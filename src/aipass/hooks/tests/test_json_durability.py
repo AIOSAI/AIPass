@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_json_durability.py
-# Version: 2.0.3
-# Description: Torn-write durability tests for hooks' arbitrary-path json module
+# Version: 2.2.0
+# Description: Torn-write durability tests for hooks' arbitrary-path json module; the shim binds by name
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-16
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/json/files.py's torn-write durability."""
@@ -18,15 +18,18 @@
 # sentry: no-test-needed(stdlib) — os.replace's atomicity and json.dumps' encoding
 # sentry: no-test-needed(documentation) — that read_json_file / write_json_file carry docstrings
 
+import importlib.util
 import json
 import os
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
 from aipass.hooks.apps.handlers.json import files as json_files
+from aipass.hooks.apps.handlers.json import json_handler
 
 MODULE_SOURCE = Path(json_files.__file__)
 
@@ -63,15 +66,15 @@ class TestAtomicHelper:
         target = tmp_path / "nested" / "doc.json"
         target.parent.mkdir()
         seen: dict = {}
+        real_replace = os.replace
 
         def at_the_move(source, destination):
             seen["staged"] = Path(source)
             seen["on_disk"] = Path(source).is_file()
             seen["destination"] = Path(destination)
-            os.replace(source, destination)
+            real_replace(source, destination)
 
-        # The product's own mover, not tempfile.mkstemp (stdlib_patch).
-        monkeypatch.setattr(json_files, "_replace_with_retry", at_the_move)
+        monkeypatch.setattr(json_files.os, "replace", at_the_move)
         json_files.write_json_file(target, {"a": 1})
         assert seen["on_disk"] is True
         assert seen["staged"].parent == target.parent
@@ -85,7 +88,7 @@ class TestAtomicHelper:
         def boom(*args, **kwargs):
             raise OSError("disk full")
 
-        monkeypatch.setattr(json_files, "_replace_with_retry", boom)
+        monkeypatch.setattr(json_files.os, "replace", boom)
         with pytest.raises(OSError):
             json_files.write_json_file(target, {"replacement": True})
 
@@ -94,7 +97,7 @@ class TestAtomicHelper:
 
     def test_helper_raises_it_does_not_swallow(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """No new silent catch — a failed write must reach the caller."""
-        monkeypatch.setattr(json_files, "_replace_with_retry", lambda *a, **k: (_ for _ in ()).throw(OSError("nope")))
+        monkeypatch.setattr(json_files.os, "replace", lambda *a, **k: (_ for _ in ()).throw(OSError("nope")))
         with pytest.raises(OSError, match="nope"):
             json_files.write_json_file(tmp_path / "x.json", {"a": 1})
 
@@ -177,69 +180,52 @@ class TestConcurrentReadsStayUsable:
         json_files.write_json_file(target, {"version": 1, "projects": {}})
 
         stop = threading.Event()
-        failures: list = []
-        write_failures: list = []
-        reads = [0]
-        lock = threading.Lock()
 
         def writer(tag: int) -> None:
-            # A writer that dies silently would leave the content assertions passing vacuously.
-            try:
-                for i in range(150):
-                    json_files.write_json_file(
-                        target,
-                        {
-                            "version": 1,
-                            "projects": {},
-                            "writer": tag,
-                            "round": i,
-                            "filler": "x" * 4000,
-                        },
-                    )
-            except Exception as error:  # surfaced through write_failures below
-                with lock:
-                    write_failures.append(error)
+            for i in range(150):
+                json_files.write_json_file(
+                    target,
+                    {"version": 1, "projects": {}, "writer": tag, "round": i, "filler": "x" * 4000},
+                )
 
-        def reader() -> None:
-            local_reads = 0
-            local_failures = []
+        def reader() -> int:
+            """Reads until the writers stop; the first unusable read raises, and its future carries it."""
+            reads = 0
             while not stop.is_set():
-                # Yield: on Windows a spinning reader's handle makes os.replace fail (WinError 5)
-                # and can starve the writer's bounded retry; Event wait ends with the writers.
-                stop.wait(0.001)
-                try:
-                    raw = target.read_text(encoding="utf-8")
-                except PermissionError:
-                    # Windows share-mode refusal mid-replace: not an unusable document, not a read.
-                    continue
-                except FileNotFoundError:
-                    local_failures.append("missing")
-                    continue
-                local_reads += 1
-                if raw.strip() == "":
-                    local_failures.append("empty")
-                    continue
-                try:
-                    json.loads(raw)
-                except json.JSONDecodeError:
-                    local_failures.append("unparseable")
-            with lock:
-                reads[0] += local_reads
-                failures.extend(local_failures)
+                stop.wait(0.001)  # yield; ends with the writers
+                raw = target.read_text(encoding="utf-8")
+                assert raw.strip(), f"an empty read after {reads} usable ones"
+                json.loads(raw)
+                reads += 1
+            return reads
 
-        readers = [threading.Thread(target=reader) for _ in range(2)]
-        writers = [threading.Thread(target=writer, args=(t,)) for t in range(2)]
-        for t in readers + writers:
-            t.start()
-        for t in writers:
-            t.join()
-        stop.set()
-        for t in readers:
-            t.join()
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            readers = [pool.submit(reader) for _ in range(2)]
+            writers = [pool.submit(writer, tag) for tag in range(2)]
+            try:
+                for done in writers:
+                    done.result()  # a writer that died re-raises here
+            finally:
+                stop.set()
+            reads = sum(done.result() for done in readers)
 
-        assert write_failures == [], f"a writer died mid-race: {write_failures[0]!r}"
-        assert reads[0] > 0, "readers never ran — the test would pass vacuously"
-        assert failures == [], f"{len(failures)} unusable reads of {reads[0]}"
+        assert reads > 0, "readers never ran — the test would pass vacuously"
 
     def test_race_leaves_no_staged_files(self, tmp_path: Path):
         assert list(tmp_path.glob("*.tmp")) == []
+
+
+class TestTheShimBindsByName:
+    """The engine runs the shim from a .live-<stamp> copy: its json paths must not depend on where the file sits."""
+
+    def test_a_snapshot_copy_answers_the_same_json_paths_as_the_source(self, tmp_path: Path):
+        source = MODULE_SOURCE.with_name("json_handler.py")
+        copy = tmp_path / ".live-20990101T000000Z" / "handlers" / "json" / "json_handler.py"
+        copy.parent.mkdir(parents=True)
+        copy.write_bytes(source.read_bytes())
+        spec = importlib.util.spec_from_file_location("snapshot_shim", copy)
+        assert spec is not None and spec.loader is not None
+        snapshot = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(snapshot)
+
+        assert snapshot.get_json_path("engine", "log") == json_handler.get_json_path("engine", "log")

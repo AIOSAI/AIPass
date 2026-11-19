@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stop.py
 # Description: Stop module — ends a project's running lanes by request, and the stopped report every lane prints
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """Stop Module — ``stop <project_root|@name> [lane]`` ends the lanes running for a project.
@@ -11,19 +11,11 @@
 Reference: docs/cli.md
 """
 
-import os
 import sys
 from pathlib import Path
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, mark_command_failed
+from aipass.cli import console, error, mark_command_failed
 
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.json.json_handler import InvalidDocument
@@ -47,9 +39,19 @@ USAGE = "stop <project_root|@name> [lane]"
 STOP_WAIT_SECONDS = 30
 
 #: The words a lane may be named by; all names whatever sub-lane an all run is in.
-LANE_WORDS = ("snapshot", "versioned", "drive_sync", "all")
+LANE_WORDS = ("snapshot", "drive_sync", "all")
 
-__all__ = ["STOPPED_EXIT", "reset_stop_state", "run_was_stopped", "report_stopped", "stop_lanes", "handle_command"]
+__all__ = ["begin_run", "exit_code", "report_stopped", "stop_lanes", "handle_command"]
+
+
+def begin_run() -> None:
+    """Clear the previous run's stop mark, before a command runs."""
+    reset_stop_state()
+
+
+def exit_code(handled_code: int) -> int:
+    """The exit of a handled command: STOPPED_EXIT when its lane honoured a stop, else ``handled_code``."""
+    return STOPPED_EXIT if run_was_stopped() else handled_code
 
 
 def print_introspection():

@@ -3,7 +3,7 @@
 # Description: Literal Absolute Path Standards Content Handler
 # Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -27,9 +27,9 @@ def get_literal_path_standards() -> str:
         "  Paths in a test are [green]built from tmp_path[/green], never written as a",
         "  literal [red]/...[/red]",
         "",
-        '  Path("/nonexistent/path") happens to work on Windows. It is still the',
+        '  Path("/nonexistent/path") happens to work. It is still the',
         "  habit that breaks the next test: the path is a fact about ONE host,",
-        "  written into a file that has to run on three.",
+        "  written into a file that has to run on every host.",
         "",
         "[bold cyan]THIS IS NOT hardcoded_path:[/bold cyan]",
         "  That standard hunts a HOME directory -- /home/<user>/, /Users/<user>/ --",
@@ -55,11 +55,8 @@ def get_literal_path_standards() -> str:
         "    and so does a same-file helper's parameter it hands to one.",
         '  [green]A system root[/green] (60) -- [dim]read_file("/etc/passwd")[/dim] names a real file',
         "  the fence must refuse; tmp_path cannot express that.",
-        '  [green]A pure path class[/green] (26) -- [dim]PureWindowsPath("/x")[/dim] is string algebra.',
+        '  [green]A pure path class[/green] (26) -- [dim]PurePosixPath("/x")[/dim] is string algebra.',
         '  [green]A string operation[/green] (10) -- [dim]p.startswith("/proc")[/dim] is a comparison.',
-        '  [green]A drive-rooted literal[/green] (15) -- [dim]r"C:\\proj\\AIPass"[/dim]. COUNTED and',
-        "  reported in the passing message, never convicted: on a POSIX host",
-        "  tmp_path cannot produce one, so a cross-OS test has no other spelling.",
         "",
         "[bold cyan]VIOLATIONS:[/bold cyan]",
         "  [red]Bad -- a path invented on one host:[/red]",

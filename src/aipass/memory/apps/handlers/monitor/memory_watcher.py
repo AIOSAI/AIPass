@@ -1,50 +1,38 @@
 # =================== AIPass ====================
 # Name: memory_watcher.py
 # Description: Memory File System Watcher
-# Version: 1.2.3
+# Version: 1.2.5
 # Created: 2025-11-26
-# Modified: 2026-10-17
+# Modified: 2026-11-18
 # =============================================
 
 """
 Memory File System Watcher
 
-Uses watchdog when present; delegates to the detector and the rollover orchestrator.
+Uses watchdog; delegates to the detector and the rollover orchestrator.
 """
 
-import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, Any, Iterable
 
 if TYPE_CHECKING:
     pass
 
-# Temporary logger for module-level import guards (overwritten below by get_system_logger)
-logger = logging.getLogger(__name__)
-
-try:
-    from watchdog.observers import Observer
-    from watchdog.events import FileSystemEventHandler
-
-    WATCHDOG_AVAILABLE = True
-except ImportError:
-    WATCHDOG_AVAILABLE = False
-    Observer = None
-    FileSystemEventHandler = object  # type: ignore[assignment,misc]
-    logger.info("Optional dependency 'watchdog' not available")
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable, check_single_file
 from aipass.memory.apps.handlers import repo_root
 from aipass.memory.apps.handlers.repo_root import exists_exactly
-from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.prax import branch_state_root, get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
-from aipass.memory.apps.handlers.repo_root import module_file
 from aipass.memory.apps.handlers.storage.lane import memory_python
 
 logger = get_system_logger()
 
-_MEMORY_ROOT = module_file(__file__).parents[3]
+_MEMORY_ROOT = Path(__file__).resolve().parents[3]
 
 _observer: Any = None
 
@@ -227,7 +215,7 @@ def _check_plans() -> Dict[str, Any]:
     if file_count == 0:
         return {"success": True, "pending_files": 0, "action": "count_only"}
 
-    manifest_path = _MEMORY_ROOT / "memory_json" / ".plans_processed.json"
+    manifest_path = branch_state_root("memory") / "memory_json" / ".plans_processed.json"
     manifest: Dict[str, str] = {}
     if manifest_path.exists():
         try:
@@ -250,12 +238,12 @@ def _find_repo_root() -> Path:
 
 
 def _get_branch_paths() -> list[Path]:
-    """Branch paths the watcher may roll over: ``detector._read_registry()``, one fleet, nothing else."""
+    """Branch paths the watcher may roll over: ``detector.write_scope()``, one fleet, nothing else."""
     from aipass.memory.apps.handlers.monitor import detector
 
     paths: list[Path] = []
     seen: set[Path] = set()
-    for branch in detector._read_registry():
+    for branch in detector.write_scope():
         branch_path = Path(branch.get("path", ""))
         if branch.get("path") and branch_path.exists() and branch_path.resolve() not in seen:
             paths.append(branch_path)
@@ -291,7 +279,7 @@ class MemoryFileWatcher(FileSystemEventHandler):  # type: ignore[misc]
         if event.is_directory:
             return
 
-        file_path = Path(event.src_path)
+        file_path = Path(os.fsdecode(event.src_path))
 
         if not _is_memory_file(file_path, self._roots):
             return
@@ -351,7 +339,7 @@ def start_memory_watcher() -> Dict[str, Any]:
 
     watcher = MemoryFileWatcher(branch_paths)
 
-    new_observer = Observer()  # type: ignore[misc]
+    new_observer = Observer()
 
     # Silent: no logging during startup.
     watched_paths = []

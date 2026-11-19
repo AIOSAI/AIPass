@@ -31,7 +31,7 @@ per-directory notes that the tree points at.
 | Path | What it does |
 |---|---|
 | `daemon.py` | Entry point (CLI) — module discovery + command routing |
-| `.archive/` | scheduler_cron (superseded by run.py), daemon_wakeup and wakeup_ops (no caller), the plugin loader and its plugins, telegram_notifier |
+| `.archive/` | scheduler_cron (superseded by run.py), daemon_wakeup and wakeup_ops (no caller), the plugin loader and its plugins |
 | `extensions/` | Extension point for additional capabilities |
 | `integrations/` | Private branch-local wrappers — gitignored except its README |
 
@@ -84,14 +84,7 @@ per-directory notes that the tree points at.
 | `rotation.py` | Rounds roster, pointer state, prompt rendering |
 | `runstate.py` | last_run/next_run tracking + due-logic |
 | `tick_lock.py` | Single-instance advisory lock for the tick |
-| `.archive/` | assistant_notifier, task_registry, plugin_processor, telegram_notifier (superseded copy) |
-
-### apps/handlers/telegram(disabled)/
-
-| Path | What it does |
-|---|---|
-| *(this directory)* | Disabled with Telegram: an empty package, not importable, out of the audit and of test collection |
-| `.archive/` | assistant_chat (archived) |
+| `.archive/` | assistant_notifier, task_registry, plugin_processor |
 
 ### apps/handlers/update/
 

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: registry_gate.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Blocks raw writes, edits, and deletions of *_REGISTRY.json (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-07-10
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """Blocks raw writes, edits, and deletions of *_REGISTRY.json files.
@@ -20,7 +20,8 @@ import json
 import re
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 
 REGISTRY_RE = re.compile(r"\w+_REGISTRY\.json$")
@@ -137,7 +138,17 @@ def _check_edit(tool_input: dict) -> dict:
 
 
 def handle(hook_data: dict) -> dict:
-    """The engine's hook event in, {stdout: block JSON or "", exit_code} out."""
+    """The engine's hook event in, {stdout: block JSON or "", exit_code} out; each call leaves a json trail entry."""
+    result = _decide(hook_data)
+    payload = hook_data if isinstance(hook_data, dict) else {}
+    tool = payload.get("tool_name") or payload.get("hook_event_name", "")
+    verdict = "refuse" if result.get("exit_code") == 2 else "allow"
+    json_handler.log_operation("check", {"tool": tool, "verdict": verdict, "seat": payload.get("cwd", "")})
+    return result
+
+
+def _decide(hook_data: dict) -> dict:
+    """The verdict on one hook event."""
     tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
     try:
         tool_input = hook_data.get("tool_input", {})

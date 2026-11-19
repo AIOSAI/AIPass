@@ -25,8 +25,8 @@ Plain UTF-8 text. Every non-blank line is two or more fields.
 - **The first non-blank line sets the column count.** Every later row must have
   the same number of fields; one that does not refuses the file.
 - **A missing final newline is fine.** This file is somebody else's: an
-  unterminated last line is how half the world's text files end, not the torn
-  write the note store has to refuse.
+  unterminated last line is how half the world's text files end, not a torn
+  write.
 
 ## The layout
 
@@ -156,7 +156,7 @@ alone and a vertical tab are the boundaries only `splitlines()` finds, and each
 has its own case.
 
 `@cli` renders a refusal through rich, which **wraps stderr at the console
-width**: 80 columns when stderr is not a terminal (79 on Windows), or `COLUMNS`
+width**: 80 columns when stderr is not a terminal, or `COLUMNS`
 when exported. A refusal naming a long path is broken across lines at whatever
 space falls near that column, so any caller grepping stderr for a refusal
 phrase can miss it. The tests pin the console width and flatten stderr

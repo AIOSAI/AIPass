@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
-# Description: Shared pytest fixtures for aipass tests — json and profile redirects, console width, command state
-# Version: 1.7.0
+# Description: Shared pytest fixtures for aipass tests — json redirect, console width, command state
+# Version: 1.8.0
 # Created: 2026-05-04
-# Modified: 2026-10-28
+# Modified: 2026-11-16
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.8.0 (2026-11-14): isolate_profile_store retired with profile.py (FPLAN-0924)
 #   - v1.7.0 (2026-10-28): no_real_opencode keeps doctor's OpenCode rows off the real binary and config (FPLAN-0721)
 #   - v1.6.0 (2026-10-26): no_live_shadow_fix keeps doctor --fix from renaming the live repo's CLAUDE files
 #   - v1.5.0 (2026-10-26): no_real_codex keeps doctor's Codex rows off the real binary and ~/.codex
 #   - v1.4.0 (2026-10-10): temp_test_dir, sample_test_data retired - requested only by the .archive scaffold (PR #774)
-#   - v1.3.0 (2026-10-05): tools_on_path writes PATH so shutil.which answers for real (DPLAN-0354 leg 8)
 # =============================================
 
 """Shared pytest fixtures for aipass tests."""
@@ -19,7 +19,6 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Generator
-from unittest.mock import patch
 
 # At import time: the repo-root conftest guard refuses to import a json shim while it is unset.
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
@@ -28,8 +27,7 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 import pytest
 
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.aipass.apps.modules import profile as profile_mod
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 
 @pytest.fixture(autouse=True)
@@ -44,34 +42,17 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     return sandbox
 
 
-@pytest.fixture(autouse=True)
-def isolate_profile_store(tmp_path_factory) -> Generator[Path, None, None]:
-    """Point the user profile at a temp dir for EVERY test in this branch.
-
-    Autouse: import order can bypass a sys.modules profile mock and write the live store."""
-    store_dir = tmp_path_factory.mktemp("profile_store")
-    with (
-        patch.object(profile_mod, "_PROFILE_JSON", store_dir / "user_profile.json"),
-        patch.object(profile_mod, "_LEGACY_LOCAL_JSON", store_dir / "local.json"),
-    ):
-        yield store_dir
-
-
 @pytest.fixture
 def tools_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Set PATH to one tmp directory holding an executable stub per name given.
-
-    shutil.which answers for real; under PATHEXT (Windows) each stub takes its first extension."""
+    """Set PATH to one tmp directory holding an executable stub per name given; shutil.which answers for real."""
 
     def put(*names: str) -> Path:
         bin_dir = tmp_path / "path_bin"
         bin_dir.mkdir(exist_ok=True)
-        pathext = os.environ.get("PATHEXT", "")
-        suffix = pathext.split(os.pathsep)[0].lower() if pathext else ""
         for name in names:
-            stub = bin_dir / f"{name}{suffix}"
+            stub = bin_dir / name
             stub.write_text("", encoding="utf-8")
-            stub.chmod(stub.stat().st_mode | 0o111)  # no effect where the platform has no mode bit
+            stub.chmod(stub.stat().st_mode | 0o111)
         monkeypatch.setenv("PATH", str(bin_dir))
         return bin_dir
 
@@ -80,8 +61,8 @@ def tools_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
-    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    """Rich sizes an unpinned console on every print: 80 under pytest's capture,
+    the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 

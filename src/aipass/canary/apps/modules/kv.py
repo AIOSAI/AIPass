@@ -19,7 +19,7 @@ from typing import List, Optional
 
 from aipass.canary.apps.handlers.json import json_handler
 from aipass.canary.apps.handlers.kv import store
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.prax import logger
 
 JSON_FLAG = "--json"

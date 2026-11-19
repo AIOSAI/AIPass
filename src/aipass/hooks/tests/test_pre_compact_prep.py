@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_pre_compact_prep.py
-# Version: 1.6.0
+# Version: 1.7.0
 # Description: Tests for pre_compact_prep lifecycle handler
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-10
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/lifecycle/pre_compact_prep.py."""
@@ -31,7 +31,7 @@ from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import (
 )
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.hooks.apps.modules import context_window
-from aipass.memory.apps.modules import door_registry_scope
+from aipass.memory import fleet_branches
 
 MODULE = "aipass.hooks.apps.handlers.lifecycle.pre_compact_prep"
 
@@ -72,7 +72,7 @@ class TestHandle:
         branch_dir = _make_branch(tmp_path)
         rollout = tmp_path / "rollout.jsonl"
         meta = {"type": "session_meta", "payload": {"id": "s", "source": "cli"}}
-        info = {"last_token_usage": {"input_tokens": 21_545, "output_tokens": 568, "total_tokens": 22_113}}
+        info: dict = {"last_token_usage": {"input_tokens": 21_545, "output_tokens": 568, "total_tokens": 22_113}}
         info["model_context_window"] = 475_000
         count = {"type": "event_msg", "payload": {"type": "token_count", "info": info}}
         rollout.write_text(json.dumps(meta) + "\n" + json.dumps(count) + "\n", encoding="utf-8")
@@ -108,7 +108,6 @@ class TestHandle:
         assert stamped in result["stdout"]
         assert "/200k" not in result["stdout"]
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="the stamp lock is fcntl's; Windows stamps unlocked")
     def test_two_concurrent_stamps_keep_both_snapshots(self, tmp_path, monkeypatch):
         branch_dir = _make_branch(tmp_path)
         real_write = json_files.write_json_file
@@ -154,7 +153,7 @@ class TestHandle:
         before = local.read_text(encoding="utf-8")
         with (
             patch(f"{MODULE}._find_repo_root", return_value=None),
-            patch("aipass.hooks.apps.handlers.json.files._replace_with_retry", side_effect=OSError("disk full")),
+            patch("aipass.hooks.apps.handlers.json.files.os.replace", side_effect=OSError("disk full")),
         ):
             handle({"cwd": str(branch_dir)})
         assert local.read_text(encoding="utf-8") == before
@@ -215,11 +214,13 @@ class TestHandle:
         data = json.loads((branch_dir / ".trinity" / "local.json").read_text(encoding="utf-8"))
         assert len(data["sessions"][0]["summary"]) == 300
 
-    def test_never_raises_on_unexpected_error(self, tmp_path):
-        with patch("aipass.hooks.apps.modules.context_window.find_branch_dir", side_effect=RuntimeError("boom")):
-            result = handle({"cwd": str(tmp_path)})
+    def test_an_unexpected_raise_is_one_engine_fault_line_and_compaction_goes_on(self, engine_fault, tmp_path):
+        handler = f"{pre_compact_prep.__name__}.handle"
+        with patch.object(context_window, "find_branch_dir", side_effect=RuntimeError("boom")):
+            faults, (stdout, code) = engine_fault("PreCompact", "pre_compact_prep", handler, {"cwd": str(tmp_path)})
 
-        assert result == {"stdout": "", "exit_code": 0}
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1 and f"fault[PreCompact.pre_compact_prep.{handler}.RuntimeError@" in faults[0]
 
 
 def _snapshot(branch_dir, repo_root=None) -> str:
@@ -244,7 +245,7 @@ class TestCountOpenPlans:
             ("0003", {"location": str(branch_dir.resolve())}),
         ]
 
-        with patch("aipass.flow.apps.modules.door_open_plans.get_open_plans", return_value=fake_plans):
+        with patch("aipass.flow.get_open_plans", return_value=fake_plans):
             snapshot = _snapshot(branch_dir)
 
         assert "2 open plan(s)" in snapshot
@@ -253,7 +254,7 @@ class TestCountOpenPlans:
 
         branch_dir = _make_branch(tmp_path)
 
-        with patch("aipass.flow.apps.modules.door_open_plans.get_open_plans", side_effect=RuntimeError("no")):
+        with patch("aipass.flow.get_open_plans", side_effect=RuntimeError("no")):
             snapshot = _snapshot(branch_dir)
 
         assert "open plan" not in snapshot
@@ -283,12 +284,10 @@ class TestCountActiveDispatchLocks:
         assert "1 active dispatch(es)" in _snapshot(external_fleet.hooks, repo_root=external_fleet.home)
 
     def test_reads_the_door_once_per_run_not_per_branch(self, external_fleet, monkeypatch):
-        real = door_registry_scope.fleet_branches
         calls = []
-        monkeypatch.setattr(door_registry_scope, "fleet_branches", lambda **kw: calls.append(kw) or real(**kw))
-
-        _snapshot(external_fleet.hooks, repo_root=external_fleet.home)
-        _snapshot(external_fleet.hooks, repo_root=external_fleet.home)
+        with patch("aipass.memory.fleet_branches", lambda **kw: calls.append(kw) or fleet_branches(**kw)):
+            _snapshot(external_fleet.hooks, repo_root=external_fleet.home)
+            _snapshot(external_fleet.hooks, repo_root=external_fleet.home)
 
         assert len(calls) == 1
 
@@ -324,7 +323,8 @@ if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
 
-_ENTRY_LIMITS = "aipass.memory.apps.modules.door_entry_limits"
+# The home, not the door: a None entry here is memory's cap module missing, the case the fallback answers.
+_ENTRY_LIMITS = "aipass.memory.apps.handlers.json.entry_limits"
 
 
 @contextlib.contextmanager

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap.py
 # Description: Tests for init bootstrap handler (DPLAN-0164)
-# Version: 1.5.0
+# Version: 1.7.0
 # Created: 2026-05-04
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
@@ -14,9 +14,12 @@
 # sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import json
+import sys
 import uuid
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest  # pyright: ignore[reportMissingImports]
 
@@ -27,10 +30,13 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
 )
 from aipass.aipass.apps.handlers.init import bootstrap
 from aipass.aipass.apps.handlers.init.scaffold_manifest import read_ignore
+from aipass.aipass.shared import project_home
+from aipass.hooks import enroll
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.registry_discovery import registries_in
 from aipass.aipass.tests.support_bootstrap import _expected_aipass_home
 
+_RESOLVER = "aipass.drone.resolve_aipass_home"
 
 # _sanitize_name is read through init_project, its one caller; an empty name means the directory's.
 
@@ -51,7 +57,7 @@ def test_project_name_is_sanitized_into_the_registry_name(tmp_path, raw: str, re
     """The registry file and the src/ package carry the sanitized name, and no other registry lands.
 
     Mutant: _sanitize_name's .upper() dropped -> red. Mutant: package_name read off the
-    raw name again -> the punctuated cases red (a trailing-dot directory crashed on Windows).
+    raw name again -> the punctuated cases red.
     """
     target = tmp_path / "proj"
     target.mkdir()
@@ -461,9 +467,43 @@ def test_init_project_returns_aipass_home(tmp_path):
     result = init_project(target, project_name="home")
 
     assert "aipass_home" in result
-    # Expected value derived independently from the installed package location; None is
-    # unreachable here, since the suite has already imported aipass.
+    # Expected value derived independently from the package location: the repo root drone names here.
     assert result["aipass_home"] == _expected_aipass_home()
+
+
+class TestNoAipassHome:
+    """The home is drone's resolve_aipass_home answer; with none, init refuses before it writes anything."""
+
+    def test_the_home_drone_resolves_is_the_home_init_records(self, tmp_path):
+        home = tmp_path / "home"
+        with patch(_RESOLVER, return_value=SimpleNamespace(path=home, tried=())):
+            result = init_project(tmp_path / "proj", project_name="drone_home")
+        assert result["aipass_home"] == str(home)
+
+    def test_no_home_from_drone_is_an_error_naming_what_was_tried_and_init_creates_nothing(self, tmp_path):
+        """The package's parents were the answer here, and on a wheel they are the Python lib folder."""
+        tried = ("AIPASS_HOME is unset", "the enrolment file does not exist")
+        target = tmp_path / "proj"
+        with (
+            patch(_RESOLVER, return_value=SimpleNamespace(path=None, tried=tried)),
+            patch("aipass.aipass.shared.project_home.logger") as log,
+            pytest.raises(RuntimeError, match="AIPASS_HOME"),
+        ):
+            init_project(target, project_name="nohome")
+        message = log.error.call_args.args[0] % log.error.call_args.args[1:]
+        assert "tried: AIPASS_HOME is unset; the enrolment file does not exist" in message
+        assert "set AIPASS_HOME=/path/to/AIPass" in message
+        assert not target.exists()
+
+    def test_init_refuses_naming_aipass_home_and_leaves_an_existing_target_empty(self, tmp_path):
+        target = tmp_path / "proj"
+        target.mkdir()
+        with (
+            patch("aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home", return_value=None),
+            pytest.raises(RuntimeError, match="AIPASS_HOME"),
+        ):
+            init_project(target, project_name="nohome")
+        assert list(target.iterdir()) == []
 
 
 def test_init_project_settings_has_aipass_home_when_detected(tmp_path, monkeypatch):
@@ -689,8 +729,22 @@ def test_init_repoints_a_venv_link_left_dangling_by_a_moved_home(tmp_path, monke
     assert (target / ".venv").resolve() == (host / ".venv").resolve()
 
 
+def test_init_raises_when_the_trust_registry_cannot_be_imported(tmp_path, monkeypatch):
+    """Mutant: project_home's ImportError arm restored (init notes and carries on) -> red."""
+    host = _host(tmp_path, {".aipass/project_hooks.json": "{}"})
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    target = tmp_path / "proj"
+    target.mkdir()
+    monkeypatch.setattr(project_home, "is_throwaway_path", lambda path: str(path) != str(target.resolve()))
+    # gone at its home, so the door's import inside _enroll_project raises ImportError
+    monkeypatch.delattr(sys.modules[enroll.__module__], "enroll")
+
+    with pytest.raises(ImportError, match="enroll"):
+        init_project(target, project_name="untrusted")
+
+
 def _refuse_skills_symlink(monkeypatch) -> None:
-    """The filesystem refuses the .claude/skills link, as Windows without the privilege does."""
+    """The filesystem refuses the .claude/skills link."""
 
     def refuse(*_args, **_kwargs):
         raise OSError("symlink not permitted")
@@ -730,7 +784,6 @@ class TestSharedSkillsScaffold:
         assert copy.read_text(encoding="utf-8") == sc.prep_skill_md()
         (note,) = result["notes"]
         assert "will not follow .agents/skills" in note
-        assert "git config core.symlinks true" in note
 
     def test_the_generated_agents_text_names_memo_on_both_clis(self):
         assert "and on `/memo` (Claude Code) or `$memo` (Codex).\n" in sc.agents_md("DEMO")

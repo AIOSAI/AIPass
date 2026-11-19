@@ -13,23 +13,14 @@ Reference: docs/identity_and_boundaries.md
 """
 
 import json
-import os
-import sys
 import time
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.memory.apps.modules.door_registry_scope import fleet_branches
+from aipass.prax import logger
+from aipass.memory import fleet_branches
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root, registries_in
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 
 MODULE_NAME = "registry.read"
@@ -38,42 +29,37 @@ BRANCH_REGISTRY_PATH = find_repo_root() / "AIPASS_REGISTRY.json"
 
 
 def get_all_branches() -> List[Dict]:
-    """Get list of all branches for email routing and selection."""
+    """All branches for email routing: [] for a missing registry, RegistryUnreadable for an unreadable or misshaped one."""
     json_handler.log_operation("get_all_branches", {"registry_path": str(BRANCH_REGISTRY_PATH)})
-
-    branches = []
 
     if not BRANCH_REGISTRY_PATH.exists():
         return []
 
+    unreadable = f"{BRANCH_REGISTRY_PATH.name} could not be read ({BRANCH_REGISTRY_PATH})"
     try:
         with open(BRANCH_REGISTRY_PATH, "r", encoding="utf-8") as f:
             registry_data = json.load(f)
+    except (OSError, ValueError) as e:
+        raise RegistryUnreadable(f"{unreadable}: {e}") from e
 
-        raw_branches = registry_data.get("branches", [])
-        if isinstance(raw_branches, dict):
-            raw_branches = list(raw_branches.values())
+    raw_branches = registry_data.get("branches", []) if isinstance(registry_data, dict) else None
+    if isinstance(raw_branches, dict):
+        raw_branches = list(raw_branches.values())
+    if not isinstance(raw_branches, list) or not all(isinstance(branch, dict) for branch in raw_branches):
+        raise RegistryUnreadable(f"{unreadable}: not an object whose branches are records")
 
-        for branch in raw_branches:
-            branch_name = branch.get("name", "")
-            path = branch.get("path", "")
+    branches = []
+    for branch in raw_branches:
+        branch_name = branch.get("name", "")
+        path = branch.get("path", "")
 
-            if not branch_name or not path:
-                continue
+        if not branch_name or not path:
+            continue
 
-            explicit_email = branch.get("email", "")
-            if explicit_email:
-                email = explicit_email
-            else:
-                email = _derive_email_from_branch_name(branch_name)
+        email = branch.get("email", "") or _derive_email_from_branch_name(branch_name)
+        branches.append({"name": branch_name, "path": path, "email": email})
 
-            branches.append({"name": branch_name, "path": path, "email": email})
-
-        return branches
-
-    except Exception as e:
-        logger.warning("[registry] get_all_branches failed: %s", e)
-        return []
+    return branches
 
 
 FLEET_CACHE_SECONDS = 60.0
@@ -83,10 +69,9 @@ _fleet_cache: Dict[str, Tuple[float, List[Dict]]] = {}
 def get_fleet_branches() -> List[Dict]:
     """Every citizen the declared fleet makes real: core, then residents, then externals, from memory's door.
 
-    For listings only (contacts, the recipient pick, @all, central stats); delivery and wake keep
-    their own tier order. Rows are {name, path (absolute), email, residency}. A later row reusing
-    an earlier email is dropped and logged, so a namesake never shadows a core citizen. Cached for
-    FLEET_CACHE_SECONDS: the door logs every refused row at ERROR on each read.
+    For listings only; delivery and wake keep their own tier order. Rows are {name, path (absolute), email,
+    residency}. A later row reusing an earlier email is dropped and logged, so a namesake never shadows a core
+    citizen. Cached for FLEET_CACHE_SECONDS: the door logs every refused row at ERROR on each read.
     """
     now = time.monotonic()
     cached = _fleet_cache.get("rows")
@@ -177,10 +162,7 @@ def _branches_from_registry(reg_file: Path) -> Dict[str, str]:
 
 
 def check_registry_readable(registry_path: Path) -> None:
-    """Raise when a registry exists and cannot be read; a missing one passes.
-
-    get_all_branches' [] cannot tell unreadable from empty; delivery asks this before widening tiers.
-    """
+    """Raise RegistryUnreadable when a registry exists and cannot be read; a missing one passes."""
     if registry_path.exists():
         _branches_from_registry(registry_path)
 
@@ -334,9 +316,9 @@ def get_external_branches(repo_root: Path) -> Dict[str, str]:
 
     Reads @memory's fleet gateway (AIPASS_ROOTS.json). A gateway failure raises, unchanged; it is not "no citizens".
     """
-    from aipass.memory.apps.modules import fleet
+    from aipass.memory import external_branches
 
-    rows = fleet.external_branches(repo_root=repo_root)
+    rows = external_branches(repo_root=repo_root)
     result: Dict[str, str] = {}
     for citizen in rows:
         email = citizen.get("email")
@@ -365,7 +347,7 @@ def get_caller_project_branches(caller_cwd: str) -> Dict[str, str]:
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("\n" + "=" * 70)
     console.print("AI_MAIL HANDLER: registry/read.py")

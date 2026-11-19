@@ -71,10 +71,10 @@ AIPass is a pip package. All execution goes through entry points defined in `pyp
 
 **Handler import rules:**
 - ✅ Same-branch handler imports: ALLOWED (even across packages)
-- ❌ Cross-branch handler imports: BLOCKED (use modules instead)
+- ❌ Cross-branch imports under `apps/` (handlers or modules): BLOCKED (use the front door)
 - ❌ Handler imports own-branch modules: FORBIDDEN (circular risk)
 
-**Current reality:** Handlers commonly import from service branches like `prax.apps.modules.logger` for system logging. This is acceptable because Prax is a system-wide service provider, not a module within the same branch.
+**Cross-branch rule:** Handlers reach a service branch only through its front door, `from aipass.<branch> import <name>` (e.g. `from aipass.prax import logger`). The package top file `src/aipass/<branch>/__init__.py` is the one door; a path under another branch's `apps/`, such as `aipass.prax.apps.modules.logger`, is convicted by the `front_door` row, service provider or not.
 
 **Modules CAN import 20+ handlers** - this is by design. Better one module imports many handlers than handlers importing each other. Dependencies flow ONE WAY: modules → handlers.
 
@@ -82,7 +82,7 @@ AIPass is a pip package. All execution goes through entry points defined in `pyp
 
 ## Foundation Service Independence
 
-**CRITICAL RULE:** Foundation service providers (CLI, Prax) MUST NOT import each other. Drone (CLI router) is NOT a foundation service - it's infrastructure.
+**CRITICAL RULE:** Foundation service providers (CLI, Prax) MUST NOT import each other. Drone (a command router with a package door) is NOT a foundation service - it's infrastructure.
 
 **WHY:** Foundation services are system-wide infrastructure used by ALL branches. If they import each other, you create circular dependencies that break the entire system.
 
@@ -113,10 +113,10 @@ Result: ImportError on all drone commands, system broken
 - Prax cannot import CLI
 
 **Drone's Special Role:**
-- Drone is NOT a foundation service - it's a CLI router (infrastructure layer)
+- Drone is NOT a foundation service - it's a command router first (infrastructure layer)
 - Drone CAN import CLI for display formatting (it's above foundation layer)
-- Branches should NEVER import Drone (it routes TO them, not used BY them)
-- See "Drone: The CLI Router" section for details on @ resolution
+- Branches reach each other through `drone @branch command`; a name drone's door hands out is imported as `from aipass.drone import <name>`, never from `aipass.drone.apps...`
+- See "Drone: a Command Router with a Package Door" section for details on @ resolution
 
 **Consequence of violation:** System-wide breakage. All branches that depend on foundation services fail to import, entire AIPass ecosystem becomes non-operational.
 
@@ -302,9 +302,9 @@ Run 'python3 create_plan.py --help' for usage
 
 ---
 
-## Drone: The CLI Router (NOT a Library)
+## Drone: a Command Router with a Package Door
 
-**CRITICAL RULE:** Drone is a CLI router that resolves @ symbols and routes commands to branches. It is NOT a library service that branches import.
+**CRITICAL RULE:** Drone is a command router first: it resolves @ symbols and routes commands to branches. A branch reaches another branch through `drone @branch command`, not by importing drone; a name drone's door hands out is imported as `from aipass.drone import <name>`.
 
 ### What Drone Does
 
@@ -355,22 +355,27 @@ Module
 Handlers
 ```
 
-### NEVER Import Drone
+### Route Through Drone; Import Only From Its Door
 
 **WRONG:**
 ```python
-# DON'T DO THIS - Drone is NOT a library
+# DON'T DO THIS - under drone's apps/, convicted by front_door; use from aipass.drone import <name>
 from aipass.drone.apps.modules import resolve_branch
 path = resolve_branch("@sentry")
 ```
 
 **RIGHT:**
 ```bash
-# Drone is a CLI tool - use it via command line
+# Reach another branch through drone's command line
 drone @sentry architecture-standard
 ```
 
-**WHY:** Drone is a CLI router, not a service provider. It sits OUTSIDE the branch ecosystem, routing commands TO branches. Branches receive commands that have ALREADY been processed by Drone.
+```python
+# A name drone's door hands out
+from aipass.drone import resolve_branch
+```
+
+**WHY:** Drone is a command router first. It sits OUTSIDE the branch ecosystem, routing commands TO branches. Branches receive commands that have ALREADY been processed by Drone; the few names it shares go through its package door.
 
 ### Branches Should NEVER Handle @ Symbols
 
@@ -435,6 +440,18 @@ def handle_command(command: str, args: List[str]) -> bool:
 4. **Scaling becomes impossible** - Context pollution, navigation overhead compounds, operations take hours instead of seconds
 5. **Technical debt compounds** - Fixes require touching many files, changes create unpredictable ripples
 6. **Duplicate @ resolution logic** - If branches handle @ themselves instead of relying on Drone, you get inconsistent resolution, maintenance burden, and unclear boundaries
+
+---
+
+## Bypass Rows
+
+A handler's import of its own branch's modules is a site, at its line, inside the function that
+holds it (`<file>` at module level), and the message names every open site. A row with
+`"lines": [n]` or `"functions": ["load"]` waives those sites only.
+
+The layer, file-size, domain and template-baseline findings are file-level: a row with
+`"functions": ["<file>"]` waives them and a line row does not. A row with no `lines` or `functions`
+waives the whole file.
 
 ---
 

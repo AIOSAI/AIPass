@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: encapsulation_check.py
 # Description: Handler Encapsulation Standards Checker
-# Version: 1.4.2
+# Version: 1.6.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Handler Encapsulation Standards Checker"""
@@ -28,7 +28,7 @@ READS_BRANCH = True
 # unit test is for, so a test is judged only on another branch's handlers (check_test_file).
 APPLIES_TO = "everywhere"
 
-# Cross-branch/cross-package handler imports are import-statement checks, so a
+# Cross-branch handler imports are import-statement checks, so a
 # violation hiding in a package marker file must not be invisible to the audit
 # the way it would be for content checkers (dead code, naming, etc.).
 INCLUDE_INIT_FILES = True
@@ -101,7 +101,7 @@ def extract_branch_from_import(import_line: str) -> Optional[str]:
     if match:
         return match.group(1)
 
-    # Handlers anywhere under a branch's tree are that branch's (aipass.skills.lib.telegram).
+    # Handlers anywhere under a branch's tree are that branch's (aipass.skills.lib.drone_commands).
     match = re.search(r"(?:from|import)\s+aipass\.(\w+)\.(?:\w+\.)*?apps\.handlers", import_line)
     if match:
         return match.group(1)
@@ -113,21 +113,12 @@ def extract_branch_from_import(import_line: str) -> Optional[str]:
     return None
 
 
-def extract_handler_package(import_line: str) -> Optional[str]:
-    """Extract the handler package name from an import"""
-    match = re.search(r"apps\.handlers\.(\w+)", import_line)
-    if match:
-        return match.group(1)
-    return None
-
-
 def _posix(file_path: str) -> str:
-    """The path as a string with forward slashes, whatever host handed it in.
+    """The path as a string.
 
-    The checks below search the path for "apps/handlers/" and "apps/modules/";
-    a Windows path with backslashes matches neither.
+    The checks below search the path for "apps/handlers/" and "apps/modules/".
     """
-    return str(file_path).replace("\\", "/")
+    return str(file_path)
 
 
 def get_file_handler_package(file_path: str) -> Optional[str]:
@@ -330,16 +321,11 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     file_branch = get_branch_from_path(module_path)
     file_branch_name = file_branch.get("name", "").lower() if file_branch else None
-    file_handler_package = get_file_handler_package(module_path)
-    is_handler_file = file_handler_package is not None
+    is_handler_file = get_file_handler_package(module_path) is not None
     is_module_file = "apps/modules/" in _posix(module_path)
 
     cross_branch_check = check_cross_branch_imports(lines, module_path, file_branch_name, bypass_rules)
     checks.append(cross_branch_check)
-
-    if is_handler_file:
-        cross_package_check = check_cross_package_imports(lines, module_path, file_handler_package, bypass_rules)
-        checks.append(cross_package_check)
 
     if not is_handler_file and not is_module_file:
         direct_import_check = check_direct_handler_imports(lines, module_path, bypass_rules)
@@ -416,7 +402,6 @@ def check_cross_branch_imports(
         imported_branch = extract_branch_from_import(code_part)
 
         if imported_branch is None:
-            # Local import (from apps.handlers.X) - will be caught by cross-package check
             continue
 
         if file_branch and imported_branch.lower() == file_branch.lower():
@@ -449,17 +434,18 @@ def check_cross_branch_imports(
 def _conviction(violation: Dict) -> str:
     """The message for a cross-branch violation; a string import quotes its line."""
     head = f"Line {violation['line']}: {violation['from_branch']}.apps.handlers imported"
+    cure = f"(use its front door: from aipass.{violation['from_branch']} import <name>)"
     if violation.get("string"):
-        return f"{head} {STRING_IMPORT_NOTE} (use modules entry point): {violation['code']}"
-    return f"{head} (use modules entry point)"
+        return f"{head} {STRING_IMPORT_NOTE} {cure}: {violation['code']}"
+    return f"{head} {cure}"
 
 
 def _target_branch(target: str) -> str:
     """The branch a dotted handlers target belongs to.
 
-    ``aipass.<branch>.`` names it whatever nests below: skills' telegram lives at
-    ``aipass.skills.lib.telegram.apps.handlers`` and is skills' own, where the
-    segment before ``apps`` would answer "telegram".
+    ``aipass.<branch>.`` names it whatever nests below: skills' drone_commands lives at
+    ``aipass.skills.lib.drone_commands.apps.handlers`` and is skills' own, where the
+    segment before ``apps`` would answer "drone_commands".
     """
     parts = target.split(".")
     if parts[0] == "aipass" and len(parts) > 1:
@@ -590,7 +576,7 @@ def _branch_root(module_path: str) -> Optional[Path]:
     """The ``src/aipass/<branch>`` directory above a file, else the nearest package holding ``apps/``, or None.
 
     The second reading is a project branch (``seed/seed``); it comes second so a nested
-    ``aipass.skills.lib.telegram`` still answers skills, not telegram.
+    ``aipass.skills.lib.drone_commands`` still answers skills, not drone_commands.
     """
     parents = Path(module_path).resolve().parents
     for parent in parents:
@@ -610,81 +596,44 @@ def _allowed_handler_names(module_path: str) -> frozenset:
     return _DEFAULT_HANDLERS | _infrastructure_handlers(str(branch_root))
 
 
-def check_cross_package_imports(
-    lines: List[str], module_path: str, file_package: str, bypass_rules: list | None = None
-) -> Dict:
-    """Check for cross-package handler imports within same branch"""
-    violations = []
+def _is_type_checking(test: ast.expr) -> bool:
+    """``TYPE_CHECKING`` or ``typing.TYPE_CHECKING``."""
+    if isinstance(test, ast.Name):
+        return test.id == "TYPE_CHECKING"
+    return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING" and isinstance(test.value, ast.Name)
 
-    allowed_handlers = _allowed_handler_names(module_path)
 
-    skipped = _not_import_lines(lines)
-    for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if i in skipped or not stripped:
-            continue
+def _door_type_only_lines(lines: List[str], module_path: str) -> AbstractSet[int]:
+    """Lines of own-handler imports in the package top file's top-level ``if TYPE_CHECKING:`` block.
 
-        if not ("from " in stripped or "import " in stripped):
+    The door types each name it hands out from its home; nothing loads at runtime, so laziness holds.
+    Anywhere else, and for a runtime import in the door, the import is judged as before.
+    """
+    path = Path(module_path)
+    root = _branch_root(module_path)
+    if path.name != "__init__.py" or root is None or path.resolve().parent != root:
+        return frozenset()
+    try:
+        tree = ast.parse("\n".join(lines))
+    except SyntaxError as exc:
+        # An empty set acquits nothing: the strict verdict, every handler line still judged.
+        logger.warning("encapsulation: door %s unparseable, no type-only acquittal: %s", module_path, exc)
+        return frozenset()
+    prefix = f"aipass.{root.name}.apps.handlers"
+    found: set = set()
+    for node in tree.body:
+        if not (isinstance(node, ast.If) and _is_type_checking(node.test)):
             continue
-
-        if stripped.startswith('"') or stripped.startswith("'"):
-            continue
-        if '"from ' in stripped or "'from " in stripped:
-            continue
-        if '"apps.handlers' in stripped or "'apps.handlers" in stripped:
-            continue
-        if "apps.handlers" in stripped:
-            handler_pos = stripped.find("apps.handlers")
-            before = stripped[:handler_pos]
-            if before.count('"') % 2 == 1 or before.count("'") % 2 == 1:
+        for stmt in node.body:
+            if isinstance(stmt, ast.ImportFrom):
+                targets = [stmt.module or ""]
+            elif isinstance(stmt, ast.Import):
+                targets = [alias.name for alias in stmt.names]
+            else:
                 continue
-
-        if stripped.startswith("from ."):
-            continue
-
-        code_part = stripped.split("#")[0] if "#" in stripped else stripped
-
-        if "apps.handlers" not in code_part:
-            continue
-
-        imported_branch = extract_branch_from_import(code_part)
-        if imported_branch is not None:
-            continue
-
-        if is_bypassed(module_path, "encapsulation", line=i, bypass_rules=bypass_rules):
-            continue
-
-        imported_package = extract_handler_package(code_part)
-
-        if imported_package is None:
-            continue
-
-        if imported_package == file_package:
-            continue
-
-        # Whole names: profile_handler is not file_handler.
-        if allowed_handlers & set(re.findall(r"\w+", code_part)):
-            continue
-
-        violations.append(
-            {"line": i, "code": code_part.strip(), "from_package": imported_package, "to_package": file_package}
-        )
-
-    if violations:
-        first = violations[0]
-        return {
-            "name": "Cross-package handler imports",
-            "passed": False,
-            "message": (
-                f"Line {first['line']}: handlers.{first['from_package']} imported from handlers.{first['to_package']}"
-            ),
-        }
-
-    return {
-        "name": "Cross-package handler imports",
-        "passed": True,
-        "message": "No forbidden cross-package handler imports",
-    }
+            if all(t == prefix or t.startswith(prefix + ".") for t in targets):
+                found.update(range(stmt.lineno, (stmt.end_lineno or stmt.lineno) + 1))
+    return frozenset(found)
 
 
 def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rules: list | None = None) -> Dict:
@@ -692,6 +641,7 @@ def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rule
     violations = []
 
     allowed_handlers = _allowed_handler_names(module_path)
+    door_typing = _door_type_only_lines(lines, module_path)
 
     skipped = _not_import_lines(lines)
     for i, line in enumerate(lines, 1):
@@ -724,6 +674,9 @@ def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rule
 
         # Whole names: profile_handler is not file_handler.
         if allowed_handlers & set(re.findall(r"\w+", code_part)):
+            continue
+
+        if i in door_typing:
             continue
 
         violations.append({"line": i, "code": code_part.strip()})
@@ -733,7 +686,10 @@ def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rule
         return {
             "name": "Direct handler imports",
             "passed": False,
-            "message": f"Line {first['line']}: Handler imported directly (use module entry point)",
+            "message": (
+                f"Line {first['line']}: Handler imported directly (inside its branch, through a module; "
+                "another branch's, through its front door: from aipass.<branch> import <name>)"
+            ),
         }
 
     return {"name": "Direct handler imports", "passed": True, "message": "No direct handler imports from entry point"}

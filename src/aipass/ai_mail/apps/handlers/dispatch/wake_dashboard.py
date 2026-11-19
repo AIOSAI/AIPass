@@ -8,22 +8,13 @@
 
 """Refresh the recipient's dashboard on the way into a wake."""
 
-import os
-import sys
 import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 
 if TYPE_CHECKING:  # pragma: no cover — import-cycle-free typing only
@@ -42,7 +33,7 @@ def refresh_recipient_dashboard(branch_path: Path, email: str, status: "Dispatch
     def _run() -> None:
         try:
             # Local import: a broken prax dashboard must not be an ImportError that kills every wake.
-            from aipass.prax.apps.modules.dashboard import refresh_single_dashboard
+            from aipass.prax import refresh_single_dashboard
 
             outcome["result"] = refresh_single_dashboard(branch_path)
         except Exception as exc:  # every failure is the same fail-open
@@ -85,7 +76,7 @@ def refresh_recipient_dashboard(branch_path: Path, email: str, status: "Dispatch
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     json_handler.log_operation("wake_dashboard_introspection")
     console.print("\nWAKE DASHBOARD REFRESH")

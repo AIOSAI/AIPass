@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: git_gate.py
-# Version: 5.3.1
+# Version: 5.4.0
 # Description: Raw git and gh, GitHub writes, credentials and the secrets store for every seat; protected changes
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-11-03
+# Modified: 2026-11-17
 # =============================================
 
 """Blocks raw git and gh, GitHub writes without gh, the gh credential, and changes to the protected files.
@@ -21,7 +21,8 @@ import json
 import os
 import re
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 
 # A verb missing here has no drone twin, and the refusal says so.
@@ -69,9 +70,8 @@ _WGET_BODY = ("--post-data", "--post-file", "--body-data", "--body-file")
 _HTTPIE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _HTTPIE_BODY_FLAGS = ("-f", "--form", "--multipart", "--raw")
 
-# R6: programs that read a stored secret, and the subcommands of `security` (macOS) that do.
+# R6: programs that read a stored secret.
 _SECRET_PROGRAMS = frozenset({"secret-tool", "kwallet-query"})
-_SECURITY_READS = frozenset({"find-generic-password", "find-internet-password", "dump-keychain"})
 _CREDENTIAL_FILES = ("gh/hosts.yml", ".git-credentials")
 # R7: a .secrets path segment with a slash or tilde beside it; a bare word ".secrets" is a pattern or prose.
 _STORE_WORD = re.compile(r"[/~]\.secrets(?![\w.-])|(?<![\w.-])\.secrets/")
@@ -299,8 +299,6 @@ def _credential_read(inv, reader) -> str:
         inv.language == "python" and "-m" in args and _next(args, args.index("-m")) == "keyring"
     ):
         return "the keyring command"
-    if inv.program == "security" and args[:1] and args[0] in _SECURITY_READS:
-        return f"security {args[0]}"
     for arg in args:
         if any(name in arg.replace("\\", "/") for name in _CREDENTIAL_FILES):
             return f"a credential file ({arg})"
@@ -457,7 +455,17 @@ def _check_edit(tool_input: dict, cwd: str) -> dict:
 
 
 def handle(hook_data: dict) -> dict:
-    """Block raw git/gh commands, GitHub writes and credential reads, and protected file changes."""
+    """Block raw git/gh, GitHub writes, credential reads, protected file changes; each call leaves a trail entry."""
+    result = _decide(hook_data)
+    payload = hook_data if isinstance(hook_data, dict) else {}
+    tool = payload.get("tool_name") or payload.get("hook_event_name", "")
+    verdict = "refuse" if result.get("exit_code") == 2 else "allow"
+    json_handler.log_operation("check", {"tool": tool, "verdict": verdict, "seat": payload.get("cwd", "")})
+    return result
+
+
+def _decide(hook_data: dict) -> dict:
+    """The verdict on one hook event."""
     tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
     try:
         tool_input = hook_data.get("tool_input", {})

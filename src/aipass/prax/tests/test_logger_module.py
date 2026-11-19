@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logger_module.py
 # Description: Unit tests for PRAX logger module (public API)
-# Version: 1.1.0
+# Version: 1.7.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/logger.py."""
@@ -11,22 +11,25 @@
 # logger.py is bound once at the top; _inject_and_import doubles each handler name on it per test.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(ruff) — that each __all__ re-export, e.g. get_direct_logger(), names a real import (F822)
+# sentry: no-test-needed(ruff) — that each __all__ name, e.g. get_system_logger(), names a real definition (F822)
 # sentry: no-test-needed(through_the_command) — append_jsonl()'s writing, covered by tests/test_jsonl_writer.py
-# sentry: no-test-needed(through_the_command) — check_file_watcher_liveness() itself, covered by tests/test_watcher.py
 
+import ast
+import importlib
 import json
 import os
 import subprocess
 import sys
 import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from aipass.cli.apps.modules import display
+import aipass.prax as door
+from aipass.cli import display
 from aipass.prax.apps.handlers.config import load as config_load
+from aipass.prax.apps.handlers.logging import jsonl_writer
 from aipass.prax.apps.modules import logger as logger_module
 
 
@@ -36,7 +39,6 @@ WATCHER = "aipass.prax.apps.handlers.discovery.watcher"
 HANDLER_DEPS = [
     "aipass.prax.apps.handlers.logging.setup",
     "aipass.prax.apps.handlers.logging.introspection",
-    "aipass.prax.apps.handlers.logging.direct",
     "aipass.prax.apps.handlers.discovery.watcher",
     "aipass.prax.apps.handlers.registry.load",
     "aipass.prax.apps.handlers.config.load",
@@ -61,12 +63,6 @@ def _build_handler_mocks(tmp_path):
 
     intro = mocks["aipass.prax.apps.handlers.logging.introspection"]
     intro.get_caller_info = MagicMock(return_value=("test_module", "/fake/path.py", "prax"))
-
-    direct = mocks["aipass.prax.apps.handlers.logging.direct"]
-    mock_direct_logger = MagicMock()
-    direct.get_direct_logger = MagicMock(return_value=mock_direct_logger)
-    direct.direct_log = MagicMock()
-    direct.DirectLogger = MagicMock
 
     watcher = mocks["aipass.prax.apps.handlers.discovery.watcher"]
     watcher.start_file_watcher = MagicMock()
@@ -110,11 +106,6 @@ _IMPORTED_NAMES = {
         ("get_system_logs_dir", "get_system_logs_dir"),
         ("get_module_logs_dir", "get_module_logs_dir"),
     ],
-    "aipass.prax.apps.handlers.logging.direct": [
-        ("get_direct_logger", "get_direct_logger"),
-        ("direct_log", "direct_log"),
-        ("DirectLogger", "DirectLogger"),
-    ],
     "aipass.prax.apps.handlers.json": [("json_handler", "json_handler")],
 }
 
@@ -127,7 +118,6 @@ def _inject_and_import(monkeypatch, tmp_path):
             monkeypatch.setattr(logger_module, local, getattr(mocks[dep], source))
     # logger.py reaches the watcher through sys.modules, never a module-level import.
     monkeypatch.setitem(sys.modules, WATCHER, mocks[WATCHER])
-    monkeypatch.setattr(logger_module.SystemLogger, "_watcher_started", False)
     return logger_module, mocks
 
 
@@ -383,7 +373,6 @@ class TestSystemLogger:
         """Each proxy method goes through the per-caller lookup and calls THAT level, no other."""
         mod, mocks = _inject_and_import(monkeypatch, tmp_path)
 
-        mod.SystemLogger._watcher_started = True
         setup = mocks["aipass.prax.apps.handlers.logging.setup"]
         routed = setup.setup_individual_logger.return_value
 
@@ -443,17 +432,14 @@ class TestPrintIntrospection:
 
         assert capsys.readouterr().out.splitlines()[1] == "logger Module"
 
-    def test_fallback_to_rich_when_cli_unavailable(self, monkeypatch, tmp_path, capsys):
-        """print_introspection falls back to rich Console if CLI import fails."""
+    def test_a_missing_cli_console_raises(self, monkeypatch, tmp_path):
+        """No rich fallback: a broken CLI is an error, not a second console."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
-
-        # Without its console name, print_introspection's from-import raises ImportError.
         monkeypatch.delattr(display, "console")
+        monkeypatch.delattr("aipass.cli.console", raising=False)  # the door caches a name it already handed out
 
-        capsys.readouterr()
-        mod.print_introspection()  # must not raise
-
-        assert capsys.readouterr().out.splitlines()[1] == "logger Module"
+        with pytest.raises(ImportError):
+            mod.print_introspection()
 
 
 def _exec_prax_init() -> dict:
@@ -464,10 +450,44 @@ def _exec_prax_init() -> dict:
     return namespace
 
 
+_BROKEN_CHAIN_PROBE = """
+import json, sys
+sys.modules["aipass.prax.apps.handlers.logging.setup"] = None  # import of a None entry raises ImportError
+results = {}
+for spelling in sys.argv[1:]:
+    try:
+        exec(spelling, {})
+        results[spelling] = "imported"
+    except Exception as exc:
+        results[spelling] = "ImportError" if isinstance(exc, ImportError) else type(exc).__name__
+print(json.dumps(results))
+"""
+
+
+def _spellings_under_a_broken_chain() -> dict:
+    """Each spelling's outcome in a fresh interpreter whose setup.py cannot import."""
+    spellings = [
+        "from aipass.prax import logger",
+        "from aipass.prax.apps.modules.logger import system_logger",
+        "from aipass.prax.apps.handlers.logging.direct import get_direct_logger",
+    ]
+    result = subprocess.run(
+        [sys.executable, "-c", _BROKEN_CHAIN_PROBE, *spellings],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=str(Path(__file__).resolve().parents[3]),
+        env={**os.environ},
+        timeout=120,
+    )
+    assert result.returncode == 0, f"probe failed: {result.stderr}"
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
 def _load_lazily(name: str):
     """Resolve a prax package name with the real logger import forced to fail.
 
-    Lazy (PEP 562): the fallback fires on attribute access, so this calls the module's __getattr__."""
+    Lazy (PEP 562): the import runs on attribute access, so this calls the module's __getattr__."""
     namespace = _exec_prax_init()
     real_import = namespace["importlib"].import_module
 
@@ -480,77 +500,43 @@ def _load_lazily(name: str):
     return namespace["__getattr__"](name)
 
 
-def _load_fallback_logger():
-    """The NullLogger instance the package falls back to."""
-    return _load_lazily("logger")
+class TestBrokenChainRaises:
+    """No fallback: a logger chain that cannot import raises, in every spelling."""
 
+    def test_the_short_spelling_raises_in_process(self):
+        with pytest.raises(ImportError, match="logger chain broken"):
+            _load_lazily("logger")
 
-class TestNullLoggerFallback:
-    """Tests for the NullLogger used when prax's own import chain breaks."""
+    def test_every_spelling_raises_when_a_handler_cannot_import(self):
+        """An induced break in a subprocess, so nothing leaks into this one."""
+        assert _spellings_under_a_broken_chain() == {
+            "from aipass.prax import logger": "ImportError",
+            "from aipass.prax.apps.modules.logger import system_logger": "ImportError",
+            "from aipass.prax.apps.handlers.logging.direct import get_direct_logger": "ImportError",
+        }
 
-    def test_falls_back_when_logger_import_fails(self):
-        """A broken prax must still hand callers a usable logger."""
-        fallback = _load_fallback_logger()
-
-        assert type(fallback).__name__ == "NullLogger"
-
-    def test_exposes_every_system_logger_level(self):
-        """Fallback parity: a level NullLogger lacks is an AttributeError when prax is already broken.
-
-        Read from source: conftest's mock SystemLogger would make the check vacuous."""
-        import ast
-
-        source_path = Path(__file__).resolve().parents[1] / "apps" / "modules" / "logger.py"
-        tree = ast.parse(source_path.read_text(encoding="utf-8"))
-        levels = [
-            item.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ClassDef) and node.name == "SystemLogger"
-            for item in node.body
-            if isinstance(item, ast.FunctionDef) and not item.name.startswith("_")
-        ]
-
-        fallback = _load_fallback_logger()
-
-        assert "debug" in levels, "SystemLogger has no debug() — parity check is vacuous"
-        for level in levels:
-            assert callable(getattr(fallback, level, None)), f"NullLogger is missing {level}()"
-
-    def test_levels_swallow_the_call_and_delegate(self):
-        """Swallowing is the whole contract: each level returns None and hands the message on unaltered."""
-        fallback = _load_fallback_logger()
-
-        with patch.object(fallback, "_logger") as inner:
-            assert fallback.debug("debug via fallback") is None
-            assert fallback.info("info via fallback") is None
-            assert fallback.warning("warning via fallback") is None
-            assert fallback.error("error via fallback") is None
-
-        inner.debug.assert_called_once_with("debug via fallback")
-        inner.info.assert_called_once_with("info via fallback")
-        inner.warning.assert_called_once_with("warning via fallback")
-        inner.error.assert_called_once_with("error via fallback")
-
-    def test_append_jsonl_degrades_to_none(self):
-        """A broken logger chain leaves append_jsonl importable and falsy, never raising."""
-        assert _load_lazily("append_jsonl") is None
-
-    def test_fallback_is_not_built_when_the_logger_imports(self):
-        """The fallback is the broken path only: a healthy prax hands back the real SystemLogger."""
+    def test_the_package_defines_no_fallback_logger(self):
         namespace = _exec_prax_init()
 
-        resolved = namespace["__getattr__"]("logger")
+        assert "NullLogger" not in namespace
+        assert "_logging" not in namespace and "logging" not in namespace
 
-        assert type(resolved).__name__ != "NullLogger"
-        assert resolved is sys.modules[MODULE_NAME].system_logger
+    def test_append_jsonl_resolves_to_the_writer_when_the_logger_chain_is_broken(self):
+        """The writer is its own door: a broken logger graph cannot take append_jsonl down with it."""
+        assert _load_lazily("append_jsonl") is jsonl_writer.append_jsonl
 
-    def test_resolved_name_is_cached_in_globals(self):
-        """PEP 562 __getattr__ fires once per name: the second access comes from the module dict."""
+    def test_a_healthy_chain_hands_back_the_real_system_logger(self):
         namespace = _exec_prax_init()
 
-        first = namespace["__getattr__"]("logger")
+        assert namespace["__getattr__"]("logger") is sys.modules[MODULE_NAME].system_logger
 
-        assert namespace["logger"] is first
+    def test_a_resolved_name_is_not_cached_in_globals(self):
+        """No cache: a name in the module dict would shadow __getattr__ and hide a later patch on its home."""
+        namespace = _exec_prax_init()
+
+        namespace["__getattr__"]("logger")
+
+        assert "logger" not in namespace
 
     def test_unknown_name_raises_attribute_error(self):
         """__getattr__ must not answer for names the package does not export."""
@@ -568,15 +554,22 @@ EXPECTED_COLD_FOOTPRINT = {
     "aipass.prax.apps.handlers",
     "aipass.prax.apps.handlers.json",
     "aipass.prax.apps.handlers.json.json_service",
+    # Its diagnostics ride prax's trail: the writer and trail, nothing of door one.
+    "aipass.prax.apps.handlers.logging",
+    "aipass.prax.apps.handlers.logging.jsonl_writer",
+    "aipass.prax.apps.handlers.logging.trail",
+    "aipass.prax.apps.handlers.state_root",
 }
 
 # Neither stdlib nor ours: _distutils_hack comes from setuptools' .pth wherever setuptools is installed.
 _INTERPRETER_NOISE = {"__main__", "sitecustomize", "_distutils_hack"}
 
+# sysconfig's own data module is stdlib under a per-platform name that stdlib_module_names does not list.
 _FOOTPRINT_PROBE = """
 import json, sys
 from aipass.prax import json_handler  # noqa: F401
-print(json.dumps(sorted(n for n in sys.modules if n.split(".")[0] not in sys.stdlib_module_names)))
+ours = [n for n in sys.modules if n.split(".")[0] not in sys.stdlib_module_names]
+print(json.dumps(sorted(n for n in ours if not n.startswith("_sysconfigdata"))))
 """
 
 
@@ -625,6 +618,114 @@ class TestLazyInitImportFootprint:
         assert not any(n == "aipass.trigger" or n.startswith("aipass.trigger.") for n in footprint)
 
 
+_DOOR_PROBE = """
+import json, sys
+import aipass.prax
+cold = sorted(n for n in sys.modules if n == "aipass" or n.startswith("aipass."))
+for name in sys.argv[1:]:
+    getattr(aipass.prax, name)
+warm = sorted(n for n in sys.modules if n == "aipass" or n.startswith("aipass."))
+print(json.dumps([cold, warm]))
+"""
+
+_WRITER_DOOR = {
+    "aipass",
+    "aipass.prax",
+    "aipass.prax.apps",
+    "aipass.prax.apps.handlers",
+    "aipass.prax.apps.handlers.logging",
+    "aipass.prax.apps.handlers.logging.jsonl_writer",
+}
+
+
+def _aipass_modules_through_the_door(*names: str) -> tuple:
+    """aipass modules a fresh interpreter holds after `import aipass.prax`, then after resolving *names*."""
+    result = subprocess.run(
+        [sys.executable, "-c", _DOOR_PROBE, *names],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=str(Path(__file__).resolve().parents[3]),
+        env={**os.environ},
+        timeout=120,
+    )
+    assert result.returncode == 0, f"probe failed: {result.stderr}"
+    cold, warm = json.loads(result.stdout.strip().splitlines()[-1])
+    return set(cold), set(warm)
+
+
+class TestStandaloneDoors:
+    """append_jsonl and trail resolve straight to their own modules, never through the logger graph."""
+
+    def test_append_jsonl_resolves_without_the_logger_module(self):
+        """Shipped defect: the append_jsonl door went through modules.logger and its whole graph."""
+        cold, warm = _aipass_modules_through_the_door("append_jsonl")
+
+        assert cold == {"aipass", "aipass.prax"}
+        assert warm == _WRITER_DOOR
+
+    def test_trail_resolves_without_the_logger_module(self):
+        """Door two: trail loads its own module, the writer and the state root, nothing of the logger graph."""
+        cold, warm = _aipass_modules_through_the_door("trail")
+
+        assert cold == {"aipass", "aipass.prax"}
+        trail_and_state = {"aipass.prax.apps.handlers.logging.trail", "aipass.prax.apps.handlers.state_root"}
+        assert warm == _WRITER_DOOR | trail_and_state
+
+
+_OPS = "aipass.prax.apps.handlers.dashboard.operations"
+_REFRESH = "aipass.prax.apps.handlers.dashboard.refresh"
+
+# The public list: each door name and the (home module, attribute) it is the same object as.
+_DOOR_HOMES = {
+    "logger": (MODULE_NAME, "system_logger"),
+    "get_system_logger": (MODULE_NAME, "get_system_logger"),
+    "log_backup_count": (MODULE_NAME, "log_backup_count"),
+    "append_jsonl": ("aipass.prax.apps.handlers.logging.jsonl_writer", "append_jsonl"),
+    "trail": ("aipass.prax.apps.handlers.logging.trail", "trail"),
+    "json_handler": ("aipass.prax.apps.handlers.json.json_service", None),
+    "SUBJECT_CAP": (_OPS, "SUBJECT_CAP"),
+    "DASHBOARD_CHAR_BUDGET": (_OPS, "DASHBOARD_CHAR_BUDGET"),
+    "cap_subject": (_OPS, "cap_subject"),
+    "dashboard_lock": (_OPS, "dashboard_lock"),
+    "write_section": (_OPS, "write_section"),
+    "get_branch_paths": ("aipass.prax.apps.handlers.dashboard.status", "get_branch_paths"),
+    "refresh_single_dashboard": (_REFRESH, "refresh_single_dashboard"),
+    "refresh_all_dashboards": (_REFRESH, "refresh_all_dashboards"),
+    "branch_state_root": ("aipass.prax.apps.handlers.state_root", "branch_state_root"),
+    "get_system_logs_dir": ("aipass.prax.apps.handlers.config.load", "get_system_logs_dir"),
+}
+
+
+class TestFrontDoor:
+    """The one import door: every name other branches take, the home's own object, read fresh on each access."""
+
+    def test_the_door_publishes_exactly_the_public_list(self):
+        assert sorted(door.__all__) == sorted(_DOOR_HOMES)
+
+    @pytest.mark.parametrize("name", sorted(_DOOR_HOMES))
+    def test_each_door_name_is_the_object_its_home_gives(self, name):
+        module_name, attribute = _DOOR_HOMES[name]
+        home = importlib.import_module(module_name)
+
+        assert getattr(door, name) is (home if attribute is None else getattr(home, attribute))
+
+    @pytest.mark.parametrize("name", ["logger", "SUBJECT_CAP", "refresh_single_dashboard", "log_backup_count"])
+    def test_a_patch_on_the_home_reaches_a_later_read_through_the_door(self, name, monkeypatch):
+        """Read first, then patch: a cached door would keep handing out the first object."""
+        module_name, attribute = _DOOR_HOMES[name]
+        getattr(door, name)
+        sentinel = object()
+        monkeypatch.setattr(importlib.import_module(module_name), attribute, sentinel)
+
+        assert getattr(door, name) is sentinel
+
+    def test_a_bare_import_loads_nothing_under_apps(self):
+        cold, _ = _aipass_modules_through_the_door()
+
+        assert cold == {"aipass", "aipass.prax"}
+
+
 _TRIGGER_PROBE = """
 import json, sys
 from aipass.prax import logger
@@ -668,52 +769,82 @@ class TestLoggingPathIsTriggerFree:
         assert _trigger_modules_after_one_log_line(tmp_path) == _TRIGGER_SHELLS_AFTER_ONE_LOG_LINE
 
 
-class TestEnsureWatcherStartsNothing:
-    """Logging is not a reason to watch the filesystem: discovery is a scheduled scan."""
+class TestNoWatcherHookOnTheLogPath:
+    """A log line checks no watcher: nothing in production starts one (start_file_watcher has test callers only)."""
 
-    def test_first_log_line_starts_no_watcher(self, monkeypatch, tmp_path):
-        """The first log line starts no watcher, background or not."""
-        mod, mocks = _inject_and_import(monkeypatch, tmp_path)
-        watcher = mocks["aipass.prax.apps.handlers.discovery.watcher"]
-        watcher.start_file_watcher_in_background = MagicMock()
-        mod.SystemLogger._watcher_started = False
+    def test_system_logger_has_no_watcher_hook(self):
+        assert not hasattr(logger_module.SystemLogger, "_ensure_watcher")
+        assert not hasattr(logger_module.SystemLogger, "_watcher_started")
 
-        mod.SystemLogger()._ensure_watcher()
 
-        watcher.start_file_watcher_in_background.assert_not_called()
-        watcher.start_file_watcher.assert_not_called()
+_PRAX_ROOT = Path(__file__).resolve().parents[1]
+_SKIP_PARTS = {".archive", "tests", "__pycache__", "docs.local", "dropbox", "tools"}
 
-    def test_the_logger_no_longer_binds_the_background_start(self, monkeypatch, tmp_path):
-        """A name the module does not import cannot be called by accident."""
-        mod, _ = _inject_and_import(monkeypatch, tmp_path)
 
-        assert not hasattr(mod, "start_file_watcher_in_background")
+def _imports_stdlib_logging(path: Path) -> bool:
+    """True when the file imports stdlib logging in any spelling."""
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import) and any(a.name.split(".")[0] == "logging" for a in node.names):
+            return True
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and (node.module or "").split(".")[0] == "logging":
+            return True
+    return False
 
-    def test_later_log_lines_still_check_liveness(self, monkeypatch, tmp_path):
-        """A process that imported the watcher still hears when it dies."""
-        mod, mocks = _inject_and_import(monkeypatch, tmp_path)
-        mod.SystemLogger._watcher_started = True
 
-        mod.SystemLogger()._ensure_watcher()
+_LEVEL_METHODS = {"debug", "info", "warning", "error", "critical"}
 
-        mocks[WATCHER].check_file_watcher_liveness.assert_called_once_with()
 
-    def test_a_log_line_never_imports_the_watcher(self, monkeypatch, tmp_path):
-        """The watcher pulls the watchdog library; a process that never imported it must not pay for it."""
-        mod, _ = _inject_and_import(monkeypatch, tmp_path)
-        monkeypatch.delitem(sys.modules, WATCHER)
-        mod.SystemLogger._watcher_started = True
+def _defines_level_shaped_class(path: Path) -> bool:
+    """True when the file defines a class with two or more level methods, sentry's K1 shape."""
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.ClassDef):
+            methods = {n.name for n in node.body if isinstance(n, ast.FunctionDef)}
+            if len(methods & _LEVEL_METHODS) >= 2:
+                return True
+    return False
 
-        mod.SystemLogger()._ensure_watcher()
 
-        assert WATCHER not in sys.modules
+class TestPublishedLoggingFacts:
+    """What prax publishes through its modules door for other branches to read."""
 
-    def test_the_first_line_does_not_pay_for_the_liveness_check(self, monkeypatch, tmp_path):
-        """`_watcher_started` means "past the first log line", when no watcher can exist yet."""
-        mod, mocks = _inject_and_import(monkeypatch, tmp_path)
-        mod.SystemLogger._watcher_started = False
+    def test_logging_allowed_is_exactly_the_files_that_hold_stdlib_logging(self):
+        production = [*_PRAX_ROOT.glob("*.py"), *(_PRAX_ROOT / "apps").rglob("*.py")]
+        holders = {
+            "prax/" + p.relative_to(_PRAX_ROOT).as_posix()
+            for p in production
+            if not _SKIP_PARTS & set(p.relative_to(_PRAX_ROOT).parts) and _imports_stdlib_logging(p)
+        }
 
-        mod.SystemLogger()._ensure_watcher()
+        assert {path for path, _why in logger_module.LOGGING_ALLOWED} == holders
 
-        mocks[WATCHER].check_file_watcher_liveness.assert_not_called()
-        assert mod.SystemLogger._watcher_started is True
+    def test_every_allowed_file_says_why_in_one_line(self):
+        for path, why in logger_module.LOGGING_ALLOWED:
+            assert why.strip() and "\n" not in why, path
+
+    def test_logger_doors_is_exactly_the_files_that_define_a_level_shaped_class(self):
+        production = [*_PRAX_ROOT.glob("*.py"), *(_PRAX_ROOT / "apps").rglob("*.py")]
+        holders = {
+            "prax/" + p.relative_to(_PRAX_ROOT).as_posix()
+            for p in production
+            if not _SKIP_PARTS & set(p.relative_to(_PRAX_ROOT).parts) and _defines_level_shaped_class(p)
+        }
+
+        assert {path for path, _why in logger_module.LOGGER_DOORS} == holders
+
+    def test_every_door_file_says_why_in_one_line(self):
+        for path, why in logger_module.LOGGER_DOORS:
+            assert why.strip() and "\n" not in why, path
+
+    def test_log_backup_count_is_the_deepest_configured_tier(self, monkeypatch):
+        config_load.PRAX_LOGGER_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        config_load.PRAX_LOGGER_CONFIG_FILE.write_text(
+            json.dumps({"config": {"system_logs": {"backup_count": 5}, "local_logs": {"backup_count": 2}}}),
+            encoding="utf-8",
+        )
+
+        assert logger_module.log_backup_count() == 5
+
+    def test_log_backup_count_without_a_config_is_the_code_default(self):
+        assert logger_module.log_backup_count() == max(
+            config_load.DEFAULT_SYSTEM_LOGS["backup_count"], config_load.DEFAULT_LOCAL_LOGS["backup_count"]
+        )

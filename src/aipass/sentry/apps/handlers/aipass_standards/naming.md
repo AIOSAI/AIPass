@@ -99,7 +99,6 @@ prax/apps/handlers/monitoring/
     module_tracker.py
     event_queue.py
     unified_stream.py
-    telegram_relay.py
 ```
 
 **prax -- registry domain:**
@@ -165,6 +164,18 @@ These are patterns observed across the codebase. They are not prescriptive rules
 - `dispatcher` -- routing or dispatching work
 - `collector` -- collecting data from multiple sources
 - `client` -- API or service client
+
+---
+
+## Bypass Rows
+
+Each badly named function, constant and class is its own site: the name is the site, at the line that
+defines it, and the message names every open site. A row with `"functions": ["badName"]` waives that
+name; a row with `"lines": [n]` waives the name defined on line n. Every other bad name in the file
+still convicts.
+
+The file name is a file-level finding: a row with `"functions": ["<file>"]` waives it and a line row
+does not. A row with no `lines` or `functions` waives the whole file.
 
 ---
 

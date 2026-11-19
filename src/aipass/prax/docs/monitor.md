@@ -40,12 +40,16 @@ Real-time unified console showing:
 Interactive commands inside the monitor: `help`, `status`, `quit`/`exit`/`q`.
 
 **Who counts as a branch.** Names and paths come from declarations, never from
-path shape. Three sources, in precedence order: `AIPASS_REGISTRY.json` for
-`src/aipass/*` branches; then a sweep of `projects/*/*_REGISTRY.json` for in-repo
-project citizens; then, for any file still unresolved, the nearest
-`.trinity/passport.json` walking up to the repo root. A relative registry path
-is resolved against *its own registry's* directory, not the process CWD. First registration wins, so a project cannot
-claim a name AIPass already uses.
+path shape. The citizens are memory's door rows (core `AIPASS_REGISTRY.json`,
+in-repo residents, and the roots `AIPASS_ROOTS.json` declares), read through a
+60-second cache; then, for any file still unresolved, the nearest
+`.trinity/passport.json` walking up to the repo root. First registration wins, so
+a project cannot claim a name AIPass already uses. The same rows decide what is
+watched: each citizen's `apps/` recursively, its root and `.trinity/` flat, so a
+declared-root citizen outside the repo is watched like a core one. A Codex
+session is labelled by asking the detector about its CWD, wherever it lives; the
+`aipass/<name>` and `src/<name>` path shapes answer only when the detector has
+no label.
 
 The project sweep resolves whoever the registries *declare*, not whoever has a
 directory. Path
@@ -67,6 +71,17 @@ screen. The monitor's own health warnings (file watcher unavailable, and similar
 bypass the scope — a filter must never hide the reason the screen is empty.
 The scope is set at launch; there is no runtime `filter` command outside commons
 feed mode.
+
+**One rate tracker per machine.** `monitor run` is not single-instance: several
+Mission Controls can run side by side, each with its own display and watchers. The
+rate tracker is the exception, because two of them would raise every runaway alert
+twice. At startup each monitor tries a non-blocking `flock` on
+`prax_json/monitor.lock` (`apps/handlers/monitoring/instance_lock.py`). The winner
+runs the tracker and writes its PID into the file; the others log that another
+monitor runs it and only display events. The lock is held on an open file for the
+process life, so the kernel drops it when the holder dies and no stale pidfile is
+ever judged. The file stays on release, since unlinking it would race a waiting
+opener, and it lives outside `system_logs/`, which the monitor tails.
 
 **Display resilience.** Everything on screen is other branches' output, so every
 dynamic value is escaped before it reaches Rich — a tailed line containing

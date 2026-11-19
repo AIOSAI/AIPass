@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_sleep_in_test_check.py
 # Description: sleep_in_test_check — crack class N, a test that waits instead of asserting
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/sleep_in_test_check.py."""
@@ -46,7 +46,7 @@ class TestTheModelFilePasses:
 
 
 class TestThePlantedSpecimen:
-    """test_versioned_engine.py 89/110/126/240/315/441 — @backup's mtime nudges."""
+    """The mtime nudge: a short sleep between two writes so the second reads as newer."""
 
     def test_the_mtime_nudge_is_convicted(self):
         """0.01s does not move an mtime on a one-second-granularity filesystem."""
@@ -174,3 +174,45 @@ class TestTheBypass:
             )["score"]
             == 100
         )
+
+
+class TestAScopedRowWaivesOneSleep:
+    """Each sleep is a site: its line, inside the test function that holds it."""
+
+    TWO = "def test_a():\n    time.sleep(1)\ndef test_b():\n    time.sleep(2)\n"
+
+    def _check(self, tmp_path, body, **scope):
+        """check_module's (passed, message) for *body* under one row scoped by *scope*."""
+        path = _write(tmp_path, body)
+        rules = [{"standard": "sleep_in_test", "file": str(path), **scope}] if scope else []
+        result = sleep_in_test_check.check_module(str(path), bypass_rules=rules)
+        return result["passed"], result["checks"][0]["message"]
+
+    def test_with_no_row_the_sleep_is_reported(self, tmp_path):
+        passed, said = self._check(tmp_path, "def test_it():\n    time.sleep(1)\n")
+
+        assert passed is False
+        assert "test_specimen.py:2 time.sleep" in said
+
+    def test_a_line_row_waives_the_sleep_on_that_line(self, tmp_path):
+        assert self._check(tmp_path, "def test_it():\n    time.sleep(1)\n", lines=[2])[0] is True
+
+    def test_a_function_row_waives_the_sleep_inside_that_test(self, tmp_path):
+        assert self._check(tmp_path, "def test_it():\n    time.sleep(1)\n", functions=["test_it"])[0] is True
+
+    def test_a_file_scope_row_waives_a_sleep_at_module_level(self, tmp_path):
+        assert self._check(tmp_path, "import time\ntime.sleep(1)\n", functions=["<file>"])[0] is True
+
+    def test_a_line_row_leaves_the_other_sleep_reported_and_the_file_failing(self, tmp_path):
+        passed, said = self._check(tmp_path, self.TWO, lines=[2])
+
+        assert passed is False
+        assert "test_specimen.py:4 time.sleep" in said
+        assert "test_specimen.py:2" not in said
+
+    def test_a_function_row_leaves_the_other_test_reported(self, tmp_path):
+        passed, said = self._check(tmp_path, self.TWO, functions=["test_b"])
+
+        assert passed is False
+        assert "test_specimen.py:2 time.sleep" in said
+        assert "test_specimen.py:4" not in said

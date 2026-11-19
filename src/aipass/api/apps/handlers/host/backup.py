@@ -1,16 +1,17 @@
 # =================== AIPass ====================
 # Name: backup.py
-# Description: Host API Backup Handler — the backup door: start and stop a lane, read a job, read the store
-# Version: 1.2.0
+# Description: Host API Backup Handler — the backup door: start and stop a lane, read a job, the store, the schedule
+# Version: 1.4.0
 # Created: 2026-10-16
-# Modified: 2026-10-22
+# Modified: 2026-11-15
 # =============================================
 
 """
 Host API Backup Handler
-Reference: docs/host_surfaces.md. Reaches @backup only through drone.route_command; owns no subprocess."""
+Reference: docs/host_backup.md. Reaches @backup only through drone.route_command; owns no subprocess."""
 
 import json
+import re
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -30,13 +31,12 @@ BACKUP = "@backup"
 # drive_sync has no --quiet; passing one would be an argument it refuses.
 LANES: Dict[str, List[str]] = {
     "snapshot": ["--quiet"],
-    "versioned": ["--quiet"],
     "all": ["--quiet"],
     "drive_sync": [],
 }
 
 # drive_sync has no limit by the owner's ruling: a rebuild is hours, its own stop ends it early.
-RUN_LIMIT_SECONDS: Dict[str, Optional[int]] = {"snapshot": 1800, "versioned": 1800, "all": 86400, "drive_sync": None}
+RUN_LIMIT_SECONDS: Dict[str, Optional[int]] = {"snapshot": 1800, "all": 86400, "drive_sync": None}
 
 # shortcut: drone's router has no no-deadline mode, so an unlimited lane gets ten years; use drone's when it has one.
 UNLIMITED_SECONDS = 10 * 365 * 86400
@@ -78,13 +78,26 @@ MAX_LINE_CHARS = 300
 
 STOP_FAILED = "@backup stop exited non-zero with nothing on stdout"
 
+# @backup's schedule asks @daemon's queue with 60 s to answer; this leaves it room.
+SCHEDULE_TIMEOUT_SECONDS = 120
+
+# shortcut: @backup exits 2 for a refusal and a fault it names alike, so both are 400; split when its codes do.
+SCHEDULE_REFUSED_EXIT = 2
+
+# Each frequency's fields, in the order @backup's set form takes them after the frequency.
+SCHEDULE_SHAPES = {"daily": ("time",), "weekly": ("weekday", "time"), "monthly": ("day", "time")}
+
+SCHEDULE_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+SCHEDULE_TIME = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
+
 
 class JobUnknown(Exception):
     """No job by that id on this server: never started, dropped after an hour, or lost to a restart."""
 
 
 class NotRunning(Exception):
-    """@backup's stop exited non-zero: nothing of that lane is running for the project. Carries its first stdout line."""
+    """@backup's stop exited non-zero: nothing of that lane runs for the project. Carries its first stdout line."""
 
 
 class StatusJsonMissing(VerbUnavailable):
@@ -277,7 +290,7 @@ def _root_of(project: str) -> Path:
 
 
 def _check_lane(lane: str) -> None:
-    """Refuse anything but one of the four lanes."""
+    """Refuse anything but one of the three lanes."""
     if lane not in LANES:
         named = f"Unknown lane {lane!r}" if lane else "A lane is required"
         raise VerbRefused(f"{named} — the backup door runs {', '.join(LANES)}")
@@ -375,8 +388,93 @@ def read_status(project: str, sizes: bool = False) -> Dict[str, Any]:
     return answered
 
 
+def _schedule(root: Path, words: List[str]) -> str:
+    """One @backup schedule call; its stdout on exit 0. Exit 2 with a sentence is @backup refusing."""
+    try:
+        result = drone.route_command(BACKUP, "schedule", [str(root)] + words, timeout=SCHEDULE_TIMEOUT_SECONDS)
+    except drone.RoutingError as e:
+        logger.error("[host_api] drone could not run %s schedule: %s", BACKUP, e)
+        raise VerbUnavailable(f"{BACKUP} schedule could not be run: {e}") from e
+
+    if result.exit_code == 0:
+        return result.stdout or ""
+    # The hint after the arrow is usage, and Rich wraps both, so the sentence is rejoined.
+    sentence = " ".join((result.stderr or "").split("→ Try:")[0].split()).lstrip("❌ ")[:MAX_LINE_CHARS]
+    if result.exit_code != SCHEDULE_REFUSED_EXIT or not sentence:
+        logger.error("[host_api] %s schedule %s exited %s: %s", BACKUP, words, result.exit_code, result.stderr)
+        raise VerbUnavailable(f"{BACKUP} schedule exited {result.exit_code}: {sentence}")
+    logger.warning("[host_api] %s schedule %s refused: %s", BACKUP, words, sentence)
+    raise VerbRefused(sentence)
+
+
+def _schedule_json(root: Path) -> Dict[str, Any]:
+    """@backup's schedule --json, one object, keys untouched."""
+    stdout = _schedule(root, ["--json"])
+    try:
+        answered = json.loads(stdout)
+    except ValueError as e:
+        raise VerbUnavailable(f"{BACKUP} schedule --json answered no JSON object: {e}") from e
+    if not isinstance(answered, dict):
+        raise VerbUnavailable(f"{BACKUP} schedule --json answered {type(answered).__name__}, not an object")
+    return answered
+
+
+def read_schedule(project: str) -> Dict[str, Any]:
+    """One project's scheduled backup, as @backup's schedule --json answers it."""
+    return _schedule_json(_root_of(project))
+
+
+def _schedule_words(frequency: Any, time: Any, weekday: Any, day: Any) -> List[str]:
+    """@backup's set form for one frequency; a missing, malformed or stray field is refused."""
+    if frequency not in SCHEDULE_SHAPES:
+        named = f"Unknown frequency {frequency!r}" if frequency else "A frequency is required with its fields"
+        raise VerbRefused(f"{named} — the schedule takes {', '.join(SCHEDULE_SHAPES)}")
+    shape = SCHEDULE_SHAPES[frequency]
+    given = {"weekday": weekday, "day": day, "time": time}
+    stray = [field for field, value in given.items() if value is not None and field not in shape]
+    if stray:
+        raise VerbRefused(f"{frequency} takes no {' or '.join(stray)}")
+    if "weekday" in shape and weekday not in SCHEDULE_WEEKDAYS:
+        raise VerbRefused(f"Not a weekday: {weekday!r} — monday to sunday, lowercase")
+    # type(), not isinstance: JSON true is a bool, and a bool is an int to isinstance.
+    if "day" in shape and (type(day) is not int or not 1 <= day <= 31):
+        raise VerbRefused(f"Not a day of the month: {day!r} — a whole number 1 to 31")
+    if not isinstance(time, str) or not SCHEDULE_TIME.fullmatch(time):
+        raise VerbRefused(f"Not a 24-hour HH:MM time: {time!r}")
+    return [frequency] + [str(given[field]) for field in shape]
+
+
+def set_schedule(
+    project: str,
+    on: Any = None,
+    frequency: Any = None,
+    time: Any = None,
+    weekday: Any = None,
+    day: Any = None,
+) -> Dict[str, Any]:
+    """
+    Set a frequency with its fields, then on or off, through @backup; answer the schedule read back.
+    Everything @backup would refuse for its form is refused here first, before anything is written."""
+    calls: List[List[str]] = []
+    if any(field is not None for field in (frequency, time, weekday, day)):
+        calls.append(_schedule_words(frequency, time, weekday, day))
+    if on is not None:
+        if not isinstance(on, bool):
+            raise VerbRefused(f"on is true or false, not {on!r}")
+        calls.append(["on" if on else "off"])
+    if not calls:
+        raise VerbRefused("Nothing to set: send on, or a frequency with its fields")
+
+    root = _root_of(project)
+    for words in calls:
+        _schedule(root, words)
+    json_handler.log_operation("host_api_backup_schedule_set", {"project": project, "calls": calls})
+    logger.info("[host_api] backup schedule for %s set: %s", project, calls)
+    return _schedule_json(root)
+
+
 def answer(call: Callable[..., Dict[str, Any]], *args: Any) -> Tuple[int, Dict[str, Any]]:
-    """Run one of the four and answer (status, body), with no web framework in it."""
+    """Run one of the door's calls and answer (status, body), with no web framework in it."""
     try:
         return 200, call(*args)
     except JobUnknown as e:

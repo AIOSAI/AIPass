@@ -4,7 +4,7 @@
   "jobs": [
     {
       "id": "rounds",
-      "enabled": true,
+      "enabled": false,
       "schedule": {
         "type": "rotation",
         "time": "05:00"

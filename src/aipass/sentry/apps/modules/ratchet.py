@@ -21,7 +21,7 @@ import time
 from typing import List, Optional, Tuple
 
 from aipass.cli import console
-from aipass.cli.apps.modules import error, success, warning
+from aipass.cli import error, success, warning
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.audit_tests import artifact, laws, refusal, runner
 from aipass.sentry.apps.handlers.cli.help_flags import wants_help

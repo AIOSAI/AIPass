@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: output_merge.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: One hook output, one document - merges fan-out handler stdouts for the engine
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-09-10
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """Merges every handler's stdout on one event into the ONE document Claude Code reads.
@@ -15,7 +15,8 @@ Claude Code parses stdout as one document: two JSON objects on two lines fail an
 
 import json
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 
 #: Claude Code persists an additionalContext over this many UTF-16 units and shows a 2,000-char preview.
@@ -48,6 +49,13 @@ def _as_object(stdout: str) -> dict | None:
 
 
 def combine_outputs(event_type: str, outputs: list[tuple[str, str, str]]) -> str:
+    """Every handler's stdout as the ONE document Claude Code will read; each call leaves one json trail entry."""
+    document = _combine(event_type, outputs)
+    json_handler.log_operation("combine_outputs", {"event": event_type, "outputs": len(outputs)})
+    return document
+
+
+def _combine(event_type: str, outputs: list[tuple[str, str, str]]) -> str:
     """Every handler's stdout as the ONE document Claude Code will read.
 
     Once any handler answers in JSON the answer is one object; plain keys are first-handler-wins.

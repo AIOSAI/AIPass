@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_file_top_check.py
 # Description: file_top_check — test template v1 items 5, 6 and 7, the top of a test file
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/file_top_check.py."""
@@ -245,7 +245,7 @@ class TestATestPluginIsExcusedItemSix:
     reasoning; items 5 and 7 still bind. Told apart by the AST, never the name.
     """
 
-    PLUGIN = '\n"""A pytest plugin that\nsimulates a Windows home."""\n'
+    PLUGIN = '\n"""A pytest plugin that\nsimulates a fresh home."""\n'
     HOOK = "\nimport pytest\n\n\ndef pytest_configure(config):\n    return None\n"
 
     def _said(self, tmp_path, text):
@@ -334,6 +334,60 @@ class TestCheckModuleIsThePerFileLane:
     def test_the_rule_scopes_to_tests_and_scores_every_file(self):
         assert file_top_check.APPLIES_TO == "tests"
         assert file_top_check.AUDIT_SCOPE == "all_files"
+
+
+class TestAScopedRowWaivesOneFinding:
+    """A finding with a line is a site there; one with no honest line is the file's (<file>)."""
+
+    BAD_BANNER = "# ===================AIPASS====================\n" + HEADER.split("\n", 1)[1]
+
+    def _check(self, tmp_path, body, **scope):
+        """check_module's (passed, message) for *body* under one row scoped by *scope*."""
+        path = _write(tmp_path, body + "\n\ndef test_x():\n    assert True\n")
+        rules = [{"standard": "file_top", "file": str(path), **scope}] if scope else []
+        result = file_top_check.check_module(str(path), bypass_rules=rules)
+        return result["passed"], result["checks"][0]["message"]
+
+    def test_with_no_row_the_finding_is_reported(self, tmp_path):
+        passed, said = self._check(tmp_path, HEADER + DOCSTRING + BODY)
+
+        assert passed is False
+        assert "item 7 declared pass: missing" in said
+
+    def test_a_file_scope_row_waives_a_missing_declared_pass(self, tmp_path):
+        assert self._check(tmp_path, HEADER + DOCSTRING + BODY, functions=["<file>"])[0] is True
+
+    def test_a_line_row_cannot_waive_a_finding_that_has_no_line(self, tmp_path):
+        passed, said = self._check(tmp_path, HEADER + DOCSTRING + BODY, lines=[1])
+
+        assert passed is False
+        assert "item 7 declared pass: missing" in said
+
+    def test_a_line_row_waives_the_banner_on_its_line(self, tmp_path):
+        assert self._check(tmp_path, self.BAD_BANNER + DOCSTRING + DECLARED_PASS + BODY, lines=[1])[0] is True
+
+    def test_a_file_scope_row_waives_a_finding_at_module_level_too(self, tmp_path):
+        assert self._check(tmp_path, self.BAD_BANNER + DOCSTRING + DECLARED_PASS + BODY, functions=["<file>"])[0]
+
+    def test_a_line_row_waives_the_stray_line_in_the_declared_pass(self, tmp_path):
+        stray = DECLARED_PASS + "# a note to self, not a marker\n"
+
+        assert self._check(tmp_path, HEADER + DOCSTRING + stray + BODY, lines=[13])[0] is True
+
+    def test_a_line_row_waives_the_docstring_on_its_line(self, tmp_path):
+        vague = '\n"""Unit tests for the dispatch monitor."""\n'
+
+        assert self._check(tmp_path, HEADER + vague + DECLARED_PASS + BODY, lines=[9])[0] is True
+
+    def test_a_line_row_waives_the_misplaced_block_on_its_line(self, tmp_path):
+        assert self._check(tmp_path, HEADER + DECLARED_PASS + DOCSTRING + BODY, lines=[9])[0] is True
+
+    def test_one_waived_site_leaves_the_other_reported_and_the_file_failing(self, tmp_path):
+        passed, said = self._check(tmp_path, self.BAD_BANNER + DOCSTRING + BODY, lines=[1])
+
+        assert passed is False
+        assert "item 7 declared pass: missing" in said
+        assert "banner line" not in said
 
 
 class TestTheModelFileHoldsTheLine:

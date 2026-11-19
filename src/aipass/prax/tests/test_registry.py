@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry.py
 # Description: Tests for registry load and save handlers
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/registry/load.py and apps/handlers/registry/save.py."""
@@ -74,8 +74,8 @@ class TestLoadLastScan:
         assert load_mod.load_last_scan() is None
         warning = cast(MagicMock, load_mod.logger).warning
         assert warning.call_count == 1
-        form, where, _why = warning.call_args.args
-        assert (form, where) == ("load: failed to read last_scan from '%s': %s", load_mod.REGISTRY_FILE)
+        assert warning.call_args.args == ("load: failed to read last_scan",)
+        assert warning.call_args.kwargs["file"] == str(load_mod.REGISTRY_FILE)
 
 
 class TestLoadModuleRegistry:
@@ -132,8 +132,8 @@ class TestLoadModuleRegistry:
         assert result is None
         warning = cast(MagicMock, load_mod.logger).warning
         assert warning.call_count == 1
-        form, where, _why = warning.call_args.args
-        assert (form, where) == ("load: failed to load module registry from '%s': %s", load_mod.REGISTRY_FILE)
+        assert warning.call_args.args == ("load: failed to load the module registry",)
+        assert warning.call_args.kwargs["file"] == str(load_mod.REGISTRY_FILE)
 
     def test_empty_dict_when_modules_key_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Registry without 'modules' key should return empty dict."""
@@ -274,7 +274,7 @@ class TestSaveModuleRegistry:
 
         assert result is False
         save_mod.logger.error.assert_called_once()  # type: ignore[union-attr]
-        assert "failed to save module registry" in save_mod.logger.error.call_args[0][0]  # type: ignore[union-attr]
+        assert "failed to save the module registry" in save_mod.logger.error.call_args[0][0]  # type: ignore[union-attr]
 
     def test_logs_operation_on_success(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Should call json_handler.log_operation after successful save."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: exceptions.py
 # Description: Custom exceptions for routing and branch resolution
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-09
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -69,5 +69,11 @@ class RegistryPermissionError(RegistryError):
 
 class CommandExecutionError(RoutingError):
     """Raised when command execution fails."""
+
+    pass
+
+
+class RepoRootError(RoutingError):
+    """Raised when the caller's directory is inside no git repository and below no *_REGISTRY.json."""
 
     pass

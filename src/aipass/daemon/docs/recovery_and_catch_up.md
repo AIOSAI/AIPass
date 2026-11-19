@@ -42,7 +42,7 @@ header.
 A gap can be **both** a stopped timer and a reboot, and a two-valued cause would report only
 the reboot and hide the stop. There is no `machine_off` value, because boot-inside-the-gap
 cannot be told apart from "shut down for the night" without positive evidence the host was up
-during the gap, and no cross-platform source provides it — so the cause names what is **known**
+during the gap, and no source the daemon reads provides it — so the cause names what is **known**
 and the sentence states both instants rather than picking a story.
 
 **One catch-up, never a replay.** Ten days off is one wake carrying ten dates, not

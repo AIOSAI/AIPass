@@ -3,7 +3,7 @@
 # Description: Tests for the init git-auth provisioning handler (DPLAN-0281 P2)
 # Version: 1.2.2
 # Created: 2026-08-04
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/init/git_auth.py."""
@@ -14,7 +14,6 @@
 import json
 import logging
 import os
-import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -213,10 +212,7 @@ def test_records_missing_path_from_the_citizens_own_passport(tmp_path: Path) -> 
     assert result["verified"] is True
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits: Windows still lists a 0o000 directory")
-@pytest.mark.skipif(
-    hasattr(os, "geteuid") and os.geteuid() == 0, reason="root reads a 0o000 directory, so nothing is unreadable"
-)
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a 0o000 directory, so nothing is unreadable")
 def test_an_unreadable_directory_is_named_in_the_refusal_not_reported_as_absent(tmp_path: Path) -> None:
     # A real permission bit is the only route to an unreadable subtree (template item 10).
     build_project(tmp_path, owner_path=None)

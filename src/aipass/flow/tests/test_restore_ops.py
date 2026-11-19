@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_restore_ops.py
 # Description: Tests for restore_ops handler -- plan restore business logic, and validator
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/plan/restore_ops.py and apps/handlers/plan/validator.py."""
@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.flow.apps.handlers.plan import authority
 from aipass.flow.apps.handlers.plan.restore_ops import (
     find_backup_copy,
     recover_plan_from_backup,
@@ -30,7 +31,6 @@ from aipass.flow.apps.handlers.plan.validator import (
     validate_plan_exists as real_validate,
 )
 
-# Not a hardcoded "/tmp": a POSIX-only literal breaks on Windows once an assertion reads it back.
 _TMP = Path(tempfile.gettempdir())
 
 
@@ -104,7 +104,7 @@ class TestRestoreSuccess:
         }
         deps = _make_deps(load_registry=MagicMock(return_value=registry))
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = fn(plan_num="1", **deps)
 
         assert result["success"] is True
@@ -119,7 +119,7 @@ class TestRestoreSuccess:
         registry = {"plans": {"0001": {"status": "closed", "file_path": str(plan_file), "location": str(tmp_path)}}}
         deps = _make_deps(load_registry=MagicMock(return_value=registry), save_registry=MagicMock(return_value=False))
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = restore_plan_impl(plan_num="1", **deps)
 
         assert result["success"] is False
@@ -154,7 +154,7 @@ class TestRestoreSuccess:
         save_mock = MagicMock()
         deps = _make_deps(load_registry=MagicMock(return_value=registry), save_registry=save_mock)
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             fn(plan_num="1", **deps)
 
         save_mock.assert_called_once()
@@ -185,7 +185,7 @@ class TestRestoreSuccess:
         scan_mock = MagicMock()
         deps = _make_deps(load_registry=MagicMock(return_value=registry), scan_plan_files=scan_mock)
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             fn(plan_num="1", **deps)
 
         scan_mock.assert_called_once_with()
@@ -209,7 +209,7 @@ class TestRestoreSuccess:
         }
         deps = _make_deps(load_registry=MagicMock(return_value=registry))
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = fn(plan_num="1", **deps)
 
         types = [m["type"] for m in result["messages"]]
@@ -290,7 +290,7 @@ class TestRestoreNotFound:
                 "aipass.flow.apps.handlers.plan.registry_routing._load_template_registry",
                 return_value={"types": {"flow_plans": {"prefix": "FPLAN"}}},
             ),
-            patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger,
+            patch("aipass.trigger.trigger") as mock_trigger,
         ):
             result = fn(plan_num="9999", **deps)
 
@@ -378,7 +378,7 @@ class TestRestoreDashboardFailures:
             update_dashboard_local=MagicMock(return_value=answer),
         )
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = restore_plan_impl(plan_num="1", **deps)
 
         assert result["success"] is True
@@ -409,7 +409,7 @@ class TestRestoreDashboardFailures:
             push_to_plans_central=MagicMock(return_value=False),
         )
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = fn(plan_num="1", **deps)
 
         assert result["success"] is True
@@ -436,7 +436,7 @@ class TestRestoreDashboardFailures:
             push_to_plans_central=MagicMock(return_value=False),
         )
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = fn(plan_num="1", **deps)
 
         assert result["success"] is True
@@ -493,7 +493,7 @@ class TestRestoreCrossTypeCollision:
             save_registry=save_mock,
         )
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = fn(plan_num="PPLAN-0011", **deps)
 
         assert result["success"] is True
@@ -539,7 +539,7 @@ class TestRestoreCrossTypeCollision:
             save_registry=MagicMock(),
         )
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = fn(plan_num="PPLAN-0011", **deps)
 
         header = next(m for m in result["messages"] if m["type"] == "restore_header")
@@ -659,8 +659,7 @@ class TestRecoverPlanFromBackup:
         saved_reg = save.call_args[0][0]
         assert saved_reg["plans"]["0010"]["location"] == str(flow_root)
 
-    # Absolute is EITHER dialect, and a vanished absolute record is refused by name, never re-homed
-    # to FLOW_ROOT. The host running these tests must not decide any of these verdicts.
+    # A vanished absolute record is refused by name, never re-homed to FLOW_ROOT.
 
     def _recover_with_recorded_location(self, tmp_path, recorded, plan_key="0077"):
         """Recover a backup whose header records *recorded*, in a sandbox tree."""
@@ -686,26 +685,8 @@ class TestRecoverPlanFromBackup:
 
         return ok, msg, save, flow_root
 
-    def test_a_windows_recorded_location_is_not_read_as_relative(self, tmp_path):
-        """``C:\\plans`` is absolute even on POSIX, so it cannot land in FLOW_ROOT."""
-        ok, msg, save, flow_root = self._recover_with_recorded_location(tmp_path, r"C:\plans\archive")
-
-        assert ok is False
-        assert r"C:\plans\archive" in msg
-        save.assert_not_called()
-        assert not list(flow_root.glob("*.md"))
-
-    def test_a_unc_recorded_location_is_not_read_as_relative(self, tmp_path):
-        """A UNC share is the other windows-absolute spelling, and it has no drive letter."""
-        ok, msg, save, flow_root = self._recover_with_recorded_location(tmp_path, r"\\server\share\plans")
-
-        assert ok is False
-        assert r"\\server\share\plans" in msg
-        save.assert_not_called()
-        assert not list(flow_root.glob("*.md"))
-
     def test_a_vanished_posix_location_is_refused_by_name(self, tmp_path):
-        """The same rule in the host's own dialect: gone means refused, not re-homed."""
+        """Gone means refused, not re-homed."""
         gone = tmp_path / "deleted_seat"
         ok, msg, save, flow_root = self._recover_with_recorded_location(tmp_path, str(gone))
 
@@ -888,7 +869,7 @@ class TestRestoreFileFromBackup:
 
         target, msg = restore_file_from_backup(row, "0042")
 
-        assert target == home / name, msg
+        assert target is not None and target == home / name, msg
         assert target.read_text(encoding="utf-8").startswith("# The plan")
 
     def test_refuses_when_the_original_location_is_gone(self, tmp_path):
@@ -928,7 +909,7 @@ class TestRestoreOfANormallyClosedPlan:
         )
         deps["restore_file_from_backup_fn"] = lambda info, key: restore_file_from_backup(info, key, backup_dir=archive)
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = fn(plan_num="FPLAN-0042", **deps)
 
         mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0042", location=str(home))
@@ -954,7 +935,7 @@ class TestRestoreOfANormallyClosedPlan:
         )
         deps["restore_file_from_backup_fn"] = lambda info, key: restore_file_from_backup(info, key, backup_dir=archive)
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             fn(plan_num="FPLAN-0042", **deps)
 
         mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0042", location=str(home))
@@ -982,3 +963,74 @@ class TestRestoreOfANormallyClosedPlan:
         assert any(m.get("error_type") == "file_missing" for m in result["messages"])
         blob = " ".join(str(m.get("text", "")) for m in result["messages"])
         assert "Archive lookup" in blob and "no archived copy" in blob
+
+
+class TestRestoreAnswersToThePlansOwners:
+    @pytest.fixture(autouse=True)
+    def _seats(self, make_seat):
+        self.make_seat = make_seat
+
+    def _setup(self, tmp_path, monkeypatch, caller: str):
+        branch = self.make_seat(tmp_path / "beta")
+        row = {"status": "closed", "file_path": str(branch / "FPLAN-0001.md"), "location": str(branch)}
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: caller)
+        restore_file = MagicMock(return_value=(branch / "FPLAN-0001.md", "copied"))
+        deps = _make_deps(load_registry=MagicMock(return_value={"plans": {"0001": row}}))
+        return row, restore_file, deps
+
+    def test_another_branch_is_refused_and_nothing_is_copied_back(self, tmp_path, monkeypatch):
+        row, restore_file, deps = self._setup(tmp_path, monkeypatch, "@alpha")
+
+        result = restore_plan_impl(plan_num="1", restore_file_from_backup_fn=restore_file, **deps)
+
+        assert result["success"] is False
+        assert "sits in @beta" in result["messages"][-1]["details"]
+        restore_file.assert_not_called()
+        deps["save_registry"].assert_not_called()
+        assert row["status"] == "closed"
+
+    def test_the_holder_restores_and_the_log_names_it(self, tmp_path, monkeypatch, mock_json_handler):
+        _row, restore_file, deps = self._setup(tmp_path, monkeypatch, "@beta")
+
+        with patch("aipass.trigger.trigger"):
+            result = restore_plan_impl(plan_num="1", restore_file_from_backup_fn=restore_file, **deps)
+
+        assert result["success"] is True
+        restore_file.assert_called_once()
+        mock_json_handler.assert_any_call(
+            "plan_restored",
+            {"plan_key": "0001", "location": str(tmp_path / "beta"), "caller": "@beta", "success": True},
+        )
+
+
+class TestARecoveryAnswersToTheBranchThatWillHoldIt:
+    def _recover(self, tmp_path, monkeypatch, make_seat, caller: str):
+        beta = make_seat(tmp_path / "beta")
+        backup_dir = tmp_path / "processed_plans"
+        backup_dir.mkdir()
+        (backup_dir / "FPLAN-0042.md").write_text(f"# Plan\n**Location**: {beta}\n", encoding="utf-8")
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: caller)
+        save = MagicMock(return_value=True)
+        with (
+            patch("aipass.flow.apps.handlers.plan.restore_ops.PROCESSED_PLANS_DIR", backup_dir),
+            patch("aipass.flow.apps.handlers.plan.restore_ops._PKG_ROOT", tmp_path),
+            patch("aipass.flow.apps.handlers.plan.restore_ops.FLOW_ROOT", tmp_path / "flow"),
+        ):
+            ok, msg = recover_plan_from_backup(
+                "0042", "FPLAN-0042", load_registry=MagicMock(return_value={"plans": {}}), save_registry=save
+            )
+        return ok, msg, save, beta / "FPLAN-0042.md"
+
+    def test_another_branch_is_refused_and_nothing_is_copied(self, tmp_path, monkeypatch, make_seat):
+        ok, msg, save, target = self._recover(tmp_path, monkeypatch, make_seat, "@alpha")
+
+        assert ok is False
+        assert "sits in @beta" in msg and "not recorded on this plan" in msg
+        assert not target.exists()
+        save.assert_not_called()
+
+    def test_the_branch_that_will_hold_it_recovers_it(self, tmp_path, monkeypatch, make_seat):
+        ok, _msg, save, target = self._recover(tmp_path, monkeypatch, make_seat, "@beta")
+
+        assert ok is True and target.exists()
+        save.assert_called_once()

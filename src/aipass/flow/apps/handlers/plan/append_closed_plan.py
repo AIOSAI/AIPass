@@ -3,7 +3,7 @@
 # Description: Closed Plans Local Registry Handler
 # Version: 0.5.0
 # Created: 2026-03-03
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Closed Plans Append Handler"""
@@ -12,13 +12,11 @@ import json
 import re
 from pathlib import Path
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.flow.apps.handlers.registry.save_registry import registry_lock
 
-_PKG_ROOT = module_file(__file__).parents[4]
+_PKG_ROOT = Path(__file__).resolve().parents[4]
 
 MODULE_NAME = "append_closed_plan"
 CLOSED_PLANS_FILE = "CLOSED_PLANS.local.json"

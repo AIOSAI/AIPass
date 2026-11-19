@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Tests for registry-led citizen discovery and .daemon/ schedule job discovery
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-06-15
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/schedule/discovery.py — citizens from the registries, jobs from their .daemon/."""
@@ -19,14 +19,15 @@ import shutil
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from aipass.daemon.apps.handlers.schedule.command_job import ok_exit_codes_for
 from aipass.daemon.apps.handlers.schedule import discovery
-from aipass.memory.apps.modules import fleet
+from aipass.memory import declared_residency
 from aipass.daemon.apps.handlers.schedule.discovery import (
+    PassportUnreadable,
     discover_jobs,
     active_citizens,
     citizen_class_for,
@@ -39,7 +40,7 @@ from aipass.daemon.apps.handlers.schedule.discovery import (
 
 DISCOVERY = "aipass.daemon.apps.handlers.schedule.discovery"
 
-# Failures to stat a passport that are NOT its absence: a .trinity that cannot be
+# Failures to read a passport that are NOT its absence: a .trinity that cannot be
 # searched (EACCES) and a .trinity that is not a directory (ENOTDIR).
 NOT_ABSENT = (
     PermissionError(errno.EACCES, "Permission denied"),
@@ -129,9 +130,13 @@ class TestValidateJob:
 
     def test_all_valid_schedule_types(self, one_branch):
         # The floor: _validate_job reads the same set, so emptying it would leave the list below empty and green.
-        assert len(VALID_SCHEDULE_TYPES) == 5, f"expected five schedule types, got {sorted(VALID_SCHEDULE_TYPES)}"
+        assert len(VALID_SCHEDULE_TYPES) == 7, f"expected seven schedule types, got {sorted(VALID_SCHEDULE_TYPES)}"
         stypes = sorted(VALID_SCHEDULE_TYPES)
-        jobs = [{"id": f"t-{stype}", "schedule": {"type": stype}, "prompt": "do stuff"} for stype in stypes]
+        required = {"weekly": {"weekday": "monday"}, "monthly": {"day": 1}}
+        jobs = [
+            {"id": f"t-{stype}", "schedule": {"type": stype, **required.get(stype, {})}, "prompt": "do stuff"}
+            for stype in stypes
+        ]
         assert discovered_ids(one_branch, *jobs) == ["keep"] + [f"t-{stype}" for stype in stypes]
 
     @pytest.mark.parametrize("interval", ["60", None, "abc", 0, -5, True, float("nan"), float("inf")])
@@ -363,7 +368,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
 
@@ -385,7 +389,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
 
@@ -403,7 +406,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
 
@@ -422,7 +424,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
 
@@ -450,7 +451,6 @@ class TestDiscoverJobs:
 
         with (
             patch(f"{DISCOVERY}._REPO_ROOT", root),
-            patch(f"{DISCOVERY}._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
 
@@ -477,7 +477,6 @@ class TestDiscoverJobs:
 
         with (
             patch(f"{DISCOVERY}._REPO_ROOT", root),
-            patch(f"{DISCOVERY}._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
 
@@ -510,7 +509,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
 
@@ -637,45 +635,51 @@ class TestCitizenClass:
         assert citizen_class_for(tmp_path) == ""
 
     @pytest.mark.parametrize("error", NOT_ABSENT, ids=["EACCES", "ENOTDIR"])
-    def test_a_trinity_that_cannot_be_read_returns_none(self, tmp_path, caplog, error):
-        """Only a passport truly absent is an ordinary citizen; not learning whether it exists is None.
+    def test_a_trinity_that_cannot_be_read_raises_naming_the_passport(self, tmp_path, error):
+        """Only a passport truly absent is an ordinary citizen; not learning whether it exists raises.
 
         Path.exists() raises on EACCES and answers False on ENOTDIR, so an unreadable .trinity read as "" (a worker).
         Mutant killed: except FileNotFoundError widened to except OSError in citizen_class_for.
         """
         passport = tmp_path / ".trinity" / "passport.json"
-        with patch(f"{DISCOVERY}._stat_passport", side_effect=error) as stat, caplog.at_level("WARNING"):
-            assert citizen_class_for(tmp_path) is None
-        stat.assert_called_once_with(passport)
-        assert str(passport) in caplog.text
+        with (
+            patch(f"{DISCOVERY}._passport_text", side_effect=error) as read,
+            pytest.raises(PassportUnreadable) as raised,
+        ):
+            citizen_class_for(tmp_path)
+        read.assert_called_once_with(passport)
+        assert str(passport) in str(raised.value)
 
-    def test_malformed_passport_returns_none(self, tmp_path):
-        """A passport that exists but cannot be read answers None, never "" (not a manager).
+    def test_malformed_passport_raises(self, tmp_path):
+        """A passport that exists but cannot be read raises, never answers "" (not a manager).
 
         Mutant killed: the parse failure answering "".
         """
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         (trinity / "passport.json").write_text("{not json", encoding="utf-8")
-        assert citizen_class_for(tmp_path) is None
+        with pytest.raises(PassportUnreadable):
+            citizen_class_for(tmp_path)
 
-    def test_non_dict_passport_returns_none(self, tmp_path):
+    def test_non_dict_passport_raises(self, tmp_path):
         """Mutant killed: a non-dict passport answering ""."""
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         (trinity / "passport.json").write_text("[]", encoding="utf-8")
-        assert citizen_class_for(tmp_path) is None
+        with pytest.raises(PassportUnreadable):
+            citizen_class_for(tmp_path)
 
     @pytest.mark.parametrize("identity", [{"citizen_class": None}, {"citizen_class": 7}, "manager"])
-    def test_an_unreadable_class_returns_none(self, tmp_path, identity):
-        """A class that is not a string is as unreadable as a corrupt file: None, never a worker.
+    def test_an_unreadable_class_raises(self, tmp_path, identity):
+        """A class that is not a string is as unreadable as a corrupt file: it raises, never reads as a worker.
 
         Mutant killed: the class returned unchecked (null leaked through, a non-dict identity raised).
         """
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         (trinity / "passport.json").write_text(json.dumps({"identity": identity}), encoding="utf-8")
-        assert citizen_class_for(tmp_path) is None
+        with pytest.raises(PassportUnreadable):
+            citizen_class_for(tmp_path)
 
 
 # Residency: discovery is registry-led and shallow; classification reads the branch's OWN passport; inside
@@ -962,7 +966,7 @@ class TestLiveFleet:
         citizens = [c for c in active_citizens() if c["source"].startswith("projects/")]
         assert citizens, "no projects/ citizen on this machine - the pin proved nothing"
         for citizen in citizens:
-            assert fleet.declared_residency(citizen["path"]) == RESIDENCY_RESIDENT, citizen
+            assert declared_residency(citizen["path"]) == RESIDENCY_RESIDENT, citizen
 
     def test_an_external_citizen_is_labelled_external_never_core(self):
         # The fence. A citizen outside AIPass home may never read as core: the
@@ -997,6 +1001,15 @@ class TestTimeValidation:
             {"type": "hourly", "time": "half"},
             {"type": "hourly", "time": 75},
             {"type": "hourly", "time": True},
+            {"type": "weekly", "weekday": "monday", "time": "25:00"},
+            {"type": "weekly", "weekday": "funday", "time": "05:00"},
+            {"type": "weekly", "time": "05:00"},
+            {"type": "monthly", "day": 0, "time": "05:00"},
+            {"type": "monthly", "day": 32, "time": "05:00"},
+            {"type": "monthly", "day": "1", "time": "05:00"},
+            {"type": "monthly", "day": True, "time": "05:00"},
+            {"type": "monthly", "time": "05:00"},
+            {"type": "monthly", "day": 1, "time": "5am"},
         ],
     )
     def test_an_unreadable_time_is_refused_and_named(self, schedule, one_branch, caplog):
@@ -1013,6 +1026,8 @@ class TestTimeValidation:
             {"type": "rotation", "time": "23:59"},
             {"type": "hourly", "time": "30"},
             {"type": "hourly", "time": 0},
+            {"type": "weekly", "weekday": "sunday", "time": "05:00"},
+            {"type": "monthly", "day": 31, "time": "05:00"},
         ],
     )
     def test_a_readable_time_is_accepted(self, schedule, one_branch):
@@ -1035,8 +1050,33 @@ class TestSkippedOwners:
         discover_jobs(skipped_owners=skipped)
         assert skipped == {"@testbranch"}
 
+    def test_a_refused_job_and_an_unreadable_file_are_told_with_their_reason(self, one_branch):
+        refusals = []
+        bad = {"id": "bad", "schedule": {"type": "biweekly"}, "prompt": "x"}
+        (one_branch / "a_bad.json").write_text("{oops", encoding="utf-8")
+        (one_branch / "schedule.json").write_text(json.dumps({"jobs": [KEEP, bad]}), encoding="utf-8")
+        assert [j["id"] for j in discover_jobs(refusals=refusals)] == ["keep"]
+        assert refusals == [
+            f"{one_branch / 'a_bad.json'}: not a readable schedule"
+            " (Expecting property name enclosed in double quotes: line 1 column 2 (char 1))",
+            f"Job 'bad' has invalid schedule type 'biweekly' in {one_branch / 'schedule.json'}",
+        ]
+
     def test_a_clean_owner_is_not_named(self, one_branch):
         skipped = set()
         discovered_ids(one_branch)
         discover_jobs(skipped_owners=skipped)
         assert skipped == set()
+
+
+class TestFleetRootIsTheResolvedHome:
+    def test_framework_root_comes_from_the_resolver_not_a_depth(self, tmp_path):
+        """A fixed-depth climb leaves the installed package; the framework root must come from the resolver."""
+        with patch(f"{DISCOVERY}.resolve_aipass_home", return_value=MagicMock(path=tmp_path)):
+            assert discovery.framework_root() == tmp_path / "src" / "aipass"
+
+    def test_no_resolved_home_is_loud(self, caplog):
+        with patch(f"{DISCOVERY}.resolve_aipass_home", return_value=MagicMock(path=None)):
+            with pytest.raises(RuntimeError, match="No AIPass home"):
+                discovery.framework_root()
+        assert "No AIPass home resolved" in caplog.text

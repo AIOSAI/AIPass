@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ledger.py
 # Description: CI red lane ledger - run verdicts and cure states in trigger_json/ci_ledger.json
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-10-22
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -17,7 +17,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterator
 
-from aipass.trigger.apps.config import TRIGGER_JSON_DIR, atomic_write_json, json_file_lock, read_text_with_retry
+from aipass.prax import logger
+from aipass.trigger.apps.config import TRIGGER_JSON_DIR, atomic_write_json, json_file_lock
 from aipass.trigger.apps.handlers.json import json_handler
 
 LEDGER_FILE = TRIGGER_JSON_DIR / "ci_ledger.json"
@@ -35,9 +36,12 @@ def utc_now() -> str:
 
 def claim_is_live(entry: Dict[str, Any]) -> bool:
     """True while the entry's `claimed` stamp is younger than CLAIM_STALE_SECONDS; unreadable is stale."""
+    stamp = entry.get("claimed", "")
     try:
-        claimed = datetime.strptime(entry.get("claimed", ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        claimed = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except ValueError:
+        if stamp:  # no stamp is "not claimed"; a garbled one is worth a line
+            logger.warning(f"unparseable claim stamp {stamp!r}, read as stale")
         return False
     return (datetime.now(timezone.utc) - claimed).total_seconds() < CLAIM_STALE_SECONDS
 
@@ -52,7 +56,7 @@ def load() -> Dict[str, Any]:
     if not LEDGER_FILE.exists():
         return _empty()
     try:
-        data = json.loads(read_text_with_retry(LEDGER_FILE))
+        data = json.loads(LEDGER_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise RuntimeError(f"ci ledger unreadable ({LEDGER_FILE.name}): {exc}") from exc
     data.setdefault("runs", {})

@@ -70,7 +70,7 @@
           "timeout": 30
         },
         {
-          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreToolUse",
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreToolUse ; c=$?; [ $c -eq 0 ] || [ $c -eq 2 ] || { echo \"HOOKS BROKEN: claude.py exited $c without an answer; nothing runs until it is fixed (src/aipass/hooks/logs/bridge.log)\" >&2; exit 2; }; exit $c",
           "event": "PreToolUse",
           "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit|Read|Grep|Glob|WebSearch|WebFetch|Task|Agent"
         },
@@ -278,7 +278,7 @@
           "timeout": 30
         },
         {
-          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/codex.py PreToolUse",
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/codex.py PreToolUse || printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"HOOKS BROKEN: codex.py exited without an answer\"},\"systemMessage\":\"HOOKS BROKEN: codex.py exited without an answer\"}'",
           "event": "PreToolUse",
           "matcher": "Bash|apply_patch"
         },

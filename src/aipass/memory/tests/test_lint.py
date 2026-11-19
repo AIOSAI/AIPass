@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_lint.py
 # Description: check_entry validator, the read-only lint handler and the lint module (FPLAN-0270 phase 2)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-06-13
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
-"""Tests for apps/handlers/json/entry_limits.py check_entry, apps/handlers/json/lint_handler.py and apps/modules/lint.py."""
+"""Tests for entry_limits.py check_entry, handlers/json/lint_handler.py and apps/modules/lint.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(documentation) — the wording of lint's print_help() and print_introspection() panels
@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.cli import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.json import entry_limits, lint_handler
 from aipass.memory.apps.modules import lint as lint_module
 
@@ -449,7 +449,7 @@ class TestUnknownBranchIsAnError:
     def test_a_declared_external_branch_is_not_refused(self) -> None:
         """The read lane resolves names through the scope that holds the external tier, not the write scope.
 
-        Patching ``read_scope`` is the binding under test: reaching for ``_read_registry`` raises instead.
+        Patching ``read_scope`` is the binding under test: reaching for ``write_scope`` raises instead.
         """
         lint = lint_module
         external = [{"name": "vera", "path": str(Path(tempfile.gettempdir()) / "vera")}]
@@ -631,7 +631,7 @@ class TestFieldsModeFlagsTheClosedShape:
 
 
 class TestLintAgreesWithTheGate:
-    """An entry inside the tolerance band is never drift; one char past it is flagged by lint and refused by the gate."""
+    """An entry inside the tolerance band is never drift; one char past it is flagged by lint, refused by the gate."""
 
     def test_both_lanes_flag_exactly_what_the_gate_refuses(self, tmp_path: Path) -> None:
         section = {**_shape_limits(), "tolerance_percent": 10}

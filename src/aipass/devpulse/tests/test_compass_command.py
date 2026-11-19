@@ -3,7 +3,7 @@
 # Description: Tests for the compass module command router (FPLAN P2)
 # Version: 1.0.0
 # Created: 2026-06-16
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/compass.py, driven through handle_command against a temp --db store."""
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from aipass.cli.apps.modules import display as cli_display
+from aipass.cli import display as cli_display
 from aipass.devpulse.apps.modules import compass as compass_cmd
 
 

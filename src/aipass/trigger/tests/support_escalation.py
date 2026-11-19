@@ -75,7 +75,7 @@ def _fire_distinct(lane, index: int) -> Any:
 def _freeze_clock(monkeypatch: pytest.MonkeyPatch, lane) -> None:
     """Pin datetime.now() so every last_seen string comes out byte-identical.
 
-    Reproduces the coarse Windows clock: tied last_seen values fall back to insertion order.
+    Reproduces a tied clock: tied last_seen values fall back to insertion order.
     """
     frozen = datetime(2026, 8, 9, 12, 0, 0)
     monkeypatch.setattr(

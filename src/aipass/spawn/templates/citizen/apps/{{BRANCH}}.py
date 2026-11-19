@@ -20,15 +20,7 @@ from typing import Any, List, Tuple
 # so a later setdefault would name the wrong branch in every log line.
 os.environ.setdefault("AIPASS_BRANCH_NAME", "{{BRANCH}}")
 
-# Rich markup below is non-ASCII; a cp1252 Windows console raises UnicodeEncodeError mid-render.
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.prax import logger
 
 __version__ = "1.0.0"

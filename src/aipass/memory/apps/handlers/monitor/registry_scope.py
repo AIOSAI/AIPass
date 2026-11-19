@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_scope.py
 # Description: The one definition of "the fleet" — core, passport-declared residents, declared-root externals
-# Version: 4.2.0
+# Version: 4.3.0
 # Created: 2026-08-27
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Fleet Scope
@@ -35,7 +35,7 @@ RESIDENCY_EXTERNAL = "external"
 DECLARED_ROOTS = "AIPASS_ROOTS.json"
 EXTERNAL_REGISTRY_GLOB = "*_REGISTRY.json"
 
-# Windows and macOS glob case-insensitively; both globs narrow to this exact case.
+# A case-insensitive filesystem globs case-insensitively; both globs narrow to this exact case.
 CORE_REGISTRY_SUFFIX = "_REGISTRY.json"
 
 
@@ -125,26 +125,31 @@ def read_registry_branches(registry_path: Path, name_from: str = "path", strict:
 
     ``name_from="path"`` names by directory (what ``managed_by`` keys on); ``"registry"`` keeps its casing.
     """
+    _observe_registry(registry_path)  # a clean read is a state too: mended then broken again logs again
     try:
         branches = _registry_rows(registry_path)
     except RegistryUnreadable as exc:
         if strict:
             raise
-        logger.error(f"[registry_scope] {exc}")
+        _log_refusal_once(registry_path, f"[registry_scope] {exc}")
         return []
 
     found = []
     for branch in branches:
         # One bad row costs one row, never the whole registry.
         if not isinstance(branch, dict):
-            logger.error(f"[registry_scope] Registry row is {type(branch).__name__}, not an object: {registry_path}")
+            _log_refusal_once(
+                registry_path,
+                f"[registry_scope] Registry row is {type(branch).__name__}, not an object: {registry_path}",
+            )
             continue
         if branch.get("status") != "active":
             continue
         raw = branch.get("path", "")
         if not isinstance(raw, str):
-            logger.error(
-                f"[registry_scope] Registry row '{branch.get('name')}' has a non-string path in {registry_path}"
+            _log_refusal_once(
+                registry_path,
+                f"[registry_scope] Registry row '{branch.get('name')}' has a non-string path in {registry_path}",
             )
             continue
         if not raw:
@@ -155,11 +160,15 @@ def read_registry_branches(registry_path: Path, name_from: str = "path", strict:
         name = path.name if name_from == "path" else branch.get("name", path.name)
         # A bad address has no honest fallback, unlike a name: it becomes None.
         if not isinstance(name, str):
-            logger.error(f"[registry_scope] Registry row at {raw} has a non-string name in {registry_path}")
+            _log_refusal_once(
+                registry_path, f"[registry_scope] Registry row at {raw} has a non-string name in {registry_path}"
+            )
             name = path.name
         email = branch.get("email")
         if email is not None and not isinstance(email, str):
-            logger.error(f"[registry_scope] Registry row '{name}' has a non-string email in {registry_path}")
+            _log_refusal_once(
+                registry_path, f"[registry_scope] Registry row '{name}' has a non-string email in {registry_path}"
+            )
             email = None
         # Never derive an address from ``name``: a plausible wrong address is worse than None.
         found.append(
@@ -281,11 +290,39 @@ def external_branches(repo_root: Path | None = None, name_from: str = "path") ->
 
 
 def _refuse(item: dict[str, Any], registry_path: Path, reason: str, tier: str = RESIDENCY_RESIDENT) -> None:
-    """Log a refused candidate by tier, name, path and reason; no refusal is silent."""
-    logger.error(
+    """Log a refused candidate by tier, name, path and reason, once per registry state."""
+    _log_refusal_once(
+        registry_path,
         f"[registry_scope] REFUSED {tier} '{item['name']}' at {item['path']} "
-        f"(listed active in {registry_path.name}): {reason}"
+        f"(listed active in {registry_path.name}): {reason}",
     )
+
+
+# resolved registry -> (its state, messages logged in that state): trigger's watcher dispatches every ERROR line it reads.
+_LOGGED_REFUSALS: dict[str, tuple[tuple[int, int] | None, set[str]]] = {}
+
+
+def _observe_registry(registry_path: Path) -> set[str]:
+    """The messages already logged for this registry's current state; a new state starts empty."""
+    path = str(Path(registry_path).resolve())
+    # Absent is a state of its own, or an absent registry would log on every read.
+    state = None
+    if Path(path).exists():
+        stat = Path(path).stat()
+        state = (stat.st_mtime_ns, stat.st_size)
+    seen = _LOGGED_REFUSALS.get(path)
+    if seen is None or seen[0] != state:
+        seen = (state, set())
+        _LOGGED_REFUSALS[path] = seen
+    return seen[1]
+
+
+def _log_refusal_once(registry_path: Path, message: str) -> None:
+    """Log a refusal at ERROR once per registry state; an edited, mended or vanished registry is a new state."""
+    logged = _observe_registry(registry_path)
+    if message not in logged:
+        logged.add(message)
+        logger.error(message)
 
 
 def _accepted_residents(registry_path: Path, name_from: str) -> list[dict[str, Any]]:

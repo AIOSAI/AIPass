@@ -3,7 +3,7 @@
 # Description: Identity operations handler
 # Version: 1.6.1
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -16,9 +16,8 @@ import json
 from pathlib import Path
 from typing import Callable, Dict, Any, Iterator, Optional, List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.commons.apps.handlers.json import json_handler
-from aipass.commons.apps.handlers.module_root import module_file
 
 
 def _find_branch_registry_path() -> Path:
@@ -29,9 +28,7 @@ def _find_branch_registry_path() -> Path:
         if candidate.exists():
             return candidate
 
-    # module_file(), not a bare .resolve(): this runs at module scope, and on
-    # Windows a bare resolve would read cwd at import time.
-    current = module_file(__file__).parent
+    current = Path(__file__).resolve().parent
     for _ in range(10):
         candidate = current / "AIPASS_REGISTRY.json"
         if candidate.exists():
@@ -221,9 +218,9 @@ def get_branch_info_by_name(branch_name: str) -> Optional[Dict[str, Any]]:
 def get_caller_branch() -> Optional[Dict[str, Any]]:
     """Detect and auto-register the calling branch; CallerLookupFailed when the lookup breaks."""
     try:
+        # Never Path.cwd(): under drone that is commons' own dir, so commons would author as itself.
         caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
-        cwd = Path(caller_cwd) if caller_cwd else Path.cwd()
-        branch_root = find_branch_root(cwd)
+        branch_root = find_branch_root(Path(caller_cwd)) if caller_cwd else None
 
         if branch_root:
             branch_info = get_branch_info_from_registry(branch_root)
@@ -245,7 +242,12 @@ def get_caller_branch() -> Optional[Dict[str, Any]]:
                 return branch_info
 
         logger.warning(
-            "[commons.identity] Could not detect calling branch — run from a branch directory or use drone routing"
+            "[commons.identity] Could not detect calling branch — "
+            + (
+                "AIPASS_CALLER_CWD sits in no registered branch"
+                if caller_cwd
+                else "AIPASS_CALLER_CWD is unset (run through drone)"
+            )
         )
         return None
 

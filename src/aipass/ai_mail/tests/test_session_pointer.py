@@ -3,7 +3,7 @@
 # Description: Tests for the durable per-branch session pointer
 # Version: 1.2.0
 # Created: 2026-08-20
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/dispatch/session_pointer.py -- encoding, round trip, atomicity, resume."""
@@ -57,11 +57,9 @@ def branch(tmp_path):
 @pytest.fixture
 def fake_home(tmp_path, monkeypatch):
     """Point the home directory at tmp_path so transcript paths land under the sandbox."""
-    # Path.home() reads HOME on POSIX and USERPROFILE on Windows: set both, leave pathlib alone.
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
     assert Path.home() == home, "this platform must answer Path.home() from the environment"
     return home
 
@@ -97,12 +95,6 @@ def test_transcript_dir_encodes_separators_underscores_and_dots(fake_home):
     assert "_" not in encoded
     assert "." not in encoded
     assert "/" not in encoded
-
-
-def test_transcript_dir_encodes_windows_paths(fake_home):
-    """Backslash and drive colon collapse too: C:\\repo\\AIPass -> C--repo-AIPass."""
-    result = transcript_dir("C:\\repo\\AIPass")
-    assert result is not None and result.name == "C--repo-AIPass"
 
 
 def test_transcript_dir_encodes_every_non_alphanumeric_as_claude_does(fake_home):
@@ -456,26 +448,7 @@ def test_pointer_file_is_valid_json_on_disk(branch):
 
 
 class TestTheMismatchMessageIsReadableOnBothPlatforms:
-    """A mismatch message names both paths as stored: no repr-doubled Windows backslashes."""
-
-    def test_a_windows_pointer_cwd_survives_into_the_message(self, branch, fake_home):
-        """The reproduction, run on Linux: pointer cwd is read from JSON verbatim, nothing mocked."""
-        windows_cwd = r"C:\Projects\AIPass\src\aipass\ai_mail"
-        path = pointer_path(branch)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps({"session_id": "sess-live", "cwd": windows_cwd, "reason": "wake"}),
-            encoding="utf-8",
-        )
-
-        _session_id, reason = resolve_resume_target(branch)
-
-        assert "cwd" in reason, "premise: this must be the mismatch verdict"
-        assert windows_cwd in reason, (
-            "the pointer's own cwd must appear exactly as it is stored, so a human can "
-            f"compare it against their directory. Got: {reason}"
-        )
-        assert "\\\\" not in reason, "no doubled separators - the reader cannot copy those"
+    """A mismatch message names both paths as stored: no repr-doubled backslashes."""
 
     def test_an_empty_cwd_is_still_visible(self, branch, fake_home):
         """What ``!r`` was buying, kept: a blank value must not vanish; the quoting survives, the escaping does not."""
@@ -488,7 +461,7 @@ class TestTheMismatchMessageIsReadableOnBothPlatforms:
         assert "''" in reason, f"an empty cwd must still be visible as a quoted empty value. Got: {reason}"
 
     def test_a_posix_path_is_unchanged(self, branch, fake_home, tmp_path):
-        """The original assertion still holds - this fix must not buy Windows with Linux."""
+        """The original assertion still holds."""
         moved = tmp_path / "moved-branch"
         (moved / ".ai_mail.local").mkdir(parents=True)
         write_pointer(branch, "sess-live", "wake")
@@ -503,14 +476,14 @@ class TestTheMismatchMessageIsReadableOnBothPlatforms:
 
 
 class TestAnUnnameableHomeDoesNotRaise:
-    """Path.home() can raise on Windows (no USERPROFILE); the resume path must not.
+    """Path.home() can raise; the resume path must not.
 
     Reached only once a pointer exists and its cwd matches, so it is the happy path.
     """
 
     @staticmethod
     def _home_is_unnameable(monkeypatch):
-        """Make Path.home() fail the way ntpath does with no USERPROFILE."""
+        """Make Path.home() fail the way it does when no home can be named."""
 
         def _raise():
             raise RuntimeError("Could not determine home directory.")

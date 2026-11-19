@@ -1,28 +1,20 @@
 # =================== AIPass ====================
 # Name: drive_clear.py
 # Description: Drive clear module — clears Drive file tracker (requires --force)
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-04-17
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Drive Clear Module — clears the Drive file tracker for a project."""
 
-import os
 import sys
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error as cli_error
+from aipass.cli import console, error as cli_error
 
 from aipass.backup.apps.handlers.audit import trail
-from aipass.backup.apps.handlers.path.caller import resolve_caller_path
+from aipass.backup.apps.handlers.path.caller import resolve_caller_path, store_delete_refusal
 
 
 MODULE_NAME = "drive_clear"
@@ -82,9 +74,13 @@ def handle_command(command: str, args: list) -> bool:
         print_help()
         return True
 
-    project_root = str(resolve_caller_path(args[0]))
+    project_root = resolve_caller_path(args[0])
     force = "--force" in args
-    run_drive_clear(project_root, force=force)
+    refusal = store_delete_refusal("drive_clear --force", project_root) if force else None
+    if refusal:
+        cli_error(f"Drive clear refused: {refusal}")
+        return True
+    run_drive_clear(str(project_root), force=force)
     return True
 
 

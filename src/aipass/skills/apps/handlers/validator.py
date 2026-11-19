@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: validator.py
 # Description: Check skill requirements
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """Skill requirement checking: can this skill actually run here?"""
@@ -60,13 +60,9 @@ def _check_pip(packages):
     """Check which pip packages are missing."""
     missing = []
     for pkg in packages:
-        import_name = pkg.replace("-", "_")
-        try:
-            spec = importlib.util.find_spec(import_name)
-            if spec is None:
-                missing.append(pkg)
-        except (ModuleNotFoundError, ValueError):
-            logger.warning(f"Package check failed for: {pkg}")
+        # Top-level name only: find_spec raises for a dotted name whose parent package is absent.
+        import_name = pkg.replace("-", "_").split(".")[0]
+        if importlib.util.find_spec(import_name) is None:
             missing.append(pkg)
     return missing
 

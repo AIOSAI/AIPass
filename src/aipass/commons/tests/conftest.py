@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: The Commons test configuration
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """The Commons - Test Configuration"""
@@ -26,14 +26,14 @@ import pytest
 logger = logging.getLogger(__name__)
 
 try:
-    from aipass.prax.apps.modules.logger import system_logger as logger
+    from aipass.prax import logger
 except ImportError:
     logger.warning("[conftest] prax logger unavailable — using stdlib logging")
 
-from aipass.cli.apps.modules import display
-from aipass.cli.apps.modules.display import reset_command_state
+from aipass.cli import display
+from aipass.cli import reset_command_state
 from aipass.commons.apps.handlers.json import json_handler
-from aipass.commons.apps.modules.database import close_db, init_db
+from aipass.commons.apps.handlers.database import close_db, init_db
 
 # .archive/ holds old suite copies; collecting a dot-directory yields an invalid dotted module name.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
@@ -46,6 +46,8 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     A subdirectory, not tmp_path itself: the sandbox is <seam>/commons/..., which would collide with tests' own dirs.
     """
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    # drone always exports it, and get_caller_branch never falls back to the process cwd.
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox

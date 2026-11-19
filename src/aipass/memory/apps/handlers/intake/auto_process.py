@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auto_process.py
 # Description: Automated pool + rollover entry point
-# Version: 1.2.0
+# Version: 1.3.1
 # Created: 2026-06-06
-# Modified: 2026-10-27
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -24,21 +24,21 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
-from aipass.prax import logger
+from aipass.prax import append_jsonl, branch_state_root, logger
 from aipass.memory.apps.handlers.json import json_handler, config_loader
-from aipass.memory.apps.handlers.repo_root import module_file
 
-_MEMORY_ROOT = module_file(__file__).parent.parent.parent.parent
+_MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 # Single-flight: two concurrent rollovers would write the same .trinity files.
-# Staleness is time-based (cross-platform), so a crashed child frees the lane.
+# Staleness is time-based, so a crashed child frees the lane.
 _LOCK_PATH = Path(tempfile.gettempdir()) / "aipass-memory-auto-process.lock"
 _LOCK_STALE_SECONDS = 900
-_CHILD_LOG = Path(tempfile.gettempdir()) / "aipass-memory-auto-process.log"
+# Crash output only; trigger reads every *.log.
+CHILD_OUT = branch_state_root("memory") / "logs" / "auto_process_child.out"
 
 
 def _lock_is_stale(data: Dict[str, Any] | None) -> bool:
-    """A missing, unreadable, or old lock is stale. Guard the read, not just the parse."""
+    """A missing, shapeless or old lock is stale (an unparsable one arrives aged by its mtime)."""
     if not isinstance(data, dict):
         return True
     started = data.get("started")
@@ -48,14 +48,22 @@ def _lock_is_stale(data: Dict[str, Any] | None) -> bool:
 
 
 def _read_lock() -> Dict[str, Any] | None:
-    """Read the lock file, or None if it is missing or cannot be read at all."""
+    """Read the lock file, or None if it is missing.
+
+    The holder writes its JSON after O_EXCL, so an unparsable lock may be a live holder mid-write:
+    it is aged by its mtime, never called stale on sight.
+    """
     try:
         return json.loads(_LOCK_PATH.read_text(encoding="utf-8"))
     except FileNotFoundError:
         logger.debug("[auto_process] No lock file present")
         return None
-    except Exception as e:
-        logger.warning(f"[auto_process] Lock unreadable, treating as stale: {e}")
+    except (OSError, ValueError) as e:
+        logger.warning(f"[auto_process] Lock unparsable ({e}), aging it by its mtime")
+    try:
+        return {"started": _LOCK_PATH.stat().st_mtime}
+    except FileNotFoundError:
+        logger.warning("[auto_process] Lock vanished while being read: the lane is free")
         return None
 
 
@@ -124,31 +132,27 @@ def spawn_background() -> Dict[str, Any]:
         return {"success": True, "skipped": True, "reason": reason, "pid": None}
 
     try:
-        log_handle = open(_CHILD_LOG, "a", encoding="utf-8")
+        out_handle = open(CHILD_OUT, "a", encoding="utf-8")
     except OSError as e:
-        logger.error(f"[auto_process] Cannot open child log: {e}")
+        logger.error(f"[auto_process] Cannot open child output: {e}")
         return {"success": False, "error": str(e), "pid": None}
 
     kwargs: Dict[str, Any] = {
         "stdin": subprocess.DEVNULL,
-        "stdout": log_handle,
+        "stdout": out_handle,
         "stderr": subprocess.STDOUT,
         "cwd": str(_MEMORY_ROOT),
+        "start_new_session": True,
     }
-    if sys.platform == "win32":
-        # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        kwargs["creationflags"] = 0x00000008 | 0x00000200
-    else:
-        kwargs["start_new_session"] = True
 
     try:
-        child = subprocess.Popen([sys.executable, str(module_file(__file__))], **kwargs)
+        child = subprocess.Popen([sys.executable, str(Path(__file__).resolve())], **kwargs)
     except Exception as e:
         logger.error(f"[auto_process] Spawn failed: {e}")
         json_handler.log_operation("spawn_background", {"success": False, "error": str(e)})
         return {"success": False, "error": str(e), "pid": None}
     finally:
-        log_handle.close()
+        out_handle.close()
 
     logger.info(f"[auto_process] Spawned background run (pid {child.pid})")
     json_handler.log_operation("spawn_background", {"success": True, "pid": child.pid})
@@ -178,7 +182,7 @@ def _fire_completion(result: Dict[str, Any]) -> None:
     so the owner is woken. Never raises.
     """
     try:
-        from aipass.trigger.apps.modules.core import trigger
+        from aipass.trigger import trigger
 
         pool = result.get("pool") or {}
         rollover = result.get("rollover") or {}
@@ -336,7 +340,15 @@ def run_locked() -> Dict[str, Any]:
         _release_lock()
 
 
+RUNS_LOG = branch_state_root("memory") / "logs" / "auto_process_runs.jsonl"
+
+
+def run_child() -> None:
+    """The detached child: its run summary is a record, so stdout stays empty for a crash."""
+    append_jsonl(RUNS_LOG, run_once())
+
+
 # This file IS the detached child.
 
 if __name__ == "__main__":
-    print(json.dumps(run_once()))
+    run_child()

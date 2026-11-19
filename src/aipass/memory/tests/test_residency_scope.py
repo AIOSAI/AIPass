@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_residency_scope.py
 # Description: Red-first pins for passport-declared residency as the fleet classifier (DPLAN-0319)
-# Version: 1.1.0
+# Version: 1.2.1
 # Created: 2026-08-28
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/monitor/registry_scope.py and the callers that classify through it."""
@@ -298,7 +298,7 @@ class TestEveryLaneReadsTheOneDefinition:
         monkeypatch.setattr(detector, "_REPO_ROOT", fleet)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
 
-        write_names = {Path(branch["path"]).name for branch in detector._read_registry()}
+        write_names = {Path(branch["path"]).name for branch in detector.write_scope()}
         read_names = {Path(branch["path"]).name for branch in detector.read_scope()}
 
         assert "ext" not in write_names, "the write scope reached a branch outside the repo"
@@ -312,19 +312,45 @@ class TestEveryLaneReadsTheOneDefinition:
         assert "accepted" not in caller_loop.split("return branches")[0]
 
 
-class TestTheLiveFleetStillCountsTwentyFour:
-    """The receipt the dispatch asked for, measured rather than asserted."""
+def _hand_read_registries(projects: Path) -> list[Path]:
+    """Every visible project's registry, by plain directory listing — never through registry_scope."""
+    return sorted(
+        entry
+        for project in projects.iterdir()
+        if project.is_dir() and not project.name.startswith(".")
+        for entry in project.iterdir()
+        if entry.name.endswith(rs.CORE_REGISTRY_SUFFIX)
+    )
 
-    def test_discovery_names_exactly_the_five_resident_projects(self, live_residents):
-        """What the deleted anchor used to be compared against, measured directly."""
+
+def _active_rows(registry_path: Path) -> int:
+    """Active branch rows in one registry, read by hand."""
+    rows = json.loads(registry_path.read_text(encoding="utf-8")).get("branches", [])
+    return sum(1 for row in rows if isinstance(row, dict) and row.get("status") == "active")
+
+
+class TestTheLiveFleetAgreesWithItsRegistries:
+    """Live state, because the contract is "the real install reads whole": a fixture cannot drift from itself.
+
+    Compared against the registries read by hand, never a count, so a retired seat or a new project moves both sides.
+    """
+
+    def test_discovery_names_every_visible_project_registry(self, live_residents):
         found = {path.parent.name for path in rs.resident_registry_paths(live_residents)}
-        assert found == {"baud", "earmark", "finch", "aipass-site", "seed_dev"}
+        assert found == {path.parent.name for path in _hand_read_registries(live_residents / rs.RESIDENT_PROJECTS_DIR)}
+        assert {"baud", "earmark", "finch", "aipass-site"} <= found, "the fixture's own residents were not discovered"
 
-    def test_the_live_fleet_is_eighteen_core_and_six_residents(self, live_residents):
-        """Counted BY TIER now, not by total — and the change is the point (seed_dev holds two seats, seed_dev and dean)."""
+    def test_every_active_row_lands_in_its_tier(self, live_residents):
+        """Counted BY TIER: core rows from the core registry, resident rows from the project registries."""
         branches = rs.fleet_branches(live_residents)
         tiers = Counter(item["residency"] for item in branches)
-        assert (tiers[rs.RESIDENCY_CORE], tiers[rs.RESIDENCY_RESIDENT]) == (18, 6), [item["name"] for item in branches]
+        expected_core = _active_rows(live_residents / rs.CORE_REGISTRY)
+        registries = _hand_read_registries(live_residents / rs.RESIDENT_PROJECTS_DIR)
+        expected_residents = sum(_active_rows(path) for path in registries)
+        assert (tiers[rs.RESIDENCY_CORE], tiers[rs.RESIDENCY_RESIDENT]) == (expected_core, expected_residents), [
+            item["name"] for item in branches
+        ]
+        assert expected_core and expected_residents, "an empty registry agrees with an empty fleet and proves nothing"
         externals = [item for item in branches if item["residency"] == rs.RESIDENCY_EXTERNAL]
         assert len(externals) == tiers[rs.RESIDENCY_EXTERNAL]
         assert bool(externals) == bool(rs.declared_roots(live_residents)), (
@@ -511,18 +537,89 @@ class TestMalformedJsonDeclaresNothingAndNeverRaises:
         assert record["email"] is None
 
 
+class TestARefusedRowIsLoggedOncePerRegistryState:
+    """@trigger's watcher dispatches every ERROR line: a stale row must not page @memory on every read."""
+
+    @staticmethod
+    def _refusals(caplog) -> int:
+        return sum("not an object" in record.getMessage() for record in caplog.records)
+
+    def test_a_bad_row_read_twice_from_an_unchanged_registry_logs_once(self, tmp_path, caplog):
+        """Mutant: the helper logs before its seen-check — killed (2 lines)."""
+        registry = tmp_path / "ROW_REGISTRY.json"
+        registry.write_text(json.dumps({"branches": ["not-a-row"]}), encoding="utf-8")
+
+        with caplog.at_level(logging.ERROR):
+            rs.read_registry_branches(registry)
+            rs.read_registry_branches(registry)
+
+        assert self._refusals(caplog) == 1
+
+    def test_an_edited_registry_logs_its_refusal_again(self, tmp_path, caplog):
+        """Mutant: the key drops the file's size and mtime — killed (1 line)."""
+        registry = tmp_path / "ROW_REGISTRY.json"
+        registry.write_text(json.dumps({"branches": ["not-a-row"]}), encoding="utf-8")
+
+        with caplog.at_level(logging.ERROR):
+            rs.read_registry_branches(registry)
+            registry.write_text(json.dumps({"branches": ["not-a-row", "still-not-a-row"]}), encoding="utf-8")
+            rs.read_registry_branches(registry)
+
+        assert self._refusals(caplog) == 2
+
+    def test_strict_on_an_unreadable_registry_raises_its_stable_message_and_logs_nothing(self, tmp_path, caplog):
+        """@trigger dispatches @spawn once keyed on str(exc): the message carries no per-read value."""
+        registry = tmp_path / "BROKEN_REGISTRY.json"
+        registry.write_text("{not json", encoding="utf-8")
+
+        messages = []
+        with caplog.at_level(logging.DEBUG):
+            for _ in range(2):
+                with pytest.raises(rs.RegistryUnreadable) as exc:
+                    rs.read_registry_branches(registry, strict=True)
+                messages.append(str(exc.value))
+
+        assert messages[0] == messages[1]
+        assert messages[0].startswith(f"Unreadable registry {registry}: ")
+        assert caplog.records == []
+
+    def test_a_non_strict_unreadable_registry_logs_once_per_state(self, tmp_path, caplog):
+        """The watcher's non-strict read: a broken file read twice logs once; mended then broken again logs again."""
+        registry = tmp_path / "BROKEN_REGISTRY.json"
+        registry.write_text("{not json", encoding="utf-8")
+
+        with caplog.at_level(logging.ERROR):
+            rs.read_registry_branches(registry)
+            rs.read_registry_branches(registry)
+            registry.write_text(json.dumps({"branches": []}), encoding="utf-8")
+            rs.read_registry_branches(registry)
+            registry.write_text("{not json at all", encoding="utf-8")
+            rs.read_registry_branches(registry)
+
+        assert sum("Unreadable registry" in r.getMessage() for r in caplog.records) == 2
+
+    def test_an_absent_registry_logs_once_until_it_returns_and_goes_again(self, tmp_path, caplog):
+        """Absent is a state of its own: no stat must not mean log on every read."""
+        registry = tmp_path / "GONE_REGISTRY.json"
+
+        with caplog.at_level(logging.ERROR):
+            rs.read_registry_branches(registry)
+            rs.read_registry_branches(registry)
+            registry.write_text(json.dumps({"branches": []}), encoding="utf-8")
+            rs.read_registry_branches(registry)
+            registry.unlink()
+            rs.read_registry_branches(registry)
+
+        assert sum("Unreadable registry" in r.getMessage() for r in caplog.records) == 2
+
+
 # REPO_ROOT resolves at import, so a registry-less tree in a dead cwd must not crash or
 # guess: the root derives from this file's location, never the process, and says so at WARNING.
 
 
 class TestRepoRootNeverReadsTheProcessDirectory:
-    """A registry-less world must resolve, deterministically, without cwd.
+    """A registry-less world must resolve, deterministically, without cwd."""
 
-    Runs on every platform, Windows included — see ``_PROBE`` for why the world
-    is built by denying ``getcwd`` rather than by deleting a directory.
-    """
-
-    # Denying getcwd, not deleting the cwd: Windows locks a process's directory against rmdir.
     # The world is imported from tests/dead_cwd.py and goes BEFORE `import pathlib` (3.10 captures getcwd).
     _PROBE = "{world}import sys, pathlib\nsys.path.insert(0, {src!r})\n{body}\n"
 

@@ -3,7 +3,7 @@
 # Description: Tests for trigger.py CLI entry point — line coverage
 # Version: 1.0.0
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for the apps/trigger.py CLI entry point (discover, route, main)."""
@@ -17,7 +17,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from aipass.cli.apps.modules import error, mark_command_failed
+from aipass.cli import display, error, mark_command_failed
+from aipass.trigger.apps import config, log_watcher_service
 from aipass.trigger.apps import trigger as trigger_entry
 
 _mock_logger = MagicMock()
@@ -93,7 +94,7 @@ class TestDiscoverModules:
         assert result == []
 
     def test_handles_import_error(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """Module that raises on import is skipped and logged."""
+        """Pins the default: a module that failed to import was logged and skipped, its commands gone from routing."""
         (tmp_path / "bad_mod.py").write_text("raise RuntimeError('boom')\n", encoding="utf-8")
 
         trigger = _import_trigger()
@@ -105,9 +106,8 @@ class TestDiscoverModules:
             MagicMock(side_effect=ImportError("boom")),
         )
 
-        result = trigger.discover_modules()
-        assert result == []
-        _mock_logger.error.assert_called()
+        with pytest.raises(ImportError, match="boom"):
+            trigger.discover_modules()
 
     def test_returns_empty_when_dir_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Non-existent MODULES_DIR returns empty list and warns."""
@@ -431,3 +431,23 @@ class TestUnknownCommandMessage:
         assert trigger.main([module_name, "not_a_subcommand_xyz"]) == 1
         err = capsys.readouterr().err
         assert f"{module_name} not_a_subcommand_xyz" in err, err
+
+
+@pytest.mark.parametrize("command", ["core", "errors", "escalation", "log_events", "medic", "branch_log_events"])
+def test_a_module_whose_console_cannot_import_fails_its_introspection(command, monkeypatch):
+    """Pins the default: a failed cli console import was swapped for a bare rich Console and the command passed."""
+    monkeypatch.delattr(display, "console")
+    monkeypatch.delattr("aipass.cli.console", raising=False)  # the door caches a name it already handed out
+
+    assert trigger_entry.main([command]) == 1
+
+
+def test_the_config_and_service_introspection_raise_without_the_cli_console(monkeypatch):
+    """Pins the default: config and the log watcher service printed through a rich stand-in when cli was gone."""
+    monkeypatch.delattr(display, "console")
+    monkeypatch.delattr("aipass.cli.console", raising=False)  # the door caches a name it already handed out
+
+    with pytest.raises(ImportError):
+        config.print_introspection()
+    with pytest.raises(ImportError):
+        log_watcher_service.print_introspection()

@@ -1,38 +1,24 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Trigger event bus for AIPass system-wide event handling
-# Version: 1.4.0
+# Version: 1.6.0
 # Created: 2026-02-03
-# Modified: 2026-10-17
+# Modified: 2026-11-16
 # =============================================
 
 """
 Core Trigger class - Event bus for AIPass"""
 
-import os
-import sys
 from typing import Callable
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
+from aipass.trigger.apps.handlers import failure_report
 from aipass.trigger.apps.handlers.json import json_handler
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError.
-    except (ImportError, OSError):
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]core Module[/bold cyan]")
@@ -62,20 +48,14 @@ class Trigger:
     _deferred_queue = []  # Queue for events fired during handling
     _draining_deferred = False  # Prevents nested deferred processing
     _log_watcher_started = False  # Lazy-start flag for log watcher
-    _handler_failures = {}  # (handler, branch) -> consecutive failure count
-    _disabled_handlers = set()  # (handler, branch) tuples auto-disabled
-    _HANDLER_FAILURE_THRESHOLD = 5  # consecutive failures before auto-disable
 
     @classmethod
     def _ensure_initialized(cls):
         """Auto-register handlers on first use"""
         if not cls._initialized:
-            try:
-                from aipass.trigger.apps.handlers.events.registry import setup_handlers
+            from aipass.trigger.apps.handlers.events.registry import setup_handlers
 
-                setup_handlers()
-            except ImportError as e:
-                logger.warning(f"[TRIGGER] Handlers not available: {e}")
+            setup_handlers()
             cls._initialized = True
 
     @classmethod
@@ -130,25 +110,15 @@ class Trigger:
         branch = data.get("branch", "__global__")
         ran = failed = 0
         for handler in handlers:
-            key = (handler, branch)
-            if key in cls._disabled_handlers:
-                continue
+            name = getattr(handler, "__name__", repr(handler))
             try:
                 handler(**data)
-                cls._handler_failures.pop(key, None)  # Reset on success
                 ran += 1
             except Exception as e:
                 failed += 1
-                count = cls._handler_failures.get(key, 0) + 1
-                cls._handler_failures[key] = count
-                if count >= cls._HANDLER_FAILURE_THRESHOLD:
-                    cls._disabled_handlers.add(key)
-                    logger.error(
-                        f"[TRIGGER] Handler {getattr(handler, '__name__', handler)} "
-                        f"disabled for branch '{branch}' after {count} consecutive failures"
-                    )
-                else:
-                    logger.error(f"[TRIGGER] Handler error for {event}: {e}")
+                failure_report.report_failure(name, branch, event, e)
+                continue
+            failure_report.report_recovery(name, branch)
 
         return {"event": event, "handlers": len(handlers), "ran": ran, "failed": failed}
 
@@ -214,7 +184,7 @@ def _coerce_value(val_str: str) -> int | float | str:
 
 def handle_command(command: str, args: list) -> bool:
     """Handle commands routed by the entry point."""
-    from aipass.cli.apps.modules import console, error
+    from aipass.cli import console, error
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 
@@ -289,12 +259,12 @@ def _print_help(console):
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
     console.print("  fire <event> \\[key=value ...]  Fire an event with optional data")
-    console.print("  status                        Show registered event handlers")
-    console.print("  list                          Alias for status")
+    console.print("  status                        Show the branch log watcher (branch_log_events answers it)")
+    console.print("  list                          Show registered event handlers")
     console.print()
     console.print("[bold]EXAMPLES:[/bold]")
     console.print("  drone @trigger fire deploy_complete branch=main")
-    console.print("  drone @trigger status")
+    console.print("  drone @trigger list")
     console.print()
 
 

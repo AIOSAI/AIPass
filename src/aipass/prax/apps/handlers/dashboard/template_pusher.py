@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_pusher.py
 # Description: Dashboard Template Push Handler
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-02-25
-# Modified: 2026-11-08
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -18,7 +18,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 
 logger = get_direct_logger()
 
@@ -27,9 +27,8 @@ from .operations import atomic_write_text, dashboard_lock
 from .status import calculate_quick_status, merge_quick_status
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 from aipass.prax.apps.handlers.fleet import fleet_rows
-from aipass.prax.apps.handlers.repo_root import resolved_file
 
-_PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # .../prax/
+_PRAX_ROOT = Path(__file__).resolve().parents[3]  # .../prax/
 
 
 def _find_repo_root() -> Path:

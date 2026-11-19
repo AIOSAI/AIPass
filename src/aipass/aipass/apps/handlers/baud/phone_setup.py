@@ -51,7 +51,7 @@ BOOT_LIVE = "live"  # systemd already runs the unit: left alone
 BOOT_PLANNED = "planned"  # a dry run: the steps named, none run
 BOOT_FAILED = "failed"  # a step failed; the last report's last step says why
 BOOT_REFUSED = "refused"  # enable refused: a hand-started server holds the port
-BOOT_UNSUPPORTED = "unsupported"  # no user-level systemd here (a container, macOS, Windows)
+BOOT_UNSUPPORTED = "unsupported"  # no user-level systemd here (a container)
 BOOT_UNREACHABLE = "unreachable"  # the supervisor or the serve record could not be read
 BOOT_NO_DOOR = "no_door"  # this @api publishes no installer doors
 

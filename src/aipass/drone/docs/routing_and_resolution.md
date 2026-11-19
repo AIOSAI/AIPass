@@ -102,6 +102,28 @@ live verb is fired to prove the trap.
 
 ## The Python API
 
+`aipass.drone` is drone's one import door. Another branch takes every name from it, never from a
+path under `apps/`. The door is lazy and uncached: a bare `import aipass.drone` loads nothing under
+`apps/`, and each read loads only that name's home, the module that defines it. Its `__all__` is
+the public list:
+
+| Names | Home |
+|-------|------|
+| `resolve_branch`, `list_branches`, `branch_exists`, `get_branch_info`, `normalize_branch_arg` | `apps/modules/resolver.py` |
+| `route_command`, `route_all` | `apps/modules/router.py` |
+| `discover_modules`, `get_help`, `get_system_help` | `apps/modules/discovery.py` |
+| `HelpResult` | `apps/handlers/discovery_handler.py` |
+| `CommandResult` | `apps/handlers/executor.py` |
+| `is_registry_filename` | `apps/handlers/registry_name.py` |
+| `get_registry_path`, `set_registry_path`, `reset_registry_path`, `resolve_aipass_home` | `apps/handlers/registry_handler.py` |
+| `create_identified_connection` | `apps/handlers/broker/client.py` |
+| `BrokerDaemon` | `apps/handlers/broker/daemon.py` |
+| `record_foreign_deletion`, `record_gate_refusal` | `apps/handlers/deletion_log.py` |
+| `RoutingError` and the other exceptions | `apps/handlers/exceptions.py` |
+
+A test patches a name at its home. Nothing is cached on the package, so the next read through the
+door returns the patch. An unknown name raises `AttributeError`.
+
 ```python
 from aipass.drone import resolve_branch, list_branches, route_command
 
@@ -135,6 +157,19 @@ Order (`get_registry_path()` → `find_registry()`): explicit `set_registry_path
 conflicts with the nearest passport's `citizenship.registry_id` → the AIPass home (below) → walk up
 from the drone package → package-relative default. The env var is `AIPASS_REGISTRY`;
 `AIPASS_REGISTRY_PATH` is read by no code.
+
+### What counts as a registry file
+
+`is_registry_filename(name)` takes a file name and answers a bool: true when the name ends exactly,
+case-sensitively, in `_REGISTRY.json`. The stem is free, since an external project names its registry
+after itself, so `vera-studio_REGISTRY.json` counts and `drone_command_registry.json` does not. Its
+module imports only the standard library. It reads no logging, env or disk, so another branch can
+import it before drone has run.
+
+The predicate checks names only. Listing a directory is each caller's policy: which entries to read,
+and whether a directory with a registry name counts. Drone's own listing, `registry_named_entries()`
+in `router_handler.py`, keeps every entry the predicate passes, directories included. A directory
+named like a registry then fails loudly when it is loaded, instead of being skipped.
 
 From the shell, `drone config set <path>` and `drone config reset` cannot persist anything: the
 override would live only in a process that exits at once. Each prints the line that does persist
@@ -185,8 +220,7 @@ per-project registration.
   runs in `discovery_handler` (`discover_modules`, `get_help`) and `scanning/scanner`.
   - A branch outside the resolved home, or no home at all: `sys.executable`.
   - The home is `Path(sys.prefix).parent`, so this drone is the home's: `sys.executable`.
-  - Otherwise, the home's `.venv/bin/python` (`.venv/Scripts/python.exe` on Windows), logged
-    INFO once per home.
+  - Otherwise, the home's `.venv/bin/python`, logged INFO once per home.
   - No venv there: `sys.executable`, with one WARNING naming the half-installed home.
 
   A machine can hold aipass twice. The uv tool venv's `drone` comes first on PATH, and the home's

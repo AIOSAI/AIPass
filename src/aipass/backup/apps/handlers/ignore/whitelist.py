@@ -3,7 +3,7 @@
 # Description: Whitelist loader and path membership check
 # Version: 1.0.0
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """Whitelist handler."""
@@ -24,8 +24,7 @@ def load_whitelist(project_root: str) -> list[str]:
 
 def is_whitelisted(rel_path: str, whitelist: list[str]) -> bool:
     """Check whether a relative path is whitelisted."""
-    rel = rel_path.replace("\\", "/")
     for entry in whitelist:
-        if fnmatch.fnmatch(rel, entry):
+        if fnmatch.fnmatch(rel_path, entry):
             return True
     return False

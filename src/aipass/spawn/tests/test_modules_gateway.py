@@ -1,146 +1,41 @@
 # =================== META ====================
 # Name: test_modules_gateway.py
-# Description: Tests for the apps.modules package gateway re-exports
-# Version: 1.1.3
+# Description: Tests for spawn's front door (__init__.py); the apps.modules package hands out nothing
+# Version: 1.6.0
 # Created: 2026-08-28
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
-"""Tests for apps/modules/__init__.py's gateway re-exports (DPLAN-0319 wave 3)."""
+"""Tests for __init__.py, the package door, and for apps/modules/__init__.py holding no re-exports."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(documentation) — docstrings on get_template_dir, refuse_legacy_class and docs_page_template
-# sentry: no-test-needed(ruff) — that apps/handlers/class_registry.py and apps/handlers/docs_page.py parse and import
+# sentry: no-test-needed(documentation) — docstrings on get_template_dir and refuse_legacy_class
+# sentry: no-test-needed(ruff) — that apps/handlers/class_registry.py parses and imports
 
 import inspect
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
 
+import aipass.spawn as front_door
+from aipass.spawn import get_template_dir, refuse_legacy_class
 from aipass.spawn.apps import modules
-from aipass.spawn.apps.handlers import docs_page
-from aipass.spawn.apps.handlers.class_registry import get_template_dir as _class_registry_get_template_dir
-from aipass.spawn.apps.handlers.class_registry import refuse_legacy_class as _class_registry_refuse_legacy_class
-from aipass.spawn.apps.handlers.docs_page import docs_page_template as _docs_page_module_docs_page_template
-from aipass.spawn.apps.modules import docs_page_template, get_template_dir, refuse_legacy_class
-
-# @sentry imports the class registry through this gateway instead of keeping a mirror; the
-# ``is`` pins fail if a second copy of the logic appears here and drifts from the handler.
+from aipass.spawn.apps.handlers import bootstrap_render, class_registry, registry
+from aipass.spawn.apps.modules import core
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SPAWN_BRANCH = Path(__file__).resolve().parents[1]
 
 
-class TestGatewayImportPath:
-    """The exact import statement that replaces sentry's mirror."""
+class TestModulesPackageIsNoDoor:
+    """The second door is retired: apps/modules/__init__.py re-exports no handler name."""
 
-    def test_both_names_import_from_the_modules_package(self):
-        """The documented one-liner works verbatim."""
-
-        assert callable(get_template_dir)
-        assert callable(refuse_legacy_class)
-
-    def test_names_are_declared_public_in_all(self):
-        """__all__ names them, so the export is intentional rather than incidental."""
-
-        assert "get_template_dir" in modules.__all__
-        assert "refuse_legacy_class" in modules.__all__
-
-    def test_gateway_import_works_from_outside_the_spawn_branch(self, tmp_path):
-        """The whole point: a caller outside this branch must get through.
-
-        A separate process from a file outside src/aipass/spawn/, where sentry's auditor imports from.
-        """
-        probe = tmp_path / "probe_gateway_from_outside.py"
-        probe.write_text(
-            textwrap.dedent(
-                """
-                from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
-
-                print(get_template_dir("specialist").name)
-                print(bool(refuse_legacy_class("aipass_framework")))
-                """
-            ).strip(),
-            encoding="utf-8",
-        )
-
-        result = subprocess.run(
-            [sys.executable, str(probe)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            cwd=str(REPO_ROOT),
-        )
-
-        assert result.returncode == 0, f"gateway refused an outside caller:\n{result.stderr}"
-        assert result.stdout.split() == ["citizen", "True"]
-
-    def test_the_docs_page_door_is_public_and_answers_an_outside_caller(self, tmp_path):
-        """@sentry's docs_page render reads the skeleton through this door."""
-
-        assert "docs_page_template" in modules.__all__
-
-        probe = tmp_path / "probe_docs_page_from_outside.py"
-        probe.write_text(
-            textwrap.dedent(
-                """
-                from aipass.spawn.apps.modules import docs_page_template
-
-                print(docs_page_template().splitlines()[0])
-                """
-            ).strip(),
-            encoding="utf-8",
-        )
-
-        result = subprocess.run(
-            [sys.executable, str(probe)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            cwd=str(REPO_ROOT),
-        )
-
-        assert result.returncode == 0, f"the docs page door refused an outside caller:\n{result.stderr}"
-        assert result.stdout.strip() == "[<- Back to the README](../README.md)"
-
-
-class TestGatewayIsTheHandlerItself:
-    """The gateway export and the handler function are one callable."""
-
-    def test_get_template_dir_is_the_handler_callable(self):
-
-        assert get_template_dir is _class_registry_get_template_dir
-
-    def test_refuse_legacy_class_is_the_handler_callable(self):
-
-        assert refuse_legacy_class is _class_registry_refuse_legacy_class
-
-    def test_docs_page_template_is_the_handler_callable(self):
-
-        assert docs_page_template is _docs_page_module_docs_page_template
-
-    def test_docs_page_template_reads_the_file_on_every_call(self, tmp_path, monkeypatch):
-        """No cached copy: an edit to the skeleton reaches the next render unchanged."""
-
-        skeleton = tmp_path / "docs_page.md"
-        monkeypatch.setattr(docs_page, "DOCS_PAGE_TEMPLATE", skeleton)
-
-        skeleton.write_text("# First\n", encoding="utf-8")
-        assert docs_page_template() == "# First\n"
-        skeleton.write_text("# Second\n", encoding="utf-8")
-        assert docs_page_template() == "# Second\n"
-
-    def test_docs_page_template_raises_when_the_skeleton_is_gone(self, tmp_path, monkeypatch):
-        """Unreachable is said, never papered over with a fallback shape."""
-
-        monkeypatch.setattr(docs_page, "DOCS_PAGE_TEMPLATE", tmp_path / "absent.md")
-
-        with pytest.raises(OSError):
-            docs_page_template()
+    @pytest.mark.parametrize("name", ["__all__", "get_template_dir", "refuse_legacy_class"])
+    def test_the_modules_package_hands_out_no_handler_name(self, name):
+        assert not hasattr(modules, name)
 
 
 class TestSignaturesAreStable:
@@ -167,14 +62,8 @@ class TestSignaturesAreStable:
         assert param.annotation == (str | None), "None must stay callable — sentry passes a missing class straight in"
         assert sig.return_annotation is str
 
-    def test_docs_page_template_signature(self):
 
-        sig = inspect.signature(docs_page_template)
-        assert list(sig.parameters) == [], "sentry calls the door bare on every render"
-        assert sig.return_annotation is str
-
-
-class TestGetTemplateDirThroughGateway:
+class TestGetTemplateDirThroughTheDoor:
     """What the auditor actually asks it."""
 
     @pytest.mark.parametrize("citizen_class", ["manager", "specialist"])
@@ -216,7 +105,7 @@ class TestGetTemplateDirThroughGateway:
         assert "manager" in message and "specialist" in message
 
 
-class TestRefuseLegacyClassThroughGateway:
+class TestRefuseLegacyClassThroughTheDoor:
     """The retired-name lane, which sentry reports as 'not yet migrated'."""
 
     @pytest.mark.parametrize(
@@ -259,7 +148,7 @@ class TestRefuseLegacyClassThroughGateway:
 
 
 class TestHandlerGuard:
-    """The fence the gateway exists to answer, pinned through the real import.
+    """The fence the package door exists to answer, pinned through the real import.
 
     The full shape table is tests/test_handlers_fence.py.
     """
@@ -288,3 +177,76 @@ class TestHandlerGuard:
         assert "ACCESS DENIED" in result.stderr, result.stderr[-600:]
         assert "Caller branch: unknown" in result.stderr, result.stderr[-600:]
         assert result.stdout == ""
+
+
+FRONT_DOOR_HOMES = {
+    "spawn_agent": core,
+    "CITIZEN_CLASSES": class_registry,
+    "FORBIDDEN_CLASSES": class_registry,
+    "LEGACY_CLASSES": class_registry,
+    "get_available_classes": class_registry,
+    "get_template_dir": class_registry,
+    "refuse_legacy_class": class_registry,
+    "refuse_retired_or_forbidden": class_registry,
+    "validate_class": class_registry,
+    "find_registry": registry,
+    "get_owner": registry,
+    "is_owner": registry,
+    "registry_is_writable_document": registry,
+    "render_bootstrap_trinity": bootstrap_render,
+    "restore_citizen": bootstrap_render,
+}
+
+
+class TestFrontDoor:
+    """from aipass.spawn import <name>: each name read live from its home, nothing loaded until asked."""
+
+    def test_the_public_list_is_exactly_the_homes_table(self):
+        assert sorted(front_door.__all__) == sorted(FRONT_DOOR_HOMES)
+        assert set(FRONT_DOOR_HOMES) <= set(dir(front_door))
+
+    @pytest.mark.parametrize("name", sorted(FRONT_DOOR_HOMES))
+    def test_each_name_is_the_object_its_home_defines(self, name):
+        assert getattr(front_door, name) is getattr(FRONT_DOOR_HOMES[name], name)
+
+    def test_an_unknown_name_raises_attribute_error_with_no_fallback(self):
+        with pytest.raises(AttributeError, match="no attribute 'door_owner'"):
+            getattr(front_door, "door_owner")
+
+    def test_a_patch_on_the_home_reaches_the_next_read_through_the_door(self, monkeypatch):
+        def sentinel(start_path=None):
+            return {"email": "@patched"}
+
+        assert front_door.get_owner is registry.get_owner
+        monkeypatch.setattr(registry, "get_owner", sentinel)
+        assert front_door.get_owner is sentinel
+
+    def test_a_bare_import_loads_nothing_under_apps_and_one_name_loads_only_its_home(self):
+        probe = (
+            "import sys, aipass.spawn as door\n"
+            "print(sorted(m for m in sys.modules if m.startswith('aipass.spawn.apps')))\n"
+            "door.LEGACY_CLASSES\n"
+            "print('aipass.spawn.apps.handlers.class_registry' in sys.modules,"
+            " 'aipass.spawn.apps.handlers.registry' in sys.modules,"
+            " 'aipass.spawn.apps.modules.core' in sys.modules)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8", cwd=str(REPO_ROOT)
+        )
+
+        assert result.returncode == 0, result.stderr[-600:]
+        assert result.stdout.splitlines() == ["[]", "True False False"]
+
+    def test_an_outside_caller_passes_the_handlers_fence_through_the_door(self, tmp_path):
+        probe = tmp_path / "probe_front_door_from_outside.py"
+        probe.write_text(
+            "from aipass.spawn import LEGACY_CLASSES, get_owner, get_template_dir\n"
+            'print(callable(get_owner), bool(LEGACY_CLASSES), get_template_dir("specialist").name)\n',
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [sys.executable, str(probe)], capture_output=True, text=True, encoding="utf-8", cwd=str(tmp_path)
+        )
+
+        assert result.returncode == 0, result.stderr[-600:]
+        assert result.stdout.split() == ["True", "True", "citizen"]

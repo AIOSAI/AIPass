@@ -13,7 +13,7 @@ Engagement Operations Handler
 from typing import List
 from datetime import datetime
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler

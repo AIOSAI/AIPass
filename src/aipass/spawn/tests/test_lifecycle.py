@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_lifecycle.py
 # Description: Tests for spawn lifecycle commands (delete, retire-project, sync-registry)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/delete_ops.py and apps/handlers/sync_registry_ops.py."""
@@ -15,6 +15,7 @@
 import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -41,6 +42,17 @@ def repo_root(tmp_path):
     (root / "pyproject.toml").write_text("[project]\nname = 'aipass'\n", encoding="utf-8")
     (root / "src" / "aipass").mkdir(parents=True)
     return root
+
+
+@pytest.fixture(autouse=True)
+def admin_seat(monkeypatch):
+    """Every delete here runs from the admin seat unless a test stands it elsewhere."""
+    _admin_answers(monkeypatch, True)
+
+
+def _admin_answers(monkeypatch, admin):
+    """The ai_mail rail's admin verdict, stood on one answer for delete_ops."""
+    monkeypatch.setattr("aipass.spawn.apps.handlers.delete_ops.is_verified_admin_caller", lambda: admin)
 
 
 @pytest.fixture
@@ -160,6 +172,23 @@ class TestDeleteBranch:
         reg = json.loads(mock_registry.read_text(encoding="utf-8"))
         names = [b["name"] for b in reg["branches"]]
         assert "TEST_API" not in names
+
+    def test_an_unknown_home_refuses_before_the_tree_moves(self, mock_branch, mock_registry):
+        """Mutant: the home is resolved after _archive_branch, or the refusal is dropped -> red."""
+
+        no_home = SimpleNamespace(path=None, source="", tried=("AIPASS_HOME unset",))
+        with (
+            patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry),
+            patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=no_home),
+            patch("aipass.spawn.apps.handlers.delete_ops._archive_branch") as archive,
+        ):
+            result = delete_branch("test_api", confirm=False)
+
+        assert result["success"] is False
+        assert "AIPass home not found - tried: AIPASS_HOME unset" in result["error"]
+        archive.assert_not_called()
+        assert mock_branch.is_dir()
+        assert "TEST_API" in _registry_names(mock_registry)
 
     def test_delete_protected_spawn(self, repo_root, mock_registry):
         """Cannot delete spawn (self-protection)."""
@@ -1152,7 +1181,7 @@ class TestHandleDelete:
             handle_delete(["--dry-run", "--yes", "@spawn"])
 
         combined = "".join(capsys.readouterr())
-        assert "Delete FAILED" in combined
+        assert "Delete refused" in combined
         assert "[dim]" not in combined
         assert "[/dim]" not in combined
         assert "(dry-run)" in combined
@@ -1280,6 +1309,66 @@ class TestDeleteByPath:
         (archive,) = (root / ".archive" / "deleted_branches").iterdir()
         assert (archive / ".git" / "HEAD").read_text(encoding="utf-8") == ".git/HEAD"
         assert (archive / ".chroma" / "chroma.sqlite3").read_text(encoding="utf-8") == ".chroma/chroma.sqlite3"
+
+
+class TestDeleteRunsFromTheAdminSeat:
+    """A real delete or retire runs from the verified admin seat only; a dry run stays open to every seat."""
+
+    def test_a_real_retire_off_the_admin_seat_is_refused_touches_nothing_and_records_who_tried(
+        self, capsys, tmp_path, monkeypatch, _isolate_spawn_json
+    ):
+        root, branch, registry = _foreign_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        _seat(monkeypatch, "commons")
+        _admin_answers(monkeypatch, False)
+        before = _tree_bytes(branch)
+
+        result = handle_delete([str(branch), "--retire", "--yes"])
+
+        said = _said(capsys)
+        assert result == 1
+        assert "admin seat" in said and "mail @devpulse" in said
+        assert _tree_bytes(branch) == before
+        assert _registry_names(registry) == ["WORKER"]
+        assert not (root / ".archive").exists()
+        assert _deletion_rows(tmp_path) == []
+        log = json.loads((_isolate_spawn_json / "delete_ops_log.json").read_text(encoding="utf-8"))
+        (refused,) = [e for e in log if e["operation"] == "delete_refused"]
+        assert refused["timestamp"]
+        assert (refused["data"]["caller"], refused["data"]["branch"]) == ("@commons", "WORKER")
+        assert refused["data"]["requested"] == str(branch)
+
+    def test_a_raising_verifier_refuses_the_real_run(self, capsys, tmp_path, monkeypatch):
+        root, branch, registry = _foreign_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        _seat(monkeypatch)
+
+        def boom():
+            raise RuntimeError("registry unreadable")
+
+        monkeypatch.setattr("aipass.spawn.apps.handlers.delete_ops.is_verified_admin_caller", boom)
+
+        assert handle_delete([str(branch), "--retire", "--yes"]) == 1
+        assert "admin seat" in _said(capsys)
+        assert branch.exists()
+        assert _registry_names(registry) == ["WORKER"]
+
+    def test_a_dry_run_off_the_admin_seat_previews_and_says_the_real_run_is_the_admins(
+        self, capsys, tmp_path, monkeypatch
+    ):
+        root, branch, registry = _foreign_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        _seat(monkeypatch, "commons")
+        _admin_answers(monkeypatch, False)
+
+        result = handle_delete([str(branch), "--retire", "--dry-run"])
+
+        said = _said(capsys)
+        assert result == 0
+        assert "admin seat" in said and "mail @devpulse" in said
+        assert branch.exists()
+        assert _registry_names(registry) == ["WORKER"]
+        assert not (root / ".archive").exists()
 
 
 def _retire_rig(tmp_path, monkeypatch, admin=True):

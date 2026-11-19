@@ -24,7 +24,6 @@ from aipass.memory.apps.handlers.monitor.registry_scope import (
     find_repo_root,
     overlaps_home,
 )
-from aipass.memory.apps.handlers.repo_root import module_file
 
 # Imported from the reader, never re-spelled: the write side refuses exactly what it refuses.
 ROOTS_FILE = DECLARED_ROOTS
@@ -33,7 +32,7 @@ ROOTS_SCHEMA_VERSION = "1.0.0"
 TEMPLATE_NAME = "AIPASS_ROOTS.template.json"
 CORRUPT_SUFFIX_NAME = f"{DECLARED_ROOTS}.corrupt"
 
-_BRANCH_ROOT = module_file(__file__).parent.parent.parent.parent
+_BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 # Salvage is for a human to read; nothing it finds is ever written back as a declaration.
 _SALVAGE = re.compile(r'"path"\s*:\s*"([^"]+)"')
@@ -99,10 +98,7 @@ def _resolve(repo_root: Path | None, raw: str) -> Path:
 
 
 def _spell(repo_root: Path | None, resolved: Path) -> str:
-    """Relative to home when it fits, absolute when it does not — POSIX-spelled either way.
-
-    Forward slashes are the contract: the only spelling both platforms read as a path.
-    """
+    """Relative to home when it fits, absolute when it does not — POSIX-spelled either way."""
     root = (Path(repo_root) if repo_root is not None else find_repo_root()).resolve()
     try:
         return (Path("..") / resolved.relative_to(root.parent)).as_posix()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stderr_routing_content.py
 # Description: Stderr Routing Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-13
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -33,7 +33,7 @@ def get_stderr_routing_standards() -> str:
         "\u2500" * 70,
         "",
         "[bold cyan]CORRECT PATTERN:[/bold cyan]",
-        "  [dim]from aipass.cli.apps.modules import error, warning, fatal[/dim]",
+        "  [dim]from aipass.cli import error, warning, fatal[/dim]",
         "",
         "  [green]\u2713[/green] [dim]error('Branch not found', suggestion='Check spelling')[/dim]",
         "  [green]\u2713[/green] [dim]warning('Template mismatch', details='Expected v2')[/dim]",
@@ -55,7 +55,7 @@ def get_stderr_routing_standards() -> str:
         "     \u2192 Import [dim]err_console[/dim] from CLI instead",
         "",
         "[bold cyan]CLI DISPLAY EXPORTS:[/bold cyan]",
-        "  [dim]from aipass.cli.apps.modules import ([/dim]",
+        "  [dim]from aipass.cli import ([/dim]",
         "  [dim]    error,        # \u2718 message + optional suggestion \u2192 stderr[/dim]",
         "  [dim]    warning,      # \u26a0 message + optional details \u2192 stderr[/dim]",
         "  [dim]    fatal,        # \u2718 message + sys.exit(1) \u2192 stderr[/dim]",

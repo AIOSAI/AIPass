@@ -3,7 +3,7 @@
 # Description: Drive sync module — uploads the snapshot store to Google Drive
 # Version: 2.6.3
 # Created: 2026-04-17
-# Modified: 2026-10-31
+# Modified: 2026-11-15
 # =============================================
 
 """Drive Sync Module — orchestrates file upload to Google Drive.
@@ -12,20 +12,14 @@ No pre-resolve: workers create Drive folders on demand through the client's lock
 Reference: docs/drive_sync.md
 """
 
-import os
 import sys
 import time
 from pathlib import Path
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
+from rich.progress import Progress
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, mark_command_failed
+from aipass.cli import console, error, mark_command_failed
 
 from aipass.backup.apps.handlers.ignore.patterns import load_spec
 from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist
@@ -45,6 +39,7 @@ from aipass.backup.apps.modules.stop import report_stopped
 
 MODULE_NAME = "drive_sync"
 PRIMARY_COMMAND = "drive_sync"
+USAGE = "drive_sync <project_path|@name> [--force] [--note <text>] [--project <name>]"
 
 
 def print_introspection():
@@ -59,7 +54,7 @@ def print_help():
     """Display help for this module."""
     print_introspection()
     console.print()
-    console.print("Usage: drive_sync <project_root> \\[options]")
+    console.print(f"Usage: {USAGE}", markup=False)
     console.print("  Uploads the snapshot store, whatever the project's drive_sync setting says.")
     console.print("  --force       Force re-upload of all files")
     console.print("  --project     Override project name")
@@ -262,23 +257,18 @@ def _drive_sync_run(
     task = None
 
     if show_panels:
-        try:
-            from rich.progress import Progress
+        progress = Progress(console=console)
+        progress.start()
+        task = progress.add_task(
+            "Uploading to Drive...",
+            total=len(files_to_upload),
+        )
 
-            progress = Progress(console=console)
-            progress.start()
-            task = progress.add_task(
-                "Uploading to Drive...",
-                total=len(files_to_upload),
-            )
+        def _advance():
+            if progress is not None and task is not None:
+                progress.advance(task)
 
-            def _advance():
-                if progress is not None and task is not None:
-                    progress.advance(task)
-
-            progress_fn = _advance
-        except ImportError:
-            logger.info("Rich progress not available for Drive upload display")
+        progress_fn = _advance
 
     try:
         batch_result = upload_batch(
@@ -380,21 +370,25 @@ def handle_command(command: str, args: list) -> bool:
         print_help()
         return True
 
-    project_root = str(resolve_caller_path(args[0]))
-    force = "--force" in args
-    note = ""
-    project_name = ""
-
-    for i, arg in enumerate(args):
-        if arg == "--note" and i + 1 < len(args):
-            note = args[i + 1]
-        if arg == "--project" and i + 1 < len(args):
-            project_name = args[i + 1]
+    force = False
+    values = {"--note": "", "--project": ""}
+    stray: list[str] = []
+    rest = iter(args[1:])
+    for arg in rest:
+        if arg == "--force":
+            force = True
+        elif arg in values and (value := next(rest, None)) is not None:
+            values[arg] = value
+        else:
+            stray.append(arg)
+    if args[0].startswith("-") or stray:
+        error(f"drive_sync does not take: {(stray or args)[0]}", suggestion=USAGE)
+        return True
 
     run_drive_sync(
-        project_root,
-        project_name=project_name,
-        note=note,
+        str(resolve_caller_path(args[0])),
+        project_name=values["--project"],
+        note=values["--note"],
         force=force,
     )
     return True

@@ -19,7 +19,6 @@ pack inventory.
 | `audit/audit_display.py` | Rich result formatting — the score grid, the violation detail, the info lines. |
 | `audit/incremental_cache.py` | Content-hash cache: a branch whose inputs did not change replays its stored score instead of re-running every checker, and a branch where one checker changed re-runs that checker alone. |
 | `audit/artifact.py` | The untruncated violation set → `.sentry/last_audit_<branch>.json`, because the console view is capped and the full set is what you actually debug against. |
-| `module_root.py` | The guarded `module_file()` — the one import-time `__file__` resolve in the branch. |
 | `registry_scan.py` | Case-EXACT registry discovery — the one reader every lane uses. |
 
 ---
@@ -149,8 +148,9 @@ summary prints `Ignored by the audit list: <pattern> N`, and each artifact branc
 carries the list. It also returns `ignored_tracked`: the removed files that the repository's
 `.gitignore` files do **not** ignore, read with `pathspec` (no git subprocess, negations
 honoured). Anything there prints red, `Ignore list drops tracked source`, because a file git
-tracks is source, and source is judged. The one known gap is git's rule that a file cannot be
-re-included under an excluded parent directory, which `pathspec` does not apply.
+tracks is source, and source is judged. Limit: `pathspec` does not apply git's rule that a
+file cannot be re-included under an excluded parent directory, so such a file prints in that
+red list although git ignores it.
 
 Pyright's filter in `diagnostics_check` reads the same list through `audit_ignore_match`, so
 the two lanes cannot drift.
@@ -178,6 +178,11 @@ it deliberately does not judge.
 and a **required reason**. Checkers call `is_bypassed()` per violation;
 `bypass/utils.matching_rule()` is the single scope-aware matcher. Bypass is an intentional,
 documented deviation — not a way to ignore a rule.
+
+A finding that has no line of its own (a file over the size limit, a missing door) passes the
+name `FILE_SCOPE` (`"<file>"`, in `bypass/utils.py`) as its function, so a row with
+`"functions": ["<file>"]` waives it and a line row stays inert. A row with no scope keys
+waives the whole file.
 
 `bypass/inert.py` derives inert (unreachable) rules from the checker ASTs: a rule that could
 never match anything the checker can produce is noise, and it says so. The audit says it on
@@ -210,6 +215,19 @@ The audit returns `bypass_dead` (index, file, standard, why, the rule's own reas
 carries both. `drone @sentry bypass prune @branch [--dry-run]` removes exactly the convicted
 rules, prints each with its reason, and refuses to rewrite a file `json.dumps` cannot reproduce
 byte for byte. A dead rule matches nothing, so pruning one moves no score.
+
+Prune also convicts a rule that **covers nothing**: it matches a file, yet its checker answers the
+same with the rule removed (a line pin that drifted, a finding that was cured). A file-wide rule
+always changes the answer to "bypassed", so a rule also covers nothing when every file it is handed
+passes clean without it. A checker is handed only the files the audit hands it (`branch_audit.files_handed`,
+the audit's own routing: an entry_point checker sees only the entry file), so a rule over files outside
+its checker's scope covers nothing. Each such rule
+costs two checker runs over its files, so the lane runs in prune only, never in the audit. A
+checker with a post-pass or observe lane is not judged this way.
+
+The audit's bypass info also names, as certain rather than advisory, a rule carrying `pattern`
+(`matching_rule` never reads it, so the rule is file-wide) and a `diagnostics` rule (diagnostics
+never reads bypass rules).
 
 ---
 

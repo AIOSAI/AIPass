@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Optional, Tuple
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 
 POINTER_DIR_NAME = ".ai_mail.local"
@@ -57,7 +57,7 @@ _HOME_FAILURE_WARNED = False
 def _claude_home() -> Optional[Path]:
     """This machine's home directory, or None when it cannot be named.
 
-    Path.home() can raise (Windows); never hoist it to module scope, where that is an import-time crash.
+    Path.home() can raise; never hoist it to module scope, where that is an import-time crash.
     """
     global _HOME_FAILURE_WARNED
 
@@ -69,7 +69,7 @@ def _claude_home() -> Optional[Path]:
             logger.warning(
                 "[session_pointer] cannot determine the home directory (%s) — no ~/.claude/projects "
                 "can be located, so transcript lookups will report absence and dispatches fall back "
-                "to -c. On Windows this means USERPROFILE and HOMEDRIVE+HOMEPATH are all unset.",
+                "to -c.",
                 e,
             )
         return None
@@ -350,7 +350,7 @@ def _transcript_candidates(branch_path: Path, session_id: str) -> Optional[list[
 def _quote_path(value: object) -> str:
     """Render a path inside a human-facing message: quoted, but never escaped.
 
-    Not repr(): it doubles Windows backslashes. Quotes keep a blank cwd visible.
+    Not repr(): it doubles backslashes. Quotes keep a blank cwd visible.
     """
     if value is None:
         return "<absent>"

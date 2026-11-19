@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Find skills across search paths
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """Skill discovery module."""
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, escape
+from aipass.cli import console, error, escape
 from aipass.skills.apps.handlers.discovery_handler import get_search_paths, discover_skills_in_path
 from aipass.skills.apps.handlers.registry import build_registry
 from aipass.skills.apps.handlers.switch_handler import SwitchStateUnreadable, read_state
@@ -19,6 +19,7 @@ from aipass.skills.apps.handlers.json import json_handler
 def handle_command(command: str, args: list) -> bool:
     """Handle the list command routed by the entry point."""
     if any(arg in ("--help", "-h", "help") for arg in args):
+        print_list_help()
         print_introspection()
         return True
     if command != "list":
@@ -75,6 +76,14 @@ def discover_all():
     result = build_registry(search_paths, discover_skills_in_path)
     json_handler.log_operation("skills_discovered", {"count": len(result)})
     return result
+
+
+def print_list_help():
+    """Print the usage page for this verb."""
+    console.print("Skills List - Show every discovered skill")
+    console.print()
+    console.print("Usage:")
+    console.print("  drone @skills list    List project, global and built-in skills, OFF ones marked")
 
 
 def print_introspection():

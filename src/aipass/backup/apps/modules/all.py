@@ -1,30 +1,22 @@
 # =================== AIPass ====================
 # Name: all.py
-# Description: All module — full cycle: snapshot + versioned + drive (shared scan)
-# Version: 4.2.1
+# Description: All module — full cycle: snapshot + drive (shared scan)
+# Version: 5.0.0
 # Created: 2026-04-17
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
-"""All Module — runs snapshot then versioned backup with shared scan, then drive sync when the project has it on.
+"""All Module — runs snapshot with a shared scan, then drive sync when the project has it on.
 
 Reference: docs/cli.md
 """
 
-import os
 import sys
 import time
 from pathlib import Path
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 
 from aipass.backup.apps.handlers.ignore.patterns import load_spec
 from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist
@@ -41,10 +33,10 @@ from aipass.backup.apps.handlers.state.stop_flag import catch_sigterm, run_was_s
 from aipass.backup.apps.modules.display import refuse_missing_root, refuse_oversized_run
 from aipass.backup.apps.modules.snapshot import run_snapshot
 from aipass.backup.apps.modules.stop import report_stopped
-from aipass.backup.apps.modules.versioned import run_versioned
 
 MODULE_NAME = "all"
 PRIMARY_COMMAND = "all"
+USAGE = "all <project_path|@name> [--quiet] | all --registered [--quiet]"
 REGISTERED_FLAG = "--registered"
 
 
@@ -53,8 +45,8 @@ def print_introspection():
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
     console.print("  Status: Phase 4 -- shared scan + drive sync")
-    console.print("  Orchestration: scan -> snapshot -> versioned -> drive (when drive_sync is on)")
-    console.print("  Usage: all <project_path|@name> [--quiet] | all --registered [--quiet]")
+    console.print("  Orchestration: scan -> snapshot -> drive (when drive_sync is on)")
+    console.print(f"  Usage: {USAGE}", markup=False)
 
 
 def print_help():
@@ -81,13 +73,12 @@ def _all_run(project_root: str, show_panels: bool) -> dict:
     summary: dict = {
         "ok": False,
         "snapshot_files": 0,
-        "versioned_files": 0,
         "drive": "skipped",
         "seconds": 0.0,
         "stopped": False,
     }
 
-    # Refuse before the shared scan — snapshot/versioned each guard themselves,
+    # Refuse before the shared scan — snapshot guards itself,
     # but the scan below would otherwise run against a path that isn't there.
     if not Path(project_root).is_dir():
         refuse_missing_root("all", project_root, show_panels)
@@ -97,13 +88,13 @@ def _all_run(project_root: str, show_panels: bool) -> dict:
     logger.info(f"[backup] Running full backup cycle for {project_root}")
 
     # Scaffold before the shared scan: create_backup_dir writes the seed .backupignore, and a scan
-    # taken before it hands versioned every path the seed excludes. Idempotent.
+    # taken before it hands snapshot every path the seed excludes. Idempotent.
     if create_backup_dir(project_root) is None:
         refuse_missing_root("all", project_root, show_panels)
         summary["seconds"] = time.monotonic() - start
         return summary
 
-    # One scan shared by both modes; it is the snapshot lane's first work, so it announces as that lane.
+    # The scan is the snapshot lane's first work, so it announces as that lane.
     with LaneProgress(project_root, "snapshot", PRIMARY_COMMAND):
         config = load_project_config(project_root)
         spec = load_spec(project_root)
@@ -112,7 +103,7 @@ def _all_run(project_root: str, show_panels: bool) -> dict:
         all_files = list(walk_project(project_root, spec, whitelist_entries))
         filtered = filter_paths(all_files, spec, whitelist_entries, max_size)
 
-    # Refuse the whole cycle here: a refusal inside run_snapshot alone falls through to run_versioned.
+    # Refuse the whole cycle here: a refusal inside run_snapshot alone falls through to drive_sync.
     breach = check_ceiling(filtered, config)
     if breach is not None:
         refuse_oversized_run("all", project_root, breach, show_panels)
@@ -129,11 +120,6 @@ def _all_run(project_root: str, show_panels: bool) -> dict:
     if run_was_stopped():
         return _stopped_summary(summary, start)
     console.print()
-
-    ver_result = run_versioned(project_root, pre_scanned=filtered, verb=PRIMARY_COMMAND)
-    summary["versioned_files"] = ver_result.files_copied
-    if run_was_stopped():
-        return _stopped_summary(summary, start)
 
     # drive_sync must be a real True: a hand-edited "false" string must not send the store off the machine.
     drive_result: dict = {}
@@ -173,17 +159,15 @@ def _all_run(project_root: str, show_panels: bool) -> dict:
         {
             "project_root": project_root,
             "snapshot_files": snap_result.files_copied,
-            "versioned_files": ver_result.files_copied,
             "drive_uploaded": drive_result.get("uploaded", 0),
             "drive_skipped": not drive_on,
         },
     )
     logger.info(
         f"[backup] Full backup complete: snapshot={snap_result.files_copied}, "
-        f"versioned={ver_result.files_copied}, "
         f"drive_uploaded={drive_result.get('uploaded', 0)}, drive={summary['drive']}"
     )
-    summary["ok"] = snap_result.success and ver_result.success and summary["drive"] != "failed"
+    summary["ok"] = snap_result.success and summary["drive"] != "failed"
     summary["seconds"] = time.monotonic() - start
     return summary
 
@@ -211,7 +195,7 @@ def _registered_run(projects: dict, show_panels: bool) -> bool:
         except Exception as exc:
             logger.error(f"[backup] all --registered: {name} failed: {exc}")
             error(f"all --registered: {name} failed -- {exc}")
-            summary = {"ok": False, "snapshot_files": 0, "versioned_files": 0, "drive": "skipped"}
+            summary = {"ok": False, "snapshot_files": 0, "drive": "skipped"}
             summary["seconds"] = time.monotonic() - start
         rows.append((name, summary))
         if summary.get("stopped"):
@@ -225,8 +209,7 @@ def _registered_run(projects: dict, show_panels: bool) -> bool:
     for name, summary in rows:
         state = "ok" if summary["ok"] else "FAILED"
         console.print(
-            f"{name} {state} snapshot={summary['snapshot_files']} versioned={summary['versioned_files']} "
-            f"drive={summary['drive']} {summary['seconds']:.1f}s",
+            f"{name} {state} snapshot={summary['snapshot_files']} drive={summary['drive']} {summary['seconds']:.1f}s",
             markup=False,
         )
 
@@ -258,16 +241,23 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     show_panels = "--quiet" not in args
+    stray = [arg for arg in args if arg.startswith("-") and arg not in (REGISTERED_FLAG, "--quiet")]
+    if stray:
+        error(f"all does not take: {stray[0]}", suggestion=USAGE)
+        return True
 
+    named = [arg for arg in args if not arg.startswith("-")]
     if REGISTERED_FLAG in args:
-        named = [arg for arg in args if not arg.startswith("--")]
         if named:
             error(f"all --registered runs every registered project; drop the project argument: {named[0]}")
             return True
         run_registered(show_panels=show_panels)
         return True
 
-    run_all(str(resolve_caller_path(args[0])), show_panels=show_panels)
+    if len(named) != 1:
+        error(f"all takes one project: {' '.join(args)}", suggestion=USAGE)
+        return True
+    run_all(str(resolve_caller_path(named[0])), show_panels=show_panels)
     return True
 
 

@@ -15,7 +15,6 @@ The sandbox module (`apps/modules/sandbox.py`) provides the kernel-level filesys
 | Function | What it does |
 |---|---|
 | `build_policy(branch_path)` | Generates per-role writable/RO map from branch passport |
-| `sandbox_launch(command, *, cwd=None, policy, env=None)` | Resolves bwrap command via srt, spawns sandboxed process |
 | `resolve_bwrap_command(...)` | Resolves the bwrap argv without spawning — what external callers actually consume |
 | `build_srt_config(policy)` | Converts policy dict to srt config format |
 
@@ -32,8 +31,8 @@ Bind-mount, not isolation: the sandbox preserves the shared live filesystem. Rea
 
 The Node helper (`_srt_resolve.mjs`) resolves the globally-installed srt library via `process.execPath` (ESM resolution doesn't walk to global node_modules). The resolver runs with CWD set to `/var/tmp` to prevent srt's mandatory-deny mask files from polluting the branch directory.
 
-@ai_mail's `dispatch_monitor` wires the launch seam with `build_policy` + `build_srt_config` +
-`resolve_bwrap_command` (`ai_mail/apps/handlers/dispatch/dispatch_monitor.py`), not `sandbox_launch`.
+Callers spawn the process themselves: @ai_mail's `dispatch_monitor` wires the launch seam with
+`build_policy` + `build_srt_config` + `resolve_bwrap_command` (`ai_mail/apps/handlers/dispatch/dispatch_monitor.py`).
 The @drone broker is a privileged delete daemon and does not validate sandbox policy.
 
 ---

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
-# Description: Contained safe-delete handler
-# Version: 1.4.5
+# Description: Contained safe-delete: in-tree targets move to the local .archive
+# Version: 1.10.0
 # Created: 2026-06-02
-# Modified: 2026-10-24
+# Modified: 2026-11-18
 # =============================================
 
 """Contained safe-delete handler.
@@ -13,22 +13,51 @@ Roots match Codex sandbox boundaries: writable = {project, /tmp, $TMPDIR}.
 
 from __future__ import annotations
 
+import ctypes
 import os
 import re
 import shutil
 import stat
-import sys
 import tempfile
 import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers import deletion_log
-from aipass.drone.apps.handlers.router_handler import caller_cwd, find_project_root
+from aipass.drone.apps.handlers.git import repo_door
+from aipass.drone.apps.handlers.router_handler import caller_cwd, find_project_root, registry_named_entries
 from aipass.drone.apps.handlers.json import json_handler
 
 _CARVEOUT_DIRS = frozenset((".git", ".trinity", ".aipass", ".codex", ".agents"))
+
+ARCHIVE_DIR = ".archive"
+# Interpreter output, rebuilt on the next import: archiving it keeps nothing worth having.
+_BYTECODE_DIR = "__pycache__"
+_BYTECODE_SUFFIX = ".pyc"
+# The owner's ruling: the verified admin seat, and only it, works inside every branch.
+ADMIN_EXEMPTION = "admin"
+# The owner's ruling: a dot name is a settings, identity or system file; moved by accident it can take a seat down.
+DOT_FLAG = "--dot"
+DOT_EXEMPTION = "dot"
+# The owner's ruling: the verified admin seat reaches any project under the owner's home.
+ELSEWHERE_EXEMPTION = "elsewhere"
+# The provider settings folders are the owner's by standing rule, refused to every seat.
+_PROVIDER_DIRS = (".claude", ".codex")
+_EXEMPTION_NOTES = {
+    ADMIN_EXEMPTION: "across the sibling fence",
+    DOT_EXEMPTION: f"dot guard lifted by {DOT_FLAG}",
+    ELSEWHERE_EXEMPTION: "in another project",
+}
+SIBLING_NEXT_STEP = " — not yours to remove: mail @devpulse the path and why"
+RECORDED_LINE = "This attempt is recorded in .ai_central/deletions.jsonl."
+
+
+def _shown(verdict: str, *lines: object) -> str:
+    """A result as printed: the verdict, then each path (or note) whole on a line of its own."""
+    return "\n".join((verdict, *(str(line) for line in lines)))
 
 
 def get_allowed_roots() -> list[Path]:
@@ -41,10 +70,7 @@ def get_allowed_roots() -> list[Path]:
         seen.add(project_root)
         roots.append(project_root)
 
-    tmp_candidates: list[Path] = []
-    if sys.platform != "win32":
-        tmp_candidates.append(Path("/tmp"))
-    tmp_candidates.append(Path(tempfile.gettempdir()))
+    tmp_candidates = [Path("/tmp"), Path(tempfile.gettempdir())]
 
     for tmp_candidate in tmp_candidates:
         resolved = tmp_candidate.resolve()
@@ -90,22 +116,109 @@ def check_protected_dirs(resolved: Path) -> tuple[bool, str]:
     return False, ""
 
 
-def check_carveouts(resolved: Path, project_root: Path | None) -> tuple[bool, str]:
-    """Refuse deletion of protected paths even inside allowed roots. Returns ``(blocked, reason)``."""
+@dataclass(frozen=True)
+class Seat:
+    """Who asks: their own branch root, and whether they hold the admin seat, asked per fence and path."""
+
+    own: Path | None
+    is_admin: Callable[[str], bool]
+
+
+def cli_seat(project_root: Path | None) -> Seat:
+    """The seat of a drone rm run in a shell: the cwd's branch, and @ai_mail's verified-caller rail."""
+    return Seat(own=_current_branch_root(project_root), is_admin=_verified_admin)
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """One target judged: why it stays (None when it goes), the guards lifted, and move or true delete."""
+
+    refusal: str | None
+    exemption: str | None
+    moves: bool
+
+
+def judge(resolved: Path, project_root: Path | None, seat: Seat, *, lift_dot: bool) -> Verdict:
+    """The one decision every delete lane takes after its own containment: fences, archive, dot names, move or not."""
+    blocked, reason, exemption = check_carveouts(resolved, project_root, admin_may_cross=True, seat=seat)
+    if blocked:
+        return Verdict(reason, None, False)
+    if ARCHIVE_DIR in resolved.parts:
+        return Verdict(f"Refused: inside {ARCHIVE_DIR}/ — emptying an archive is the owner's, by hand", None, False)
+    moves = _archives(resolved, project_root)
+    dot = _dot_name(resolved, project_root) if moves else None
+    if dot is not None:
+        refusal = _dot_refusal(dot, lift_dot, seat)
+        if refusal is not None:
+            return Verdict(refusal, None, False)
+        exemption = DOT_EXEMPTION if exemption is None else f"{exemption}+{DOT_EXEMPTION}"
+    if moves and (resolved.parent / ARCHIVE_DIR).is_symlink():
+        archive_link = f"Refused: {ARCHIVE_DIR} beside the target is a symlink — an archive must be a real folder"
+        return Verdict(archive_link, None, False)
+    return Verdict(None, exemption, moves)
+
+
+def check_carveouts(
+    resolved: Path, project_root: Path | None, *, admin_may_cross: bool = False, seat: Seat | None = None
+) -> tuple[bool, str, str | None]:
+    """Refuse protected paths even inside allowed roots; one exemption, the verified admin in a sibling's tree.
+
+    The branch root itself stays refused (retiring a citizen is @spawn's), and so does every
+    carve-out, which is judged first. *seat* is the asker, the shell's when not given.
+    Returns ``(blocked, reason, exemption used or None)``.
+    """
     blocked, reason = check_protected_dirs(resolved)
     if blocked:
-        return blocked, reason
+        return blocked, reason, None
 
-    own = _current_branch_root(project_root)
+    seat = seat or cli_seat(project_root)
+    own = seat.own
     if project_root is not None:
         target_branch_root = _find_branch_root(resolved, project_root)
         if target_branch_root is not None and target_branch_root != own:
-            return True, f"Protected: path is inside sibling branch {target_branch_root.name}/"
+            if admin_may_cross and resolved != target_branch_root and seat.is_admin("sibling fence"):
+                return False, "", ADMIN_EXEMPTION
+            return True, f"Protected: path is inside sibling branch {target_branch_root.name}/{SIBLING_NEXT_STEP}", None
 
     blocked, reason = check_contained_citizens(resolved, project_root, own)
     if not blocked and own is not None and own.is_relative_to(resolved):
-        return True, f"Protected: path is your own branch {own.name}/ or holds it"
-    return blocked, reason
+        return True, f"Protected: path is your own branch {own.name}/ or holds it", None
+    return blocked, reason, None
+
+
+def _verified_admin(fence: str) -> bool:
+    """@ai_mail's verified-caller rail, the hooks gates' rail, asked per path; it fails closed and logs why."""
+    verdict = repo_door.admin_verdict()
+    if not verdict.granted:
+        logger.info("rm: %s holds for %s: not the verified admin seat", fence, verdict.caller)
+    return verdict.granted
+
+
+def _dot_name(resolved: Path, project_root: Path | None) -> str | None:
+    """*resolved*'s own name when it starts with a dot, a link's own name included; what sits inside one is not."""
+    if project_root is None or not resolved.is_relative_to(project_root) or not resolved.name.startswith("."):
+        return None
+    return resolved.name
+
+
+def _dot_refusal(name: str, lift: bool, seat: Seat) -> str | None:
+    """Why a dot target stays, or None when the verified admin lifted the guard with ``--dot``."""
+    admin = seat.is_admin("dot guard")
+    if admin and lift:
+        return None
+    reason = f"Protected: {name} is a dot name (a settings, identity or system file), and drone rm does not move it"
+    if admin:
+        return f"{reason} — the verified admin seat moves it with the same command and {DOT_FLAG}, the deliberate form"
+    if lift:
+        reason += f"; {DOT_FLAG} is the verified admin seat's alone"
+    return reason + SIBLING_NEXT_STEP
+
+
+def _seat_note(exemption: str | None) -> str:
+    """The move's note on the guards the verified admin seat lifted, or nothing."""
+    if exemption is None:
+        return ""
+    return " (admin seat, " + ", ".join(_EXEMPTION_NOTES[name] for name in exemption.split("+")) + ")"
 
 
 def check_contained_citizens(resolved: Path, project_root: Path | None, own: Path | None) -> tuple[bool, str]:
@@ -163,36 +276,70 @@ def check_containment(path: Path, roots: list[Path]) -> tuple[bool, str]:
     return False, (f"Path {path} is outside allowed roots.\n  Allowed: {allowed_str}")
 
 
+def elsewhere_project(resolved: Path) -> tuple[Path | None, str]:
+    """The project *resolved* sits in, for the verified admin outside the allowed roots; ``(None, why)`` when none.
+
+    A project is the nearest folder below the owner's home holding a ``*_REGISTRY.json`` or ``.git``.
+    The project root itself, the provider settings folders and anything beyond the home are refused.
+    """
+    home = Path.home().resolve()
+    if not resolved.is_relative_to(home) or resolved == home:
+        return None, f"Refused: {resolved} is outside the owner's home {home}, refused to every seat"
+    for name in _PROVIDER_DIRS:
+        if resolved.is_relative_to(home / name):
+            return None, f"Refused: {resolved} is in the provider settings folder ~/{name}, the owner's alone"
+    for folder in [resolved, *resolved.parents]:
+        if folder == home:
+            break
+        git = folder / ".git"
+        # A sandbox mounts an empty .git in each writable root; a worktree's .git is a file.
+        if registry_named_entries(folder) or git.is_file() or (git.is_dir() and any(git.iterdir())):
+            if folder == resolved:
+                return None, f"Refusing to delete root directory itself: {resolved}"
+            return folder, ""
+    return None, f"Refused: {resolved} is in no project (no *_REGISTRY.json or .git above it below {home})"
+
+
 def safe_delete(paths: list[str]) -> list[tuple[str, bool, str]]:
-    """Delete *paths* with containment checks; a refused path does not block others."""
-    return _safe_delete_direct(paths)
+    """Delete *paths* with containment checks; a refused path does not block others.
 
-
-def _standing_inside(resolved: Path, cwd: Path | None) -> str:
-    """Name the caller's own position when that is what blocked the delete.
-
-    Windows refuses to remove a tree the process stands in (WinError 32); ``drone rm ..`` does that.
+    ``--dot`` in any slot asks to lift the dot guard, which only the verified admin seat may.
     """
-    if cwd is None or not cwd.is_relative_to(resolved):
-        return ""
-    return f" — this process is standing in {cwd}; run drone rm from outside {resolved}"
+    lift_dot = DOT_FLAG in paths
+    targets = [path for path in paths if path != DOT_FLAG]
+    if lift_dot and not targets:
+        return [(DOT_FLAG, False, f"{DOT_FLAG} names no path: drone rm {DOT_FLAG} <path>")]
+    return _safe_delete_direct(targets, lift_dot)
 
 
-def _remove_tree(path: Path) -> None:
-    """Remove a directory tree in rm's direct lane — where the host answers.
+def _record(outcome: str, path_str: str, resolved: Path | None, reason: str, **fields: Any) -> tuple:
+    """Write the ledger row; return the prax line for it, one a reader can act on alone.
 
-    Its own function so tests/test_rm.py can stand Windows' refusal in for it on POSIX.
+    Who, outcome, path, where to. The caller logs it: a broken operation at ERROR, a move, a delete
+    and every deliberate refusal at INFO (a refusal is the fence doing its job, shown and in the ledger).
     """
-    shutil.rmtree(path)
+    record = deletion_log.record_deletion(
+        lane=deletion_log.LANE_RM, outcome=outcome, requested=path_str, resolved=resolved, reason=reason, **fields
+    )
+    destination = f" -> {record['moved_to']}" if "moved_to" in record else ""
+    exemption = f", {record['exemption']} exemption" if "exemption" in record else ""
+    return "rm: %s %s%s by %s%s — %s", outcome, record["path"], destination, record["caller"], exemption, reason
 
 
-def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
+def _refuse(path_str: str, resolved: Path | None, reason: str, shown: str, **fields: Any) -> tuple[str, bool, str]:
+    """Record and log one deliberate refusal; *shown* is the caller's text, the recorded line appended."""
+    logger.info(*_record(deletion_log.OUTCOME_REFUSED, path_str, resolved, reason, **fields))
+    return path_str, False, _shown(shown, RECORDED_LINE)
+
+
+def _safe_delete_direct(paths: list[str], lift_dot: bool) -> list[tuple[str, bool, str]]:
     """Delete paths directly (unsandboxed mode — current behavior)."""
     roots = get_allowed_roots()
     if not roots:
         return [(p, False, "No allowed roots found (no project registry, no temp dir)") for p in paths]
 
     project_root = find_project_root()
+    seat = cli_seat(project_root)
     json_handler.log_operation("rm", {"paths": paths, "roots": [str(r) for r in roots]})
 
     results: list[tuple[str, bool, str]] = []
@@ -206,29 +353,14 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
         else:
             # Refused per path, so absolute paths in the same call still delete.
             message = f"Cannot resolve relative path '{path_str}' — this process has no current directory"
-            results.append((path_str, False, message))
-            logger.info("rm: %s", message)
-            deletion_log.record_deletion(
-                lane=deletion_log.LANE_RM,
-                outcome=deletion_log.OUTCOME_REFUSED,
-                requested=path_str,
-                resolved=original,
-                reason=message,
-            )
+            results.append(_refuse(path_str, original, message, message))
             continue
 
         exists_on_disk = absolute.exists() or absolute.is_symlink()
         if not exists_on_disk:
             message = f"Path does not exist: {absolute}"
-            results.append((path_str, False, message))
-            logger.info("rm: nonexistent path %s", absolute)
-            deletion_log.record_deletion(
-                lane=deletion_log.LANE_RM,
-                outcome=deletion_log.OUTCOME_NOT_FOUND,
-                requested=path_str,
-                resolved=absolute,
-                reason=message,
-            )
+            logger.info(*_record(deletion_log.OUTCOME_NOT_FOUND, path_str, absolute, message))
+            results.append((path_str, False, _shown("Path does not exist:", absolute, RECORDED_LINE)))
             continue
 
         # A symlink is judged by where the LINK lives, not its target: only the link is removed.
@@ -239,81 +371,145 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
         else:
             resolved = absolute.resolve()
 
+        judged_root, elsewhere = project_root, None
         allowed, reason = check_containment(resolved, roots)
+        if not allowed and not any(resolved.is_relative_to(root) for root in roots) and seat.is_admin("location"):
+            judged_root, reason = elsewhere_project(resolved)
+            allowed, elsewhere = judged_root is not None, ELSEWHERE_EXEMPTION
         if not allowed:
-            results.append((path_str, False, reason))
-            logger.warning(
-                "rm: containment refused %s (resolved %s): %s",
-                path_str,
-                resolved,
-                reason,
-            )
-            deletion_log.record_deletion(
-                lane=deletion_log.LANE_RM,
-                outcome=deletion_log.OUTCOME_REFUSED,
-                requested=path_str,
-                resolved=resolved,
-                reason=reason,
-                target=target,
-            )
+            results.append(_refuse(path_str, resolved, reason, _shown(reason, resolved), target=target))
             continue
 
-        blocked, carveout_reason = check_carveouts(resolved, project_root)
-        if blocked:
-            results.append((path_str, False, carveout_reason))
-            logger.warning(
-                "rm: carveout refused %s (resolved %s): %s",
-                path_str,
-                resolved,
-                carveout_reason,
-            )
-            deletion_log.record_deletion(
-                lane=deletion_log.LANE_RM,
-                outcome=deletion_log.OUTCOME_REFUSED,
-                requested=path_str,
-                resolved=resolved,
-                reason=carveout_reason,
-                target=target,
-            )
+        verdict = judge(resolved, judged_root, seat, lift_dot=lift_dot)
+        if verdict.refusal is not None:
+            shown = _shown(verdict.refusal, resolved)
+            results.append(_refuse(path_str, resolved, verdict.refusal, shown, target=target))
             continue
+        exemption = "+".join(name for name in (elsewhere, verdict.exemption) if name) or None
 
         measurement = deletion_log.measure(absolute)
+
+        if verdict.moves:
+            results.append(_move_to_archive(path_str, resolved, measurement, target, exemption))
+            continue
 
         try:
             # Delete the RESOLVED path the guards judged: rmtree("spawn/..") fails its last rmdir.
             if target is not None:
                 absolute.unlink()
             elif resolved.is_dir():
-                _remove_tree(resolved)
+                shutil.rmtree(resolved)
             else:
                 resolved.unlink()
-            message = f"Deleted: {resolved}" + (f" (symlink to {target})" if target is not None else "")
-            results.append((path_str, True, message))
-            logger.info("rm: deleted %s (resolved %s)", path_str, resolved)
-            deletion_log.record_deletion(
-                lane=deletion_log.LANE_RM,
-                outcome=deletion_log.OUTCOME_DELETED,
-                requested=path_str,
-                resolved=resolved,
-                reason=message,
-                measurement=measurement,
-                target=target,
-            )
         except Exception as exc:
-            message = f"Delete failed: {exc}{_standing_inside(resolved, cwd)}"
-            results.append((path_str, False, message))
-            logger.error("rm: delete failed for %s: %s", path_str, exc)
-            deletion_log.record_deletion(
-                lane=deletion_log.LANE_RM,
-                outcome=deletion_log.OUTCOME_FAILED,
-                requested=path_str,
-                resolved=resolved,
-                reason=message,
+            message = f"Delete failed: {exc}"
+            logger.error(
+                *_record(
+                    deletion_log.OUTCOME_FAILED, path_str, resolved, message, measurement=measurement, target=target
+                )
+            )
+            results.append((path_str, False, _shown(message, resolved, RECORDED_LINE)))
+            continue
+        message = f"Deleted: {resolved}" + (f" (symlink to {target})" if target is not None else "")
+        logger.info(
+            *_record(
+                deletion_log.OUTCOME_DELETED,
+                path_str,
+                resolved,
+                message,
                 measurement=measurement,
                 target=target,
+                exemption=exemption,
             )
+        )
+        link = () if target is None else (f"(the link only; it pointed at {target})",)
+        results.append((path_str, True, _shown("Deleted:", resolved, *link)))
 
     return results
+
+
+def _archives(resolved: Path, project_root: Path | None) -> bool:
+    """True when *resolved* is moved, not deleted: inside the project and not bytecode.
+
+    Outside the project means the system temp dir, the one place a true delete is the design.
+    """
+    if project_root is None or not resolved.is_relative_to(project_root):
+        return False
+    return _BYTECODE_DIR not in resolved.parts and resolved.suffix != _BYTECODE_SUFFIX
+
+
+_LIBC = ctypes.CDLL(None, use_errno=True)
+# renameat2's flag from linux/fs.h: fail with EEXIST rather than replace what holds the name.
+_RENAME_NOREPLACE = 1
+_ARCHIVE_NAME_TRIES = 1000
+
+
+def _rename_noreplace(src_dir_fd: int, src: str, dst_dir_fd: int, dst: str) -> None:
+    """One ``renameat2(RENAME_NOREPLACE)``: whole or not at all, and a taken *dst* raises FileExistsError."""
+    if _LIBC.renameat2(src_dir_fd, os.fsencode(src), dst_dir_fd, os.fsencode(dst), _RENAME_NOREPLACE) != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), dst)
+
+
+def _archive_names(name: str) -> Iterator[str]:
+    """*name*, then *name* plus a time stamp, then the stamp with a counter."""
+    yield name
+    stamped = f"{name}.{time.strftime('%Y%m%d-%H%M%S')}"
+    yield stamped
+    for count in range(2, _ARCHIVE_NAME_TRIES):
+        yield f"{stamped}-{count}"
+
+
+def move_into_archive(parent_fd: int, name: str) -> str:
+    """Rename *name*, in the folder *parent_fd* holds, into the ``.archive`` there; return the name it took.
+
+    Never over anything: a name taken, even in the same instant, moves on to the next. The
+    ``.archive`` opens without following a link, so one swapped in for a symlink fails, never redirects.
+    """
+    try:
+        os.mkdir(ARCHIVE_DIR, dir_fd=parent_fd)
+    except FileExistsError:
+        logger.debug("rm: the %s is already there", ARCHIVE_DIR)
+    archive_fd = os.open(ARCHIVE_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+    try:
+        for candidate in _archive_names(name):
+            try:
+                _rename_noreplace(parent_fd, name, archive_fd, candidate)
+            except FileExistsError:
+                logger.info("rm: %s is taken in the %s, trying the next name", candidate, ARCHIVE_DIR)
+                continue
+            return candidate
+    finally:
+        os.close(archive_fd)
+    raise FileExistsError(f"no free name for {name} in {ARCHIVE_DIR} after {_ARCHIVE_NAME_TRIES} tries")
+
+
+def _move_to_archive(
+    path_str: str, resolved: Path, measurement: dict, target: Path | None, exemption: str | None
+) -> tuple[str, bool, str]:
+    """Rename *resolved* into the ``.archive`` beside it and record the outcome, and any *exemption* used.
+
+    One rename, never a copy: it moves whole or not at all, and a cross-device target fails.
+    """
+    try:
+        parent_fd = os.open(resolved.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            destination = resolved.parent / ARCHIVE_DIR / move_into_archive(parent_fd, resolved.name)
+        finally:
+            os.close(parent_fd)
+    except OSError as exc:
+        message = f"Move to {ARCHIVE_DIR} failed, nothing moved: {exc}"
+        fields = {"measurement": measurement, "target": target, "exemption": exemption}
+        logger.error(*_record(deletion_log.OUTCOME_FAILED, path_str, resolved, message, **fields))
+        return path_str, False, _shown(message, resolved, RECORDED_LINE)
+
+    message = f"Moved: {resolved} -> {destination}" + (f" (symlink to {target})" if target is not None else "")
+    message += _seat_note(exemption)
+    fields = {"measurement": measurement, "target": target, "moved_to": destination, "exemption": exemption}
+    logger.info(*_record(deletion_log.OUTCOME_MOVED, path_str, resolved, message, **fields))
+    verdict = "Moved to .archive" + _seat_note(exemption) + ":"
+    link = () if target is None else (f"(the link only; it points at {target})",)
+    return path_str, True, _shown(verdict, resolved, f"-> {destination}", *link)
 
 
 MODE_STALE = "stale"
@@ -504,7 +700,7 @@ def _refuse_stale_dir(
 ) -> None:
     """Count, log and (unless dry) record one refused DIR."""
     report.refusals.append(message)
-    logger.warning("rm --stale: refused %s: %s", dir_arg, message)
+    logger.info("rm --stale: refused %s: %s", dir_arg, message)
     if not request.dry_run:
         deletion_log.record_deletion(
             lane=deletion_log.LANE_RM,
@@ -544,7 +740,7 @@ def _find_stale(
             continue
         visited.add(here)
         report.folders_scanned += 1
-        dirnames[:] = [name for name in dirnames if name not in _CARVEOUT_DIRS and name not in (".archive", "dropbox")]
+        dirnames[:] = [name for name in dirnames if name not in _CARVEOUT_DIRS and name not in (ARCHIVE_DIR, "dropbox")]
         if not here.name.endswith(_STALE_FOLDER_SUFFIX):
             continue
         for name in filenames:

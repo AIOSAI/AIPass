@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: startup.py
 # Description: Startup event handler with error catch-up scanning
-# Version: 1.5.2
+# Version: 1.8.0
 # Created: 2025-12-04
-# Modified: 2026-10-24
+# Modified: 2026-11-18
 # =============================================
 
 """Startup Event Handler - Run startup checks
@@ -17,20 +17,20 @@ import time
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set
+from aipass.prax import append_jsonl, get_system_logs_dir, logger
 from aipass.trigger.apps.config import (
     TRIGGER_JSON_DIR,
-    TRIGGER_ROOT,
-    append_trail,
+    TRIGGER_LOGS_DIR,
     atomic_write_json,
     migrate_json_file,
-    trail_logger,
 )
 from aipass.trigger.apps.handlers.json import json_handler
 
-SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent.parent / "system_logs"
+# Bound once: prax caches per process, and tests redirect by patching this name.
+SYSTEM_LOGS_DIR = get_system_logs_dir()
 CATCHUP_STATE_FILE = TRIGGER_JSON_DIR / "error_catchup.json"
 LEGACY_CATCHUP_STATE_FILE = TRIGGER_JSON_DIR / "trigger_data.json"
-SUPPRESSED_LOG = TRIGGER_ROOT / "logs" / "medic_suppressed.jsonl"
+SUPPRESSED_LOG = TRIGGER_LOGS_DIR / "medic_suppressed.jsonl"
 
 MAX_HASHES = 500
 MAX_LOOKBACK_HOURS = 24
@@ -38,9 +38,6 @@ MAX_LOOKBACK_HOURS = 24
 MAX_ERRORS_PER_SCAN = 50  # Stop after this many new errors found
 MAX_FILE_SIZE_BYTES = 512_000  # Skip files larger than 500KB
 SCAN_TIME_BUDGET_SECONDS = 5.0  # Abort entire scan after this many seconds
-
-# Not prax: the watchers would read its line and fire it back; they skip `.jsonl`.
-logger = trail_logger(TRIGGER_ROOT / "logs" / "startup_handler.jsonl")
 
 
 def _load_trigger_data() -> Dict[str, Any]:
@@ -80,18 +77,13 @@ def _load_trigger_data() -> Dict[str, Any]:
 
 def _save_trigger_data(data: Dict[str, Any]) -> None:
     """Save error_catchup.json."""
-    try:
-        atomic_write_json(CATCHUP_STATE_FILE, data)
-    except Exception as exc:
-        logger.warning(f"save trigger data failed: {exc}")
-        return
+    atomic_write_json(CATCHUP_STATE_FILE, data)
 
 
 def _log_suppression(reason: str) -> None:
     """Log a catchup suppression event to medic_suppressed.jsonl."""
     entry = {"ts": datetime.now().isoformat(), "source": "error_catchup", "reason": reason}
-    if not append_trail(SUPPRESSED_LOG, entry):
-        logger.warning("log suppression write failed")
+    append_jsonl(SUPPRESSED_LOG, entry)
 
 
 class ScanOutcome(NamedTuple):

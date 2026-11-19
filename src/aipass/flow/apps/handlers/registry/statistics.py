@@ -3,7 +3,7 @@
 # Description: Registry Statistics Handler
 # Version: 1.0.0
 # Created: 2025-11-07
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -12,12 +12,11 @@ Registry Statistics Handler
 
 from datetime import datetime, timezone
 from typing import Dict, Any
+from pathlib import Path
 
 from aipass.flow.apps.handlers.json import json_handler
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-_PKG_ROOT = module_file(__file__).parents[4]
+_PKG_ROOT = Path(__file__).resolve().parents[4]
 
 
 def get_registry_statistics(registry: Dict[str, Any]) -> Dict[str, Any]:

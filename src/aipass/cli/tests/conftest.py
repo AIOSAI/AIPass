@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for CLI branch tests
 # Version: 4.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """Shared pytest fixtures for CLI tests."""
@@ -60,8 +60,8 @@ def make_capture_console(**kwargs):
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
-    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    """Rich sizes an unpinned console on every print: 80 under pytest's capture,
+    the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 

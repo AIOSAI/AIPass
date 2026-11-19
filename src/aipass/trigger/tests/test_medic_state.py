@@ -3,7 +3,7 @@
 # Description: Unit tests for medic_state handler — real file I/O via tmp_path
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for the medic_state handler (apps/handlers/medic_state.py)."""
@@ -14,7 +14,6 @@
 import json
 from datetime import datetime, timedelta
 import pytest
-from pathlib import Path
 from unittest.mock import MagicMock
 
 from aipass.trigger.apps.handlers import medic_state
@@ -389,6 +388,29 @@ class TestGetSuppressionStats:
         assert result["suppressed_count"] == 1
         assert result["last_suppressed"] == "unknown"
 
+    def test_the_rotated_file_is_counted_with_the_live_one(self, state_mod):
+        """Pins the short count: rotation at 500 KB moved rows to .jsonl.1 and status stopped counting them."""
+        log_file = state_mod.MEDIC_SUPPRESSED_LOG
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        rotated = log_file.parent / f"{log_file.name}.1"
+        rotated.write_text('{"ts": "2026-04-01T10:00:00"}\n{"ts": "2026-04-02T10:00:00"}\n', encoding="utf-8")
+        log_file.write_text('{"ts": "2026-04-03T10:00:00"}\n', encoding="utf-8")
+        (log_file.parent / f"{log_file.name}.lock").write_text("", encoding="utf-8")
+
+        result = state_mod.get_suppression_stats()
+
+        assert result == {"suppressed_count": 3, "last_suppressed": "2026-04-03T10:00:00"}
+
+    def test_a_live_file_rotated_away_takes_its_last_row_from_the_backup(self, state_mod):
+        """Right after a rotation the live file is absent; the newest row is the backup's last one, not 'never'."""
+        log_file = state_mod.MEDIC_SUPPRESSED_LOG
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        (log_file.parent / f"{log_file.name}.1").write_text('{"ts": "2026-04-02T10:00:00"}\n', encoding="utf-8")
+
+        result = state_mod.get_suppression_stats()
+
+        assert result == {"suppressed_count": 1, "last_suppressed": "2026-04-02T10:00:00"}
+
 
 class TestGetRateLimitStats:
     """Tests for get_rate_limit_stats."""
@@ -436,6 +458,17 @@ class TestGetRateLimitStats:
 
         assert result["rate_limited_count"] == 1
         assert result["last_rate_limited"] == "unknown"
+
+    def test_the_rotated_file_is_counted_with_the_live_one(self, state_mod):
+        """The rate-limit count spans the live trail and its rotated backup."""
+        log_file = state_mod.RATE_LIMITED_LOG
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        (log_file.parent / f"{log_file.name}.1").write_text('{"ts": "2026-04-01T08:00:00"}\n', encoding="utf-8")
+        log_file.write_text('{"ts": "2026-04-02T09:00:00"}\n', encoding="utf-8")
+
+        result = state_mod.get_rate_limit_stats()
+
+        assert result == {"rate_limited_count": 2, "last_rate_limited": "2026-04-02T09:00:00"}
 
 
 class TestParseDuration:
@@ -977,32 +1010,3 @@ class TestLegacyPathMigration:
         data = json.loads(state_mod.MEDIC_STATE_FILE.read_text(encoding="utf-8"))
         assert [e["name"] for e in data["config"]["muted_branches"]] == ["sentry"]
         assert not legacy.exists()
-
-
-class TestARefusedReadDoesNotBlankTheState:
-    """read_config returns {} when it cannot read, and write_config persists
-    exactly what it is handed, so a refused read must raise rather than blank every mute.
-    """
-
-    def test_a_transient_refusal_does_not_cost_the_mutes(self, state_mod):
-        state_mod.mute_branch("flow")
-        assert state_mod.get_muted_branches() == ["flow"]
-
-        seen = []
-        state_file = str(state_mod.MEDIC_STATE_FILE)
-
-        class _RefusedOnce(type(Path())):
-            """The state file's own path, refused once — no other path in the process is touched."""
-
-            def read_text(self, *args, **kwargs):
-                if str(self) == state_file and not seen:
-                    seen.append(1)
-                    raise PermissionError(13, "used by another process")
-                return super().read_text(*args, **kwargs)
-
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(state_mod, "MEDIC_STATE_FILE", _RefusedOnce(state_file))
-            state_mod.mute_branch("sentry")
-
-        assert seen, "fixture refused nothing — test is vacuous"
-        assert sorted(state_mod.get_muted_branches()) == ["flow", "sentry"]

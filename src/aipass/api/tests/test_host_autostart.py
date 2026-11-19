@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_autostart.py
 # Description: Tests for the supervisor seam — a server that comes back on its own
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-27
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/host/autostart.py and the host-api autostart verb that drives it."""
@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import aipass.api as api_door
 from aipass.api.apps.handlers.host import autostart as host_autostart
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import lifetime as host_lifetime
@@ -192,14 +193,6 @@ class TestTheProbeAnswersAbsenceAndFailureDifferently:
                 assert host_autostart.supervised_pid() == 0
                 run.assert_not_called()
         gate.assert_called_once_with()
-
-    def test_a_platform_without_systemd_never_shells_out(self, quiet: None) -> None:
-        """The Windows lesson, applied before the bug rather than after."""
-        with patch.object(host_autostart.sys, "platform", "win32"):
-            with patch.object(host_autostart.subprocess, "run") as run:
-                assert host_autostart.supervised_pid() == 0
-                assert host_autostart.is_supported() is False
-                run.assert_not_called()
 
 
 class TestTheBindIsReadFromTheUnitNotTheConfig:
@@ -439,18 +432,15 @@ class TestTheInstallerDoorsRunTheStepsTheVerbPrints:
     def test_the_serve_detached_door_is_the_handler_with_the_same_refusals(self, quiet: None) -> None:
         """Where no user systemd exists the install starts the server
         through this door instead of printing the command."""
-        record = {"pid": 7, "host": "100.64.0.9", "port": 9100, "log": "/l", "started": "t"}
-        with patch.object(host_lifetime, "serve_detached", return_value=record) as start:
-            assert host_api_module.serve_detached("100.64.0.9", 9100) == record
-        start.assert_called_once_with(host="100.64.0.9", port=9100)
+        assert api_door.serve_detached is host_lifetime.serve_detached
 
         with patch.object(host_lifetime, "serve_detached", side_effect=host_config.BindRefused("loopback")):
-            with pytest.raises(host_api_module.BindRefused):
-                host_api_module.serve_detached()
+            with pytest.raises(api_door.BindRefused):
+                api_door.serve_detached()
 
     def test_both_doors_refuse_without_systemd(self, quiet: None, tmp_path: Path) -> None:
         with patch.object(host_autostart, "is_supported", return_value=False):
-            with pytest.raises(host_api_module.AutostartUnsupported):
+            with pytest.raises(api_door.AutostartUnsupported):
                 host_autostart.install_unit(tmp_path / "u.service")
-            with pytest.raises(host_api_module.AutostartUnsupported):
+            with pytest.raises(api_door.AutostartUnsupported):
                 host_autostart.enable_unit()

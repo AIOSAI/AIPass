@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: system_detector.py
 # Description: Pure system detection logic for aipass doctor
-# Version: 1.1.1
+# Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-11-01
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -22,6 +22,8 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Dict
+
+import psutil  # type: ignore[import-untyped]
 
 from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
@@ -82,7 +84,6 @@ def detect_claude_code() -> Dict[str, Any]:
 
     raw = ""
     try:
-        # The resolved path, not "claude": on Windows it is claude.cmd, which a bare name misses.
         result = subprocess.run([claude_path, "--version"], capture_output=True, text=True, timeout=10)
         raw = result.stdout.strip()
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -93,13 +94,11 @@ def detect_claude_code() -> Dict[str, Any]:
     return {"found": True, "raw": raw, "version": version}
 
 
-def _shell_from_parent_proc(os_name: str = os.name, getppid: Callable[[], int] = os.getppid) -> str | None:
-    """POSIX fallback: read the invoking parent process's command name via /proc.
+def _shell_from_parent_proc(getppid: Callable[[], int] = os.getppid) -> str | None:
+    """Fallback: read the invoking parent process's command name via /proc.
 
     Containers and CI runners often run a real shell without exporting $SHELL.
     """
-    if os_name != "posix":
-        return None
     try:
         comm_path = Path(f"/proc/{getppid()}/comm")
         if not comm_path.is_file():
@@ -111,16 +110,16 @@ def _shell_from_parent_proc(os_name: str = os.name, getppid: Callable[[], int] =
     return name or None
 
 
-def detect_shell(os_name: str = os.name, getppid: Callable[[], int] = os.getppid) -> Dict[str, Any]:
+def detect_shell(getppid: Callable[[], int] = os.getppid) -> Dict[str, Any]:
     """Return shell name and path.
 
-    os_name and getppid are test seams; product callers pass nothing.
+    getppid is a test seam; product callers pass nothing.
     """
     shell_path = os.environ.get("SHELL", "")
     if shell_path:
         return {"name": Path(shell_path).name, "path": shell_path}
 
-    name = _shell_from_parent_proc(os_name, getppid)
+    name = _shell_from_parent_proc(getppid)
     if name:
         resolved = shutil.which(name)
         if resolved:
@@ -139,34 +138,9 @@ def detect_os() -> Dict[str, Any]:
     }
 
 
-def _read_meminfo_kb() -> int:
-    """Read MemTotal from /proc/meminfo and return value in kB, or 0 on failure."""
-    meminfo = Path("/proc/meminfo")
-    if not meminfo.exists():
-        return 0
-    try:
-        with open(meminfo, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("MemTotal:"):
-                    return int(line.split()[1])
-    except Exception as exc:
-        logger.warning("[system_detector] /proc/meminfo read failed: %s", exc)
-    return 0
-
-
 def _total_ram_gb() -> float:
-    """Return total RAM in GB using psutil or /proc/meminfo fallback."""
-    try:
-        import psutil  # type: ignore[import-untyped]
-
-        return psutil.virtual_memory().total / (1024**3)
-    except ImportError as exc:
-        logger.info("[system_detector] psutil not installed, using /proc/meminfo fallback: %s", exc)
-        kb = _read_meminfo_kb()
-        return kb / (1024**2) if kb else 0.0
-    except Exception as exc:
-        logger.warning("[system_detector] psutil RAM check failed: %s", exc)
-        return 0.0
+    """Return total RAM in GB; psutil is a declared dependency, so a failure raises."""
+    return psutil.virtual_memory().total / (1024**3)
 
 
 def detect_ram() -> Dict[str, Any]:
@@ -200,18 +174,3 @@ def detect_install_method() -> str:
             return "clone"
 
     return "unknown"
-
-
-def detect_tmux() -> bool:
-    """True if tmux is available on PATH."""
-    return shutil.which("tmux") is not None
-
-
-def detect_wt() -> bool:
-    """True if Windows Terminal (wt.exe) is available on PATH."""
-    return shutil.which("wt.exe") is not None
-
-
-def detect_docker() -> bool:
-    """True if docker is available on PATH."""
-    return shutil.which("docker") is not None

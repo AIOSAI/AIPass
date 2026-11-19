@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_run_module.py
 # Description: Tests for the drone @daemon run module
-# Version: 1.3.1
+# Version: 1.4.0
 # Created:2026-06-15
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
@@ -12,7 +12,7 @@
 # sentry: no-test-needed(stdlib) — fcntl's exclusive lock under tick_lock; its use is pinned in the blocked contract
 # sentry: no-test-needed(ruff) — that run.py parses and imports; every test here imports it first
 
-import errno
+import importlib.util
 import json
 import os
 import re
@@ -194,7 +194,7 @@ class TestPrunePersistence:
         """A citizen mid-edit (bad JSON, a refused job) must not lose its history, or its once jobs re-fire."""
         runstate = {"jobs": {"@backup/once": {"completed": "2026-09-01T00:00:00"}, "@commons/live": {}}}
 
-        def discover(skipped_owners):
+        def discover(skipped_owners, refusals):
             skipped_owners.add("@backup")
             return [live_job()]
 
@@ -292,7 +292,7 @@ class TestRotationDelegation:
             results = self._tick(
                 live_job(),
                 runstate,
-                patch("aipass.ai_mail.apps.modules.door_wake.wake_branch", side_effect=RuntimeError("no wake")),
+                patch("aipass.ai_mail.wake_branch", side_effect=RuntimeError("no wake")),
             )
         assert (results["fired"], results["failed"]) == (0, 1)
         assert runstate["jobs"]["@commons/live"]["last_error"] == "no wake"
@@ -571,6 +571,124 @@ class TestCaughtUpTick:
         assert mock_update.call_args.kwargs["caught_up"] is False
 
 
+STAMPED_LINE = re.compile(r"^\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\]", re.MULTILINE)
+
+
+class TestTickLinesThroughPrax:
+    """Prax is the tick's only log: under the scheduler stdout goes nowhere, so a console-only event is lost."""
+
+    def _seeding_tick(self, monkeypatch):
+        freeze_runstate_clock(monkeypatch, SLOT_SEED_CASES[0][0])
+        with (
+            patch(f"{RUN}.discover_jobs", return_value=[interval_job_with_slot()]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}._fire_job", return_value=(OUTCOME_FIRED, "")),
+            patch(f"{RUN}.save_runstate", return_value=True),
+        ):
+            return run_tick()
+
+    def test_a_seed_reaches_the_prax_log(self, caplog, monkeypatch):
+        with caplog.at_level("INFO"):
+            results = self._seeding_tick(monkeypatch)
+        assert results["seeded"] == 1
+        assert "[run] SEED: @sentry/shadow-cycle-weekly" in caplog.text
+
+    def test_a_tick_that_fires_logs_its_summary(self, caplog):
+        with (
+            caplog.at_level("INFO"),
+            patch(f"{RUN}.discover_jobs", return_value=[live_job()]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.is_job_due", return_value=True),
+            patch(f"{RUN}._fire_job", return_value=(OUTCOME_FIRED, "")),
+            patch(f"{RUN}.save_runstate", return_value=True),
+        ):
+            assert run_tick()["fired"] == 1
+        assert "[run] Tick complete: 1 fired, 0 failed" in caplog.text
+
+    def test_a_dry_run_lane_line_tells_the_console_and_logs_nothing(self, caplog, capsys):
+        def drain(runstate, enabled, dry_run, log, fire):
+            log("DRY RUN — would fire CATCH-UP @commons/live (2 window(s))")
+            return 0
+
+        with (
+            caplog.at_level("INFO"),
+            patch(f"{RUN}.discover_jobs", return_value=[live_job()]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.is_job_due", return_value=False),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.catch_up_lane.drain_one", side_effect=drain),
+        ):
+            run_tick(dry_run=True)
+        assert "would fire CATCH-UP @commons/live" in flat(capsys.readouterr().out)
+        assert "[run]" not in caplog.text
+
+    def test_no_console_line_carries_a_time_stamp(self, capsys, monkeypatch):
+        self._seeding_tick(monkeypatch)
+        out = capsys.readouterr().out
+        assert "SEED: @sentry/shadow-cycle-weekly" in flat(out)
+        assert not STAMPED_LINE.search(out), "a time-stamped console line is a second logger"
+
+    def test_a_quiet_tick_tells_the_console_and_logs_nothing(self, caplog, capsys):
+        with (
+            caplog.at_level("INFO"),
+            patch(f"{RUN}.discover_jobs", return_value=[live_job()]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.is_job_due", return_value=False),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.save_runstate", return_value=True),
+        ):
+            run_tick()
+        assert "@commons/live — not due" in flat(capsys.readouterr().out)
+        assert "[run]" not in caplog.text, "every idle tick would spend prax's history on nothing"
+
+    def test_a_catch_up_lane_line_reaches_the_prax_log(self, caplog):
+        def drain(runstate, enabled, dry_run, log, fire):
+            log("CATCH-UP FIRED: @commons/live (2 window(s))")
+            return 1
+
+        with (
+            caplog.at_level("INFO"),
+            patch(f"{RUN}.discover_jobs", return_value=[live_job()]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.is_job_due", return_value=False),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.save_runstate", return_value=True),
+            patch(f"{RUN}.catch_up_lane.drain_one", side_effect=drain),
+        ):
+            assert run_tick()["drained"] == 1
+        assert "[run] CATCH-UP FIRED: @commons/live (2 window(s))" in caplog.text
+
+    def test_a_wake_that_raises_is_a_prax_error_and_leaves_stderr_to_crashes(self, caplog, capsys):
+        with (
+            caplog.at_level("INFO"),
+            patch(f"{RUN}.discover_jobs", return_value=[live_job()]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.is_job_due", return_value=True),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.save_runstate", return_value=True),
+            patch("aipass.ai_mail.wake_branch", side_effect=RuntimeError("boom")),
+        ):
+            assert run_tick()["failed"] == 1
+        errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+        assert errors == ["[run] Exception firing @commons/live: boom"]
+        out, err = capsys.readouterr()
+        assert "FAIL: @commons/live — exception: boom" in flat(out), "a hand run still sees it"
+        assert err == "", "under the timer stderr is the crash record; a handled failure is not a crash"
+
+    def test_a_tick_that_finds_the_lock_held_says_so_in_the_prax_log(self, caplog):
+        with (
+            caplog.at_level("INFO"),
+            patch(f"{RUN}.tick_lock.prepare"),
+            patch(f"{RUN}.tick_lock.acquire", return_value=None),
+            patch(f"{RUN}.run_tick") as tick,
+        ):
+            assert handle_command("run", []) is True
+        tick.assert_not_called()
+        assert "[run] Another scheduler instance is running, skipping." in caplog.text
+
+
 def fake_drone(tmp_path, program: str = "", mail_exit: int = 0) -> tuple:
     """A stand-in for drone: the interpreter running a one-liner, so the tokens after "drone" arrive as sys.argv[1:].
 
@@ -618,61 +736,33 @@ def command_job_dict(branch_dir, command="drone @daemon --help", **extra) -> dic
 def pid_gone(pid: int, within: float = 5.0) -> bool:
     """True once *pid* has exited (a zombie waiting for its new parent to reap it counts).
 
-    Waits on the exit itself, not on a clock: a pidfd (Linux) or a kqueue NOTE_EXIT
-    (BSD, macOS) turns readable the moment the process ends, and the wait gives up
-    at *within*. Linux and macOS only (its one caller is skipped elsewhere); any
-    other platform raises rather than answering from a guess.
+    Waits on the exit itself, not on a clock: a pidfd turns readable the moment
+    the process ends, and the wait gives up at *within*.
     """
-    if sys.platform == "linux":
-        try:
-            fd = os.pidfd_open(pid)
-        except ProcessLookupError:
-            return True
-        try:
-            ready, _, _ = select.select([fd], [], [], within)
-            return bool(ready)
-        finally:
-            os.close(fd)
-    if sys.platform == "darwin":
-        queue = select.kqueue()
-        try:
-            watch = select.kevent(
-                pid,
-                filter=select.KQ_FILTER_PROC,
-                flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
-                fflags=select.KQ_NOTE_EXIT,
-            )
-            try:
-                events = queue.control([watch], 1, within)
-            except ProcessLookupError:
-                return True
-            # A registration error comes back as an EV_ERROR event, not a raise:
-            # ESRCH means the process was already gone; anything else is a real error.
-            if events and events[0].flags & select.KQ_EV_ERROR:
-                if events[0].data == errno.ESRCH:
-                    return True
-                raise OSError(events[0].data, "kevent registration failed")
-            return bool(events)
-        finally:
-            queue.close()
-    raise RuntimeError(f"pid_gone has no exit notifier on {sys.platform}")
+    try:
+        fd = os.pidfd_open(pid)
+    except ProcessLookupError:
+        return True
+    try:
+        ready, _, _ = select.select([fd], [], [], within)
+        return bool(ready)
+    finally:
+        os.close(fd)
 
 
 def leader_reaped(pid: int) -> bool:
     """True once this process's child *pid* has been reaped; an exited, unreaped zombie is False."""
-    if hasattr(os, "waitid"):
-        try:
-            os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
-        except ChildProcessError:
-            return True
-        return False
-    raise RuntimeError(f"leader_reaped has no non-reaping wait on {sys.platform}")
+    try:
+        os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except ChildProcessError:
+        return True
+    return False
 
 
 def kill_quietly(pid: int) -> None:
     """Teardown for a test that started a background process. Already gone is fine, and said."""
     try:
-        os.kill(pid, signal.SIGTERM)  # TerminateProcess on Windows, SIGTERM on POSIX
+        os.kill(pid, signal.SIGTERM)
     except OSError as e:
         print(f"background pid {pid} already gone at teardown: {e}")
 
@@ -680,7 +770,7 @@ def kill_quietly(pid: int) -> None:
 @pytest.fixture
 def no_wake():
     """wake_branch, wired to fail loudly if a command job ever reaches it."""
-    wake = "aipass.ai_mail.apps.modules.door_wake.wake_branch"
+    wake = "aipass.ai_mail.wake_branch"
     with patch(wake, side_effect=AssertionError("a command job woke someone")) as mock_wake:
         yield mock_wake
 
@@ -753,7 +843,6 @@ class TestRunCommand:
         assert result.duration < 10, f"a 1s timeout took {result.duration:.1f}s to come back"
         assert result.tail == "started", "output written before the overrun must survive into the tail"
 
-    @pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX; Windows stops the direct child only")
     def test_an_overrun_stops_the_grandchild_too(self, tmp_path, monkeypatch):
         # Drone runs every @branch verb in a child of its own, so killing drone
         # alone would orphan exactly the work that overran.
@@ -773,7 +862,6 @@ class TestRunCommand:
         finally:
             kill_quietly(grandchild)
 
-    @pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX; Windows stops the direct child only")
     @pytest.mark.parametrize("leader_on_term", ["exits", "ignores"])
     def test_a_grandchild_that_ignores_sigterm_is_killed_with_its_group(self, tmp_path, monkeypatch, leader_on_term):
         pidfile = tmp_path / "stubborn.pid"
@@ -799,12 +887,11 @@ class TestRunCommand:
         finally:
             kill_quietly(grandchild)
 
-    @pytest.mark.skipif(not hasattr(os, "waitid"), reason="the reap check reads waitid's WNOWAIT")
     def test_the_sigkill_never_reaches_a_pgid_reissued_after_the_leader_is_reaped(self, tmp_path, monkeypatch):
         # The kernel reissues a reaped pid at will, so the reuse is modelled: a
         # group signal sent once the leader is reaped lands on the test's sentinel.
         sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
-        sentinel = subprocess.Popen(sleeper, start_new_session=os.name == "posix")
+        sentinel = subprocess.Popen(sleeper, start_new_session=True)
         real_signal_group = command_job.signal_group
         sent = []
 
@@ -1015,14 +1102,18 @@ class TestCommandJobFire:
         assert outcome == OUTCOME_FAILED
         assert detail.startswith("exit 2, ")
 
-    def test_a_mail_that_fails_never_changes_the_answer(self, tmp_path, monkeypatch, no_wake, caplog):
+    def test_a_mail_that_fails_never_changes_the_answer(self, tmp_path, monkeypatch, no_wake, caplog, capsys):
         with caplog.at_level("WARNING"):
             outcome, _, runs, _ = self._fire(
                 tmp_path, monkeypatch, "print('ok')\n", mail_exit=1, notify={"email": "@devpulse"}
             )
         assert outcome == OUTCOME_FIRED
         assert len(runs) == 3, "both mails were attempted"
-        assert caplog.text.count("[run] notify mail to @devpulse not sent") == 2
+        warnings = [r for r in caplog.records if "notify mail to @devpulse not sent" in r.getMessage()]
+        assert [r.levelname for r in warnings] == ["WARNING", "WARNING"]
+        out, err = capsys.readouterr()
+        assert flat(out).count("Notify mail to @devpulse not sent") == 2
+        assert err == "", "under the timer stderr is the crash record"
 
 
 class TestCommandJobTick:
@@ -1173,3 +1264,14 @@ class TestHelpNamesCommandJobs:
         assert '"command": "drone rm --stale 10d .."' in out
         assert "drone must be the first token" in out
         assert '"notify": { "email": "@devpulse" }' in out
+
+
+class TestLockFileFollowsTheStateRoot:
+    def test_schedule_lock_lives_under_the_state_root_not_the_package(self, tmp_path, monkeypatch):
+        """A fixed-depth climb puts schedule.lock inside an installed wheel; it must follow the state root."""
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        spec = importlib.util.spec_from_file_location("run_fresh", str(sys.modules[RUN].__file__))
+        assert spec is not None and spec.loader is not None
+        fresh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fresh)  # a fresh copy: the shared module keeps the conftest seam
+        assert Path(fresh.LOCK_FILE) == tmp_path / "daemon" / "daemon_json" / "schedule.lock"

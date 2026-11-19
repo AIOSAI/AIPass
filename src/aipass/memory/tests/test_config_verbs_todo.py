@@ -3,7 +3,7 @@
 # Description: The todo lane of the verbs - the todos count shown never set, the rollover pad, the todo verbs
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/todo.py and the todo lane of apps/modules/rollover.py and rollover_config.py."""
@@ -29,7 +29,8 @@ import pytest
 # The real display module, imported once at the top: nothing in the suite
 # stands it in, conftest imports it the same way, and its consoles are patched
 # at the edge (their width) per test.
-from aipass.cli.apps.modules import display
+from aipass.cli import display
+from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.tests.support_config_verbs import (
     _ANSI,
     _payload,
@@ -153,6 +154,7 @@ class TestRolloverTodoPad:
             return local.read_bytes()
 
         backlog = tmp_path / ".backup" / "todo" / "memory" / "backlog.json"
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: ("@memory", False))
         return SimpleNamespace(local=local, backlog=backlog, execute=execute, write=write, before=write(12))
 
     def test_check_over_count_says_ready_for_rollover(self, verbs, pad, capsys) -> None:
@@ -223,6 +225,34 @@ class TestRolloverTodoPad:
         entries = json.loads(pad.backlog.read_text(encoding="utf-8"))["entries"]
         assert [record["entry"]["number"] for record in entries] == [1, 2]
         pad.execute.assert_called_once_with()
+
+    def test_another_verified_seat_naming_the_pad_is_refused_and_the_fleet_still_rolls(
+        self, verbs, pad, capsys, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: ("@seed", False))
+        capsys.readouterr()
+        _run_rollover(verbs, "run", "--branch", "@memory")
+        err = _unwrapped(_streams(capsys))
+        assert _unwrapped("@memory todos NOT rolled - rollover run --branch writes @memory's todo pad") in err
+        assert _unwrapped("not @seed - run it from inside @memory's own directory") in err, err
+        assert pad.local.read_bytes() == pad.before
+        assert not pad.backlog.exists()
+        pad.execute.assert_called_once_with()
+
+    def test_an_unverified_caller_naming_the_pad_is_refused(self, verbs, pad, capsys, monkeypatch) -> None:
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: ("", False))
+        capsys.readouterr()
+        _run_rollover(verbs, "run", "--branch", "@memory")
+        assert _unwrapped("not an unverified caller - run it from inside @memory's own") in _unwrapped(_streams(capsys))
+        assert pad.local.read_bytes() == pad.before
+        pad.execute.assert_called_once_with()
+
+    def test_the_admin_rolls_another_seats_pad(self, verbs, pad, capsys, monkeypatch) -> None:
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: ("@seed", True))
+        capsys.readouterr()
+        _run_rollover(verbs, "run", "--branch", "@memory")
+        assert "@memory todos: rolled 2 oldest (#1, #2) -> " in _stdout(capsys)
+        assert pad.backlog.exists()
 
     @pytest.mark.parametrize(
         ("args", "sentence"),

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_rm_gate.py
-# Version: 3.2.0
+# Version: 3.8.1
 # Description: Tests for rm_gate security handler, the DPLAN-0356 lockdown since 2.0.0
 # Branch: hooks
 # Created: 2026-06-02
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/security/rm_gate.py."""
@@ -16,6 +16,7 @@
 
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -24,7 +25,7 @@ import pytest
 
 from aipass.hooks.apps.handlers.security import rm_gate
 from aipass.hooks.apps.modules import bash_writes
-from aipass.prax.apps.modules.logger import system_logger
+from aipass.prax import logger as system_logger
 from aipass.hooks.apps.handlers.security.rm_gate import handle
 
 _BRANCH = Path(__file__).resolve().parent.parent
@@ -37,10 +38,9 @@ LIVE_RECORDS = (
 
 
 def _home_through_a_link(real: Path, link: Path, monkeypatch) -> None:
-    """HOME (USERPROFILE on Windows) spelled through *link*, a directory symlink to *real*, as macOS's /var is."""
+    """HOME spelled through *link*, a directory symlink to *real*."""
     link.symlink_to(real, target_is_directory=True)
     monkeypatch.setenv("HOME", str(link))
-    monkeypatch.setenv("USERPROFILE", str(link))
 
 
 @pytest.fixture(autouse=True)
@@ -62,9 +62,18 @@ def audit_log_to_tmp(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def system_temp_apart(tmp_path, monkeypatch):
+    """The seats live under tmp_path, itself in the real temp dir, so the gate's temp lane moves aside."""
+    apart = tmp_path / "system_temp"
+    apart.mkdir()
+    monkeypatch.setattr(rm_gate, "system_temp", lambda: apart.resolve())
+    return apart
+
+
+@pytest.fixture(autouse=True)
 def no_admin_grant():
     """No test reads this machine's real admin grant; TestTheLockdown grants it where it means to."""
-    with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
+    with patch("aipass.ai_mail.is_verified_admin_caller", return_value=False):
         yield
 
 
@@ -179,6 +188,36 @@ class TestHandle:
         self._assert_blocked(self._bash("rm -rf $DIR"))
 
 
+class TestEveryCallLeavesATrailEntry:
+    """Each handle() call appends one entry to rm_gate's own json trail, an allow as well as a refusal."""
+
+    CWD = str(_BRANCH)
+
+    @pytest.fixture
+    def trail(self, tmp_path, monkeypatch) -> Path:
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        return tmp_path / "hooks" / "hooks_json" / "rm_gate_log.json"
+
+    def _bash(self, command: str) -> dict:
+        return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": self.CWD})
+
+    def test_an_allow_and_a_refusal_each_write_their_verdict(self, trail: Path):
+        assert self._bash("ls")["exit_code"] == 0
+        assert self._bash("rm file.txt")["exit_code"] == 2
+        entries = json.loads(trail.read_text(encoding="utf-8"))
+        assert [(entry["operation"], entry["data"]) for entry in entries] == [
+            ("check", {"tool": "Bash", "verdict": "allow", "seat": self.CWD}),
+            ("check", {"tool": "Bash", "verdict": "refuse", "seat": self.CWD}),
+        ]
+
+    def test_a_trail_that_cannot_be_written_changes_no_verdict(self, trail: Path):
+        with patch.object(rm_gate.json_handler, "log_operation", return_value=False) as logged:
+            assert self._bash("ls")["exit_code"] == 0
+            assert self._bash("rm file.txt")["exit_code"] == 2
+        assert [c.args[0] for c in logged.call_args_list].count("check") == 2
+        assert not trail.exists()
+
+
 class TestDeletionRecord:
     """The owner, 2026-08-14: "we need a log for deleted files - if something deletes,
     it should be a record of it."
@@ -232,7 +271,7 @@ class TestDeletionRecord:
         """The admin seat's drone rm is @drone's record — double-logging it would be a lie
         about how many deletions happened."""
         with (
-            patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True),
+            patch("aipass.ai_mail.is_verified_admin_caller", return_value=True),
             caplog.at_level(logging.INFO),
         ):
             assert self._bash("drone rm build/x")["exit_code"] == 0
@@ -425,8 +464,8 @@ class TestOneDeleteSpelledManyWays:
 
     def test_drone_spelled_any_way_is_the_admin_seats_lane(self):
         """DRONE rm is drone's lane, not a raw rm: the grant decides it, as for the bare spelling."""
-        assert "admin seat's alone" in json.loads(self._bash("DRONE rm -rf build/x")["stdout"])["reason"]
-        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
+        assert "inside your own branch" in json.loads(self._bash("DRONE rm -rf build/x")["stdout"])["reason"]
+        with patch("aipass.ai_mail.is_verified_admin_caller", return_value=True):
             assert self._bash("DRONE rm -rf build/x")["exit_code"] == 0
 
     def test_a_renamed_delete_reaches_the_record(self, caplog):
@@ -443,7 +482,7 @@ class TestOneDeleteSpelledManyWays:
             assert self._bash("rm -rf build/x")["exit_code"] == 2
 
 
-_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller"
+_RAIL = "aipass.ai_mail.is_verified_admin_caller"
 
 
 def _seat(root: Path, name: str) -> str:
@@ -471,22 +510,22 @@ class TestTheLockdown:
         assert result["exit_code"] == 2
         return json.loads(result["stdout"])["reason"]
 
-    def test_a_plain_rm_from_canary_is_refused_and_teaches_rename_or_archive(self, tmp_path):
+    def test_a_plain_rm_from_canary_is_refused_and_teaches_drone_rm_in_its_own_branch(self, tmp_path):
         reason = self._reason(self._run("rm notes.txt", _seat(tmp_path, "canary"), grant=False))
 
-        assert "@canary" in reason
-        assert "(disabled)" in reason and ".archive/" in reason and "@devpulse" in reason
-        assert "drone rm" not in reason
+        assert "@canary" in reason and "drone rm <path>" in reason and "inside your own branch" in reason
+        assert "user's folder" in reason and "emptied at any moment" in reason and "@devpulse" in reason
+        assert "you never put anything there yourself" in reason
 
     def test_a_recursive_rm_from_canary_is_refused_the_same_way(self, tmp_path):
         reason = self._reason(self._run("rm -rf build", _seat(tmp_path, "canary"), grant=False))
 
-        assert ".archive/" in reason and "drone rm" not in reason
+        assert "drone rm <path>" in reason and ".archive/" in reason
 
     def test_drone_rm_from_canary_is_refused(self, tmp_path):
         reason = self._reason(self._run("drone rm notes.txt", _seat(tmp_path, "canary"), grant=False))
 
-        assert "@canary" in reason and "admin" in reason
+        assert "@canary" in reason and "@devpulse alone may" in reason and "are truly deleted" in reason
 
     def test_drone_rm_from_the_verified_admin_seat_is_allowed(self, tmp_path):
         result = self._run("drone rm notes.txt", _seat(tmp_path, "devpulse"), grant=True)
@@ -520,15 +559,171 @@ class TestTheLockdown:
             self._run("rm a.txt", canary, grant=False)
             self._run("drone rm b.txt", canary, grant=False)
 
-        records = [r.getMessage() for r in caplog.records if "DELETE" in r.getMessage()]
+        records = [r.getMessage() for r in caplog.records if " refused | lane=" in r.getMessage()]
         assert len(records) == 2
-        assert all("refused" in r and "branch=canary" in r for r in records)
+        assert all("branch=canary" in r for r in records)
+        assert "DELETE refused | lane=raw rm" in records[0] and "MOVE refused | lane=drone rm" in records[1]
+
+
+class TestDroneRmInsideTheOwnBranch:
+    """The owner, 2026-11-15: drone rm moves an in-tree target to .archive, so a citizen runs it in its own branch."""
+
+    def _run(self, command: str, cwd: str, grant: bool = False) -> dict:
+        with patch(_RAIL, return_value=grant):
+            return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd})
+
+    def _refused(self, command: str, cwd: str) -> str:
+        result = self._run(command, cwd)
+        assert result["exit_code"] == 2, command
+        return json.loads(result["stdout"])["reason"]
+
+    @staticmethod
+    def _tree(tmp_path: Path) -> tuple[Path, Path]:
+        """Seats @canary and @other, each holding notes.txt and build/x, under one root holding README.md."""
+        canary, other = Path(_seat(tmp_path, "canary")), Path(_seat(tmp_path, "other"))
+        for seat in (canary, other):
+            (seat / "build").mkdir()
+            (seat / "notes.txt").write_text("n", encoding="utf-8")
+            (seat / "build" / "x").write_text("x", encoding="utf-8")
+        (tmp_path / "README.md").write_text("r", encoding="utf-8")
+        return canary, other
+
+    def test_targets_inside_the_callers_own_branch_are_allowed(self, tmp_path):
+        canary, _ = self._tree(tmp_path)
+        for command in ("drone rm notes.txt", "drone rm notes.txt build/x", f"drone rm {canary / 'build'}"):
+            result = self._run(command, str(canary))
+            assert (result["exit_code"], result["stdout"]) == (0, ""), command
+        assert self._run("drone rm x", str(canary / "build"))["exit_code"] == 0
+
+    def test_a_target_inside_the_system_temp_dir_is_allowed(self, tmp_path, system_temp_apart):
+        canary, _ = self._tree(tmp_path)
+        (system_temp_apart / "scratch").write_text("s", encoding="utf-8")
+        result = self._run(f"drone rm {system_temp_apart / 'scratch'}", str(canary))
+        assert (result["exit_code"], result["stdout"]) == (0, "")
+
+    def test_a_file_at_the_root_above_the_branches_is_refused_and_named(self, tmp_path):
+        canary, _ = self._tree(tmp_path)
+        reason = self._refused("drone rm ../README.md", str(canary))
+        assert str(tmp_path / "README.md") in reason and "@devpulse" in reason and "@canary" in reason
+        refused_line = reason.split("Refused: ", 1)[1].split("\n", 1)[0]
+        assert (
+            refused_line == f"{tmp_path / 'README.md'} is outside your own branch ({canary}) and the system temp dir."
+        )
+
+    def test_no_refusal_names_a_plan_id(self, tmp_path):
+        canary, _ = self._tree(tmp_path)
+        for command, grant in (
+            ("rm notes.txt", False),
+            ("rm notes.txt", True),
+            ("unlink notes.txt", False),
+            ("drone rm ../README.md", False),
+            ("$UNSET_PROGRAM x", False),
+        ):
+            reason = json.loads(self._run(command, str(canary), grant=grant)["stdout"])["reason"]
+            assert not re.search(r"[A-Z]PLAN-\d", reason), command
+
+    def test_a_sibling_branchs_file_is_refused_however_it_is_reached(self, tmp_path):
+        canary, other = self._tree(tmp_path)
+        for command in (
+            "drone rm ../other/notes.txt",
+            f"drone rm {other / 'notes.txt'}",
+            "drone rm notes.txt ../other/notes.txt",
+            "cd ../other && drone rm notes.txt",
+        ):
+            assert str(other / "notes.txt") in self._refused(command, str(canary)), command
+
+    def test_a_path_through_a_directory_link_is_judged_where_it_resolves(self, tmp_path):
+        canary, other = self._tree(tmp_path)
+        (canary / "door").symlink_to(other, target_is_directory=True)
+        assert str(other / "notes.txt") in self._refused("drone rm door/notes.txt", str(canary))
+
+    def test_a_link_inside_the_branch_is_judged_where_the_link_lives(self, tmp_path):
+        canary, other = self._tree(tmp_path)
+        (canary / "door").symlink_to(other, target_is_directory=True)
+        assert self._run("drone rm door", str(canary))["exit_code"] == 0
+
+    def test_the_branch_root_and_the_temp_dir_themselves_are_refused(self, tmp_path, system_temp_apart):
+        canary, _ = self._tree(tmp_path)
+        reason = self._refused("drone rm .", str(canary))
+        assert f"Refused: {canary} is your own branch root; a branch is retired by @spawn, not by drone rm." in reason
+        self._refused(f"drone rm {system_temp_apart}", str(canary))
+
+    @pytest.mark.parametrize("command", ("drone rm --help", "drone rm -h"))
+    def test_the_help_form_alone_passes_for_every_seat(self, tmp_path, command):
+        canary, _ = self._tree(tmp_path)
+        assert self._run(command, str(canary)) == {"stdout": "", "exit_code": 0}
+
+    def test_a_file_named_like_an_option_is_refused_and_shown_the_way_out(self, tmp_path):
+        canary, _ = self._tree(tmp_path)
+        (canary / "-dash.txt").write_text("d", encoding="utf-8")
+        assert "write it as ./-dash.txt" in self._refused("drone rm -dash.txt", str(canary))
+        assert self._run("drone rm ./-dash.txt", str(canary))["exit_code"] == 0
+
+    @pytest.mark.parametrize(
+        "command",
+        (
+            "drone rm missing.txt",
+            "drone rm $UNSET_TARGET",
+            "drone rm *.txt",
+            "drone rm ~/notes.txt",
+            "drone rm $(echo notes.txt)",
+            "cd $UNSET_DIR && drone rm notes.txt",
+            "drone rm",
+            "drone rm -rf notes.txt",
+            "drone rm --stale 1d build",
+            "drone rm --help notes.txt",
+            "drone rm -h -rf",
+            "drone rm notes.txt; $UNSET_PROGRAM x",
+        ),
+    )
+    def test_a_target_the_gate_cannot_resolve_is_refused(self, tmp_path, monkeypatch, command):
+        canary, _ = self._tree(tmp_path)
+        # Each word also exists as a literal file in the branch: only the rule under test can refuse it.
+        (canary / "~").mkdir()
+        (canary / "~" / "notes.txt").write_text("n", encoding="utf-8")
+        for literal in ("$UNSET_TARGET", "*.txt", "-rf", "--stale", "1d", "--help"):
+            (canary / literal).write_text("l", encoding="utf-8")
+        monkeypatch.chdir(canary)
+        assert "drone rm" in self._refused(command, str(canary)), command
+
+    def test_a_caller_with_no_passport_owns_no_branch(self, tmp_path):
+        self._tree(tmp_path)
+        assert "could not be named" in self._refused("drone rm canary/notes.txt", str(tmp_path))
+
+    def test_the_admin_seat_still_runs_drone_rm_anywhere(self, tmp_path):
+        canary, other = self._tree(tmp_path)
+        for command in ("drone rm ../README.md", f"drone rm {other / 'notes.txt'}", "drone rm --stale 1d build"):
+            assert self._run(command, str(canary), grant=True)["exit_code"] == 0, command
+
+    def test_raw_rm_and_the_other_delete_lanes_stay_refused_in_the_own_branch(self, tmp_path):
+        canary, _ = self._tree(tmp_path)
+        for command in (
+            "rm notes.txt",
+            "drone rm notes.txt && rm build/x",
+            "drone rm notes.txt; rmdir build",
+            "unlink notes.txt",
+            "find build -delete",
+        ):
+            self._refused(command, str(canary))
+        assert "Raw rm is refused" in self._refused("rm notes.txt", str(canary))
+        admin = self._run("rm notes.txt", str(canary), grant=True)
+        assert "Raw rm is refused" in json.loads(admin["stdout"])["reason"]
+
+    def test_an_allowed_drone_rm_is_not_recorded_here(self, tmp_path, caplog):
+        canary, _ = self._tree(tmp_path)
+        with caplog.at_level(logging.INFO):
+            self._run("drone rm notes.txt", str(canary))
+            self._run("drone rm ../README.md", str(canary))
+        records = [r.getMessage() for r in caplog.records if " refused | lane=" in r.getMessage()]
+        assert len(records) == 1 and "MOVE refused | lane=drone rm | branch=canary" in records[0]
+        assert f"| target={tmp_path / 'README.md'} |" in records[0]
+        assert f"| reason={tmp_path / 'README.md'} is outside your own branch" in records[0]
 
 
 class TestEveryDeleteVerb:
     """The owner, 2026-09-30 (dab4e222): "rm is a big no no; only devpulse deletes."
 
-    Every verb is refused off the admin seat with the rename/.archive text and
+    Every verb is refused off the admin seat with the drone rm text and
     allowed on it; moving, renaming and mkdir are never deletes. One row per verb,
     so the red team's canary list reads straight off this class.
     """
@@ -582,13 +777,13 @@ class TestEveryDeleteVerb:
             return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd})
 
     @pytest.mark.parametrize("command", REFUSED)
-    def test_each_delete_verb_from_canary_is_refused_with_the_archive_text(self, tmp_path, command):
+    def test_each_delete_verb_from_canary_is_refused_and_teaches_drone_rm(self, tmp_path, command):
         result = self._run(command, _seat(tmp_path, "canary"), grant=False)
 
         assert result["exit_code"] == 2, command
         reason = json.loads(result["stdout"])["reason"]
         assert "is a delete" in reason and "@canary" in reason
-        assert "(disabled)" in reason and ".archive/" in reason and "@devpulse" in reason
+        assert "drone rm <path>" in reason and "emptied at any moment" in reason and "@devpulse" in reason
 
     @pytest.mark.parametrize("command", REFUSED)
     def test_each_delete_verb_from_the_admin_seat_is_allowed(self, tmp_path, command):
@@ -718,7 +913,7 @@ class TestTheShellSpellingIsReadTheWayTheShellRunsIt:
         assert "Raw rm is refused" in json.loads(result["stdout"])["reason"], command
 
     def test_a_glob_that_matches_nothing_the_gate_can_list_is_read_as_the_verb_it_names(self, tmp_path):
-        """CI red PR #774 (Windows): Git Bash's /bin is a mount the gate cannot list, so /bin/r? read as r?."""
+        """An empty directory lists nothing for /bin/r?, which must still read as rm, not as r?."""
         unlisted = tmp_path / "bin"
         unlisted.mkdir()
         command = f"{unlisted.as_posix()}/r? notes.txt"
@@ -781,3 +976,112 @@ class TestAnUnknownWrapperIsReadForWhatItRuns:
         result = self._run(tmp_path, command)
 
         assert (result["exit_code"], result["stdout"]) == (0, ""), command
+
+
+class TestEveryRefusalReachesTheLedger:
+    """A refusal that says it is recorded is a row in the project's deletions ledger, written through @drone's door."""
+
+    @pytest.fixture
+    def ledger(self, tmp_path, monkeypatch) -> Path:
+        path = tmp_path / "ledger" / "deletions.jsonl"
+        monkeypatch.setenv("AIPASS_DELETION_LOG", str(path))
+        return path
+
+    @staticmethod
+    def _rows(ledger: Path) -> list[dict]:
+        return [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()] if ledger.exists() else []
+
+    def _run(self, cwd: str, command: str) -> dict:
+        with patch(_RAIL, return_value=False):
+            return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd})
+
+    def test_a_refused_drone_rm_is_a_row_naming_caller_cwd_text_path_and_reason(self, tmp_path, ledger, monkeypatch):
+        seat = _seat(tmp_path, "canary")
+        (tmp_path / "README.md").write_text("x", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)  # the row's cwd is the session's, never this process's
+        result = self._run(seat, "drone rm ../README.md")
+
+        assert result["exit_code"] == 2
+        [row] = self._rows(ledger)
+        assert (row["lane"], row["outcome"], row["caller"], row["cwd"]) == ("rm_gate", "refused", "canary", seat)
+        assert row["requested"] == "drone rm ../README.md"
+        assert row["path"] == str(tmp_path / "README.md")
+        assert row["reason"] == f"{tmp_path / 'README.md'} is outside your own branch ({seat}) and the system temp dir."
+
+    def test_an_unresolvable_target_is_a_row_with_no_path(self, tmp_path, ledger):
+        self._run(_seat(tmp_path, "canary"), "drone rm $X")
+
+        [row] = self._rows(ledger)
+        assert row["path"] is None
+        assert row["reason"].startswith("a target cannot be resolved: $X")
+
+    @pytest.mark.parametrize(
+        ("command", "reason"),
+        (
+            ("rm $X", "raw rm is refused for every seat."),
+            ("shred -n 3 notes.txt", "shred is a delete only @devpulse may run."),
+            (
+                "$CMD notes.txt",
+                "it runs what the gates cannot read: the program word $CMD is an expansion this reader cannot fold.",
+            ),
+        ),
+    )
+    def test_every_other_refusal_is_a_row_too(self, tmp_path, ledger, command, reason):
+        self._run(_seat(tmp_path, "canary"), command)
+
+        [row] = self._rows(ledger)
+        assert (row["requested"], row["path"], row["reason"]) == (command, None, reason)
+
+    @pytest.mark.parametrize(
+        ("command", "paths"),
+        (
+            ("rm a.txt b.txt", ["a.txt", "b.txt"]),
+            ("rm -rf -- -x", ["-x"]),
+            ("rmdir old", ["old"]),
+            ("cd sub && unlink f", ["sub/f"]),
+            ("rm a.txt $X", ["a.txt"]),
+            ("rm a.txt && drone rm ../README.md", ["a.txt", "../README.md"]),
+        ),
+    )
+    def test_each_resolved_target_is_a_row_with_the_command_as_typed(self, tmp_path, ledger, command, paths):
+        seat = Path(_seat(tmp_path, "canary"))
+        (seat / "sub").mkdir()
+        self._run(str(seat), command)
+
+        rows = self._rows(ledger)
+        assert [row["path"] for row in rows] == [str((seat / p).parent.resolve() / Path(p).name) for p in paths]
+        assert {row["requested"] for row in rows} == {command}
+
+    def test_a_link_is_recorded_as_the_link_not_what_it_points_to(self, tmp_path, ledger):
+        seat = Path(_seat(tmp_path, "canary"))
+        (seat / "link").symlink_to(tmp_path)
+        self._run(str(seat), "rm link")
+
+        assert [row["path"] for row in self._rows(ledger)] == [str(seat / "link")]
+
+    def test_an_unnamed_caller_is_recorded_as_unknown(self, tmp_path, ledger):
+        self._run(str(tmp_path), "rm notes.txt")
+
+        assert self._rows(ledger)[0]["caller"] == "unknown"
+
+    def test_the_refusal_says_where_it_is_recorded(self, tmp_path, ledger):
+        reason = json.loads(self._run(_seat(tmp_path, "canary"), "rm notes.txt")["stdout"])["reason"]
+
+        assert reason.endswith("This refused attempt is recorded in .ai_central/deletions.jsonl.")
+
+    def test_an_allowed_drone_rm_writes_no_row(self, tmp_path, ledger):
+        seat = _seat(tmp_path, "canary")
+        (Path(seat) / "notes.txt").write_text("x", encoding="utf-8")
+
+        assert self._run(seat, "drone rm notes.txt")["exit_code"] == 0
+        assert self._rows(ledger) == []
+
+    def test_a_ledger_that_cannot_be_written_keeps_the_refusal_and_says_so(self, tmp_path, ledger, caplog):
+        ledger.parent.write_text("a file where the ledger's directory should be", encoding="utf-8")
+        with caplog.at_level(logging.ERROR, logger="test_rm_gate_audit"):
+            result = self._run(_seat(tmp_path, "canary"), "rm notes.txt")
+
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert reason.endswith("Recording this refused attempt in the ledger failed; the failure is logged.")
+        assert any("rm_gate: ledger write failed" in r.getMessage() for r in caplog.records)

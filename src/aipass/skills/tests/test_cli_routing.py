@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Unit tests for skills.py CLI routing
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-10
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # Category: skills/tests
 # =============================================
 
@@ -355,6 +355,26 @@ class TestSkillOutputIsPrintedVerbatim:
         )
         assert handle_command("run", ["inbox_check", "skills"]) is True
         assert capsys.readouterr().out == "  [opened] from @devpulse\n  closing [/b] tag\n"
+
+
+class TestReadVerbsHelpPrintsUsage:
+    """`list`, `info`, `validate` and `run` answer a help flag with their usage, not only the module map."""
+
+    @pytest.mark.parametrize(
+        "verb, title",
+        [
+            ("list", "Skills List - Show every discovered skill"),
+            ("info", "Skills Info - Show one skill"),
+            ("validate", "Skills Validate - Check a skill's requirements"),
+            ("run", "Skills Run - Execute a skill"),
+        ],
+    )
+    @pytest.mark.parametrize("flag", ["--help", "-h", "help"])
+    def test_a_help_flag_prints_the_verb_usage(self, capsys, verb, title, flag):
+        assert handle_command(verb, [flag]) is True
+        out = capsys.readouterr().out
+        assert title in out
+        assert f"drone @skills {verb}" in out
 
 
 class TestSwitchVerbsHelpWritesNothing:

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_output_routing.py
 # Description: Unit tests for output_routing_check
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-07-09
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/output_routing_check.py."""
@@ -231,7 +231,7 @@ class TestCheckModule:
 
     def test_clean_file_passes(self, tmp_path):
         f = tmp_path / "clean.py"
-        f.write_text('from aipass.cli.apps.modules import error\nerror("fail")\n', encoding="utf-8")
+        f.write_text('from aipass.cli import error\nerror("fail")\n', encoding="utf-8")
         result = output_routing_check.check_module(str(f))
         assert result["passed"] is True
         assert result["score"] == 100

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_feed.py
 # Description: Unit tests for feed handler and feed module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/feed/feed_ops.py and apps/modules/feed.py."""
@@ -190,6 +190,15 @@ def test_display_feed_limit_clamping(
     result = display_feed(["--limit", "50"])
     assert result["limit"] == 50
     assert mock_close_db.call_count == 3
+
+
+@pytest.mark.parametrize("flag", ["--limit", "--offset", "--page"])
+@patch("aipass.commons.apps.handlers.feed.feed_ops.get_db")
+def test_display_feed_refuses_a_non_integer_flag(mock_get_db: MagicMock, flag: str) -> None:
+    """A non-integer paging value is refused by name, never swapped for the default."""
+    result = display_feed([flag, "ten"])
+    assert result == {"success": False, "error": f"{flag} takes an integer, got 'ten'"}
+    mock_get_db.assert_not_called()
 
 
 @patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler", autospec=True)

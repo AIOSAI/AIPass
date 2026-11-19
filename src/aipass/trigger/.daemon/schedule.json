@@ -4,7 +4,7 @@
   "jobs": [
     {
       "id": "ci-poll",
-      "enabled": true,
+      "enabled": false,
       "schedule": {
         "type": "interval",
         "interval_minutes": 10
@@ -16,7 +16,7 @@
     },
     {
       "id": "unit-watch",
-      "enabled": true,
+      "enabled": false,
       "schedule": {
         "type": "interval",
         "interval_minutes": 10

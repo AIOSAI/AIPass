@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Main orchestrator for agent spawning
-# Version: 1.4.3
+# Version: 1.5.0
 # Created: 2026-03-05
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -15,15 +15,7 @@ from typing import List
 
 from aipass.prax import logger
 
-try:
-    from aipass.cli.apps.modules.display import console
-# A peer's import-time access guard touches the filesystem, so a broken peer raises OSError
-# (dead cwd), not only ImportError; catching ImportError alone makes "broken" fatal.
-except (ImportError, OSError) as e:
-    logger.warning("Failed to import aipass.cli.apps.modules.display, falling back to rich.console: %s", e)
-    from rich.console import Console
-
-    console = Console()
+from aipass.cli import console
 
 # apps/spawn.py imports these two from here, so they are re-exported by name.
 from aipass.spawn.apps.handlers.metadata import (
@@ -38,21 +30,14 @@ from aipass.spawn.apps.handlers.class_registry import (
     refuse_retired_or_forbidden as refuse_retired_or_forbidden,
 )
 from aipass.spawn.apps.handlers.mint_ops import INCOMPLETE_MARKER as INCOMPLETE_MARKER, spawn_at
+from aipass.spawn.apps.handlers.registry import find_registry as find_registry
 
 _META_TAB_KEYS = {"TODOS_META", "KEY_LEARNINGS_META", "SESSIONS_META", "OBSERVATIONS_META"}
 
 
 def _load_meta_tabs(branch_dir: str | None = None):
-    """Load memory meta-tab values from @memory's renderer.
-
-    Returns empty dict when @memory is unavailable (standalone project).
-    """
-    try:
-        from aipass.memory.apps.modules.door_tab_renderer import render_all_meta_tabs
-    # Width, not politeness: see the module-level import above.
-    except (ImportError, OSError) as e:
-        logger.info("[spawn] @memory not available — meta-tab placeholders will be empty (%s)", e)
-        return {}
+    """Load memory meta-tab values from @memory's renderer; @memory ships in this package, so a failed import raises."""
+    from aipass.memory import render_all_meta_tabs
 
     tabs = render_all_meta_tabs(branch_dir)
     missing = _META_TAB_KEYS - set(tabs or {})

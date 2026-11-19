@@ -18,8 +18,9 @@ there is no daemon process at all.
 The 2 min is nominal, not exact: `OnUnitActiveSec` measures from the *last activation*, and systemd's
 default `AccuracySec=1min` batches the wakeup, so observed gaps run **2–3 min**. A tick costs well
 under a second of CPU (`systemctl --user show daemon-tick.service -p CPUUsageNSec` reads it) and
-roughly 1s wall. `systemctl --user list-timers` shows the next fire; the tick's own output appends
-to `~/.aipass/daemon-tick.log`.
+roughly 1s wall. `systemctl --user list-timers` shows the next fire. The tick logs through prax
+(`logs/run.log`); a tick that dies leaves its traceback in `~/.aipass/daemon-tick.err` — see
+[scheduler_tick.md](scheduler_tick.md#where-a-tick-is-recorded).
 
 **Three tiers are swept.** Core citizens under `src/aipass/*` (listed in `AIPASS_REGISTRY.json`). Resident citizens under `projects/<name>/` (listed in that project's own sealed `<NAME>_REGISTRY.json`). And **federated externals** — citizens in separate repos entirely, reached through their own registries. `drone @daemon rotation` prints the tier label; nothing routes on it. The sweep covers all three tiers; the nightly rounds serve only the first — see [docs/rounds.md](rounds.md).
 
@@ -57,15 +58,28 @@ logged, the same way a missing `id` or `schedule` is.
 |------|--------|----------|
 | `interval` | `interval_minutes: N` | Elapsed >= N since last_run. With no `slot`, a job that has never run fires **immediately** — see below. N must be a positive number (`30`, `0.5`): text, `null`, `true`, zero or a negative is refused at discovery and logged with the file and the job, so the job is never due. Absent, N reads as 60. |
 | `daily` | `time: "HH:MM"` | Within +/-15 min of target time, once per window. A window that wraps midnight is one window. |
+| `weekly` | `weekday: "monday"`..`"sunday"`, `time: "HH:MM"` | The daily window, on that weekday only. A window that wraps midnight belongs to the day its target time falls on. |
+| `monthly` | `day: 1`..`31`, `time: "HH:MM"` | The daily window, on that day of the month only. A day past the month's end means its last day: `31` fires on 30 November and 28 February, so a monthly job never skips a month. |
+| `rotation` | `time: "HH:MM"` | Daily window — but wakes the next citizen on the fleet roster, not the owner. See [docs/rounds.md](rounds.md). |
 | `hourly` | `time: "M"` (minute) | Within +/-15 min of target minute, once per window. A window that wraps the hour is one window. |
 | `once` | `due_date: "YYYY-MM-DD"` or `"YYYY-MM-DDTHH:MM"` | From that instant on (a bare date means midnight), then marks completed. An unreadable `due_date` is never due. |
 
-A `time` that does not read for its type (`"HH:MM"` with hours 0-23 for `daily` and `rotation`,
-a minute 0-59 for `hourly`) is refused at discovery and logged with the file and the job.
+A `time` that does not read for its type (`"HH:MM"` with hours 0-23 for `daily`, `rotation`,
+`weekly` and `monthly`, a minute 0-59 for `hourly`) is refused at discovery and logged with the
+file and the job. So is a `weekly` job without a lowercase weekday name, and a `monthly` job
+without a whole-number `day` 1-31: neither has a default.
+
+`weekly` and `monthly` carry no phase. Each window asks only whether the job ran inside it, so a
+changed `weekday`, `day` or `time` takes effect at the next matching window. An `interval` job
+measures from its last run instead: each fire lands up to one tick (~2 min) after the last,
+and that lateness accumulates.
 
 When a schedule file cannot be read, or one of its jobs is refused, that owner's existing
 runstate rows are kept: the tick prunes rows only for owners whose file was read whole, so a
 half-read schedule never erases its jobs' history.
+
+Every refused file or job is also told to the user, with its reason: `drone @daemon queue` lists
+it as a **Refused, not scheduled** warning (and `--json` under `refused`), and each tick prints it.
 | `rotation` | `time: "HH:MM"` | Daily window — but wakes the next citizen on the fleet roster, not the owner. See [docs/rounds.md](rounds.md). |
 
 ### Optional schedule fields
@@ -78,7 +92,7 @@ today. `catch_up` becomes on-by-default (only an explicit `false` opts out) when
 | Field | Applies to | Effect |
 |-------|-----------|--------|
 | `slot` | `interval` | An ISO instant naming **one occurrence** of the rhythm you want (`"2026-09-06T03:00:00"`). A job that has never run is seeded from it, so its first fire lands on the next slot instead of the next tick. |
-| `catch_up` | `daily`, `rotation`, `hourly` | When the window closed with no run, the first tick after it fires the job once and stamps `caught_up` on the runstate row. Opt-in (`true`) while `RECOVERY_LANE_LIVE` is `False`. |
+| `catch_up` | `daily`, `rotation`, `hourly`, `weekly`, `monthly` | When the window closed with no run, the first tick after it, the same day, fires the job once and stamps `caught_up` on the runstate row. Opt-in (`true`) while `RECOVERY_LANE_LIVE` is `False`. |
 | `catch_up_max_age_hours` | `daily`, `rotation`, `hourly` | Drop missed windows older than N hours. Absent = unlimited: ten days away still earns one wake. |
 
 **Why `slot` exists.** An interval job with no `last_run` is due on the very next
@@ -104,7 +118,7 @@ still not due *before* its window opens. A daily window whose tail crosses midni
 (`time` later than 23:44) never closes inside its own calendar day and is refused
 rather than guessed at, in both directions.
 
-**The `MISSED` line** is written to `run.log` for every daily job whose window closed
+**The `MISSED` line** is written to `run.log` for every daily, weekly or monthly job whose window closed
 unrun — independent of `catch_up`, because a job nobody opted in still missed its
 window and that is the fact you need in order to decide whether to opt it in. Stamped
 once per job per day (`missed_logged_for`), since a ~2-minute tick would otherwise

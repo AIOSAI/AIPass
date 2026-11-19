@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: startup_ratchet.py
 # Description: Per-file CI ratchet — the README and the branch prompt held at their owners' caps
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-15
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """The ratchet — CI goes red when a gated startup file grows past its cap.
@@ -51,7 +51,7 @@ GATED_FILES: Tuple[GatedFile, ...] = (
     GatedFile(
         rel=budget.PROMPT_REL,
         owner="hooks",
-        cap_source="aipass.hooks.apps.modules.grounding_content.BRANCH_CHAR_BUDGET",
+        cap_source="aipass.hooks.BRANCH_CHAR_BUDGET",
         cap_reader="prompt_cap",
     ),
 )

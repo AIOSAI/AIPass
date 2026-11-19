@@ -3,7 +3,7 @@
 # Description: Unit tests for filesystem_handler's Codex session lane
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/monitoring/filesystem_handler.py, its Codex session lane."""
@@ -18,7 +18,6 @@
 # sentry: no-test-needed(through_the_command) — _emit_agent_event, covered by test_filesystem_handler_agent_activity.py
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -37,10 +36,11 @@ class TestBranchFromCwd:
     """Tests for _branch_from_cwd static method."""
 
     def test_aipass_branch(self, tmp_path):
-        """Should extract branch name after aipass in path."""
+        """Should extract branch name after aipass in path when the detector has no label."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        result = cls._branch_from_cwd(str(tmp_path / "Projects" / "AIPass" / "src" / "aipass" / "prax"))
+        with patch.object(mod, "detect_branch_from_path", return_value="UNKNOWN"):
+            result = cls._branch_from_cwd(str(tmp_path / "Projects" / "AIPass" / "src" / "aipass" / "prax"))
         assert result == "PRAX"
 
     def test_empty_string(self):
@@ -62,34 +62,34 @@ class TestBranchFromCwd:
         """Should return None when no recognizable pattern."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        result = cls._branch_from_cwd(str(tmp_path / "random" / "dir"))
+        with patch.object(mod, "detect_branch_from_path", return_value="UNKNOWN"):
+            result = cls._branch_from_cwd(str(tmp_path / "random" / "dir"))
         assert result is None
 
     def test_aipass_at_end_of_path(self, tmp_path):
         """Should return None when aipass is the last segment."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        result = cls._branch_from_cwd(str(tmp_path / "aipass"))
+        with patch.object(mod, "detect_branch_from_path", return_value="UNKNOWN"):
+            result = cls._branch_from_cwd(str(tmp_path / "aipass"))
         assert result is None
 
-    def test_projects_external_detected(self):
-        """Should detect external projects under ~/Projects."""
+    def test_a_citizen_outside_projects_gets_the_detectors_label_not_none(self, tmp_path):
+        """A declared-root citizen (@grow) lives anywhere: no ~/Projects gate before the detector."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        home = str(Path.home())
-        ext_path = f"{home}/Projects/AIPL/src/polyglot"
-        with patch.object(mod, "detect_branch_from_path", return_value="AIPL/POLYGLOT"):
-            result = cls._branch_from_cwd(ext_path)
-        assert result == "AIPL/POLYGLOT"
+        cwd = str(tmp_path / "seed" / "grow")
+        with patch.object(mod, "detect_branch_from_path", return_value="GROW") as detect:
+            result = cls._branch_from_cwd(cwd)
+        assert result == "GROW"
+        detect.assert_called_once_with(cwd)
 
-    def test_projects_external_unknown_falls_through(self):
+    def test_an_unknown_label_falls_through_to_the_src_shape(self, tmp_path):
         """When detect returns UNKNOWN, should try src fallback."""
         mod, _, _, _, _ = _import_filesystem_handler()
         cls = mod.MonitoringFileHandler
-        home = str(Path.home())
-        ext_path = f"{home}/Projects/AIPL/src/polyglot"
         with patch.object(mod, "detect_branch_from_path", return_value="UNKNOWN"):
-            result = cls._branch_from_cwd(ext_path)
+            result = cls._branch_from_cwd(str(tmp_path / "AIPL" / "src" / "polyglot"))
         assert result == "POLYGLOT"
 
 
@@ -182,7 +182,8 @@ class TestGetCodexBranch:
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
         meta_line = json.dumps({"type": "session_meta", "payload": {"cwd": str(tmp_path / "nowhere")}})
-        result = handler._get_codex_branch(str(_on_disk(tmp_path, meta_line + "\n", "file.jsonl")), "key4")
+        with patch.object(mod, "detect_branch_from_path", return_value="UNKNOWN"):
+            result = handler._get_codex_branch(str(_on_disk(tmp_path, meta_line + "\n", "file.jsonl")), "key4")
         assert result == "CODEX"
 
 

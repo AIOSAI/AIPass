@@ -1,42 +1,26 @@
 # =================== AIPass ====================
 # Name: governance.py
-# Description: Surfacing governance module — public API
-# Version: 1.1.0
+# Description: Surfacing governance module — introspection of the names the package door hands out
+# Version: 1.2.0
 # Created: 2026-07-16
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
-Surfacing Governance Module — Public API
+Surfacing Governance Module
 
-Cross-branch consumers (@hooks' compass_recall, every prompt) import from here.
+Cross-branch consumers import from the package door: ``from aipass.memory import should_surface``.
 """
-
-import os
-import sys
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 from aipass.prax import logger  # noqa: F401
 from aipass.memory.apps.handlers.json import json_handler
-from aipass.memory.apps.handlers.governance.engine import (
-    DEFAULT_CONFIG,
-    new_state,
-    record_message,
-    should_surface,
-)
 
-__all__ = ["should_surface", "record_message", "new_state", "DEFAULT_CONFIG"]
+__all__ = ["print_introspection", "handle_command"]
 
 
 def print_introspection() -> None:
     """Display module introspection (sentry standard)."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]governance Module[/bold cyan]")
@@ -47,7 +31,7 @@ def print_introspection() -> None:
     console.print("  record_message(state)")
     console.print("  new_state()")
     console.print()
-    console.print("[dim]Library module — import from: aipass.memory.apps.modules.governance[/dim]")
+    console.print("[dim]Library names — import from: aipass.memory[/dim]")
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -65,7 +49,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     error(f"governance: unknown subcommand '{args[0]}'")
     print_introspection()

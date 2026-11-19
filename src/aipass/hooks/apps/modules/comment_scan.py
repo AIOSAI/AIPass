@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: comment_scan.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Comment budget counter: full-line comment share of a source file
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-16
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Counts a source file's full-line comment lines against the comment budget (docs/comments.md)."""
@@ -16,8 +16,9 @@ import tokenize
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 CONSOLE = err_console
 BUDGET_PERCENT = 10
@@ -181,4 +182,5 @@ def scan(source: str | Path, kind: str) -> Scan:
             runs[-1] = (runs[-1][0], number)
         else:
             runs.append((number, number))
+    json_handler.log_operation("scan", {"kind": kind, "body": len(body), "comments": len(comment_lines)})
     return Scan(body=len(body), comments=len(comment_lines), runs=runs)

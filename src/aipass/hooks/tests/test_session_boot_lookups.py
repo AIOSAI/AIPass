@@ -4,7 +4,7 @@
 # Description: Tests for session boot's lookups: claude binary, tmux, process tree, labels, home resolution
 # Branch: hooks
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py: the lookups the menu stands on."""
@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.ai_mail.apps.modules import door_session_pointer as sp
+from aipass import ai_mail as sp
 from aipass.hooks.apps.handlers.lifecycle import session_boot
 from aipass.hooks.apps.modules import cc_sessions, cc_transcripts
 from aipass.hooks.tests.support_session_boot import (
@@ -48,18 +48,13 @@ class TestResolveClaudeBinary:
 
 class TestFindTmux:
     def test_found(self, tmp_path, monkeypatch):
-        """PATH is a real world under tmp_path holding a tmux, not a patched shutil.which.
-
-        Both a bare `tmux` (POSIX) and `tmux.exe` (Windows, via PATHEXT) are laid down.
-        """
+        """PATH is a real world under tmp_path holding a tmux, not a patched shutil.which."""
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
-        for name in ("tmux", "tmux.exe"):
-            exe = bin_dir / name
-            exe.write_text("", encoding="utf-8")
-            exe.chmod(0o755)
+        exe = bin_dir / "tmux"
+        exe.write_text("", encoding="utf-8")
+        exe.chmod(0o755)
         monkeypatch.setenv("PATH", str(bin_dir))
-        monkeypatch.setenv("PATHEXT", ".EXE")
         found = session_boot._find_tmux()
         assert found is not None
         assert Path(found).parent == bin_dir
@@ -336,25 +331,7 @@ class TestTmuxLookupsSurviveAMachineWithoutTmux:
 
 
 class TestHomeResolutionIsPortable:
-    """PR 739 / windows-setup: home resolution must not be POSIX-only.
-
-    Four pointer-door tests died on the Windows runner with
-    RuntimeError("Could not determine home directory."), while their siblings
-    passed — the split was not in the pointer logic at all. Every failing test
-    planted a pointer and then ran boot() under
-    `patch.dict(..., {"HOME": ...}, clear=True)`; every passing one returned
-    before the first home lookup. Clearing the environ strips %USERPROFILE%,
-    and Windows expanduser reads that, not $HOME.
-
-    These pin both halves of the fix so the platform gap cannot come back
-    quietly on a machine where nobody can run the failing platform.
-    """
-
-    def test_home_env_sets_both_platform_keys(self, tmp_path):
-        """HOME alone is a Linux-only redirect. The Windows key must ride too."""
-        env = home_env(tmp_path / "home")
-        assert env["HOME"] == str(tmp_path / "home")
-        assert env["USERPROFILE"] == str(tmp_path / "home")
+    """PR 739: home resolution survives a cleared environ that keeps only the fixture's HOME."""
 
     def test_set_home_redirects_home_with_the_environ_cleared(self, tmp_path, monkeypatch):
         """The whole point: resolution must survive a cleared environ, which is
@@ -391,15 +368,12 @@ class TestHomeResolutionIsPortable:
 def _on_path(tmp_path: Path, monkeypatch, name: str) -> Path:
     """PATH set to a directory under tmp_path holding name, so the product's own shutil.which answers for real.
 
-    Both a bare name (POSIX, mode bit set) and name.exe (Windows, found through PATHEXT) are laid down; the platform
-    picks its own. The stubs are empty and never run. Returns the directory.
+    The stub is empty, mode bit set, and never run. Returns the directory.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for spelling in (name, f"{name}.exe"):
-        stub = bin_dir / spelling
-        stub.write_text("", encoding="utf-8")
-        stub.chmod(0o755)
+    stub = bin_dir / name
+    stub.write_text("", encoding="utf-8")
+    stub.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir))
-    monkeypatch.setenv("PATHEXT", ".EXE")
     return bin_dir

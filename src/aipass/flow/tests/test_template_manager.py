@@ -3,7 +3,7 @@
 # Description: Unit tests for apps/modules/template_manager.py
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/template_manager.py."""
@@ -15,7 +15,7 @@
 import pytest
 from unittest.mock import patch
 
-from aipass.cli.apps.modules import resolve_exit
+from aipass.cli import resolve_exit
 from aipass.flow.apps.modules.template_manager import handle_command
 
 _MOD = "aipass.flow.apps.modules.template_manager"

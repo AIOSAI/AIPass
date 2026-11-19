@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_timer_install.py
 # Description: Tests for the timer_install module (systemd user timer installer)
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-06-25
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/timer_install.py — install-timer and uninstall-timer, the systemd user timer."""
@@ -99,12 +99,6 @@ if said:
 sys.exit(code)
 """
 
-# Windows CreateProcess finds a bare name on PATH only as name.exe, so no stub here can run there.
-_NEEDS_A_STUB_ON_PATH = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="systemd does not exist on Windows; the verb's answer there is pinned by test_systemctl_not_found",
-)
-
 
 @pytest.fixture
 def systemctl_on_path(tmp_path, monkeypatch):
@@ -130,7 +124,7 @@ def systemctl_on_path(tmp_path, monkeypatch):
         try:
             subprocess.run(["systemctl", "--user", "probe"], capture_output=True, encoding="utf-8", timeout=15)
         except OSError as refused:
-            pytest.fail(f"a systemctl stub cannot run from PATH on this host ({sys.platform}): {refused}")
+            pytest.fail(f"a systemctl stub cannot run from PATH on this host: {refused}")
         log.write_text("", encoding="utf-8")
         return log
 
@@ -157,7 +151,6 @@ class TestTheCommandsReadSystemctlsAnswers:
         with patch(f"{TI}._DAEMON_ROOT", root):
             yield
 
-    @_NEEDS_A_STUB_ON_PATH
     def test_success_runs_reload_enable_start_in_that_order(self, systemctl_on_path):
         """Every step exits 0: install-timer answers True and systemctl saw daemon-reload, enable, start."""
         log = systemctl_on_path({})
@@ -168,7 +161,6 @@ class TestTheCommandsReadSystemctlsAnswers:
             "--user start daemon-tick.timer",
         ]
 
-    @_NEEDS_A_STUB_ON_PATH
     def test_a_non_zero_exit_fails_the_install_and_prints_why(self, systemctl_on_path, capsys):
         """daemon-reload exits 1 with a stderr line: both print, install exits 1, nothing more is asked."""
         log = systemctl_on_path({"daemon-reload": [1, "Failed to connect to bus"]})
@@ -178,7 +170,6 @@ class TestTheCommandsReadSystemctlsAnswers:
         assert "Failed to connect to bus" in said, said
         assert _argv(log) == ["--user daemon-reload"]
 
-    @_NEEDS_A_STUB_ON_PATH
     def test_not_loaded_on_a_stop_is_nothing_to_stop(self, systemctl_on_path, tmp_path, capsys):
         """stop exits 5 (not loaded): uninstall-timer goes on to disable, removes the files and exits 0, with no FAIL.
 
@@ -188,7 +179,7 @@ class TestTheCommandsReadSystemctlsAnswers:
         unit_dir.mkdir()
         service, timer = _units(unit_dir)
         log = systemctl_on_path({"stop": [5, "Unit daemon-tick.timer not loaded."]})
-        with patch("aipass.trigger.apps.modules.core.trigger.fire"):
+        with patch("aipass.trigger.Trigger.fire"):
             assert _exit_of("uninstall-timer") == 0
         assert _argv(log) == [
             "--user stop daemon-tick.timer",
@@ -198,7 +189,6 @@ class TestTheCommandsReadSystemctlsAnswers:
         assert not service.exists() and not timer.exists()
         assert "FAIL" not in "".join(capsys.readouterr()), "not loaded is nothing to stop, never a failure"
 
-    @_NEEDS_A_STUB_ON_PATH
     def test_a_stop_refused_for_another_reason_fails_the_uninstall(self, systemctl_on_path, tmp_path):
         """stop exits 1: not loaded is exit 5 only, so the uninstall names the stop, exits 1 and keeps the files."""
         unit_dir = tmp_path / "_sealed_unit_dir"
@@ -209,7 +199,6 @@ class TestTheCommandsReadSystemctlsAnswers:
         assert _argv(log) == ["--user stop daemon-tick.timer"]
         assert service.exists() and timer.exists()
 
-    @_NEEDS_A_STUB_ON_PATH
     def test_not_loaded_anywhere_but_a_stop_is_a_failure(self, systemctl_on_path, capsys):
         """enable exits 5: install-timer passes no not_loaded_ok, so the install fails at enable and never starts."""
         log = systemctl_on_path({"enable": [5, "Unit daemon-tick.timer not loaded."]})
@@ -289,6 +278,17 @@ class TestInstall:
             ("start", "daemon-tick.timer"),
         ]
 
+    @patch(f"{TI}._run_systemctl", return_value=True)
+    def test_the_shipped_unit_drops_stdout_and_keeps_stderr_as_the_crash_record(self, _systemctl, tmp_path):
+        install_dir = tmp_path / "systemd"
+        install_dir.mkdir()
+        with patch(f"{TI}._UNIT_DIR", install_dir):
+            assert handle_command("install-timer", []) is True
+        unit = (install_dir / "daemon-tick.service").read_text(encoding="utf-8").splitlines()
+        assert "StandardOutput=null" in unit
+        assert "StandardError=append:%h/.aipass/daemon-tick.err" in unit
+        assert not [line for line in unit if "daemon-tick.log" in line or "journal" in line]
+
     @patch(f"{TI}._run_systemctl", return_value=False)
     def test_install_systemctl_fails(self, mock_systemctl, tmp_path):
         """install-timer exits 1 when systemctl fails, and stops at the first refusal."""
@@ -353,7 +353,7 @@ class TestUninstall:
 
         with (
             patch(f"{TI}._UNIT_DIR", unit_dir),
-            patch("aipass.trigger.apps.modules.core.trigger.fire") as fire,
+            patch("aipass.trigger.Trigger.fire") as fire,
         ):
             assert _exit_of("uninstall-timer") == 0
         assert not half.exists(), "the half install must be removed"
@@ -394,13 +394,13 @@ class TestUninstall:
     def test_uninstall_removes_files(self, mock_systemctl, tmp_path):
         """uninstall-timer stops, disables, removes both unit files, reloads, and fires file_deleted per file.
 
-        fire is patched on the core `trigger` object _uninstall imports at call time; unpatched it hits the real bus.
+        fire is patched on `Trigger` through trigger's door, where _uninstall's fire resolves; unpatched it hits a bus.
         """
         service, timer = _units(tmp_path)
 
         with (
             patch(f"{TI}._UNIT_DIR", tmp_path),
-            patch("aipass.trigger.apps.modules.core.trigger.fire") as fire,
+            patch("aipass.trigger.Trigger.fire") as fire,
         ):
             assert _exit_of("uninstall-timer") == 0
         assert not service.exists()
@@ -427,7 +427,7 @@ class TestUninstall:
         _seal_timer_host_state.side_effect = lambda *args, **kwargs: args[0] != failing
 
         with (
-            patch("aipass.trigger.apps.modules.core.trigger.fire") as fire,
+            patch("aipass.trigger.Trigger.fire") as fire,
             pytest.raises(SystemExit) as stopped,
         ):
             handle_command("uninstall-timer", [])

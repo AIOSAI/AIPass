@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: seed.py
-# Version: 1.0.0
+# Version: 1.2.0
 # Description: Seed bridge — a hooks.json command row of a Seed head, handed to the engine, answered in Claude's shape
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-11-04
-# Modified: 2026-11-04
+# Modified: 2026-11-17
 # =============================================
 
 """Seed bridge.
@@ -18,6 +18,7 @@ plain text becomes context, and a block's reason goes to stderr. The hook code i
 (mount.py); a PreToolUse whose hook code cannot load or raises is refused with exit 2. See docs/wiring.md.
 """
 
+import contextlib
 import importlib.util
 import json
 import os
@@ -80,21 +81,40 @@ def _mount() -> str:
     return mount.mount_or_source(__file__, "seed")
 
 
+def _printable(text: str) -> str:
+    """*text* safe on a UTF-8 stream: a lone surrogate (a path that is not UTF-8) becomes its escape."""
+    return text.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+def _record_break(event_type: str, line: str) -> None:
+    """Append one ERROR line in prax's format, after the answer has left: an attempt, never a wait."""
+    if "_pytest" in sys.modules and BREAK_LOG == LIVE_BREAK_LOG:
+        return  # prax's own test seam: a suite run's break never lands in the live log medic reads
+    try:
+        entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} | bridges.seed | ERROR | {line} on {event_type}\n"
+        fd = os.open(BREAK_LOG, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NONBLOCK, 0o666)
+        try:
+            os.write(fd, entry.encode("utf-8", "backslashreplace"))
+        finally:
+            os.close(fd)
+    except BaseException as exc:  # the answer is already out: nothing the record raises may change it
+        with contextlib.suppress(BaseException):
+            sys.stderr.write(
+                f"[HOOKS:seed] bridge: the break was not recorded in {BREAK_LOG}: {type(exc).__name__}: {exc}\n"
+            )
+
+
 def _broken(event_type: str, exc: BaseException) -> None:
     """Refuse a guarded event with exit 2; any other event answers nothing. Answer first, record after."""
-    reason = BROKEN.format(error=f"{type(exc).__name__}: {exc}")
-    sys.stderr.write(reason + "\n")
-    if not ("_pytest" in sys.modules and BREAK_LOG == LIVE_BREAK_LOG):
-        # prax's own test seam: a suite run's break never lands in the live log medic reads
-        line = reason.splitlines()[0]
-        entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} | bridges.seed | ERROR | {line} on {event_type}\n"
-        try:
-            with open(BREAK_LOG, "a", encoding="utf-8") as handle:
-                handle.write(entry)
-        except OSError as err:
-            sys.stderr.write(f"[HOOKS:seed] bridge: the break was not recorded in {BREAK_LOG}: {err}\n")
-    if event_type in GUARDED_EVENTS:
-        sys.exit(2)
+    code = 2 if event_type in GUARDED_EVENTS else 0
+    try:
+        reason = _printable(BROKEN.format(error=f"{type(exc).__name__}: {exc}"))
+        sys.stderr.write(reason + "\n")
+        sys.stderr.flush()
+        _record_break(event_type, reason.splitlines()[0])
+    finally:
+        if code:
+            sys.exit(code)
 
 
 def main() -> None:
@@ -104,31 +124,35 @@ def main() -> None:
         sys.exit(1)
     arg = sys.argv[1]
     event_type = arg.split(":", 1)[0]
-    stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
-    payload = _as_object(stdin_data)
-    if payload is not None:
-        if payload.get("session_id"):
-            # Cadence and the ledgers key a seat on this variable; a Seed head inherits none, or its launcher's.
-            os.environ[SESSION_ENV] = str(payload["session_id"])
-        if "provider" not in payload:
-            stdin_data = json.dumps({**payload, "provider": PROVIDER})
 
     try:
+        stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
+        payload = _as_object(stdin_data)
+        if payload is not None:
+            if payload.get("session_id"):
+                # Cadence and the ledgers key a seat on this variable; a Seed head inherits none, or its launcher's.
+                os.environ[SESSION_ENV] = str(payload["session_id"])
+            if "provider" not in payload:
+                stdin_data = json.dumps({**payload, "provider": PROVIDER})
         _mount()
+        from aipass.hooks.apps.handlers.json import json_handler
         from aipass.hooks.apps.modules.engine import run_event
 
         output, exit_code = run_event(arg, stdin_data)
-    except Exception as exc:  # fail closed on the guarded event, see _broken
+        json_handler.log_operation("bridge", {"event": arg, "exit_code": exit_code})
+    except BaseException as exc:  # fail closed on the guarded event, however it broke: see _broken
         _broken(event_type, exc)
         return
 
-    if exit_code == 2:
-        sys.stderr.write(block_reason(output) + "\n")
-        sys.stdout.write(output)
-    else:
-        sys.stdout.write(document(event_type, output))
-    if exit_code:
-        sys.exit(exit_code)
+    try:
+        if exit_code == 2:
+            sys.stderr.write(_printable(block_reason(output)) + "\n")
+            sys.stdout.write(_printable(output))
+        else:
+            sys.stdout.write(_printable(document(event_type, output)))
+    finally:
+        if exit_code:
+            sys.exit(exit_code)
 
 
 if __name__ == "__main__":

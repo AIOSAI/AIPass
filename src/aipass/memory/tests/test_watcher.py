@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watcher.py
 # Description: memory watcher handler — lifecycle, status, on_modified callback, branch-path walk
-# Version: 1.1.1
+# Version: 1.1.3
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # Category: memory/tests
 # =============================================
 
@@ -16,7 +16,6 @@
 # sentry: no-test-needed(external) — execute_rollover itself; the orchestrator is mocked, only the call is pinned
 
 import json
-import logging
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -51,7 +50,6 @@ def _prepare_watcher_mocks(monkeypatch):
     mock_observer_instance.is_alive.return_value = True
     mock_observer_cls = MagicMock(return_value=mock_observer_instance)
     monkeypatch.setattr(memory_watcher, "Observer", mock_observer_cls)
-    monkeypatch.setattr(memory_watcher, "WATCHDOG_AVAILABLE", True)
 
     monkeypatch.setattr(memory_watcher, "json_handler", MagicMock())
     monkeypatch.setattr(memory_watcher, "logger", MagicMock())
@@ -341,7 +339,6 @@ class TestMemoryFileWatcherOnModified:
         mod, mocks = _import_watcher(monkeypatch)
 
         watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
-        # str(Path(...)) matches how on_modified normalizes the key on Windows.
 
         file_path = str(tmp_path / "some" / "branch" / ".trinity" / "local.json")
         file_key = str(Path(file_path))
@@ -515,18 +512,11 @@ class TestTheWatcherOwnsOnlyTheMemoryFilesOfItsRoots:
         mocks["check_single_file"].assert_called_once_with(own)
 
     def test_a_root_reached_through_a_symlink_is_heard_at_its_real_path(self, monkeypatch, tmp_path):
-        """An observer may report the real path behind a symlinked root .
-
-        A platform that cannot make a symlink uses the real directory as the root.
-        """
+        """An observer may report the real path behind a symlinked root ."""
         real = tmp_path / "real_branch"
         real.mkdir()
         branch = tmp_path / "linked_branch"
-        try:
-            branch.symlink_to(real, target_is_directory=True)
-        except OSError as exc:
-            logging.getLogger(__name__).info("No symlink on this platform (%s): the root is the real directory", exc)
-            branch = real
+        branch.symlink_to(real, target_is_directory=True)
         handler, mocks = self._scheduled_watcher(monkeypatch, branch)
         reported = real / ".trinity" / "local.json"
 
@@ -646,6 +636,27 @@ class TestTheTrinityMatchIsAFilenameNotAPattern:
         assert memory_watcher.check_and_rollover()["files_checked"] == 1
 
 
+class TestThePlansCountReadsTheBranchStateRoot:
+    """A plan listed in the state-root manifest is not pending; a folder counted up from the file would miss it."""
+
+    def test_a_plan_in_the_state_root_manifest_is_not_pending(self, monkeypatch, tmp_path):
+        mod, _ = _import_watcher(monkeypatch)
+        plans = tmp_path / "plans"
+        plans.mkdir()
+        (plans / "done.md").write_text("# done", encoding="utf-8")
+        state = tmp_path / "state"
+        (state / "memory" / "memory_json").mkdir(parents=True)
+        (state / "memory" / "memory_json" / ".plans_processed.json").write_text('{"done.md": "sha"}', encoding="utf-8")
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(state))
+        monkeypatch.setattr(
+            memory_watcher.config_loader,
+            "section",
+            lambda name: {"enabled": True, "path": str(plans), "supported_extensions": [".md"]},
+        )
+
+        assert mod._check_plans()["pending_files"] == 0
+
+
 class TestAnUnreadableRegistryIsAnsweredByEveryEntry:
     """Each watcher entry answers its own failure shape, naming the registry, never a raise.
 
@@ -659,7 +670,7 @@ class TestAnUnreadableRegistryIsAnsweredByEveryEntry:
         def _raise():
             raise detector.RegistryUnreadable(f"Unreadable registry {registry}: x")
 
-        monkeypatch.setattr(detector, "_read_registry", _raise)
+        monkeypatch.setattr(detector, "write_scope", _raise)
         return registry
 
     def test_the_startup_check_fails_and_names_it(self, monkeypatch, tmp_path):

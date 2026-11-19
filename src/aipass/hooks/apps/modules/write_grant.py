@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_grant.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Whether a dispatch's write grant covers one cross-project write, read through @ai_mail's door
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-11-03
-# Modified: 2026-11-08
+# Modified: 2026-11-17
 # =============================================
 
 """Whether this session's dispatch grant covers one crossing write: @ai_mail's door decides, any doubt refuses."""
@@ -16,16 +16,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
-from aipass.cli.apps.modules import err_console
-from aipass.hooks.apps.handlers.module_root import module_file
+from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules.write_ownership import AIPASS_REGISTRY, Project
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 CONSOLE = err_console
 
 DISPATCH_ENV = "AIPASS_DISPATCH_ID"
-_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
-_DOOR = "aipass.ai_mail.apps.modules.door_dispatch_grant"
+_RAIL = "aipass.ai_mail"
+_DOOR = "aipass.ai_mail"
 UNREADABLE = "edit_gate could not read the dispatch register ({error}), so this crossing is refused."
 
 
@@ -38,7 +38,16 @@ class Grant:
 
 
 def granted(cwd: str, caller_root: Path | None, landing: Project, target: Path) -> Grant:
-    """Whether this session's dispatch grants *target* in foreign *landing*; no AIPASS_DISPATCH_ID is a plain no."""
+    """Whether this session's dispatch grants *target* in foreign *landing*; no AIPASS_DISPATCH_ID is a plain no.
+
+    Each call leaves one json trail entry."""
+    grant = _granted(cwd, caller_root, landing, target)
+    json_handler.log_operation("granted", {"seat": cwd, "allowed": grant.allowed})
+    return grant
+
+
+def _granted(cwd: str, caller_root: Path | None, landing: Project, target: Path) -> Grant:
+    """granted's ruling, untrailed."""
     dispatch_id = os.environ.get(DISPATCH_ENV, "")
     if not dispatch_id:
         return Grant(False)
@@ -109,7 +118,7 @@ def _register_root(door: ModuleType, caller_root: Path, landing: Project, dispat
 
 def aipass_root() -> Path | None:
     """The AIPass checkout this code runs from, by its registry above this file: never the target, the cwd or an env."""
-    return next((p for p in module_file(__file__).parents if (p / AIPASS_REGISTRY).is_file()), None)
+    return next((p for p in Path(__file__).resolve().parents if (p / AIPASS_REGISTRY).is_file()), None)
 
 
 def _verified_caller(cwd: str) -> str:

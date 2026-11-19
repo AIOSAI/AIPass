@@ -17,15 +17,51 @@ operand of a program that does not only read (`modules/shell_programs.READ_ONLY_
 the same three rules: the project fence, whose file it is, and the `.trinity` memory rule. So a program
 nobody listed as a writer cannot name another branch's file or a memory file off the admin seat. `cat`,
 `grep`, `jq` and friends still read anywhere; `drone` is the router and passes; git and gh answer to
-git_gate. `awk` and `sed` are not read as filters: their scripts can write. The one exception is
-`sed` whose every script is addresses and `p`, `d`, `q`, `=` with only reading flags (`sed -n 68,90p f`).
-That shape reads anywhere, a memory file included. A `w` or `e` inside any other
+git_gate. `sed` is not read as a filter: its scripts can write. The exception is
+`sed` whose every script is addresses (line numbers, `/regex/`, ranges of either) and `p`, `d`, `q`, `=`
+with only reading flags (`sed -n 68,90p f`, `sed -n '/^## A/,/^## B/p' f`). `awk` reads when its only
+flags are `-F` and `-v` and its program holds no `>`, `|`, `system`, `getline`, gawk's `@load` or
+`@include`, or an indirect call (`@f(`); `-f`, `-i` or any of those makes every operand a write target
+again. A provider CLI's prompt (`claude -p ../x/README.md`) is not a write target, but the value of each
+of its flags is (`codex exec -o FILE` writes FILE itself, unseen by any hook): the word after a flag, the
+part after `=`, or a short flag's attached text, even where no file exists yet. A switch from the CLI's
+`--help` and a prompt flag are passed over, so the word after them is the prompt; the directory flags
+(`-C`, `--cd`, `--add-dir`) are the launch rule's, below, which judges where the session runs.
+Those shapes read anywhere, a memory file included. A `w` or `e` inside any other
 script is not read: its target or command passes unseen. More reads: a shell whose
 options before its script carry `-n` (`bash -n x.sh`, a syntax check; git_gate does not read the
 script's commands either), `aipass init update ... --dry-run` (a preview is a read), and `read`,
 whose operands are variable names. For `pytest` and `python -m pytest`, the value of `-c`,
 `--config-file` or `-c=x` is a file pytest only reads; every other operand is judged, `--rootdir`
 and `--confcutdir` included (the rootdir takes pytest's cache).
+
+## A provider session starts only in the own branch
+
+A session's directory makes it that branch's seat for every gate, so off the verified admin seat a
+`claude`, `codex` or `opencode` launch from the Bash tool is refused when the directory it would run in
+or reach lies outside the caller's own branch (the nearest passport directory above the session cwd).
+`modules/provider_launch.py` reads, per invocation from `shell_reader`:
+
+ - the invocation cwd after `cd`, `pushd`, subshells, `bash -c`, `script -c`, `nohup`, `setsid`, `env`, `sudo`;
+ - each CLI's own directory flags, from its `--help`: codex `-C`/`--cd`, claude and codex `--add-dir`
+   (claude's takes several), opencode's positional directory;
+ - a carrier's directory: `env -C`/`--chdir`, `sudo -D`/`--chdir`, `systemd-run --working-directory`
+   or `-p WorkingDirectory=`; with none of those and no `-d`/`--same-dir`, a unit starts in `/`
+   (system) or the home dir (`--user`), per `systemd.exec`.
+
+Refused as unknown: a cwd the reader cannot follow, a directory still holding `$` or a backtick, a
+glob that matches nothing. In a command naming a provider, a detached launcher is read where it starts:
+`tmux new-session`, `new-window` and `split-window` (and their aliases) start at `-c` or, without it,
+at the tmux client's cwd (measured on tmux 3.6), and their shell command is re-read from there; `screen`
+starts its program where it is invoked (`man screen`, chdir). Still refused: any other tmux command
+(`send-keys`, `respawn-pane`, ...), tmux's own `-c`, a `;` chain, screen with `-c`, `-X`, `-x`, `-r`, `-R`
+or `-ls`, and `at`, `batch`, `dtach` and `abduco`, whose help is not on this machine to read. A session
+with no passport above its cwd has no branch and starts none. @devpulse's directory has no special
+rule. The refusal names the caller and the next step (`drone @ai_mail dispatch`); `logs/edit_gate.log`
+gets `provider launch refused: @<caller> -> <dir> | cmd=<command>`. The dispatch services (ai_mail's
+wake, systemd units, the daemon) start sessions from Python, never through an agent's Bash tool, so this
+rule never sees them. Not read: a provider started under another name (`npx @anthropic-ai/claude-code`,
+`node cli.js`, a renamed binary).
 
 ## Who may write whose files
 
@@ -63,6 +99,8 @@ Only the verified admin seat crosses. Where no project root is resolvable for th
 The shell lane applies the same rules to what `bash_writes` can see. Inside one project it convicts on write grammar only (redirection, `tee`, `sed -i`, `cp`/`mv` destinations, `dd of=`). An interpreter's held paths (`python -c`, a heredoc, `awk`) cannot be told from reads, and reading another branch is the daily loop, so **an interpreter that writes another branch of its own project is not refused**. The project fence still reads held paths: an interpreter naming another project's file is refused whether it reads or writes. The narrower `testwrite_gate` asks `bash_writes` whether the interpreter's own text holds a write verb and stands down when it does not; this gate deliberately does not, and the marker it ignores is named in [bash_writes.md](bash_writes.md).
 
 **A source-read gate is open for the seconds an edit is half-applied.** The live gate imports this file per event, so while a symbol is mid-move across several edits a real event can hit a `NameError` and fail OPEN. Move code in one Edit per symbol.
+
+**An edit to the engine's own imports is linted before it lands.** `engine_closure` lists every file the hook engine imports (`drone @hooks closure list`), and an Edit, Write or MultiEdit to one is run through ruff (`F821` and syntax) first; a hit is refused with its lines. When ruff cannot run or answer (not installed beside the hooks' interpreter, a timeout, an error exit), the edit is refused too, with the cause and the install command, and one fixed ERROR line reaches medic. An unreadable `hooks.json` or a closure file that does not parse narrows the closure, never widens what an edit may do, and logs its own fixed ERROR line; the path follows at INFO.
 
 ## The admin exemption — one seat reaches outwards
 

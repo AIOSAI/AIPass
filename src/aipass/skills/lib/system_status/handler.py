@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handler.py
-# Description: System Status skill handler - disk, memory, uptime, processes, battery, machine_vitals(), machine_processes()
-# Version: 2.6.0
+# Description: System Status skill - disk, memory, uptime, processes, battery, machine_vitals(), machine_processes()
+# Version: 2.7.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -13,7 +13,6 @@ Reference: docs/system_status.md
 
 import configparser
 import shutil
-import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -30,11 +29,6 @@ except ImportError:
     logger.warning("psutil not importable — system_status memory/uptime/processes will refuse")
 
 PSUTIL_RECIPE = "psutil is not importable on this host - install it with: pip install 'psutil>=5.9'"
-
-
-def _host_platform():
-    """sys.platform read at the call; tests patch this one door, not sys.platform process-wide."""
-    return sys.platform
 
 
 def run(action, args=None, config=None):
@@ -126,13 +120,9 @@ def _memory_info():
         f"  Available: {_format_bytes(virtual.available)}",
     ]
 
-    # buffers/cached exist on Linux and BSD only; elsewhere a zero would read as a measurement.
-    for label, field in (("Buffers", "buffers"), ("Cached", "cached")):
-        value = getattr(virtual, field, None)
-        if value is not None:
-            lines.append(f"  {label + ':':<11}{_format_bytes(value)}")
-
     lines += [
+        f"  Buffers:   {_format_bytes(virtual.buffers)}",
+        f"  Cached:    {_format_bytes(virtual.cached)}",
         "Swap",
         f"  Total:     {_format_bytes(swap.total)}",
         f"  Used:      {_format_bytes(swap.used)} ({swap_percent:.1f}%)",
@@ -246,6 +236,10 @@ def _summary():
 SKILL_NAME = "system_status"
 VITALS_SCHEMA = 2
 
+# Why a published function refused outright: off on purpose, or the switch state cannot be read.
+REASON_SWITCHED_OFF = "switched_off"
+REASON_SWITCH_UNREADABLE = "switch_unreadable"
+
 # A value the host cannot give is None, never a zero.
 _SECTION_VALUES = {
     "cpu": ("percent", "window_s", "cores", "logical", "physical", "mhz", "mhz_max"),
@@ -276,8 +270,9 @@ REASONS = {
     "no_range": (
         "The fan speed is real but its range is not known on this host, so there is no scale to draw it against."
     ),
-    "switched_off": (
-        "The system_status skill is switched off, or its switch state cannot be read, so it takes no readings."
+    REASON_SWITCHED_OFF: "The system_status skill is switched off on purpose, so it takes no readings.",
+    REASON_SWITCH_UNREADABLE: (
+        "The switch state cannot be read, so the system_status skill counts as switched off and takes no readings."
     ),
     "psutil_missing": (
         "psutil is not importable on this host, so no reading can be taken - detail carries the install recipe."
@@ -424,14 +419,16 @@ def _gate(door):
         # Cannot tell whether it is off, so it is off - the runner's answer.
         logger.error(f"Refusing {door} - switch state unreadable: %s", exc, exc_info=True)
         return _refusal(
-            "switched_off",
+            REASON_SWITCH_UNREADABLE,
             f"The switch state {STATE_FILENAME} could not be read ({_describe(exc)}), so this skill "
             f"counts as switched OFF; the error is in the host log.",
         )
 
     if not enabled:
+        # Off on purpose is the switch working, not a fault: INFO.
+        logger.info(f"Refusing {door} - the skill is switched off")
         return _refusal(
-            "switched_off",
+            REASON_SWITCHED_OFF,
             f"Skill '{SKILL_NAME}' is switched OFF and takes no readings. "
             f"Turn it back on with: drone @skills on {SKILL_NAME}",
         )
@@ -575,8 +572,7 @@ def _read_network(ps):
 
 def _read_load(ps):
     """1, 5 and 15 minute load averages."""
-    # Windows load is emulated and reads 0 until warm: not a measurement.
-    if _host_platform() == "win32" or not hasattr(ps, "getloadavg"):
+    if not hasattr(ps, "getloadavg"):
         return _section("load", "platform")
 
     one, five, fifteen = ps.getloadavg()
@@ -702,9 +698,6 @@ def _fan_entry(chip, fan):
 def _fan_range(chip, label):
     """Read one fan's min and max from Linux sysfs - read-only, and only those two."""
     # fanN_manual/fanN_output beside them are root-writable: never opened (pinned in tests).
-    if _host_platform() != "linux":
-        return None, "The fan range is read from Linux sysfs, and this host is not Linux."
-
     try:
         folder, stem = _locate_fan(chip, label)
     except LookupError as exc:
@@ -761,7 +754,6 @@ def _locate_fan(chip, label):
 
 def _read_battery(ps):
     """Charge, mains, state and time left, beside the low lines the host publishes."""
-    # psutil defines sensors_battery on Linux, Windows, macOS and FreeBSD only.
     if not hasattr(ps, "sensors_battery"):
         return _section("battery", "platform")
 
@@ -824,9 +816,7 @@ def _battery_state(ps, percent, plugged, secsleft):
 
 
 def _battery_sysfs_status():
-    """The kernel's status word for the first BAT* supply, or None off Linux or without one."""
-    if _host_platform() != "linux":
-        return None
+    """The kernel's status word for the first BAT* supply, or None without one."""
     for folder in sorted(POWER_SUPPLY_ROOT.glob("BAT*")):
         word = _read_sysfs_or(folder / "status", None)
         if word:
@@ -836,8 +826,6 @@ def _battery_sysfs_status():
 
 def _battery_lines():
     """The low and critical percentages UPower publishes, read from its config file."""
-    if _host_platform() != "linux":
-        return None, None, None
     try:
         text = UPOWER_CONF.read_text(encoding="utf-8")
     except FileNotFoundError:

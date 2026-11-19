@@ -17,7 +17,7 @@ from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, hash_lines, prose_lines
 
-# APPLIES_TO: Windows CI runs the suite, so /home/... in a test breaks the build.
+# APPLIES_TO: CI runs the suite on another machine, so /home/... in a test breaks the build.
 APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 

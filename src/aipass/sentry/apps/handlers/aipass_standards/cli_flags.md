@@ -180,8 +180,8 @@ def run_self_test():
     # Test 1: Dependencies
     total += 1
     try:
-        from aipass.cli.apps.modules import console  # noqa: F811
-        from aipass.prax.apps.modules.logger import system_logger  # noqa: F811
+        from aipass.cli import console  # noqa: F811
+        from aipass.prax import logger  # noqa: F811
         console.print("  ✅ Dependencies imported")
         passed += 1
     except ImportError as e:

@@ -18,8 +18,7 @@ documented rather than left to be discovered. Verified by reading the script, 20
   the current directory contains a `.trinity/` directory. Everything else — `claude agents`,
   `--resume`, `-c`, `auth`, `--help` — falls through to `command claude` untouched.
 - An intercepted call runs `python -m aipass.hooks.apps.handlers.lifecycle.session_boot`, with the
-  interpreter resolved from the repo's own `.venv` at install time (POSIX and Windows layouts both
-  probed, falling back to `python3`). No user path is hardcoded.
+  interpreter resolved from the repo's own `.venv` at install time (falling back to `python3`). No user path is hardcoded.
 
 A fresh start opens a new tmux session named `<branch>-<id8>`, the first eight characters of the new
 session id. It never kills a tmux session: a bare `<branch>` name could belong to a live session.

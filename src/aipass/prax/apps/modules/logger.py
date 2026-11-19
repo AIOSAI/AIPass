@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: logger.py
 # Description: PRAX Public API
-# Version: 1.5.0
+# Version: 1.8.0
 # Created: 2025-11-15
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -16,20 +16,17 @@ __all__ = [
     "system_logger",
     "get_system_logger",
     "SystemLogger",
-    "get_direct_logger",
-    "direct_log",
-    "DirectLogger",
     "get_system_status",
     "print_introspection",
     "handle_command",
     "MODULE_NAME",
     "DATA_FILE",
-    "append_jsonl",
+    "log_backup_count",
+    "LOGGING_ALLOWED",
+    "LOGGER_DOORS",
 ]
 
-import logging
-import sys
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 
 # CLI imports prax logger, so CLI is imported lazily inside functions, never here.
 from aipass.prax.apps.handlers.logging.setup import (
@@ -38,16 +35,43 @@ from aipass.prax.apps.handlers.logging.setup import (
 )
 from aipass.prax.apps.handlers.logging.introspection import get_caller_info
 from aipass.prax.apps.handlers.registry.load import load_module_registry, load_last_scan
-from aipass.prax.apps.handlers.config.load import get_system_logs_dir, get_module_logs_dir, PRAX_JSON_DIR
-from aipass.prax.apps.handlers.logging.direct import get_direct_logger, direct_log, DirectLogger
-from aipass.prax.apps.handlers.logging.jsonl_writer import append_jsonl
+from aipass.prax.apps.handlers.config.load import (
+    get_system_logs_dir,
+    get_module_logs_dir,
+    load_log_config,
+    PRAX_JSON_DIR,
+)
 from aipass.prax.apps.handlers.json import json_handler
-
-# sentry requires a module-level 'logger'; SystemLogger methods shadow it on purpose.
-logger = logging.getLogger(__name__)
 
 MODULE_NAME = "prax_logger"
 DATA_FILE = PRAX_JSON_DIR / f"{MODULE_NAME}_data.json"
+
+#: The prax files allowed to import stdlib logging, by path under src/aipass, each with why. Every other prax
+#: file holds none; even these send their own diagnostics to prax's trail.
+LOGGING_ALLOWED: Tuple[Tuple[str, str], ...] = (
+    (
+        "prax/apps/handlers/logging/setup.py",
+        "builds door one's per-module loggers on stdlib Logger and RotatingFileHandler",
+    ),
+    (
+        "prax/apps/handlers/logging/direct.py",
+        "builds door one's direct loggers on stdlib Logger, Formatter and handlers",
+    ),
+)
+
+#: The prax files whose classes are prax's logging doors, by path under src/aipass, each with why. No other
+#: file in the fleet may define a level-shaped logger class.
+LOGGER_DOORS: Tuple[Tuple[str, str], ...] = (
+    ("prax/apps/modules/logger.py", "SystemLogger: door one, from aipass.prax import logger"),
+    ("prax/apps/handlers/logging/direct.py", "DirectLogger: door one bound at creation, for prax's own handlers"),
+    ("prax/apps/handlers/logging/trail.py", "TrailLogger and PraxTrail: door two, from aipass.prax import trail"),
+)
+
+
+def log_backup_count() -> int:
+    """Backups the .log tiers keep, the deeper of the two, from the config read now: a rotated-file reader's depth."""
+    config = load_log_config()
+    return max(config["system_logs"]["backup_count"], config["local_logs"]["backup_count"])
 
 
 def get_system_logger():
@@ -62,37 +86,18 @@ def get_system_logger():
 class SystemLogger:
     """Auto-routing logger that writes to calling module's log file"""
 
-    _watcher_started = False
-
-    def _ensure_watcher(self):
-        """Keep an explicitly started discovery watcher honest. Starts nothing.
-
-        Only a process that imported and started the watcher has one; never imported here,
-        since that pulls the watchdog library into every logging process. `_watcher_started`
-        means "past the first log line"; unlocked, since a racing double-set writes the same value.
-        """
-        if SystemLogger._watcher_started:
-            watcher = sys.modules.get("aipass.prax.apps.handlers.discovery.watcher")
-            if watcher is not None:
-                watcher.check_file_watcher_liveness()  # Throttled; ~1 real check/60s.
-            return
-        SystemLogger._watcher_started = True
-
     def info(self, message, *args, **kwargs):
         """Log info message to calling module's log file"""
-        self._ensure_watcher()
         logger = get_system_logger()
         logger.info(message, *args, **kwargs)
 
     def warning(self, message, *args, **kwargs):
         """Log warning message to calling module's log file"""
-        self._ensure_watcher()
         logger = get_system_logger()
         logger.warning(message, *args, **kwargs)
 
     def error(self, message, *args, **kwargs):
         """Log error message to calling module's log file"""
-        self._ensure_watcher()
         logger = get_system_logger()
         logger.error(message, *args, **kwargs)
 
@@ -101,7 +106,6 @@ class SystemLogger:
 
         Silent at the default INFO level; the level binds when a module's logger is created.
         """
-        self._ensure_watcher()
         logger = get_system_logger()
         logger.debug(message, *args, **kwargs)
 
@@ -130,13 +134,7 @@ def get_system_status() -> Dict[str, Any]:
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    except ImportError as e:
-        logger.info("CLI console not available, using rich fallback: %s", e)
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]logger Module[/bold cyan]")
@@ -149,14 +147,9 @@ def print_introspection():
     console.print("    [dim]→ setup.py (get_captured_loggers_count — returns active logger count)[/dim]")
     console.print("    [dim]→ introspection.py (get_caller_info — resolves caller module name)[/dim]")
     console.print("    [dim]→ direct.py (get_direct_logger — bypasses event pipeline for infrastructure logging)[/dim]")
-    console.print("    [dim]→ direct.py (direct_log — shorthand for direct logging calls)[/dim]")
     console.print("    [dim]→ direct.py (DirectLogger — direct logger class)[/dim]")
     console.print()
     console.print("  [cyan]handlers/discovery/[/cyan]")
-    console.print(
-        "    [dim]→ watcher.py (check_file_watcher_liveness — reports a watcher that died under "
-        "an explicit starter; the logger starts none)[/dim]"
-    )
     console.print("    [dim]→ watcher.py (is_file_watcher_active — checks watcher status)[/dim]")
     console.print()
     console.print("  [cyan]handlers/registry/[/cyan]")
@@ -165,6 +158,7 @@ def print_introspection():
     console.print("  [cyan]handlers/config/[/cyan]")
     console.print("    [dim]→ load.py (get_system_logs_dir — returns system logs directory path)[/dim]")
     console.print("    [dim]→ load.py (get_module_logs_dir — returns per-module logs directory path)[/dim]")
+    console.print("    [dim]→ load.py (load_log_config — the tiers' backup_count, published as log_backup_count)[/dim]")
     console.print("    [dim]→ load.py (PRAX_JSON_DIR — base path for prax JSON data files)[/dim]")
     console.print()
 

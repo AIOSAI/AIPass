@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.12.2
+# Version: 2.14.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-11-07
+# Modified: 2026-11-17
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -19,24 +19,20 @@ import os
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.hooks.apps.handlers.module_root import module_file
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import branch_state_root, logger
 from aipass.hooks.apps.modules.grounding_content import find_branch_root
 
-try:
-    import fcntl
-except ImportError:
-    fcntl = None  # type: ignore[assignment]
-    logger.info("[HOOKS] cadence: fcntl unavailable (Windows)")
+import fcntl
 
 CONSOLE = err_console
 
 _GUARD_DIR = Path(tempfile.gettempdir())
-_BRANCH_ROOT = module_file(__file__).parent.parent.parent
-_CONFIG_PATH = _BRANCH_ROOT / "hooks_json" / "custom_config" / "cadence_config.json"
+_CONFIG_PATH = branch_state_root("hooks") / "hooks_json" / "custom_config" / "cadence_config.json"
 _DEBOUNCE_S = 2.0
 
 HELP_COMMANDS = [
@@ -107,9 +103,12 @@ def _load_config() -> dict:
     if _CONFIG_PATH.is_file():
         try:
             overrides = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-            _deep_merge(result, overrides)
         except (json.JSONDecodeError, OSError) as exc:
-            logger.info("[HOOKS] cadence: config load failed, using defaults: %s", exc)
+            overrides = exc
+        if isinstance(overrides, dict):
+            _deep_merge(result, overrides)
+        else:  # ERROR, not a raise: edit_gate reads cadence, and a raise there refuses every memory write
+            logger.error("[HOOKS] cadence: %s unusable (%s), the built-in cadence runs", _CONFIG_PATH, overrides)
 
     _config = result
     return result
@@ -135,7 +134,7 @@ def _get_turn_token(hook_data: dict) -> int:
         logger.debug("[HOOKS] cadence: no transcript yet (turn 0): %s", tp)
         return -1
     except OSError as exc:
-        logger.info("[HOOKS] cadence: transcript stat failed: %s", exc)
+        logger.warning("[HOOKS] cadence: transcript stat failed: %s", exc)
         return -1
 
 
@@ -156,15 +155,13 @@ def is_automated(hook_data: dict | None) -> bool:
 
 
 def _lock(fd) -> None:
-    """Acquire exclusive lock (no-op on Windows)."""
-    if fcntl is not None:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+    """Acquire exclusive lock."""
+    fcntl.flock(fd, fcntl.LOCK_EX)
 
 
 def _unlock(fd) -> None:
-    """Release exclusive lock (no-op on Windows)."""
-    if fcntl is not None:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+    """Release exclusive lock."""
+    fcntl.flock(fd, fcntl.LOCK_UN)
 
 
 def _close_fd(fd) -> None:
@@ -173,7 +170,47 @@ def _close_fd(fd) -> None:
         _unlock(fd)
         fd.close()
     except OSError as exc:
-        logger.info("[HOOKS] cadence: fd cleanup failed: %s", exc)
+        logger.warning("[HOOKS] cadence: fd cleanup failed: %s", exc)
+
+
+def _still_names(fd, path: Path) -> bool:
+    """False when *path* was set aside or replaced while this call waited for the lock on *fd*."""
+    try:
+        return os.stat(path).st_ino == os.fstat(fd.fileno()).st_ino
+    except FileNotFoundError:
+        return False
+
+
+def _parse(content: str) -> tuple[Any, str]:
+    """(the parsed value, "") or (None, why it is no JSON)."""
+    try:
+        return json.loads(content), ""
+    except json.JSONDecodeError as exc:
+        return None, f"not JSON ({exc.msg})"
+
+
+def _set_aside(path: Path, why: str) -> None:
+    """Quarantine under the lock: renamed beside, never unlinked; the temp dir's own cleaning takes it, as the state."""
+    logger.error("[HOOKS] cadence: a damaged state file is set aside, it reads empty: %s", why)
+    aside = path.with_name(f"{path.name}.corrupt-{time.time_ns()}")
+    os.replace(path, aside)
+    logger.info("[HOOKS] cadence: set aside as %s", aside)
+
+
+def _open_state(path: Path):
+    """(the state file flocked, its record). Damage is set aside first, ERROR once, and the fresh file opened in
+    its place, so a write never lands in the evidence."""
+    while True:
+        fd = open(path, "a+", encoding="utf-8")
+        _lock(fd)
+        if _still_names(fd, path):
+            fd.seek(0)
+            content = fd.read()
+            data, why = _parse(content) if content.strip() else ({}, "")
+            if isinstance(data, dict):
+                return fd, data
+            _set_aside(path, why or "not a JSON object")
+        _close_fd(fd)
 
 
 def _mtime_age(fd) -> float:
@@ -181,7 +218,7 @@ def _mtime_age(fd) -> float:
     try:
         return time.time() - os.fstat(fd.fileno()).st_mtime
     except OSError as exc:
-        logger.info("[HOOKS] cadence: fstat failed, assuming stale: %s", exc)
+        logger.warning("[HOOKS] cadence: fstat failed, assuming stale: %s", exc)
         return _DEBOUNCE_S + 1
 
 
@@ -225,12 +262,10 @@ def _read_turn_uncounted(path: Path) -> int:
         return -1
     fd = None
     try:
-        fd = open(path, encoding="utf-8")
-        _lock(fd)
-        content = fd.read()
+        fd, data = _open_state(path)
         _close_fd(fd)
         fd = None
-        stored = json.loads(content).get("turn", -1) if content.strip() else -1
+        stored = data.get("turn", -1)
         return stored if isinstance(stored, int) else -1
     except (OSError, json.JSONDecodeError, AttributeError) as exc:
         _turn_degraded = f"cadence state file {path} could not be read: {exc}"
@@ -261,12 +296,7 @@ def _load_and_increment(hook_data: dict) -> int | None:
     fd = None
 
     try:
-        fd = open(path, "a+", encoding="utf-8")
-        _lock(fd)
-        fd.seek(0)
-        content = fd.read()
-
-        data = json.loads(content) if content.strip() else {}
+        fd, data = _open_state(path)
         stored_turn = data.get("turn", -1)
         stored_token = data.get("token", -1)
 
@@ -417,7 +447,7 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
         session_short,
         branch,
     )
-
+    json_handler.log_operation("should_fire", {"loader": loader_name, "turn": turn, "fired": fired})
     return fired
 
 
@@ -441,12 +471,12 @@ def _read_last_mail_turn(path: Path) -> int | None:
     try:
         content = path.read_text(encoding="utf-8")
     except OSError as exc:
-        logger.info("[HOOKS] cadence: mail state read failed, treating as never fired: %s", exc)
+        logger.warning("[HOOKS] cadence: mail state read failed, treating as never fired: %s", exc)
         return None
     try:
         value = json.loads(content).get("last_fired_turn") if content.strip() else None
     except json.JSONDecodeError as exc:
-        logger.info("[HOOKS] cadence: mail state unreadable, treating as never fired: %s", exc)
+        logger.warning("[HOOKS] cadence: mail state unreadable, treating as never fired: %s", exc)
         return None
     return value if isinstance(value, int) else None
 
@@ -459,7 +489,7 @@ def _write_last_mail_turn(path: Path, turn: int | None) -> None:
         else:
             path.write_text(json.dumps({"last_fired_turn": turn}), encoding="utf-8")
     except OSError as exc:
-        logger.info("[HOOKS] cadence: mail state write failed: %s", exc)
+        logger.warning("[HOOKS] cadence: mail state write failed: %s", exc)
 
 
 def should_fire_mail(new_count: int, hook_data: dict | None = None) -> bool:
@@ -531,7 +561,8 @@ def current_turn() -> int | None:
     if path is None or not path.exists():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8") or "{}")
+        fd, data = _open_state(path)
+        _close_fd(fd)
     except (OSError, json.JSONDecodeError) as exc:
         logger.info("[HOOKS] cadence: turn unreadable: %s", exc)
         return None
@@ -588,7 +619,7 @@ def should_fire_advisory(name: str, period: int = ADVISORY_PERIOD) -> bool:
             path.write_text(json.dumps({"turn": turn, "at": now}), encoding="utf-8")
         except OSError as exc:
             # Fire anyway — losing the advisory is worse than repeating it.
-            logger.info("[HOOKS] cadence: advisory state write failed: %s", exc)
+            logger.warning("[HOOKS] cadence: advisory state write failed: %s", exc)
     return fire
 
 
@@ -677,7 +708,7 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
                 old_turn,
             )
     except OSError as exc:
-        logger.info(
+        logger.warning(
             "[HOOKS] cadence: reset write FAILED caller=%s pid=%d session=%s: %s", caller, pid, session_short, exc
         )
         if fd is not None:
@@ -697,7 +728,9 @@ def _stamp_window(session_id: str, opened_at: float, caller: str) -> None:
     try:
         _window_path(session_id).write_text(json.dumps({"opened_at": opened_at, "caller": caller}), encoding="utf-8")
     except OSError as exc:
-        logger.info("[HOOKS] cadence: window stamp write FAILED caller=%s session=%s: %s", caller, session_id[:8], exc)
+        logger.warning(
+            "[HOOKS] cadence: window stamp write FAILED caller=%s session=%s: %s", caller, session_id[:8], exc
+        )
 
 
 def window_opened_at(hook_data: dict | None = None) -> float | None:
@@ -715,7 +748,7 @@ def window_opened_at(hook_data: dict | None = None) -> float | None:
     try:
         opened_at = json.loads(path.read_text(encoding="utf-8") or "{}").get("opened_at")
     except (OSError, json.JSONDecodeError, AttributeError) as exc:
-        logger.info("[HOOKS] cadence: window stamp unreadable: %s", exc)
+        logger.warning("[HOOKS] cadence: window stamp unreadable: %s", exc)
         return None
     if isinstance(opened_at, bool) or not isinstance(opened_at, (int, float)):
         return None
@@ -747,7 +780,7 @@ def stamp_regroup_complete(hook_data: dict | None = None) -> None:
         stamp = {"window": window, "token": transcript_mark, "used_token": None}
         _regroup_done_path(session_id).write_text(json.dumps(stamp), encoding="utf-8")
     except OSError as exc:
-        logger.info("[HOOKS] cadence: regroup completion stamp write FAILED session=%s: %s", session_id[:8], exc)
+        logger.warning("[HOOKS] cadence: regroup completion stamp write FAILED session=%s: %s", session_id[:8], exc)
         return
     logger.info("[HOOKS] cadence: regroup complete, stamped token=%d session=%s", transcript_mark, session_id[:8])
 
@@ -783,10 +816,7 @@ def _grounded_by_regroup(hook_data: dict, config: dict) -> bool:
     token = _get_turn_token(hook_data)
     fd = None
     try:
-        fd = open(path, "r+", encoding="utf-8")
-        _lock(fd)
-        content = fd.read()
-        stamp = json.loads(content) if content.strip() else {}
+        fd, stamp = _open_state(path)
         grounded = isinstance(stamp, dict) and _stands_in(stamp, window, token, distance)
         if grounded and stamp.get("used_token") is None:
             stamp["used_token"] = token
@@ -827,11 +857,7 @@ def consume_regroup_pending(hook_data: dict | None = None) -> bool:
 
     fd = None
     try:
-        fd = open(path, "a+", encoding="utf-8")
-        _lock(fd)
-        fd.seek(0)
-        content = fd.read()
-        data = json.loads(content) if content.strip() else {}
+        fd, data = _open_state(path)
         regroup_stamp = data.get("regroup_token")
         pending = bool(regroup_stamp)
 
@@ -902,7 +928,7 @@ def queue_regroup_parts(total: int, hook_data: dict | None = None) -> None:
         fd = None
         logger.info("[HOOKS] cadence: regroup queued %d more part(s) session=%s", total - 1, session_short)
     except (OSError, json.JSONDecodeError) as exc:
-        logger.info("[HOOKS] cadence: queue_regroup_parts failed session=%s: %s", session_short, exc)
+        logger.warning("[HOOKS] cadence: queue_regroup_parts failed session=%s: %s", session_short, exc)
         if fd is not None:
             _close_fd(fd)
 
@@ -939,7 +965,7 @@ def pop_regroup_part(hook_data: dict | None = None) -> tuple[int, int] | None:
         fd = None
         return part
     except (OSError, json.JSONDecodeError) as exc:
-        logger.info("[HOOKS] cadence: pop_regroup_part failed session=%s: %s", session_short, exc)
+        logger.warning("[HOOKS] cadence: pop_regroup_part failed session=%s: %s", session_short, exc)
         if fd is not None:
             _close_fd(fd)
         return None

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unused_function_content.py
 # Description: Unused Function Standards Content Handler
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-03-22
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -104,8 +104,10 @@ def get_unused_function_standards() -> str:
         "  and file+line-level bypass rules",
         "",
         "[bold cyan]WHAT THIS CHECK MEASURES:[/bold cyan]",
-        "  'No caller in THIS BRANCH' -- not 'unused'. A static per-branch AST",
-        "  scan cannot see cross-branch or dynamic (importlib) callers.",
+        "  'No caller in THIS BRANCH' -- not 'unused'. The corpus also holds sibling",
+        "  branches' product files that name aipass.<branch> and the handlers the",
+        "  repo's .aipass/hooks.json names under it. Any other cross-branch or",
+        "  dynamic (importlib) caller stays invisible.",
         "  [yellow]![/yellow]  CONFIRM BEFORE DELETING.",
         "     [dim]On 2026-08-31 this check nominated entry_limits.changed_entries()[/dim]",
         "     [dim]-- called by @hooks at security/edit_gate.py:496 through a dynamic[/dim]",

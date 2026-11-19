@@ -1,22 +1,23 @@
 # =================== AIPass ====================
 # Name: introspection.py
 # Description: Stack Introspection
-# Version: 1.4.1
+# Version: 1.8.0
 # Created: 2025-11-10
-# Modified: 2026-11-01
+# Modified: 2026-11-18
 # =============================================
 
 """PRAX Logging Introspection"""
 
 import functools
-import logging
 from pathlib import Path
 from typing import Optional
 
-from aipass.prax.apps.handlers.json import json_handler
-from aipass.prax.apps.handlers.repo_root import resolved_file
+import aipass
+from aipass.prax.apps.handlers.logging.trail import PraxTrail
+from aipass.prax.apps.handlers.repo_root import SOURCE_DIR_NAME, source_root
+from aipass.prax.apps.handlers.state_root import is_installed
 
-logger = logging.getLogger(__name__)
+logger = PraxTrail("introspection")
 
 _PRAX_INTERNAL_MARKERS = (
     "/prax/apps/modules/logger.py",
@@ -28,8 +29,7 @@ _PRAX_INTERNAL_MARKERS = (
 
 def _is_prax_internal(module_path: str) -> bool:
     """Check if a module path belongs to prax internals."""
-    norm = module_path.replace("\\", "/")
-    return any(marker in norm for marker in _PRAX_INTERNAL_MARKERS)
+    return any(marker in module_path for marker in _PRAX_INTERNAL_MARKERS)
 
 
 def _find_external_caller_path() -> Optional[str]:
@@ -64,7 +64,7 @@ def get_caller_info() -> tuple:
     """Detect calling module name, path, and branch from a single stack walk.
 
     One walk, so name and path never come from different callers.
-    AIPASS_LOG_NAME, then AIPASS_BOT_ID (telegram-bot@.service), override the name.
+    AIPASS_LOG_NAME overrides the name.
     """
     import os
 
@@ -75,26 +75,24 @@ def get_caller_info() -> tuple:
     if log_name:
         return (log_name, caller_path, branch)
 
-    bot_id = os.environ.get("AIPASS_BOT_ID")
-    if bot_id:
-        return (f"bot_{bot_id}", caller_path, branch)
-
     if not caller_path:
         return ("unknown_module", None, None)
     module_name = Path(caller_path).stem
     return (module_name, caller_path, branch)
 
 
-_AIPASS_PKG_ROOT = resolved_file(Path(__file__)).parents[4]  # logging/ → handlers/ → apps/ → prax/ → aipass/
-_SRC_ROOT = _AIPASS_PKG_ROOT.parent  # aipass/ → src/ (contains branches outside aipass namespace)
-_REPO_ROOT = _SRC_ROOT.parent  # src/ → AIPass repo root
+_AIPASS_PKG_ROOT = Path(aipass.__file__).resolve().parent
+_CHECKOUT = source_root(_AIPASS_PKG_ROOT)
+# Installed, or with no src/ above it (a --user install), there is no checkout: no src/ arm, no repo to exclude.
+_NO_CHECKOUT = is_installed(_AIPASS_PKG_ROOT) or _CHECKOUT == Path(_CHECKOUT.anchor)
+_REPO_ROOT: Optional[Path] = None if _NO_CHECKOUT else _CHECKOUT
+_SRC_ROOT: Optional[Path] = None if _REPO_ROOT is None else _REPO_ROOT / SOURCE_DIR_NAME
 
 
 def _resolve_caller_path(module_path: str) -> Optional[Path]:
     """Resolve a caller's path without ever requiring a working directory.
 
-    ``<stdin>`` or a relative ``__file__`` would make resolve() read a possibly deleted cwd.
-    None is an answer: not knowing the caller must never take down the caller's import.
+    ``<stdin>`` or a relative ``__file__`` would make resolve() read a dead cwd; None is an answer, never a raise.
     """
     # is_absolute() alone also refuses a "<" pseudo-filename; a second guard would be dead.
     candidate = Path(module_path) if module_path else None
@@ -103,7 +101,7 @@ def _resolve_caller_path(module_path: str) -> Optional[Path]:
     try:
         return candidate.resolve()
     except OSError as exc:
-        logger.info("Caller path %s could not be resolved: %s", module_path, exc)
+        logger.info("Caller path could not be resolved", path=module_path, error=str(exc))
         return None
 
 
@@ -115,20 +113,16 @@ def detect_branch_from_path(module_path: str) -> Optional[str]:
     if path is None:
         return None
 
-    try:
+    # No record of any kind on this path: it runs on every log line, and its misses are answers.
+    if path.is_relative_to(_AIPASS_PKG_ROOT):
         relative = path.relative_to(_AIPASS_PKG_ROOT)
         if len(relative.parts) >= 2:
-            # No json operation here: every module-level get_direct_logger() resolves through this.
             return str(_AIPASS_PKG_ROOT / relative.parts[0])
-    except ValueError:
-        logger.info("Path %s is not relative to aipass package root", module_path)
 
-    try:
+    if _SRC_ROOT is not None and path.is_relative_to(_SRC_ROOT):
         relative = path.relative_to(_SRC_ROOT)
         if len(relative.parts) >= 2 and relative.parts[0] != "aipass":
             return str(_SRC_ROOT / relative.parts[0])
-    except ValueError:
-        logger.info("Path %s is not relative to src root", module_path)
 
     return next((str(p) for p in path.parents if (p / ".trinity" / "passport.json").is_file()), None)
 
@@ -141,11 +135,8 @@ def detect_external_project(module_path: str) -> Optional[tuple]:
     if path is None:
         return None
 
-    try:
-        path.relative_to(_REPO_ROOT)
+    if _REPO_ROOT is not None and path.is_relative_to(_REPO_ROOT):
         return None
-    except ValueError:
-        logger.info("Path %s is external to AIPass repo", module_path)
 
     import os
 
@@ -162,12 +153,6 @@ def detect_external_project(module_path: str) -> Optional[tuple]:
             or (candidate / "pyproject.toml").exists()
         ):
             project_name = candidate.name.lower().replace(" ", "_").replace("-", "_")
-            # Logged outside AIPass only, never on a fleet module's import.
-            json_handler.log_operation(
-                "introspection_external_project",
-                {"module_path": module_path, "project": project_name},
-                module_name="prax_introspection",
-            )
             return (project_name, candidate)
 
     return None

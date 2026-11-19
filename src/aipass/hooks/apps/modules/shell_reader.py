@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: shell_reader.py
-# Version: 1.4.4
+# Version: 1.5.0
 # Description: The one shell-word reader: every program a Bash command runs, as the shell runs it (rm_gate, git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-10-31
+# Modified: 2026-11-17
 # =============================================
 
 """What a Bash command RUNS, read the way bash reads it (DPLAN-0356 phase 3, R3 to R6).
@@ -39,7 +39,8 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules.bash_writes import _SOURCE_DELETE_SHAPES, _resolve, verb_name, write_targets
 from aipass.hooks.apps.modules.shell_programs import (
     DELETE_PROGRAMS,
@@ -55,7 +56,7 @@ from aipass.hooks.apps.modules.shell_programs import (
     sed_scripts,
     syntax_check_only,
 )
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 CONSOLE = err_console
 
@@ -101,7 +102,7 @@ _SHELL_PROGRAMS = SHELL_PROGRAMS
 
 # Interpreter names to one language, a version suffix included: python3.12 is python.
 _LANGUAGE = re.compile(
-    r"(?P<lang>python|pypy|perl|ruby|node|nodejs|php|lua|rscript|deno|bun|tsx|ts-node|osascript|pwsh|powershell"
+    r"(?P<lang>python|pypy|perl|ruby|node|nodejs|php|lua|rscript|deno|bun|tsx|ts-node|pwsh|powershell"
     r"|awk|gawk|mawk|nawk)(?:\d[\d.]*)?$"
 )
 _LANGUAGE_ALIASES = {
@@ -117,7 +118,7 @@ _LANGUAGE_ALIASES = {
 # the flags that name the script file and the flag that runs a module by name.
 _INLINE_FLAGS = {
     "python": ("-c",), "node": ("-e", "--eval", "-p", "--print"), "perl": ("-e", "-E"), "ruby": ("-e",),
-    "php": ("-r",), "lua": ("-e",), "rscript": ("-e",), "osascript": ("-e",), "pwsh": ("-command", "-c"),
+    "php": ("-r",), "lua": ("-e",), "rscript": ("-e",), "pwsh": ("-command", "-c"),
     "bun": ("-e", "--eval"), "tsx": ("-e", "--eval"), "ts-node": ("-e", "--eval"), "deno": (), "awk": (),
 }  # fmt: skip
 _VALUED_FLAGS = {
@@ -776,8 +777,7 @@ def _command_candidates(word: _Word, text: str, ctx: _Ctx) -> list[str]:
     """The program names an unquoted glob in the command word can become, against the cwd and PATH."""
     if not _globby(word):
         return [text]
-    # A watched verb the glob's last part can spell counts whatever the gate's disk shows: Git Bash's
-    # /bin is a mount Windows cannot list, so /bin/r? ran rm and read as r? (CI red, PR #774).
+    # A watched verb the glob's last part can spell counts whatever the gate's disk shows.
     found = {verb for verb in WATCHED_VERBS if fnmatch.fnmatchcase(verb, text.rsplit("/", 1)[-1])}
     if "/" in text:
         pattern = Path(os.path.expanduser(text))
@@ -1269,21 +1269,21 @@ class _Walker:
 def invocations(command: str, cwd: str = "") -> list[Invocation]:
     """Every program *command* runs, as the shell will run it (DPLAN-0356 phase 3, R3 and R4).
 
-    The one reader rm_gate and git_gate share. Quotes are removed, escapes and
-    $'...' decoded, braces expanded and a glob in a command word resolved against
-    the working directory and PATH. Launchers are stepped past; ``bash -c``, ``eval``,
-    ``find -exec``, ``trap``, aliases and substitutions are read as programs; a script
-    file a shell or interpreter is handed is read from disk.
+    The one reader rm_gate and git_gate share. Quotes are removed, escapes and $'...' decoded, braces
+    expanded and a glob in a command word resolved against the working directory and PATH. Launchers are
+    stepped past; ``bash -c``, ``eval``, ``find -exec``, ``trap``, aliases and substitutions are read as
+    programs; a script file a shell or interpreter is handed is read from disk. One json trail entry per call.
 
     Args:
         command: The raw Bash command string from the tool input.
         cwd: The session working directory; relative script paths are read from it.
 
     Returns:
-        One :class:`Invocation` per program, in the order the reader met them. An
-        entry whose ``unread`` is set names something the reader could not see.
+        One :class:`Invocation` per program in reading order; one with ``unread`` names what went unseen.
     """
-    return _read(command, cwd).invocations
+    found = _read(command, cwd).invocations
+    json_handler.log_operation("invocations", {"programs": len(found), "unread": sum(1 for i in found if i.unread)})
+    return found
 
 
 def _read(command: str, cwd: str) -> _Reading:

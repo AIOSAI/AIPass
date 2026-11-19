@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_error_detected.py
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-04-25
-# Modified: 2026-11-08
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/events/error_detected.py and the dispatch gates it runs."""
@@ -21,22 +21,27 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
+import aipass.ai_mail as ai_mail
 import aipass.trigger.apps.handlers as handlers_pkg
 import aipass.trigger.apps.handlers.error_registry as error_registry
 import aipass.trigger.apps.handlers.events.error_detected as error_detected
-from aipass.ai_mail.apps.modules import door_wake as wake
-from aipass.trigger.apps.config import trail_logger
+from aipass.prax import trail
 from aipass.trigger.apps.handlers import escalation, medic_state
+
+# wake_branch's home module, reached through the door (the handlers fence refuses a direct import).
+# The door reads it there on every access, so a patch on it reaches error_detected's lazy import.
+WAKE_HOME = sys.modules[ai_mail.wake_branch.__module__]
 
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Put the real error_detected module on tmp_path and recording stubs.
     Every outside edge is swapped with monkeypatch.setattr, so teardown restores direct assignments.
-    normalize_message stays real: a mock returns one object for every input, so a shared-signature assertion passes vacuously.
+    normalize_message stays real: a mock returns one object for every input,
+    so a shared-signature assertion passes vacuously.
     """
     json_dir = tmp_path / "trigger_json"
     monkeypatch.setattr(error_registry, "REGISTRY_FILE", json_dir / "error_registry.json")
@@ -44,23 +49,23 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setattr(error_registry, "report", MagicMock(return_value={"is_new": False}))
     monkeypatch.setattr(error_registry, "is_suppressed", MagicMock(return_value=False))
     monkeypatch.setattr(error_registry, "get_dispatch_count", MagicMock(return_value=0))
-    monkeypatch.setattr(wake, "wake_branch", MagicMock())
+    monkeypatch.setattr(WAKE_HOME, "wake_branch", MagicMock())
 
     monkeypatch.setattr(error_detected, "_send_email", None)
-    monkeypatch.setattr(error_detected, "circuit_breaker_allows", MagicMock(return_value=True))
-    monkeypatch.setattr(error_detected, "circuit_breaker_record_error", MagicMock())
-    monkeypatch.setattr(error_detected, "circuit_breaker_probe_succeeded", MagicMock())
+    monkeypatch.setattr(error_detected, "breaker_gate", MagicMock(return_value=""))
+    monkeypatch.setattr(error_detected, "circuit_breaker_delivered", MagicMock())
+    monkeypatch.setattr(error_detected, "circuit_breaker_send_failed", MagicMock())
+    monkeypatch.setattr(error_detected, "circuit_breaker_held", MagicMock(return_value={}))
     monkeypatch.setattr(error_detected, "registry_should_dispatch", MagicMock(return_value=True))
     monkeypatch.setattr(error_detected, "registry_record_dispatch", MagicMock())
     monkeypatch.setattr(error_detected, "registry_is_suppressed", MagicMock(return_value=False))
-    monkeypatch.setattr(error_detected, "_REGISTRY_DISPATCH_AVAILABLE", True)
     monkeypatch.setattr(error_detected.json_handler, "log_operation", MagicMock(return_value=True))
     monkeypatch.setattr(medic_state, "MEDIC_STATE_FILE", json_dir / "medic_state.json")
     monkeypatch.setattr(medic_state, "LEGACY_MEDIC_STATE_FILE", json_dir / "trigger_config.json")
     monkeypatch.setattr(medic_state, "logger", MagicMock())
     monkeypatch.setattr(error_detected, "BRANCH_REGISTRY_FILE", tmp_path / "AIPASS_REGISTRY.json")
-    monkeypatch.setattr(error_detected, "TRIGGER_ROOT", tmp_path)
-    monkeypatch.setattr(error_detected, "logger", trail_logger(tmp_path / "error_detected_handler.jsonl"))
+    monkeypatch.setattr(error_detected, "TRIGGER_LOGS_DIR", tmp_path / "logs")
+    monkeypatch.setattr(error_detected, "logger", MagicMock())
     monkeypatch.setattr(error_detected, "_dispatch_timestamps", {})
     # Tests assign over these directly; setattr them first so teardown undoes it.
     for name in (
@@ -85,12 +90,10 @@ def _setup_happy_path(mod: object) -> MagicMock:
     mod._is_branch_muted = MagicMock(return_value=False)  # type: ignore[attr-defined]
     mod._get_registered_emails = MagicMock(return_value={"@flow", "@spawn"})  # type: ignore[attr-defined]
     mod._send_email = send_mock  # type: ignore[attr-defined]
-    mod.circuit_breaker_allows = MagicMock(return_value=True)  # type: ignore[attr-defined]
+    mod.breaker_gate = MagicMock(return_value="")  # type: ignore[attr-defined]
     mod.registry_should_dispatch = MagicMock(return_value=True)  # type: ignore[attr-defined]
     mod.registry_is_suppressed = MagicMock(return_value=False)  # type: ignore[attr-defined]
     mod.registry_record_dispatch = MagicMock()  # type: ignore[attr-defined]
-    mod.circuit_breaker_record_error = MagicMock()  # type: ignore[attr-defined]
-    mod._REGISTRY_DISPATCH_AVAILABLE = True  # type: ignore[attr-defined]
     return send_mock
 
 
@@ -161,7 +164,7 @@ class TestHandleErrorDetectedGates:
         breaker = MagicMock(return_value=True)
         recorded = MagicMock()
         mod._is_medic_enabled = MagicMock(return_value=False)  # type: ignore[attr-defined]
-        mod.circuit_breaker_allows = breaker  # type: ignore[attr-defined]
+        mod.breaker_gate = breaker  # type: ignore[attr-defined]
         mod.registry_record_dispatch = recorded  # type: ignore[attr-defined]
 
         mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
@@ -187,7 +190,7 @@ class TestHandleErrorDetectedGates:
         send = _setup_happy_path(mod)
         breaker = MagicMock(return_value=True)
         recorded = MagicMock()
-        mod.circuit_breaker_allows = breaker  # type: ignore[attr-defined]
+        mod.breaker_gate = breaker  # type: ignore[attr-defined]
         mod.registry_record_dispatch = recorded  # type: ignore[attr-defined]
 
         mod.handle_error_detected(
@@ -218,58 +221,133 @@ class TestHandleErrorDetectedGates:
 
         send.assert_not_called()
 
-    def test_an_unreadable_branch_registry_is_reported_not_skipped(self, tmp_path: Path) -> None:
-        """A registry that cannot be read names itself in the trail; nothing is skipped or sent.
-        Answering the empty set would log 'Unknown branch skipped' for a branch that has an owner.
-        Mutants: the raise put back to return set(), and the file's name dropped from the message, each redden this.
-        """
+    def test_an_unreadable_registry_tells_its_owner_once_and_records_each_held_dispatch(self, tmp_path: Path) -> None:
+        """Pins the deaf medic: each event failed into an unread trail and nobody was told."""
         send = MagicMock(return_value=True)
         error_detected.set_send_email_callback(send)
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
 
+        for _ in range(3):
+            error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+
+        assert [c.kwargs["to_branch"] for c in send.call_args_list] == ["@spawn"]
+        assert "branch registry unreadable (AIPASS_REGISTRY.json)" in send.call_args.kwargs["message"]
+        held = (tmp_path / "logs" / "medic_suppressed.jsonl").read_text(encoding="utf-8").splitlines()
+        assert len(held) == 3
+        assert all("registry unreadable" in line and "flow" in line for line in held)
+
+    def test_a_registry_that_recovers_dispatches_again_and_a_new_failure_is_told_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Told once per failure, not once per process: a second outage after a recovery mails the owner again."""
+        monkeypatch.setattr(error_detected, "REGISTERED_TTL_SECONDS", 0.0)
+        send = MagicMock(return_value=True)
+        error_detected.set_send_email_callback(send)
+        registry_file = tmp_path / "AIPASS_REGISTRY.json"
+        registry = {"branches": [{"email": "@flow", "status": "active", "path": "src/aipass/flow"}]}
+
+        registry_file.write_text("{not json", encoding="utf-8")
+        error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+        registry_file.write_text(json.dumps(registry), encoding="utf-8")
+        error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+        registry_file.write_text("{not json", encoding="utf-8")
         error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
 
-        send.assert_not_called()
-        assert not (tmp_path / "logs" / "medic_suppressed.jsonl").exists()
-        trail = (tmp_path / "error_detected_handler.jsonl").read_text(encoding="utf-8")
-        assert "branch registry unreadable (AIPASS_REGISTRY.json)" in trail
+        assert [c.kwargs["to_branch"] for c in send.call_args_list] == ["@spawn", "@flow", "@spawn"]
 
-    def test_an_unreadable_medic_state_dispatches_nothing(self, tmp_path: Path) -> None:
-        """A medic state nobody can read may hold a person's 'off': no mail, the trail names it.
-        Red first: the unreadable state answered enabled and the error was sent.
-        """
+    def test_an_unreadable_medic_state_raises_to_the_bus_and_dispatches_nothing(self, tmp_path: Path) -> None:
+        """A medic state nobody can read may hold a person's 'off': no mail, and the bus is told, not a trail."""
         send = MagicMock(return_value=True)
         error_detected.set_send_email_callback(send)
         registry = {"branches": [{"email": "@flow", "status": "active", "path": "src/aipass/flow"}]}
         (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
-        (tmp_path / "trigger_json").mkdir()
-        (tmp_path / "trigger_json" / "medic_state.json").write_text("{not json", encoding="utf-8")
+        medic_state.MEDIC_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        medic_state.MEDIC_STATE_FILE.write_text("{not json", encoding="utf-8")
 
-        error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+        with pytest.raises(RuntimeError, match=r"medic state unreadable \(medic_state.json\)"):
+            error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
 
         send.assert_not_called()
-        trail = (tmp_path / "error_detected_handler.jsonl").read_text(encoding="utf-8")
-        assert "medic state unreadable (medic_state.json)" in trail
 
-    def test_an_absent_branch_registry_is_a_registry_with_nobody_in_it(self, tmp_path: Path) -> None:
-        """No registry file answers the empty set: the branch is skipped as unknown, no warning.
-        Mutant: an absent file made to raise reddens this.
-        """
+    def test_an_unreadable_mute_list_raises_never_answers_unmuted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pins the default: an unreadable mute list read as 'unmuted' and woke a branch a person had muted."""
+        mod = _import_module()
+        real_is_branch_muted = mod._is_branch_muted
+        send = _setup_happy_path(mod)
+        mod._is_branch_muted = real_is_branch_muted  # type: ignore[attr-defined]
+        monkeypatch.setattr(medic_state, "get_muted_branches", MagicMock(side_effect=OSError("disk gone")))
+
+        with pytest.raises(RuntimeError, match="mute list unreadable.*disk gone"):
+            mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+
+        send.assert_not_called()
+
+    def test_a_wake_failure_after_delivery_raises_once_the_dispatch_is_recorded(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pins the warning-only wake: a delivered mail that never woke its branch reached only a log line."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+        monkeypatch.setattr(WAKE_HOME, "wake_branch", MagicMock(side_effect=RuntimeError("no session")))
+        record = MagicMock()
+        monkeypatch.setattr(mod, "registry_record_dispatch", record)
+
+        with pytest.raises(RuntimeError, match="mail delivered to @flow but wake failed.*no session"):
+            mod.handle_error_detected(
+                branch="flow", module="cfg", message="err", error_hash="h1", count=2, fingerprint="fp1"
+            )
+
+        send.assert_called_once()
+        record.assert_called_once_with("fp1")
+
+    def test_a_registry_owner_wake_failure_raises_after_the_hold_is_recorded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pins the warning-only wake on the census alert: spawn's mail sat unread and nobody knew."""
+        send = MagicMock(return_value=True)
+        error_detected.set_send_email_callback(send)
+        wake_mock = MagicMock(side_effect=RuntimeError("no session"))
+        monkeypatch.setattr(WAKE_HOME, "wake_branch", wake_mock)
+
+        with pytest.raises(RuntimeError, match="mail delivered to @spawn but wake failed.*no session"):
+            error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+
+        assert "registry unreadable" in (tmp_path / "logs" / "medic_suppressed.jsonl").read_text(encoding="utf-8")
+        wake_mock.side_effect = None
+        error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+        assert [c.kwargs["to_branch"] for c in send.call_args_list] == ["@spawn"], "the alert was not marked sent"
+
+    def test_an_unreadable_log_context_is_named_in_the_mail(self, tmp_path: Path) -> None:
+        """Pins the empty default: an unreadable log sent the mail with no context and no word why."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+        unreadable = tmp_path / "flow.log"
+        unreadable.mkdir()
+
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="err", error_hash="h1", count=2, log_path=str(unreadable)
+        )
+
+        assert "context unavailable" in send.call_args.kwargs["message"]
+        assert "Is a directory" in send.call_args.kwargs["message"]
+
+    def test_an_absent_branch_registry_is_told_to_its_owner_not_read_as_empty(self, tmp_path: Path) -> None:
+        """Pins the silent default census: no file answered the empty set and every branch was skipped as unknown."""
         send = MagicMock(return_value=True)
         error_detected.set_send_email_callback(send)
 
         error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
 
-        send.assert_not_called()
-        assert not (tmp_path / "error_detected_handler.jsonl").exists()
-        skipped = (tmp_path / "logs" / "medic_suppressed.jsonl").read_text(encoding="utf-8")
-        assert "Unknown branch skipped: @flow" in skipped
+        assert [c.kwargs["to_branch"] for c in send.call_args_list] == ["@spawn"]
+        held = (tmp_path / "logs" / "medic_suppressed.jsonl").read_text(encoding="utf-8")
+        assert "Unknown branch skipped" not in held
+        assert "registry unreadable" in held
 
     def test_returns_early_circuit_breaker_open(self) -> None:
         """Does not dispatch when circuit breaker is open."""
         mod = _import_module()
         send = _setup_happy_path(mod)
-        mod.circuit_breaker_allows = MagicMock(return_value=False)  # type: ignore[attr-defined]
+        mod.breaker_gate = MagicMock(return_value="Circuit breaker OPEN - held for")  # type: ignore[attr-defined]
 
         mod.handle_error_detected(
             branch="flow",
@@ -415,100 +493,45 @@ class TestHandleErrorDetectedHappyPath:
             "dispatch_sent", {"recipient": "@flow"}
         )
 
-    def test_a_throwing_send_is_reported_and_stops_the_pipeline(self) -> None:
-        """_send_email raising is caught, named in the log, and records nothing.
-        This handler is the last thing between an error and an operator: a throwing send must be
-        logged, and the exception must not pass as a delivery, so nothing downstream may run.
-        """
+    def test_a_throwing_send_reaches_the_bus_and_records_nothing(self) -> None:
+        """Pins the swallowed send: a raise ended in an unread trail and the error was never delivered or told."""
         mod = _import_module()
         send = _setup_happy_path(mod)
         send.side_effect = RuntimeError("SMTP down")
-        json_handler = mod.json_handler
+        mod.json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
 
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
-
-        with patch.object(mod, "logger") as mock_logger:
+        with pytest.raises(RuntimeError, match="SMTP down"):
             mod.handle_error_detected(
-                branch="flow",
-                module="cfg",
-                message="err",
-                error_hash="h1",
-                count=2,
-                fingerprint="fpX",
+                branch="flow", module="cfg", message="err", error_hash="h1", count=2, fingerprint="fpX"
             )
 
-        reported = str(mock_logger.warning.call_args_list)
-        assert "SMTP down" in reported, f"the cause must reach the log, got: {reported}"
-        json_handler.log_operation.assert_not_called()  # type: ignore[union-attr]
+        mod.json_handler.log_operation.assert_not_called()  # type: ignore[union-attr]
         mod.registry_record_dispatch.assert_not_called()  # type: ignore[attr-defined]
 
-    def test_does_not_record_dispatch_when_send_fails(self) -> None:
-        """When _send_email returns False, dispatch is not recorded."""
+    def test_a_refused_send_raises_and_records_no_dispatch(self) -> None:
+        """A False from the mail adapter is a failed delivery: the bus is told, and backoff is not started."""
         mod = _import_module()
         send = _setup_happy_path(mod)
         send.return_value = False
-        json_handler = mod.json_handler
+        mod.json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
 
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
-
-        mod.handle_error_detected(
-            branch="flow",
-            module="cfg",
-            message="err",
-            error_hash="h1",
-            count=2,
-            fingerprint="fp_fail",
-        )
+        with pytest.raises(RuntimeError, match="delivery failed for @flow"):
+            mod.handle_error_detected(
+                branch="flow", module="cfg", message="err", error_hash="h1", count=2, fingerprint="fp_fail"
+            )
 
         send.assert_called_once()
-        # But nothing after it should have run
-        json_handler.log_operation.assert_not_called()  # type: ignore[union-attr]
+        mod.json_handler.log_operation.assert_not_called()  # type: ignore[union-attr]
         mod.registry_record_dispatch.assert_not_called()  # type: ignore[attr-defined]
 
+    def test_no_mail_adapter_wired_raises_instead_of_returning_quietly(self) -> None:
+        """Pins the quiet return: with ai_mail unwired, every error past the gates vanished."""
+        mod = _import_module()
+        _setup_happy_path(mod)
+        mod._send_email = None  # type: ignore[attr-defined]
 
-class TestFallbackStubs:
-    """Tests for fallback functions defined when error_registry is unavailable."""
-
-    @pytest.fixture
-    def fallback_mod(self, monkeypatch: pytest.MonkeyPatch) -> Any:
-        """A second copy of error_detected, imported while error_registry cannot be.
-        HELD for import_site: these stubs exist only in the `except ImportError` arm, and no
-        setattr on the real module can make its import-time `from ... import` fail again.
-        """
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", None)
-        monkeypatch.delitem(sys.modules, "aipass.trigger.apps.handlers.events.error_detected")
-        import aipass.trigger.apps.handlers.events.error_detected as fresh
-
-        return fresh
-
-    def test_registry_should_dispatch_returns_true(self, fallback_mod: Any) -> None:
-        """Fallback always allows dispatch for any fingerprint."""
-        mod = fallback_mod
-        assert mod.registry_should_dispatch("any-fingerprint") is True
-
-    def test_registry_is_suppressed_returns_false(self, fallback_mod: Any) -> None:
-        """Fallback suppresses nothing — no registry means no silencing."""
-        mod = fallback_mod
-        assert mod.registry_is_suppressed("any-fingerprint") is False
-
-    def test_registry_record_dispatch_is_a_no_op_with_the_real_arity(self, fallback_mod: Any) -> None:
-        """The fallback takes the same one argument and answers None like the real one.
-        "It did not raise" passes a stub that took no argument or returned a truthy sentinel;
-        record_dispatch returns nothing, so the stub must too.
-        """
-        mod = fallback_mod
-
-        assert mod.registry_record_dispatch("any-fingerprint") is None
-        assert mod._REGISTRY_DISPATCH_AVAILABLE is False
-
-    def test_circuit_breaker_record_error_takes_no_argument_and_answers_none(self, fallback_mod: Any) -> None:
-        """The fallback breaker records nothing and says nothing.
-        Without a registry there is no breaker state, so the stub must not fabricate one.
-        """
-        mod = fallback_mod
-
-        assert mod.circuit_breaker_record_error() is None
-        assert mod.circuit_breaker_allows() is True
+        with pytest.raises(RuntimeError, match="no ai_mail adapter"):
+            mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
 
 
 class TestMedicEnabledTTL:
@@ -721,14 +744,13 @@ class TestBranchMutedFormats:
         send.assert_not_called()
 
 
-class TestProbeSucceeded:
-    """Tests for circuit_breaker_probe_succeeded called after dispatch."""
+class TestDeliveredIsReported:
+    """A delivered mail is reported to the breaker, which closes a spent probe and clears what rode in it."""
 
-    def test_probe_succeeded_called_after_dispatch(self) -> None:
-        """circuit_breaker_probe_succeeded is called after successful dispatch with fingerprint."""
+    def test_a_delivered_mail_reports_its_fingerprint_to_the_breaker(self) -> None:
         mod = _import_module()
         send = _setup_happy_path(mod)
-        mod.circuit_breaker_probe_succeeded = MagicMock()  # type: ignore[attr-defined]
+        mod.circuit_breaker_delivered = MagicMock()  # type: ignore[attr-defined]
 
         mod.handle_error_detected(
             branch="flow",
@@ -741,7 +763,7 @@ class TestProbeSucceeded:
 
         send.assert_called_once()
         mod.registry_record_dispatch.assert_called_once_with("fp_probe")  # type: ignore[attr-defined]
-        mod.circuit_breaker_probe_succeeded.assert_called_once()  # type: ignore[attr-defined]
+        mod.circuit_breaker_delivered.assert_called_once_with("@flow", ["fp_probe"])  # type: ignore[attr-defined]
 
 
 class TestOccurrencesReportsTrueCount:
@@ -866,7 +888,7 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
         return True
 
     monkeypatch.setattr(escalation, "STATE_FILE", tmp_path / "escalation_state.json")
-    monkeypatch.setattr(escalation, "logger", trail_logger(tmp_path / "escalation.jsonl"))
+    monkeypatch.setattr(escalation, "logger", trail(tmp_path / "logs" / "escalation.jsonl"))
     monkeypatch.setattr(escalation, "get_config", lambda: config)
     monkeypatch.setattr(escalation, "_send_email", _send)
 
@@ -951,7 +973,7 @@ class TestEscalationRecording:
         """An error storm opens the breaker — the storm still has to be countable."""
         mod = _import_module()
         send = _setup_happy_path(mod)
-        mod.circuit_breaker_allows = MagicMock(return_value=False)
+        mod.breaker_gate = MagicMock(return_value="Circuit breaker OPEN - held for")
 
         mod.handle_error_detected(
             branch="flow", module="cfg", message="err", error_hash="h1", count=3, fingerprint="fp1"
@@ -1068,38 +1090,158 @@ class TestOneMuteRule:
         send.assert_not_called()
 
 
-class TestHalfOpenProbe:
-    """The breaker's one half-open probe goes to a fingerprint that would be sent."""
+_REAL_GATES = {
+    name: getattr(error_detected, name)
+    for name in (
+        "breaker_gate",
+        "circuit_breaker_delivered",
+        "circuit_breaker_send_failed",
+        "circuit_breaker_held",
+        "registry_should_dispatch",
+        "registry_record_dispatch",
+        "registry_is_suppressed",
+    )
+}
+_REAL_REPORT, _REAL_IS_SUPPRESSED = error_registry.report, error_registry.is_suppressed
 
-    def test_a_backoff_fingerprint_leaves_the_probe_for_a_fresh_one(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Open breaker, cooldown over: a fingerprint in backoff arrives, then a fresh one is still sent.
-        Red first: the backoff fingerprint spent the probe and the fresh one reopened the breaker.
-        """
-        import time
 
-        mod = _import_module()
-        send = _setup_happy_path(mod)
-        later = time.time() + 301
-        monkeypatch.setattr(mod, "circuit_breaker_allows", lambda: error_registry.circuit_breaker_allows(now=later))
-        monkeypatch.setattr(
-            mod, "circuit_breaker_record_error", lambda: error_registry.circuit_breaker_record_error(now=later)
-        )
-        monkeypatch.setattr(mod, "circuit_breaker_probe_succeeded", error_registry.circuit_breaker_probe_succeeded)
-        monkeypatch.setattr(mod, "registry_should_dispatch", lambda fingerprint: fingerprint != "fp_backoff")
-        error_registry.circuit_breaker_reset()
-        for _ in range(10):
-            error_registry.circuit_breaker_record_error()
+@pytest.fixture
+def medic_line(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Real registry, backoff and breaker on tmp files, fed the way the watcher feeds them; the clock is pinned."""
+    for name, real in _REAL_GATES.items():
+        monkeypatch.setattr(error_detected, name, real)
+    monkeypatch.setattr(error_registry, "report", _REAL_REPORT)
+    monkeypatch.setattr(error_registry, "is_suppressed", _REAL_IS_SUPPRESSED)
+    monkeypatch.setattr(error_registry, "logger", MagicMock())
+    clock = [1_000_000.0]
+    monkeypatch.setattr(error_registry, "time", SimpleNamespace(time=lambda: clock[0]))
+    mails: List[Dict[str, Any]] = []
+    held: List[str] = []
+    monkeypatch.setattr(error_detected, "_send_email", lambda **kwargs: mails.append(kwargs) or True)
+    monkeypatch.setattr(error_detected, "_get_registered_emails", lambda: {"@hooks", "@memory", "@seed", "@flow"})
+    monkeypatch.setattr(error_detected, "_wake", lambda *args: None)
+    monkeypatch.setattr(error_detected, "_write_suppression_log", lambda reason, *rest: held.append(reason))
 
-        mod.handle_error_detected(
-            branch="flow", module="cfg", message="noisy", error_hash="h1", count=5, fingerprint="fp_backoff"
-        )
-        mod.handle_error_detected(
-            branch="flow", module="cfg", message="fresh", error_hash="h2", count=2, fingerprint="fp_fresh"
-        )
+    def feed(branch: str, message: str, times: int = 1) -> None:
+        for _ in range(times):
+            row = error_registry.report(error_type="ERROR", message=message, component=branch)
+            error_detected.handle_error_detected(
+                branch=branch,
+                module="m",
+                message=message,
+                error_hash=row["id"],
+                fingerprint=row["fingerprint"],
+                registry_id=row["id"],
+                count=row["count"],
+            )
 
-        send.assert_called_once()
-        assert "fresh" in send.call_args.kwargs["message"]
-        assert error_registry.get_circuit_breaker_status(now=later)["state"] == "closed"
+    def trip() -> None:
+        """Ten distinct faults from two branches, each seen twice: the fleet trip."""
+        for branch in ("hooks", "memory"):
+            for n in range(5):
+                feed(branch, f"{branch} fault {chr(97 + n)}", times=2)
+
+    def to(branch: str) -> List[Dict[str, Any]]:
+        return [m for m in mails if m["to_branch"] == branch]
+
+    return SimpleNamespace(feed=feed, trip=trip, to=to, mails=mails, held=held, clock=clock)
+
+
+class TestTheBreakerCountsMailsNotLines:
+    """One fleet breaker, fed only where a mail would go: a storm from one branch never holds another's mail."""
+
+    def test_a_storm_from_one_branch_never_holds_another_branchs_mail(self, medic_line) -> None:
+        medic_line.feed("hooks", "handler error navmap KeyError 'x'", times=12)
+        medic_line.feed("memory", "vector store write failed", times=2)
+
+        assert [m["to_branch"] for m in medic_line.mails] == ["@hooks", "@memory"]
+        assert error_registry.get_circuit_breaker_status()["state"] == "closed"
+
+    def test_faults_from_unregistered_branches_never_count_toward_the_trip(self, medic_line) -> None:
+        for ghost in ("ghost1", "ghost2"):
+            for n in range(5):
+                medic_line.feed(ghost, f"fault {n}", times=2)
+        medic_line.feed("memory", "vector store write failed", times=2)
+
+        assert [m["to_branch"] for m in medic_line.mails] == ["@memory"]
+
+    def test_one_branch_gets_five_faults_and_the_rest_ride_in_its_next_mail(self, medic_line) -> None:
+        for n in range(7):
+            medic_line.feed("hooks", f"fault {chr(97 + n)}", times=2)
+
+        assert len(medic_line.to("@hooks")) == 5
+        holds = [reason for reason in medic_line.held if reason.startswith("Held")]
+        assert holds == ["Held, @hooks had 5 faults mailed in 10 min - held for"] * 2
+        assert error_registry.get_circuit_breaker_status()["state"] == "closed"
+
+        medic_line.clock[0] += 601
+        medic_line.feed("hooks", "fault h", times=2)
+
+        late = medic_line.to("@hooks")[-1]["message"]
+        assert "m: fault f" in late and "m: fault g" in late
+        assert error_registry.circuit_breaker_held("@hooks") == {}
+
+    def test_an_open_breaker_mails_devpulse_one_summary_and_never_wakes_it(self, medic_line) -> None:
+        medic_line.trip()
+        medic_line.feed("seed", "seed fault", times=2)
+
+        summaries = medic_line.to("@devpulse")
+        assert len(summaries) == 1
+        assert summaries[0]["auto_execute"] is False
+        assert "@hooks" in summaries[0]["message"] and "@memory" in summaries[0]["message"]
+        assert len(medic_line.mails) == 10
+        assert error_registry.get_circuit_breaker_status()["summary_sent"] is True
+
+    def test_holds_while_open_never_postpone_recovery(self, medic_line) -> None:
+        medic_line.trip()
+        opened_at = error_registry.get_circuit_breaker_status()["opened_at"]
+        for n in range(49):
+            medic_line.clock[0] += 6
+            medic_line.feed("seed", f"trickle {n}", times=2)
+
+        assert error_registry.get_circuit_breaker_status()["opened_at"] == opened_at
+        medic_line.clock[0] += 7
+        medic_line.feed("flow", "fresh fault", times=2)
+
+        assert len(medic_line.to("@flow")) == 1
+        assert error_registry.get_circuit_breaker_status()["state"] == "closed"
+
+    def test_a_status_read_after_cooldown_moves_nothing_and_the_next_mail_probes(self, medic_line) -> None:
+        medic_line.trip()
+        medic_line.clock[0] += 301
+        before = error_registry.CB_STATE_FILE.read_text(encoding="utf-8")
+
+        assert error_registry.get_circuit_breaker_status()["state"] == "open"
+        assert error_registry.CB_STATE_FILE.read_text(encoding="utf-8") == before
+
+        medic_line.feed("seed", "seed fault", times=2)
+        medic_line.feed("flow", "flow fault", times=2)
+
+        assert len(medic_line.to("@seed")) == 1
+        assert len(medic_line.to("@flow")) == 1
+
+    def test_a_backoff_fingerprint_leaves_the_probe_for_a_fresh_one(self, medic_line) -> None:
+        medic_line.feed("flow", "noisy", times=2)
+        medic_line.clock[0] += 300
+        medic_line.feed("flow", "noisy")  # its second mail: backoff is now 900 s
+        medic_line.trip()
+        medic_line.clock[0] += 301
+        medic_line.feed("flow", "noisy")
+        medic_line.feed("flow", "fresh", times=2)
+
+        assert "fresh" in medic_line.to("@flow")[-1]["message"]
+        assert error_registry.get_circuit_breaker_status()["state"] == "closed"
+
+    def test_a_failed_probe_reopens_with_double_cooldown(self, medic_line, monkeypatch) -> None:
+        medic_line.trip()
+        medic_line.clock[0] += 301
+        monkeypatch.setattr(error_detected, "_send_email", lambda **kwargs: kwargs["to_branch"] == "@devpulse")
+
+        with pytest.raises(RuntimeError, match="Email delivery failed"):
+            medic_line.feed("flow", "flow fault", times=2)
+
+        status = error_registry.get_circuit_breaker_status()
+        assert (status["state"], status["cooldown_seconds"]) == ("open", 600)
 
 
 class TestTheRegisteredGateReadsTheDeclaredFleet:

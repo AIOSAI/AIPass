@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rendered_path_oracle_content.py
 # Description: Rendered Path Oracle Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-13
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -18,7 +18,7 @@ def get_rendered_path_oracle_standards() -> str:
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  A test that asserts a WHOLE PATH, spelled inside an f-string, against",
-        "  output a console RENDERED. Green on Linux, [red]red on Windows and macOS[/red].",
+        "  output a console RENDERED. Green on the seat, [red]red where the tmp path differs[/red].",
         "",
         "[bold cyan]THE SPECIMEN (@aipass test_aipass_main.py, PR #787):[/bold cyan]",
         "  log_home = tmp_path / 'system_logs'",
@@ -26,11 +26,10 @@ def get_rendered_path_oracle_standards() -> str:
         "  [red]assert f\"... Permission denied: '{log_home}')\" in err[/red]",
         "",
         "[bold cyan]TWO FRAGILITIES — the second survives a cure for the first:[/bold cyan]",
-        "  [red]WRAP[/red]  Rich wraps at the console width (the conftest pins 200). A Windows",
-        "        tmp path (...\\AppData\\Local\\Temp\\pytest-of-runneradmin\\...) or",
-        "        macOS /private/var/folders/... crosses it; the substring is gone.",
-        "  [red]REPR[/red]  str(OSError) renders the filename with %r, so Windows backslashes",
-        "        are DOUBLED and '{log_home}' never matches, wrap or not.",
+        "  [red]WRAP[/red]  Rich wraps at the console width (the conftest pins 200). A longer",
+        "        tmp path (another user, TMPDIR or xdist worker) crosses it; the substring is gone.",
+        "  [red]REPR[/red]  str(OSError) renders the filename with %r, so a quote or an",
+        "        undecodable byte is ESCAPED and '{log_home}' never matches, wrap or not.",
         "        A wider console does not cure this one.",
         "",
         "[bold cyan]CONVICTED, inside one def test_*, one finding per assert:[/bold cyan]",

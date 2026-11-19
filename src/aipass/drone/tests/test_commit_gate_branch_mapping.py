@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_commit_gate_branch_mapping.py
 # Description: Commit gate maps changed files to real citizens, never template trees; --all lints what exists
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-13
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/git/commit_handler.py's commit --all gates: the branch a changed file maps to, and lint."""
@@ -13,13 +13,14 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.drone.apps.handlers.git import commit_handler
 from aipass.drone.apps.handlers.git.commit_handler import commit_changes
 
 # Spawn's templates ship .trinity/, and pytest run in one writes .pytest_cache into
@@ -122,9 +123,13 @@ def external_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return repo
 
 
-@pytest.mark.skipif(shutil.which("ruff") is None, reason="the --all lane lints with the ruff on PATH")
 class TestCommitAllInAnExternalLayout:
     """commit --all lints only the dirs that exist, refuses before rewriting, and names what it rewrote."""
+
+    @pytest.fixture(autouse=True)
+    def _needs_ruff(self, external_repo: Path) -> None:
+        if commit_handler.find_ruff(external_repo) is None:
+            pytest.skip("no ruff beside this Python, on PATH or in .venv")
 
     def test_a_lint_clean_tree_with_no_root_tests_dir_commits_and_names_the_file_ruff_formatted(
         self, external_repo: Path
@@ -154,3 +159,42 @@ class TestCommitAllInAnExternalLayout:
         assert dirty.read_text(encoding="utf-8") == "import os\nx = 2\n"
         assert unformatted.read_text(encoding="utf-8") == "y  =  3\n"
         assert _git(external_repo, "log", "-1", "--format=%s") == "init"
+
+
+class TestTheLintGateNeverPassesUnrun:
+    """A gate that cannot find ruff refuses; a tree with nothing to lint is a defined pass."""
+
+    @staticmethod
+    def _no_ruff(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+        asked: list[Path] = []
+        monkeypatch.setattr(commit_handler, "find_ruff", lambda root: asked.append(root))
+        return asked
+
+    def test_a_missing_ruff_refuses_and_names_how_to_get_it(self, external_repo: Path, monkeypatch) -> None:
+        """Mutant: the old 'no ruff, no gate' arm returns None and the commit goes through unlinted."""
+        asked = self._no_ruff(monkeypatch)
+
+        result = commit_changes("chore(pkg): bump", all_files=True, repo_root=external_repo)
+
+        assert asked == [external_repo]
+        assert result["exit_code"] == 1
+        assert result["stderr"] == commit_handler.RUFF_MISSING.format(venv=external_repo / ".venv" / "bin")
+        assert "dev extra" in result["stderr"]
+        assert _git(external_repo, "log", "-1", "--format=%s") == "init"
+
+    def test_a_repo_with_no_src_or_tests_dir_commits_without_ruff(self, external_repo: Path, monkeypatch) -> None:
+        asked = self._no_ruff(monkeypatch)
+        _git(external_repo, "mv", "src", "lib")
+
+        result = commit_changes("chore(pkg): move", all_files=True, repo_root=external_repo)
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert asked == [], "nothing to lint: ruff is never looked for"
+        assert _git(external_repo, "log", "-1", "--format=%s") == "chore(pkg): move"
+
+    def test_ruff_beside_the_running_python_is_found_first(self, tmp_path: Path) -> None:
+        beside = Path(sys.executable).parent / "ruff"
+        if not beside.is_file():
+            pytest.skip(f"no ruff at {beside}")
+
+        assert commit_handler.find_ruff(tmp_path) == str(beside)

@@ -3,7 +3,7 @@
 # Description: The one answer to "which repo root is this" — never the process cwd, never a folded filename
 # Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Repo root discovery, defined once.
@@ -14,7 +14,7 @@ Never cwd (callers walk at import time; a gone cwd raises), names in exact case,
 import os
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.prax import get_system_logger
 
 logger = get_system_logger()
 
@@ -23,18 +23,7 @@ MODULE_NAME = "repo_root"
 CORE_REGISTRY = "AIPASS_REGISTRY.json"
 
 
-def module_file(file: str) -> Path:
-    """A module's own path, resolved when it can be: on Windows resolve() reads the cwd, which may be gone."""
-    path = Path(file)
-    try:
-        return path.resolve()
-    except OSError as exc:
-        # debug, not warning: every module import takes this path in that world.
-        logger.debug(f"[repo_root] Cannot resolve {path} ({type(exc).__name__}) — using its absolute spelling")
-        return path
-
-
-_THIS_FILE = module_file(__file__)
+_THIS_FILE = Path(__file__).resolve()
 # ``src/`` is the one directory the layout guarantees; the filesystem root last resort fails loudly downstream.
 SOURCE_ROOT = next(
     (parent.parent for parent in _THIS_FILE.parents if parent.name == "src"),
@@ -85,8 +74,7 @@ def _record_fallback(caller: str, marker: str, current: Path) -> None:
 
 def find_repo_root(start: Path | None = None, *, marker: str = CORE_REGISTRY, caller: str = MODULE_NAME) -> Path:
     """Walk up from *start* to the directory holding *marker*; else ``SOURCE_ROOT``, never the cwd."""
-    # module_file, not resolve(): this runs at import time, and on Windows resolve() reads the cwd.
-    current = Path(start) if start is not None else module_file(__file__).parent
+    current = Path(start) if start is not None else Path(__file__).resolve().parent
     for parent in [current] + list(current.parents):
         if exists_exactly(parent / marker):
             return parent

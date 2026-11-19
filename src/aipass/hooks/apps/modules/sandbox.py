@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: sandbox.py
-# Version: 1.0.3
-# Description: Sandbox wrapper — launches commands inside srt (kernel FS boundary)
+# Version: 1.2.0
+# Description: Sandbox building blocks — policy, srt config and the bwrap command (kernel FS boundary)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-09
-# Modified: 2026-11-01
+# Modified: 2026-11-18
 # =============================================
 
-"""Sandbox wrapper — launches commands inside srt kernel filesystem boundary.
+"""Sandbox building blocks for the srt kernel filesystem boundary; callers spawn the wrapped command.
 
 Reference: docs/sandbox.md
 """
@@ -20,14 +20,13 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.hooks.apps.handlers.module_root import module_file
+from aipass.hooks.apps.handlers.json import json_handler
 
 CONSOLE = err_console
 
-_MODULE_DIR = module_file(__file__).parent
+_MODULE_DIR = Path(__file__).resolve().parent
 _SRT_RESOLVE = _MODULE_DIR / "_srt_resolve.mjs"
 
 _VAR_TMP = Path("/var/tmp")
@@ -82,11 +81,9 @@ def _is_devpulse(branch_path: Path) -> bool:
     """Check if a branch is devpulse (the only committer) via passport."""
     passport = branch_path / ".trinity" / "passport.json"
     if passport.is_file():
-        try:
-            data = json.loads(passport.read_text(encoding="utf-8"))
-            return data.get("branch_info", {}).get("branch_name") == "devpulse"
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.info("sandbox: failed to read passport for %s: %s", branch_path.name, exc)
+        # Uncaught: a corrupt passport must not be judged by the directory name, which grants .git.
+        data = json.loads(passport.read_text(encoding="utf-8"))
+        return data.get("branch_info", {}).get("branch_name") == "devpulse"
     return branch_path.name == "devpulse"
 
 
@@ -152,6 +149,7 @@ def build_policy(branch_path: str | Path) -> dict:
         allow_write.append(str(claude_proj))
 
     broker_secret = repo_root / ".ai_central" / "broker_secret"
+    json_handler.log_operation("build_policy", {"branch": branch_name, "allow_write": len(allow_write)})
     return {
         "allow_write": allow_write,
         "deny_write": [str(broker_secret)],
@@ -212,35 +210,11 @@ def resolve_bwrap_command(command: str, srt_config: dict) -> str:
         Path(config_path).unlink(missing_ok=True)
 
 
-def sandbox_launch(
-    command: str,
-    *,
-    cwd: str | Path | None = None,
-    policy: dict,
-    env: dict | None = None,
-) -> subprocess.Popen:
-    """Launch a command inside the srt kernel sandbox."""
-    srt_config = build_srt_config(policy)
-    bwrap_cmd = resolve_bwrap_command(command, srt_config)
-
-    logger.info("sandbox_launch: wrapping command in srt sandbox")
-
-    launch_env = env if env is not None else dict(os.environ)
-
-    return subprocess.Popen(
-        ["/bin/bash", "-c", bwrap_cmd],
-        cwd=str(cwd) if cwd else None,
-        env=launch_env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-
-
 def print_introspection() -> None:
     """Print module structure for drone routing."""
     CONSOLE.print("[bold cyan]sandbox[/bold cyan] — Kernel filesystem boundary via srt")
     CONSOLE.print("  Phase 1: wrapper module only (not yet wired into dispatch)")
-    CONSOLE.print("  Use sandbox_launch() programmatically.")
+    CONSOLE.print("  Callers compose build_policy, build_srt_config and resolve_bwrap_command.")
 
 
 def handle_command(command: str, args: list) -> bool:

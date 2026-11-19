@@ -142,7 +142,7 @@ that unit clean.
 | word | what it excludes | measured cost of not having it |
 | --- | --- | --- |
 | **bare** | `Path(__file__).parent / "fixtures" / "a.json"` — the repo ships that file | a derived root carrying any literal is not a candidate at all |
-| **climb** | `module_file(__file__)` — the test file *is* shipped, it is the thing running | 7 rows across @backup, @commons, @devpulse, all correct code |
+| **climb** | `Path(__file__).resolve()` — the test file *is* shipped, it is the thing running | 7 rows across @backup, @commons, @devpulse, all correct code |
 | **written down** | `assert root.is_dir()`, `len(hits) == len(set(hits))`, one implementation equals another | 4 families — @drone, @memory, @hooks ×2 — every one green on a clone |
 
 The "written down" requirement is what makes the species name true: this arm is
@@ -402,7 +402,7 @@ What came off, in order of size:
 | `IGNORED_PATH` must be a filesystem **reach**, not a mention | 11 | `Path("/repo/.../.ai_mail.local/inbox.json")` handed to a *parser* is a string, not a directory |
 | a same-file fixture handing out a sandbox, to a fixed point | 6 | `hosted_baud` → `repo_root` → `tmp_path` |
 | `DERIVED_EXPECTED` must pin a **written-down** value | 8 | property assertions answer the same on any machine |
-| `__file__` must be **climbed** | 7 | `module_file(__file__)` is the running test file |
+| `__file__` must be **climbed** | 7 | `Path(__file__).resolve()` is the running test file |
 | the `templates/` negation | 7 | those `.trinity` payloads are tracked on purpose |
 | tuple-unpack and `for`-target sandbox binding | 9 | `project, reg = _make_project(tmp_path, ...)` |
 | `.daemon` and `.sentry` dropped from the needle list | 2 | both tracked; checked with `git ls-files`, not assumed |

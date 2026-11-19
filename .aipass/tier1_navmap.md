@@ -6,7 +6,7 @@ AIPass: autonomous agents (citizens) with identity, memory, and a mailbox, servi
 
 # Platform: Linux only
 
-AIPass runs on Linux: native or WSL2, a Docker image to come. Windows and macOS are not maintained; a port is the community's. Not abandonment: the owner's lifetime project, daily driver, open source forever. A user this affects: open a GitHub discussion or issue with `transition` in the title and their setup; we help them find a path (WSL2, Docker later, a fork).
+AIPass runs on Linux, built and tested on Ubuntu: native or WSL2, a Docker image to come. The owner's lifetime project, daily driver, open source forever. A user the move to Linux only affects: open a GitHub discussion or issue with `transition` in the title and their setup; we help them find a path (WSL2, Docker later, a fork).
 
 # Terminology
 
@@ -25,7 +25,7 @@ Every branch is built the same: `src/aipass/<name>/`, mail `@<name>` — `.trini
 
  - @drone — command router; tier-based access; the only git interface (`drone @git`).
  - @devpulse — orchestration hub, the user's primary collaborator; dispatches work; the only git writer.
- - @aipass — the user's handyman: host/OS help, onboarding, `doctor`; builds, takes dispatches. CLI `aipass`, not `drone @aipass`.
+ - @aipass — machine concierge: host/OS diagnosis, doctor, installer; builds, takes dispatches. CLI `aipass`, not `drone @aipass`.
  - @ai_mail — inter-agent email. `dispatch` = send + wake (default for handing work), `email` = no wake, plus inbox/view/reply/close.
  - @flow — plan lifecycle: create, list, close, templates, registry. See Plans below.
  - @sentry — code standards: `audit` and `checklist` before and after building; `audit tests @branch`, the advisory test-quality lane.
@@ -36,10 +36,10 @@ Every branch is built the same: `src/aipass/<name>/`, mail `@<name>` — `.trini
  - @trigger — event bus, error detection (medic), log watching, error registry; detects and dispatches, owners fix.
  - @api — external API gateway: clients, OAuth, keys.
  - @cli — shared Rich rendering for terminal output.
- - @skills — self-contained skill units any agent can run (Telegram).
+ - @skills — self-contained skill units any agent can run (inbox check, system status, screen lock).
  - @daemon — task scheduler; each branch owns its `.daemon/schedule.json`.
  - @commons — the social space: post, comment, vote.
- - @backup — local-first snapshots, versioning, restore; `.backup/` also holds @memory rollover and @flow archives.
+ - @backup — local-first snapshots, drive sync; `.backup/` also holds @memory rollover and @flow archives.
 
 # Daily commands
 
@@ -100,7 +100,7 @@ Save proactively — after milestones, decisions, topic switches.
 # House rules
 
  - Public repo — write as if it ships, because it does. No secrets in the tree, no hardcoded paths (`pathlib`, never `/home/...`), Linux only.
- - No bare imports — always `from aipass.<agent>.apps...`.
+ - Other branch: `from aipass.<branch> import <name>`, never its `apps/`.
  - State lives in `.trinity/` and dashboards, never in prompts. Prompts are signposts; memories record; registries catalog.
  - New test files need permission: a hook gate refuses them by policy (`.aipass/test_write_policy.json`); editing an existing test is fine. Need one? Mail @devpulse the defect it pins.
  - Docs say what exists, in present tense: mechanism, shapes, commands, limits, the reason. Never history, chat or what is to come; never a plan id, `.trinity` entry or untracked file as a pointer: a repo reader cannot open them.

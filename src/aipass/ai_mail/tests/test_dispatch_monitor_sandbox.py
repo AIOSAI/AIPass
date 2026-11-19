@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_sandbox.py
 # Description: Tests for the dispatch monitor's sandbox gate and its broker-fd handshake
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's sandbox gate and broker handshake (FPLAN-0250)."""
@@ -18,7 +18,7 @@ import os
 import subprocess
 import sys
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
 from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
@@ -26,7 +26,7 @@ from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
     wrap_for_sandbox,
     main,
 )
-from aipass.drone.apps.modules.door_broker import BrokerDaemon, create_identified_connection
+from aipass.drone import BrokerDaemon, create_identified_connection
 
 pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_silenced", "monitor_wake_stubbed")
 
@@ -186,17 +186,13 @@ class TestFlagOnSandboxPath:
             call_log.append("resolve_bwrap_command")
             return f"bwrap --ro-bind / / {cmd_str}"
 
-        monkeypatch.setattr("aipass.hooks.apps.modules.sandbox.build_policy", mock_build_policy)
-        monkeypatch.setattr(
-            "aipass.hooks.apps.modules.sandbox.build_srt_config",
-            mock_build_srt_config,
-        )
-        monkeypatch.setattr(
-            "aipass.hooks.apps.modules.sandbox.resolve_bwrap_command",
-            mock_resolve_bwrap,
-        )
-
-        result = wrap_for_sandbox(["claude", "--model", "opus"], tmp_path)
+        # wrap_for_sandbox imports from hooks' door at call time, so a patch on the door name reaches it.
+        with (
+            patch("aipass.hooks.build_policy", mock_build_policy),
+            patch("aipass.hooks.build_srt_config", mock_build_srt_config),
+            patch("aipass.hooks.resolve_bwrap_command", mock_resolve_bwrap),
+        ):
+            result = wrap_for_sandbox(["claude", "--model", "opus"], tmp_path)
 
         assert call_log == ["build_policy", "build_srt_config", "resolve_bwrap_command"]
         assert result[0] == "/bin/bash"
@@ -585,7 +581,6 @@ class TestBrokerFdHandshake:
         bounce.assert_not_called()
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="AF_UNIX broker daemon is Linux-only")
 class TestBrokerRealE2E:
     """Real multi-process e2e: broker daemon, identified connection, child reads fd."""
 
@@ -670,8 +665,9 @@ finally:
             proc.wait(timeout=10)
             assert proc.returncode == 0
 
-            # Verify the delete happened
+            # In a project tree drone rm never deletes: the file moves into the .archive beside it.
             assert not target_file.exists()
+            assert (branch_dir / ".archive" / "deleteme.txt").read_text(encoding="utf-8") == "delete me"
 
             # Verify the child got a success response
             import json as json_mod
@@ -686,7 +682,7 @@ finally:
             ]
             assert len(delete_entries) >= 1
             assert delete_entries[-1]["identity"] == "testbranch"
-            assert delete_entries[-1]["result"] == "DELETED"
+            assert delete_entries[-1]["result"] == "MOVED"
 
         finally:
             broker.stop()

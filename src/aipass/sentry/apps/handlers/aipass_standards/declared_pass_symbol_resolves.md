@@ -69,7 +69,7 @@ their same-file bases, `from x import *` followed); a module with no Python of i
 (built-in, compiled extension) is imported, because nothing of Python's runs. A source that
 builds its names when it runs (`globals()`, a module `__getattr__`: hashlib's `sha256`) cannot
 be read and is never a conviction. Stdlib is `sys.stdlib_module_names` (every platform's
-list), never importability: a stdlib module this host lacks (`fcntl` on Windows) is still
+list), never importability: a stdlib module this host lacks (`readline` or `_tkinter` on a Python built without it) is still
 stdlib, its names cannot be read here, and it answers unknown, never a conviction. Fleet sweep, the import reader against this one: 0 lines
 flipped.
 

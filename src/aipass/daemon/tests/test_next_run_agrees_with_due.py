@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_next_run_agrees_with_due.py
 # Description: next_run must name an instant is_job_due actually agrees with
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for handlers/schedule/runstate.py — next_run and is_job_due must not disagree."""
@@ -37,6 +37,8 @@ DAILY = {"type": "daily", "time": "10:00"}
 ROTATION = {"type": "rotation", "time": "05:00"}
 HOURLY = {"type": "hourly", "time": "0"}
 INTERVAL = {"type": "interval", "interval_minutes": 60}
+WEEKLY = {"type": "weekly", "weekday": "monday", "time": "05:00"}
+MONTHLY = {"type": "monthly", "day": 31, "time": "05:00"}
 
 # is_job_due's +/-15min window, pinned by test_the_window_slack_is_real_and_bounded.
 WINDOW_SLACK = timedelta(minutes=15)
@@ -52,6 +54,8 @@ class TestNextRunNamesAnInstantThatIsActuallyDue:
             (ROTATION, "2026-08-31T04:46:00"),
             (HOURLY, "2026-08-31T09:47:00"),
             (INTERVAL, "2026-08-31T09:45:11"),
+            (WEEKLY, "2026-11-16T05:03:00"),
+            (MONTHLY, "2026-10-31T05:03:00"),
         ],
     )
     def test_is_job_due_agrees_at_the_advertised_instant(self, schedule, fired_at):
@@ -71,6 +75,8 @@ class TestNextRunNamesAnInstantThatIsActuallyDue:
             (DAILY, "2026-08-31T09:45:11"),
             (ROTATION, "2026-08-31T04:46:00"),
             (HOURLY, "2026-08-31T09:47:00"),
+            (WEEKLY, "2026-11-16T05:03:00"),
+            (MONTHLY, "2026-10-31T05:03:00"),
         ],
     )
     def test_the_queue_never_under_reports_by_a_whole_period(self, schedule, fired_at):

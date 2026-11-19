@@ -3,7 +3,7 @@
 # Description: Caller identity ships with the evidence it came from
 # Version: 1.0.2
 # Created: 2026-08-21
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/router_handler.py: a caller's identity ships with the provenance it came from."""
@@ -176,7 +176,6 @@ class TestProvenanceIsStampedIntoTheEnvironment:
         assert "AIPASS_CALLER_IDENTITY_SOURCE" not in env
 
 
-@pytest.mark.deletable_cwd
 class TestRoutingFromADeletedDirectory:
     """``drone rm`` on your own cwd succeeds, so the NEXT command runs from a deleted directory."""
 
@@ -274,10 +273,7 @@ class TestRoutingFromADeletedDirectory:
 
 
 class TestRoutingWithoutACwdOnEveryOS:
-    """The same three claims as the class above, built portably (Windows refuses deleting the cwd).
-
-    The import claim has no portable sibling: on Windows it is genuinely untested.
-    """
+    """The class above's env claim, through the ``_working_directory`` seam instead of a deleted directory."""
 
     @pytest.fixture()
     def no_cwd(self, monkeypatch):
@@ -308,21 +304,8 @@ class TestRoutingWithoutACwdOnEveryOS:
             router_handler.execute_branch_command(branch_path=str(branch), branch_name="x", command="ping")
         return captured
 
-    def test_routing_does_not_crash(self, no_cwd, tmp_path):
-        assert self._route(tmp_path), "routing died with no current directory"
-
     def test_the_absent_cwd_is_omitted_rather_than_faked(self, no_cwd, tmp_path):
         """The target reads AIPASS_CALLER_CWD as a location: omitted, not blanked or faked."""
         captured = self._route(tmp_path)
 
         assert "AIPASS_CALLER_CWD" not in captured["env"]
-
-    def test_assigned_identity_still_answers(self, no_cwd, monkeypatch):
-        """Who this process IS never depended on where it was standing."""
-
-        monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
-
-        identity = router_handler.resolve_caller_identity_signal(router_handler.caller_cwd())
-
-        assert identity.name == "commons"
-        assert identity.source == "assigned"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_display.py
 # Description: Audit Display Module
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -352,7 +352,9 @@ def print_branch_summary(
         warning(f"Inline bypass comment, read by nothing: {marker}")
 
     overall_icon = "✅" if avg >= 90 else "⚠️" if avg >= 75 else "❌"
-    console.print(f"  [bold]Overall:{' ' * 8} {avg:3}% {overall_icon}[/bold]")
+    waived = audit_result.get("waived")
+    waived_tag = f" [dim]· {waived} waived by bypass rows[/dim]" if waived is not None else ""
+    console.print(f"  [bold]Overall:{' ' * 8} {avg:3}% {overall_icon}[/bold]{waived_tag}")
     if no_bypass:
         console.print("  [bold yellow]BYPASSES DISABLED[/bold yellow] [dim](--no-bypass) — raw score[/dim]")
 
@@ -431,6 +433,11 @@ def print_system_summary(audit_results: List[Dict], no_bypass: bool = False):
         console.print(f"  Type errors:           {total_type_errors} ({branches_with_type_errors} branches)")
     else:
         console.print("  Type errors:           0")
+    waived = [r["waived"] for r in audit_results if r.get("waived") is not None]
+    if waived:
+        console.print(
+            f"  Waived sites:          {sum(waived)} [dim](bypass rows; a 100 with rows waived is not a clean 100)[/dim]"
+        )
     if cache_served:
         console.print(f"  Cache-served:          {cache_served}/{total_branches} branches (unchanged, skipped re-scan)")
     if no_bypass:

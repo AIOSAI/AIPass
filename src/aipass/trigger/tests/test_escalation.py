@@ -3,7 +3,7 @@
 # Description: Tests for the escalation lane's signature, counting, windows, gates and state file
 # Version: 1.3.0
 # Created: 2026-08-08
-# Modified: 2026-11-08
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/escalation.py — the repeat signature, counting, windows, gates and state file."""
@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, Generator
 
 import pytest
-from aipass.trigger.apps.config import trail_logger
+from aipass.prax import trail
 from aipass.trigger.apps.handlers import escalation
 from aipass.trigger.apps.handlers.json import config_loader
 from aipass.trigger.tests.support_escalation import (
@@ -617,13 +617,13 @@ class TestStateFileResilience:
     """The lane must survive its own state file, whatever shape it is in."""
 
     def test_unreadable_state_starts_empty(self, lane) -> None:
-        """Garbage on disk is replaced by a fresh count, not an exception."""
+        """Pins the default: garbage on disk was overwritten by a fresh count; now the record fails, file kept."""
         lane.STATE_FILE.write_text("{ this is not json", encoding="utf-8")
 
         decision = _fire_warning(lane, times=1)
 
-        assert decision["count"] == 1
-        assert _read_state(lane)["signatures"]
+        assert decision["outcome"] == "record_failed"
+        assert lane.STATE_FILE.read_text(encoding="utf-8") == "{ this is not json"
 
     def test_wrong_shape_state_starts_empty(self, lane) -> None:
         """A JSON list where an object belongs is treated as no state at all."""
@@ -640,10 +640,11 @@ class TestStateFileResilience:
         assert _fire_warning(lane, times=1)["count"] == 1
 
     def test_listing_an_unreadable_state_returns_nothing(self, lane) -> None:
-        """get_signatures never raises on a broken file."""
+        """Pins the default: a broken file listed as "no signatures tracked yet"; now the listing raises."""
         lane.STATE_FILE.write_text("{ this is not json", encoding="utf-8")
 
-        assert lane.get_signatures() == []
+        with pytest.raises(RuntimeError, match="escalation state unreadable"):
+            lane.get_signatures()
 
 
 class TestPruning:
@@ -695,7 +696,7 @@ class TestConfigReadThrough:
         """Point the real loader at an operator config file under tmp_path."""
         path = tmp_path / "custom_config" / "trigger.config.json"
         monkeypatch.setattr(config_loader, "CONFIG_PATH", path)
-        monkeypatch.setattr(config_loader, "logger", trail_logger(tmp_path / "config_loader.jsonl"))
+        monkeypatch.setattr(config_loader, "logger", trail(tmp_path / "logs" / "config_loader.jsonl"))
         monkeypatch.setattr(escalation, "STATE_FILE", tmp_path / "escalation_state.json")
         escalation._config_cache = (0.0, None)
         yield path

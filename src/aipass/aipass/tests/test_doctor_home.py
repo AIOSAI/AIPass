@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills, shadow and smoke rows
-# Version: 1.6.1
+# Version: 1.11.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
-"""Tests for apps/modules/doctor.py and _doctor_smoke.py: home, seating, preflight, drone, skills, shadows, gitignore, smoke."""
+"""Tests for apps/modules/doctor.py and _doctor_smoke.py: home, seating, preflight, drone, skills, shadows, smoke."""
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
@@ -124,12 +124,17 @@ class TestCheckOwnerSeating:
 
     @pytest.fixture(autouse=True)
     def _identity_edges(self, tmp_path, monkeypatch) -> None:
-        registry = tmp_path / "AIPASS_REGISTRY.json"
+        self.home = tmp_path / "home"
+        self.home.mkdir()
+        registry = self.home / "AIPASS_REGISTRY.json"
         registry.write_text(json.dumps({"branches": [{"name": "vera"}]}), encoding="utf-8")
         mod = "aipass.aipass.apps.modules.doctor"
         monkeypatch.setattr(f"{mod}._find_registry", lambda: registry)
         monkeypatch.setattr(f"{mod}._check_global_aipass_home", lambda: [])
         monkeypatch.setattr(f"{mod}._configured_aipass_home", lambda: "")
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+        monkeypatch.chdir(self.home)
 
     @staticmethod
     def _owner_rows():
@@ -210,12 +215,43 @@ class TestCheckOwnerSeating:
         assert len(results) == 1
         assert results[0].glyph == GLYPH_WARN
 
-    def test_empty_stdout_exit_zero(self):
+    def test_an_empty_check_output_with_exit_zero_warns_not_passes(self):
+        """Mutant: the rc-0 empty branch returns PASS "clean (no details)" again -> red."""
         mock_proc = MagicMock(returncode=0, stdout="", stderr="")
         with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
             results = self._owner_rows()
-        assert len(results) == 1
-        assert results[0].glyph == GLYPH_PASS
+        assert [(r.label, r.glyph) for r in results] == [("owner", GLYPH_WARN)]
+        assert "printed nothing" in results[0].detail
+        assert "sync-registry --check" in results[0].remediation
+
+    def test_outside_any_project_the_check_runs_in_aipass_home(self, tmp_path, monkeypatch):
+        """Mutant: subprocess.run without cwd=root (the caller's cwd) -> red."""
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        monkeypatch.setenv("AIPASS_HOME", str(self.home))
+        check_json = json.dumps({"clean": True, "owner": "vera", "owner_uid": "8fb38c96", "issues": []})
+        seen: list = []
+
+        def _run(cmd, **kw):
+            seen.append(kw.get("cwd"))
+            return MagicMock(returncode=0, stdout=check_json, stderr="")
+
+        with patch("aipass.aipass.apps.modules.doctor.subprocess.run", side_effect=_run):
+            results = self._owner_rows()
+        assert seen == [self.home]
+        assert [r.glyph for r in results] == [GLYPH_PASS]
+
+    def test_with_no_project_and_no_aipass_home_the_row_warns_and_names_the_fix(self, tmp_path, monkeypatch):
+        """Mutant: the no-root guard dropped, the check runs in a bare dir -> red (run is called)."""
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        with patch("aipass.aipass.apps.modules.doctor.subprocess.run", side_effect=AssertionError("ran")):
+            results = self._owner_rows()
+        assert [(r.label, r.glyph) for r in results] == [("owner", GLYPH_WARN)]
+        assert "no AIPASS_HOME" in results[0].detail
+        assert "export AIPASS_HOME" in results[0].remediation
 
 
 class TestFixOwnerSeating:
@@ -225,8 +261,11 @@ class TestFixOwnerSeating:
     """
 
     @pytest.fixture(autouse=True)
-    def _every_other_edge(self, monkeypatch) -> None:
+    def _every_other_edge(self, tmp_path, monkeypatch) -> None:
         mod = "aipass.aipass.apps.modules.doctor"
+        (tmp_path / "AIPASS_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        monkeypatch.chdir(tmp_path)
         for name in ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         monkeypatch.setattr(f"{mod}._check_sandbox", lambda: [])
@@ -247,8 +286,8 @@ class TestFixOwnerSeating:
         return [r for r in self.printed["Identity"] if r.label.startswith("owner")]
 
     def test_fix_success_returns_pass(self):
-        """A fix that exits 0 shows the re-check's row (here a clean, empty --check), not its own tick."""
-        mock_proc = MagicMock(returncode=0, stdout="", stderr="")
+        """A fix that exits 0 shows the re-check's row (here a clean --check), not its own tick."""
+        mock_proc = MagicMock(returncode=0, stdout='{"clean": true, "issues": []}', stderr="")
         with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
             results = self._fix_rows()
         assert len(results) == 1
@@ -282,52 +321,193 @@ class TestFixOwnerSeating:
         assert len(results) == 1
         assert results[0].glyph == GLYPH_WARN
 
+    def test_a_clean_seat_is_not_repaired_and_keeps_its_check_row(self):
+        """A fresh install's seatless --fix hit spawn's seat gate on a seat nobody needed to repair."""
+        clean = CheckResult("owner", GLYPH_PASS, "@owner OK (seated, uid 12345678)", "")
+        with (
+            patch("aipass.aipass.apps.modules.doctor.check_identity", return_value=[clean]),
+            patch("aipass.aipass.apps.modules.doctor.subprocess.run") as run,
+        ):
+            results = self._fix_rows()
+        assert run.call_count == 0
+        assert results == [clean]
+
+    def test_a_defective_seat_is_repaired_and_spawns_refusal_stays_an_error_row(self):
+        unseated = CheckResult("owner/unseated", GLYPH_FAIL, "no owner seated", "Run 'aipass doctor --fix'")
+        refusal = "sync-registry --fix runs for real from @spawn or the verified admin seat only (caller unknown)"
+        with (
+            patch("aipass.aipass.apps.modules.doctor.check_identity", return_value=[unseated]),
+            patch(
+                "aipass.aipass.apps.modules.doctor.subprocess.run",
+                return_value=MagicMock(returncode=1, stdout="", stderr=refusal),
+            ) as run,
+        ):
+            results = self._fix_rows()
+        assert run.call_args.args[0] == ["drone", "@spawn", "sync-registry", "--fix"]
+        assert [(r.label, r.glyph, r.detail) for r in results] == [("owner fix", GLYPH_FAIL, refusal[:120])]
+
+
+class TestFixRestoresALostPassport:
+    """doctor --fix restores a citizen's lost passport through spawn's door, before the owner repair runs."""
+
+    REINSTALL = "Run the installer again: ./aipass install (rebuilds the environment, keeps personal files)"
+
+    @pytest.fixture(autouse=True)
+    def _a_citizen_without_its_passport(self, tmp_path, monkeypatch) -> None:
+        mod = "aipass.aipass.apps.modules.doctor"
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        monkeypatch.chdir(tmp_path)
+        for name in ("_check_system", "_check_community", "_check_scaffold", "_check_sandbox", "check_wire_verify"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.reconcile_stale_deny", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}._detect_aipass_home", lambda: str(tmp_path / "home"))
+        lost = [CheckResult("owner/owner_passport_missing", GLYPH_FAIL, "x", "")]
+        monkeypatch.setattr(f"{mod}.check_identity", lambda: lost)
+        self.citizen = tmp_path / "src" / "devpulse"
+        self.passport = self.citizen / ".trinity" / "passport.json"
+        self.registry = tmp_path / "AIPASS_REGISTRY.json"
+        rows = {"branches": [{"name": "devpulse", "path": "src/devpulse"}]}
+        self.registry.write_text(json.dumps(rows), encoding="utf-8")
+        self.kept = {
+            self.citizen / ".trinity" / "local.json": '{"sessions": []}',
+            self.citizen / ".trinity" / "observations.json": '{"observations": []}',
+            self.citizen / "artifacts" / "birth_certificate.json": '{"born": "2026-04-16"}',
+            self.citizen / ".ai_mail.local" / "inbox.json": '{"messages": []}',
+        }
+        for path, text in self.kept.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        self.seat_saw_passport: list = []
+        seated = [CheckResult("owner", GLYPH_PASS, "ok", "")]
+        monkeypatch.setattr(
+            f"{mod}._check_owner_seating", lambda: self.seat_saw_passport.append(self.passport.exists()) or seated
+        )
+        self.owner_repairs: list = []
+        monkeypatch.setattr(f"{mod}._fix_owner_seating", lambda: self.owner_repairs.append(1) or [])
+        self.printed: dict = {}
+        monkeypatch.setattr(f"{mod}._print_doctor_groups", lambda groups: self.printed.update(groups) or (0, 0, 0))
+
+    def _restored_rows(self, restore) -> list:
+        with patch("aipass.spawn.restore_citizen", side_effect=restore) as door:
+            run_doctor(fix=True)
+        self.door = door
+        rows = self.printed["Structure"]
+        return [(r.glyph, r.detail, r.remediation) for r in rows if r.label == "registry: devpulse"]
+
+    def _write_passport(self, *_args) -> list:
+        self.passport.write_text('{"branch_info": {"branch_name": "devpulse"}}', encoding="utf-8")
+        return ["passport.json(seed)"]
+
+    def test_a_restore_names_what_it_wrote_and_the_seat_check_sees_it_before_any_owner_repair(self) -> None:
+        before = self.registry.read_bytes()
+
+        rows = self._restored_rows(self._write_passport)
+
+        assert rows == [(GLYPH_PASS, "passport restored: passport.json(seed)", "")]
+        assert self.door.call_args.args == ("devpulse", self.registry)
+        assert self.seat_saw_passport == [True]
+        assert self.owner_repairs == []
+        assert self.registry.read_bytes() == before
+        assert {path: path.read_text(encoding="utf-8") for path in self.kept} == self.kept
+
+    def test_a_restore_that_raises_fails_naming_the_installer(self) -> None:
+        rows = self._restored_rows(FileNotFoundError("devpulse carries no seed"))
+
+        assert rows == [(GLYPH_FAIL, "passport not restored: devpulse carries no seed", self.REINSTALL)]
+
+    def test_a_restore_that_leaves_the_passport_unreadable_fails_naming_the_installer(self) -> None:
+        rows = self._restored_rows(lambda *_a: ["passport.json(seed)"])
+
+        detail = "passport restored: passport.json(seed); still not readable"
+        assert rows == [(GLYPH_FAIL, detail, self.REINSTALL)]
+
+    def test_a_project_citizen_with_no_seed_is_sent_to_a_backup_not_the_installer(self) -> None:
+        """The installer rebuilds the AIPass tree's own citizens only: for a project it cannot help."""
+        project = self.registry.with_name("FINCH_REGISTRY.json")
+        project.write_bytes(self.registry.read_bytes())
+        self.registry.unlink()
+
+        rows = self._restored_rows(FileNotFoundError("devpulse carries no seed"))
+
+        backup = "No seed was written while the passport existed: restore .trinity/passport.json from a backup"
+        assert rows == [(GLYPH_FAIL, "passport not restored: devpulse carries no seed", backup)]
+
+    def _a_seedless_citizen(self) -> Path:
+        """A core citizen 'flow' with a readable passport and no seed, listed beside devpulse."""
+        flow = self.registry.parent / "src" / "flow"
+        (flow / ".trinity").mkdir(parents=True)
+        (flow / ".trinity" / "passport.json").write_text('{"citizenship": {"residency": "core"}}', encoding="utf-8")
+        rows = json.loads(self.registry.read_text(encoding="utf-8"))
+        rows["branches"].append({"name": "flow", "path": "src/flow"})
+        self.registry.write_text(json.dumps(rows), encoding="utf-8")
+        return flow / ".aipass" / "passport.seed.json"
+
+    def _stub_export(self, monkeypatch, seed: Path, refusal: str = "") -> None:
+        """spawn's export-seeds command: writes the seed, or prints its refusal the way its receipt does."""
+        real = subprocess.run
+        self.exports: list = []
+
+        def export(cmd, **kwargs):
+            if cmd[:3] != ["drone", "@spawn", "export-seeds"]:
+                return real(cmd, **kwargs)
+            self.exports.append(cmd)
+            self.events.append("seed")
+            if refusal:
+                printed = f"1 seed(s) could not be exported:\n    flow: {refusal}\n"
+                return subprocess.CompletedProcess(cmd, 1, "", printed)
+            seed.parent.mkdir(parents=True, exist_ok=True)
+            seed.write_text("{}", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, "Written: 1\n", "")
+
+        monkeypatch.setattr("subprocess.run", export)
+
+    def test_fix_writes_a_missing_seed_before_passports_are_restored_and_the_owner_is_seated(self, monkeypatch) -> None:
+        seed = self._a_seedless_citizen()
+        self.events: list = []
+        self._stub_export(monkeypatch, seed)
+        seated = [CheckResult("owner", GLYPH_PASS, "ok", "")]
+        monkeypatch.setattr(
+            "aipass.aipass.apps.modules.doctor._check_owner_seating", lambda: self.events.append("seat") or seated
+        )
+
+        self._restored_rows(lambda *a: self.events.append("restore") or self._write_passport())
+
+        flow = [(r.glyph, r.detail, r.remediation) for r in self.printed["Structure"] if r.label == "registry: flow"]
+        assert flow == [(GLYPH_PASS, f"seed written: {seed}", "")]
+        root = str(self.registry.parent)
+        assert self.exports == [["drone", "@spawn", "export-seeds", "--confirm", "--root", root, "--only", "flow"]]
+        assert self.events == ["seed", "restore", "seat"]
+
+    def test_a_seed_spawn_refuses_fails_carrying_spawn_reason_verbatim(self, monkeypatch) -> None:
+        seed = self._a_seedless_citizen()
+        self.events = []
+        reason = "live passport is not a valid 2.0.0 passport: branch_info: missing key 'branch_name'"
+        self._stub_export(monkeypatch, seed, refusal=reason)
+
+        self._restored_rows(self._write_passport)
+
+        flow = [(r.glyph, r.detail, r.remediation) for r in self.printed["Structure"] if r.label == "registry: flow"]
+        assert flow == [(GLYPH_FAIL, f"seed not written: {reason}", "")]
+        assert not seed.exists()
+
 
 class TestRunDoctorPreflight:
-    """Tests for run_doctor_preflight — doctor-before-hello (round-2 addendum 2)."""
+    """run_doctor_preflight: the install's doctor --fix, returning the groups and their counts."""
 
-    def test_returns_error_count_and_empty_items_when_hooks_wired(self) -> None:
+    def test_returns_the_groups_after_the_fix_and_their_counts(self) -> None:
+        """Mutant: the counts dropped for (0, 0, 0) -> red. Mutant: non_interactive or yes not passed on -> red."""
         groups = {
-            "System": [],
-            "Identity": [],
-            "Services": [CheckResult("hooks", GLYPH_PASS, "9 provider hooks wired", "")],
-            "Community": [],
-            "Structure": [],
-            "Sandbox": [],
-        }
-        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
-            error_count, hook_action_items = run_doctor_preflight()
-        assert error_count == 0
-        assert hook_action_items == []
-
-    def test_still_broken_hooks_surfaced_as_action_items(self) -> None:
-        groups = {
+            "System": [CheckResult("python", GLYPH_PASS, "3.12", "")],
             "Services": [
-                CheckResult("hooks", GLYPH_WARN, "2 hook(s) missing from provider settings: Stop, Notification", ""),
+                CheckResult("hooks", GLYPH_WARN, "2 hook(s) missing", "aipass doctor --fix"),
                 CheckResult("wire verify", GLYPH_FAIL, "verify failed", ""),
             ],
         }
-        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
-            _error_count, hook_action_items = run_doctor_preflight()
-        assert any("hooks:" in item for item in hook_action_items)
-        assert any("wire verify:" in item for item in hook_action_items)
-
-    def test_passing_checks_excluded_from_action_items(self) -> None:
-        groups = {"Services": [CheckResult("hooks", GLYPH_PASS, "9 provider hooks wired", "")]}
-        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
-            _error_count, hook_action_items = run_doctor_preflight()
-        assert hook_action_items == []
-
-    def test_fix_true_and_the_install_door_passed_through_to_compute_groups(self) -> None:
-        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value={}) as mock_compute:
-            run_doctor_preflight(fix=True)
-        mock_compute.assert_called_once_with(fix=True, door="install")
-
-    def test_error_count_reflects_fail_glyphs(self) -> None:
-        groups = {"System": [CheckResult("test", GLYPH_FAIL, "bad", "")]}
-        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
-            error_count, _hook_action_items = run_doctor_preflight()
-        assert error_count == 1
+        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups) as compute:
+            assert run_doctor_preflight(non_interactive=True, yes=True) == (groups, (1, 1, 1))
+        compute.assert_called_once_with(fix=True, door="install", yes=True, non_interactive=True)
 
 
 class TestDroneCitizenCount:
@@ -414,6 +594,37 @@ class TestDroneCitizenCount:
         row = self._run(stdout, ["aipass"])
 
         assert row.detail == "1 citizens"
+
+    def test_no_routed_names_is_a_warn_not_a_pass(self) -> None:
+        """Mutant: an empty `drone systems` read as PASS "ok" -> red."""
+        row = self._run("", ["drone"])
+
+        assert (row.glyph, row.detail) == (GLYPH_WARN, "drone systems listed no agents")
+
+    def test_a_group_that_raises_is_one_fail_row_and_the_run_goes_on(self) -> None:
+        """Mutant: the group's try removed -> the whole run raises -> red."""
+        mod = "aipass.aipass.apps.modules.doctor"
+        printed: dict = {}
+
+        def _record(groups):
+            printed.update(groups)
+            return 0, 0, 1
+
+        with (
+            patch(f"{mod}._check_system", side_effect=RuntimeError("RAM unreadable: psutil failed")),
+            patch(f"{mod}.check_identity", return_value=[]),
+            patch(f"{mod}._check_services", return_value=[]),
+            patch(f"{mod}._check_community", return_value=[]),
+            patch(f"{mod}._check_structure", return_value=[]),
+            patch(f"{mod}._check_scaffold", return_value=[]),
+            patch(f"{mod}._check_sandbox", return_value=[]),
+            patch(f"{mod}._print_doctor_groups", side_effect=_record),
+        ):
+            assert run_doctor() == 1
+        assert printed["System"] == [
+            CheckResult("system", GLYPH_FAIL, "could not run: RAM unreadable: psutil failed", "Repair what it names")
+        ]
+        assert printed["Sandbox"] == []
 
 
 class TestHomeAgreement:
@@ -612,6 +823,19 @@ class TestSharedSkillsRows:
         run_doctor(**kwargs)
         return {r.label: r for r in self.printed["Scaffold"]}
 
+    def test_no_aipass_home_is_a_fail_row_and_the_template_compares_never_pass(self) -> None:
+        (self.root / ".aipass").mkdir()
+        (self.root / ".aipass" / "tier0_kernel.md").write_text("# kernel\n", encoding="utf-8")
+        (self.root / ".aipass" / "hooks.json").write_text("{}\n", encoding="utf-8")
+
+        with patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=None):
+            rows = self._rows()
+
+        assert (rows["aipass home"].glyph, rows["aipass home"].detail) == (GLYPH_FAIL, "not found")
+        assert rows["aipass home"].remediation == "Set AIPASS_HOME=/path/to/AIPass"
+        assert "tier0_kernel.md" not in rows
+        assert "hooks handlers" not in rows
+
     def test_named_skills_behind_a_link_pass_both_rows(self) -> None:
         self._skill("prep", "name: prep\ndescription: wrap up\n")
         (self.root / ".claude").mkdir()
@@ -634,7 +858,6 @@ class TestSharedSkillsRows:
         assert rows["skills link"].glyph == GLYPH_WARN
         assert rows["skills link"].detail == ".claude/skills missing: Claude Code sees none"
         assert rows["skills link"].remediation.startswith("Run: aipass doctor --fix")
-        assert "git config core.symlinks true" in rows["skills link"].remediation
         assert "writes a copy that will not follow .agents/skills" in rows["skills link"].remediation
 
     def test_a_copied_skills_folder_warns_that_it_will_not_follow(self) -> None:
@@ -645,7 +868,6 @@ class TestSharedSkillsRows:
 
         assert row.glyph == GLYPH_WARN
         assert row.detail == ".claude/skills is a copy, not a link: it will not follow .agents/skills"
-        assert "git config core.symlinks true" in row.remediation
 
     def test_fix_links_the_folder_and_retires_an_unedited_legacy_prep(self) -> None:
         self._skill("prep", "name: prep\ndescription: wrap up\n")
@@ -838,7 +1060,6 @@ class TestInstructionShadowRows:
             "Left .claude/CLAUDE.md: the project root holds $HOME, whose CLAUDE files are the user's"
         )
 
-    @pytest.mark.skipif(os.name == "nt", reason="symlinks need a Windows privilege")
     def test_fix_leaves_a_claude_folder_that_links_outside_the_root(self, tmp_path) -> None:
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
@@ -851,7 +1072,6 @@ class TestInstructionShadowRows:
         assert (elsewhere / "CLAUDE.md").read_text(encoding="utf-8") == "# not this project's\n"
         assert rows["shadow fix"].detail == "Left .claude/CLAUDE.md: its folder resolves outside the project root"
 
-    @pytest.mark.skipif(os.name == "nt", reason="symlinks need a Windows privilege")
     def test_a_claude_md_linked_to_agents_md_is_one_file_and_passes(self) -> None:
         (self.root / "CLAUDE.md").symlink_to("AGENTS.md")
 
@@ -1015,3 +1235,54 @@ class TestDoctorSmoke:
         _out, err = capsys.readouterr()
         assert "never runs with --fix" in err
         assert self.calls == [] and self.printed == {}
+
+
+class TestDoctorRowsJson:
+    """aipass doctor --fix --rows-json PATH: the install's health check, its non-PASS rows and counts as JSON."""
+
+    MOD = "aipass.aipass.apps.modules.doctor"
+
+    def test_the_rows_file_holds_the_counts_and_each_non_pass_row_plain(self, tmp_path, monkeypatch) -> None:
+        """Mutants: PASS rows kept; severity inverted; markup kept in detail -> each red."""
+        groups = {
+            "System": [CheckResult("python", GLYPH_PASS, "3.12", "")],
+            "Services": [
+                CheckResult("wire verify", GLYPH_FAIL, "[red]2 orphan entries[/red]", "drone @hooks verify"),
+                CheckResult("hooks", GLYPH_WARN, "2 hook(s) missing", "aipass doctor --fix"),
+            ],
+        }
+        monkeypatch.setattr(f"{self.MOD}.run_doctor_preflight", lambda **_kw: (groups, (1, 1, 1)))
+        rows_file = tmp_path / "home" / ".aipass" / "install_doctor_rows.json"
+
+        assert handle_command("doctor", ["--fix", "--rows-json", str(rows_file)]) is True
+
+        assert json.loads(rows_file.read_text(encoding="utf-8")) == {
+            "counts": {"pass": 1, "warn": 1, "error": 1},
+            "rows": [
+                {"group": "Services", "label": "wire verify", "severity": "error", "detail": "2 orphan entries",
+                 "remediation": "drone @hooks verify"},
+                {"group": "Services", "label": "hooks", "severity": "warning", "detail": "2 hook(s) missing",
+                 "remediation": "aipass doctor --fix"},
+            ],
+        }  # fmt: skip
+
+    def test_rows_json_without_fix_is_refused_with_2_and_writes_nothing(self, tmp_path, capsys) -> None:
+        """Mutant: the --fix guard dropped -> the doctor runs and writes the file -> red."""
+        rows_file = tmp_path / "rows.json"
+        with patch(f"{self.MOD}.run_doctor_preflight") as preflight, pytest.raises(SystemExit) as exc:
+            handle_command("doctor", ["--rows-json", str(rows_file)])
+
+        assert exc.value.code == 2
+        preflight.assert_not_called()
+        assert not rows_file.exists()
+        assert "run it with --fix" in capsys.readouterr().err
+
+    def test_the_install_flags_reach_the_rows_writer(self, tmp_path, monkeypatch) -> None:
+        """Mutants: --non-interactive not read; --yes not read -> each red."""
+        calls: list = []
+        monkeypatch.setattr(f"{self.MOD}.write_preflight_rows", lambda *a, **kw: calls.append((a, kw)))
+        rows_file = tmp_path / "rows.json"
+
+        handle_command("doctor", ["--fix", "--rows-json", str(rows_file), "--non-interactive", "--yes"])
+
+        assert calls == [((rows_file,), {"non_interactive": True, "yes": True})]

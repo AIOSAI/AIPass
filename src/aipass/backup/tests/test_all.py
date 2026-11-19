@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_all.py
 # Description: Tests for the all cycle's Drive switch, its Drive step's headroom refusal and the --registered run
-# Version: 1.1.0
+# Version: 1.2.1
 # Created: 2026-10-16
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/all.py: the drive_sync setting it obeys and the --registered run."""
@@ -30,8 +30,8 @@ from aipass.backup.apps.handlers.project import registry
 from aipass.backup.apps.modules import all as all_module
 from aipass.backup.apps.modules import display, drive_sync
 
-# snapshot and versioned run for real against tmp_path projects: they are
-# local copies, cheap at this size, and their file counts are what the summary
+# snapshot runs for real against tmp_path projects: it is a
+# local copy, cheap at this size, and its file count are what the summary
 # reports. Only the Drive step is replaced, by a recorder: conftest's
 # sealed_google_edge stands behind it.
 
@@ -57,15 +57,6 @@ def drive_runs(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     monkeypatch.setattr(drive_sync, "run_drive_sync", _record)
     return runs
-
-
-@pytest.fixture
-def tmp_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point the project registry at a file under tmp_path, never the branch's real one."""
-    path = tmp_path / "registry" / "project_registry.json"
-    path.parent.mkdir()
-    monkeypatch.setattr(registry, "REGISTRY_PATH", path)
-    return path
 
 
 def _project(root: Path, files: int = 2, drive_sync_on: bool | None = None) -> Path:
@@ -145,7 +136,7 @@ class TestAllObeysTheDriveSyncSetting:
 class TestADriveStepThatCannotFit:
     """all's Drive step is run_drive_sync itself, so a run that cannot fit ends all on the refusal sentence."""
 
-    def test_the_refusal_is_alls_last_line_the_local_stores_stand_and_the_exit_is_non_zero(
+    def test_the_refusal_is_alls_last_line_the_local_store_stands_and_the_exit_is_non_zero(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # The real run_drive_sync runs; only its client is offline, on a full account.
@@ -161,7 +152,6 @@ class TestADriveStepThatCannotFit:
         last = capsys.readouterr().out.splitlines()[-1]
         assert re.fullmatch(r"Drive has 0\.0 B free; this run needs \d+\.\d B\. Nothing uploaded\.", last), last
         assert (project / ".backup" / "snapshots" / "file_0.txt").is_file()
-        assert (project / ".backup" / "versioned").is_dir()
         # The run-start listing reads Drive; nothing is written to it.
         client.drive_service.files.return_value.create.assert_not_called()
         client.drive_service.files.return_value.update.assert_not_called()
@@ -189,9 +179,9 @@ class TestAllRegistered:
         rows = [line for line in summary if line.startswith(("first", "gone", "third"))]
         assert [row.split()[0] for row in rows] == ["first", "gone", "third"]
         first_row, gone_row, third_row = rows
-        assert "snapshot=3 versioned=3 drive=uploaded" in first_row  # two files plus the seed .backupignore
+        assert "snapshot=3 drive=uploaded" in first_row  # two files plus the seed .backupignore
         assert "FAILED" in gone_row and "drive=skipped" in gone_row
-        assert "snapshot=2 versioned=2 drive=skipped" in third_row
+        assert "snapshot=2 drive=skipped" in third_row
         assert all(row.rstrip().endswith("s") for row in rows)
         assert "1 of 3 projects failed: gone" in err
 

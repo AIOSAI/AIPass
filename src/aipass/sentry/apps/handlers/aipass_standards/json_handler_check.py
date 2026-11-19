@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler_check.py
 # Description: JSON Handler Integrity Standards Checker
-# Version: 1.2.1
+# Version: 1.3.1
 # Created: 2026-06-14
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """JSON Handler Integrity Standards Checker. Reference: json_handler.md"""
@@ -28,27 +28,34 @@ _TRIPLET_KINDS = ("config", "data", "log")
 
 _TRIPLET_RE = re.compile(r"^(?P<stem>.+)_(?P<kind>config|data|log)\.json$")
 
-# sha256 of the canonical shim pinned in src/aipass/devpulse/docs.local/DPLAN-0325_spec.md section 3. Computed
-# from the spec, not a branch copy, so a branch that drifts cannot teach the constant its own drift.
-# Re-pinned when the shim's docstring was renamed with the citizen (seedgo to sentry); all 19 copies agree.
+# sha256 of the canonical shim: the bytes spawn's citizen template ships at apps/handlers/json/json_handler.py.
+# Never taught by a branch copy, so a branch that drifts cannot teach the constant its own drift.
 CANONICAL_SHIM_SHA256 = "237bc66d92337a188bcd85e515863fe2141a607df0b7534c820b9ead55ae50db"
 
 # Guidance only: quoted in the refusal message, accepted by nothing. json_structure_check imports
-# `_is_canonical_shim` instead, so the two standards share the test, not a string.
+# `is_shim_for` instead, so the two standards share the test, not a string.
 SERVICE_IMPORT_MARKER = "from aipass.prax import json_handler"
+
+# Branches whose shim binds by package name. Hooks' shim also runs from a promoted snapshot beside apps/
+# (.live-<stamp>), where a depth counted from its own __file__ lands on the branch only by coincidence.
+BY_NAME_CLAIMS = frozenset({"hooks"})
+
+BY_FILE_LINE = "_h = json_handler.for_module(__file__)\n"
+_BY_NAME_RE = re.compile(r'^_h = json_handler\.for_branch\("([^"\n]*)"\)\n', re.MULTILINE)
 
 _TEMPLATE_HANDLER_PARTS = ("templates", "citizen", "apps", "handlers", "json", "json_handler.py")
 
 
 def _read_handler(branch_path: Path) -> str | None:
+    """The handler's text, or None when the branch has none.
+
+    Raises:
+        OSError, UnicodeDecodeError: the handler exists but cannot be read; never reported as missing.
+    """
     handler = branch_path / "apps" / "handlers" / "json" / "json_handler.py"
     if not handler.exists():
         return None
-    try:
-        return handler.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        logger.warning("json_handler_check: cannot read handler: %s", exc)
-        return None
+    return handler.read_text(encoding="utf-8")
 
 
 def _is_canonical_shim(content: str) -> bool:
@@ -59,21 +66,59 @@ def _is_canonical_shim(content: str) -> bool:
     return hashlib.sha256(content.encode("utf-8")).hexdigest() == CANONICAL_SHIM_SHA256
 
 
+def by_name_line(branch_name: str) -> str:
+    """The binding line a claimed branch writes in place of ``BY_FILE_LINE``."""
+    return f'_h = json_handler.for_branch("{branch_name}")\n'
+
+
+def _by_name_target(content: str) -> str | None:
+    """The branch a by-name shim names, or None when *content* is not the canonical shim with only that line swapped.
+
+    Proven by construction: swapping the by-name line back must give the canonical bytes, so no second hash is kept.
+    """
+    match = _BY_NAME_RE.search(content)
+    if match is None or not _is_canonical_shim(content.replace(match.group(0), BY_FILE_LINE)):
+        return None
+    return match.group(1)
+
+
 def _capability_verdict(content: str, branch_name: str) -> tuple[bool, str]:
-    """Judge one handler file. One accept path: the bytes ARE the canonical shim.
+    """Judge one handler file: the canonical shim, or for a claimed branch the shim binding by its own name.
 
     A hash, not substring evidence: the file either IS the one shim or it is not, and a branch that edits a
     byte goes red at once instead of falling through to a weaker path and looking migrated.
     """
+    claimed = branch_name in BY_NAME_CLAIMS
+    own_line = by_name_line(branch_name).strip()
     if _is_canonical_shim(content):
-        return True, "Canonical shim — sha256 matches the pinned spec (DPLAN-0325 section 3)"
+        if not claimed:
+            return True, "Canonical shim — sha256 matches the pinned spec (DPLAN-0325 section 3)"
+        return False, (
+            f"{branch_name} holds a by-name claim but binds by file: its shim also runs from a snapshot beside "
+            f"apps/, so write '{own_line}' in place of '{BY_FILE_LINE.strip()}', nothing else changed"
+        )
+    named = _by_name_target(content)
+    if named is not None and not claimed:
+        return False, (
+            f"{branch_name} binds by name, a form claimed only by {', '.join(sorted(BY_NAME_CLAIMS))}: "
+            f"write '{BY_FILE_LINE.strip()}', the canonical shim"
+        )
+    if named is not None and named != branch_name:
+        return False, f"{branch_name}'s shim binds the branch named '{named}', not itself: write '{own_line}'"
+    if named is not None:
+        return True, f"Claimed by-name shim — the canonical shim with only its binding line naming {branch_name}"
     return False, (
         f"Not the canonical json shim — {branch_name}'s handler does not match the pinned "
         f"sha256 (DPLAN-0325 section 3). The fleet has ONE json implementation; a branch "
         f"handler is its byte-identical binding, {len(content.encode('utf-8'))} bytes here. "
         f"Replace the file with the spec's bytes: '{SERVICE_IMPORT_MARKER}' and the nine "
-        f"bound names, nothing of its own"
+        f"bound names, nothing of its own" + (f", binding with '{own_line}'" if claimed else "")
     )
+
+
+def is_shim_for(content: str, branch_name: str) -> bool:
+    """True when *content* is the json shim *branch_name* must hold: the one test both json standards share."""
+    return _capability_verdict(content, branch_name)[0]
 
 
 def _check_template_handler(branch_path: Path, bypass_rules: list | None = None) -> dict | None:

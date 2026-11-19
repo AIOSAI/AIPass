@@ -6,27 +6,14 @@
 # Modified: 2026-10-17
 # =============================================
 
-"""
-Shared path utilities for ai_mail handlers.
-"""
+"""Shared path utilities for ai_mail handlers."""
 
-import os
-import sys
 from pathlib import Path
 from typing import Optional
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
-
-_CWD_FALLBACK_WARNED = False
 
 REPO_ROOT_MARKERS = ("AIPASS_REGISTRY.json", "pyproject.toml")
 
@@ -38,7 +25,7 @@ REGISTRY_GLOB = f"*{REGISTRY_SUFFIX}"
 def registries_in(directory: Path, pattern: str = REGISTRY_GLOB) -> list:
     """Registry files under *directory*, with the NAME re-checked case-sensitively.
 
-    pathlib glob folds case on Windows, so ``*_registry.json`` counters would pass as identity-bearing registries.
+    pathlib glob folds case on a case-insensitive filesystem, so ``*_registry.json`` counters would pass as identity-bearing registries.
     """
     try:
         found = list(directory.glob(pattern))
@@ -59,10 +46,12 @@ def registries_in(directory: Path, pattern: str = REGISTRY_GLOB) -> list:
     return sorted(kept)
 
 
-def find_repo_root() -> Path:
-    """Walk up from this file to the repo root, by the first marker that answers."""
-    global _CWD_FALLBACK_WARNED
+class RepoRootNotFound(RuntimeError):
+    """No root marker above this file: mailboxes cannot be placed, and the caller's cwd is no stand-in."""
 
+
+def find_repo_root() -> Path:
+    """Walk up from this file to the repo root, by the first marker that answers; RepoRootNotFound when none does."""
     current = Path(__file__).resolve().parent
     ancestors = [current] + list(current.parents)
 
@@ -72,26 +61,14 @@ def find_repo_root() -> Path:
             if (parent / marker).exists():
                 return parent
 
-    cwd = Path.cwd()
-    if not _CWD_FALLBACK_WARNED:
-        _CWD_FALLBACK_WARNED = True
-        logger.warning(
-            "[paths] none of %s found above %s — falling back to the current directory (%s) "
-            "as the repo root. Paths derived from this (feed, dispatch register, reports) will be "
-            "rooted there. This is no longer expected on a fresh checkout, which pyproject.toml "
-            "resolves; reaching here means the tree is not a recognisable AIPass checkout.",
-            ", ".join(REPO_ROOT_MARKERS),
-            current,
-            cwd,
-        )
-    return cwd
+    raise RepoRootNotFound(
+        f"none of {', '.join(REPO_ROOT_MARKERS)} found above {current}; "
+        "ai_mail cannot place mailboxes; run from an AIPass checkout"
+    )
 
 
 def find_project_root(start: Path) -> Optional[Path]:
-    """Walk up from *start* to find the first *_REGISTRY.json (project root).
-
-    An unreadable level is skipped, not fatal: for the delivery fence a found root fails closed, None allows.
-    """
+    """The first directory at or above *start* holding a *_REGISTRY.json; an unreadable level is skipped, not fatal."""
     current = start.resolve()
     for candidate in [current] + list(current.parents):
         if registries_in(candidate):
@@ -100,7 +77,7 @@ def find_project_root(start: Path) -> Optional[Path]:
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     json_handler.log_operation("paths_introspection")
     console.print("\n" + "=" * 70)

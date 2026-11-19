@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_section.py
 # Description: Git status section builder for devpulse dashboard
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-05-16
-# Modified: 2026-11-01
+# Modified: 2026-11-17
 # =============================================
 
 """Git section builder for devpulse dashboard plugin."""
@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 import subprocess
 
-from aipass.prax.apps.modules.dashboard import SUBJECT_CAP, cap_subject, write_section
+from aipass.prax import SUBJECT_CAP, cap_subject, write_section
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # SUBJECT_CAP is re-exported because this module's tests read it.

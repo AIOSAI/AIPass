@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dev_pr_handler.py
 # Description: Dev branch PR handler — push dev and create PR to main
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-05-12
-# Modified: 2026-10-24
+# Modified: 2026-11-10
 # =============================================
 
 """Branch PR handlers — generic and dev-specific."""
@@ -23,7 +23,7 @@ from aipass.drone.apps.handlers.git.repo_context import is_aipass_repo
 
 # gh prints the open PR's URL in its refusal; only a whole GitHub PR URL counts, not any line naming the host.
 _PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
-DEV_PR_OUTCOME = "The PR title was refused. Nothing was pushed."
+DEV_PR_OUTCOME = external_pr_handler.TITLE_OUTCOME
 
 
 def _slugify(text: str) -> str:

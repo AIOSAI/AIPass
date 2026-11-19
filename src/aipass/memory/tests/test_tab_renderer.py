@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_tab_renderer.py
 # Description: Tests for tab_renderer handler (FPLAN-0285)
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-06-25
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/tracking/tab_renderer.py."""
@@ -508,7 +508,7 @@ class TestRefreshAllTabs:
             ),
             patch.object(
                 _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
-                "_read_registry",
+                "write_scope",
                 return_value=mock_branches,
             ),
             patch.object(
@@ -566,7 +566,7 @@ class TestRefreshAllTabs:
             ),
             patch.object(
                 _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
-                "_read_registry",
+                "write_scope",
                 return_value=[{"name": "x", "path": str(branch_dir)}],
             ),
             patch.object(
@@ -622,7 +622,7 @@ class TestRefreshAllTabs:
             ),
             patch.object(
                 _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
-                "_read_registry",
+                "write_scope",
                 return_value=mock_branches,
             ),
             patch.object(
@@ -663,7 +663,7 @@ class TestRefreshAllTabs:
             ),
             patch.object(
                 _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
-                "_read_registry",
+                "write_scope",
                 return_value=[],
             ),
         ):
@@ -688,7 +688,7 @@ class TestRefreshAllTabs:
             ),
             patch.object(
                 _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
-                "_read_registry",
+                "write_scope",
                 return_value=[],
             ),
         ):
@@ -724,7 +724,7 @@ class TestRefreshAllTabs:
             ),
             patch.object(
                 _read_at_call("aipass.memory.apps.handlers.monitor.detector"),
-                "_read_registry",
+                "write_scope",
                 return_value=mock_branches,
             ),
             patch.object(
@@ -893,3 +893,26 @@ class TestTabAgreesWithTheEngine:
         src = inspect.getsource(tab_renderer.render_tab)
         assert 'get("count", ' not in src
         assert "resolve_limits" in src
+
+
+class TestAnUnreadableFileIsAnError:
+    """A file the detector found but nobody can read is reported, never skipped silently."""
+
+    def test_refresh_names_each_unreadable_file_as_an_error(self, tmp_path):
+        branch_dir = tmp_path / "b"
+        trinity = branch_dir / ".trinity"
+        trinity.mkdir(parents=True)
+        for name in ("local.json", "observations.json"):
+            (trinity / name).write_text("{not json", encoding="utf-8")
+        detector = _read_at_call("aipass.memory.apps.handlers.monitor.detector")
+        config = {"rollover": SAMPLE_ROLLOVER_CFG, "entry_limits": SAMPLE_ENTRY_LIMITS_CFG}
+
+        with (
+            patch.object(_read_at_call("aipass.memory.apps.handlers.json.config_loader"), "load", return_value=config),
+            patch.object(detector, "write_scope", return_value=[{"name": "b", "path": str(branch_dir)}]),
+            patch.object(detector, "_get_memory_file_path", side_effect=lambda b, t: trinity / f"{t}.json"),
+        ):
+            result = tab_renderer.refresh_all_tabs()
+
+        assert result["updated"] == 0 and result["skipped"] == 0
+        assert result["errors"] == ["b/local.json: unreadable", "b/observations.json: unreadable"]

@@ -3,7 +3,7 @@
 # Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
 # Version: 1.2.6
 # Created: 2026-07-15
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/trust.py and the handlers it drives."""
@@ -21,8 +21,7 @@ import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers.init.bootstrap import init_project, update_project
 from aipass.aipass.apps.modules.trust import handle_command
-from aipass.hooks.apps.modules import door_trust_registry
-from aipass.hooks.apps.modules.door_trust_registry import (
+from aipass.hooks import (
     enroll,
     is_trusted,
     read_registry,
@@ -38,7 +37,7 @@ def _isolate_registry(tmp_path, monkeypatch):
     """Redirect the trust registry to a tmp file so tests never touch ~/.aipass.
 
     One setting through hooks' public seam: every verb and trust.py's prune
-    resolve door_trust_registry.registry_path() per call, which reads
+    resolve hooks' registry_path() per call, which reads
     AIPASS_TRUST_REGISTRY.
     """
     fake_registry = tmp_path / "trusted_projects.json"
@@ -316,13 +315,8 @@ def test_update_project_reports_trust_enrolled(tmp_path, monkeypatch):
     assert result["trust_enrolled"] is True
 
 
-def test_update_project_reports_none_when_the_trust_registry_cannot_be_imported(tmp_path, monkeypatch):
-    """A re-enrol with hooks' door unimportable (a clone before install) reports None,
-    not the False of a refused enrollment, so the receipt can say which it was.
-    The door's enroll is removed at the edge; _enroll_project's lazy import fails.
-
-    Mutant: project_home's ImportError arm returns False again -> red.
-    """
+def test_update_project_raises_when_the_trust_registry_cannot_be_imported(tmp_path, monkeypatch):
+    """Mutant: project_home's ImportError arm restored (a None receipt, no raise) -> red."""
     target = tmp_path / "noregproj"
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
@@ -348,11 +342,10 @@ def test_update_project_reports_none_when_the_trust_registry_cannot_be_imported(
         '{"new_hook": {"handler": "aipass.hooks.apps.handlers.test.handle", "enabled": true}}}',
         encoding="utf-8",
     )
-    monkeypatch.delattr(door_trust_registry, "enroll")
+    monkeypatch.delattr(sys.modules[enroll.__module__], "enroll")  # gone at its home: the door's import raises
 
-    result = update_project(target)
-
-    assert result["trust_enrolled"] is None
+    with pytest.raises(ImportError, match="enroll"):
+        update_project(target)
 
 
 def test_prune_removes_stale_entries(tmp_path):
@@ -422,13 +415,7 @@ def test_enroll_missing_hooks_json_leaves_registry_intact(tmp_path):
 
 _ENROLL_ANCHOR = 'echo "Enrolling this install in the hook trust registry ..."'
 
-# setup.sh is a POSIX installer. On Windows, shutil.which("bash") finds
-# System32\bash.exe — the WSL launcher, which exits 1 with no distro installed —
-# so a which() check alone does not prove a usable shell.
-_NEEDS_POSIX_BASH = pytest.mark.skipif(
-    sys.platform == "win32" or shutil.which("bash") is None,
-    reason="needs a POSIX bash (Windows 'bash' is the WSL launcher)",
-)
+_NEEDS_POSIX_BASH = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
 
 
 def _extract_enroll_block() -> str:
@@ -451,7 +438,7 @@ def _run_enroll_block(script_dir: Path, home: Path) -> subprocess.CompletedProce
             'echo "REACHED_END action_needed=${#ACTION_NEEDED[@]}"',
         ]
     )
-    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+    env = dict(os.environ, HOME=str(home))
     # An install has no override: the block must resolve the registry under HOME,
     # not the fixture's AIPASS_TRUST_REGISTRY this process inherited.
     env.pop("AIPASS_TRUST_REGISTRY", None)
@@ -470,7 +457,7 @@ def test_setup_sh_has_enroll_block():
     body = SETUP_SH.read_text(encoding="utf-8")
     assert _ENROLL_ANCHOR in body
     block = _extract_enroll_block()
-    assert "from aipass.hooks.apps.modules.door_trust_registry import enroll" in block
+    assert "from aipass.hooks import enroll" in block
     assert "enroll(sys.argv[1])" in block
     # Only ever the repo being installed — never a blanket trust.
     assert '"$SCRIPT_DIR"' in block

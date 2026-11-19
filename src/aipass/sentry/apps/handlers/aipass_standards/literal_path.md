@@ -13,7 +13,7 @@ result = classify(Path("/fake/repo/apps/entry.py"))   # convicted
 adopt.run("/fake/aipass/home")                        # convicted
 ```
 
-The path is a fact about one host, written into a file that has to run on three.
+The path is a fact about one host, written into a file that has to run on every host.
 
 ---
 
@@ -35,7 +35,7 @@ The two standards split cleanly: `hardcoded_path` keeps the production half and 
 
 ## The restriction to an argument IS the rule
 
-`host_portability` ARM A settled this shape for `/proc`, and the same split does the work here. A literal that merely **sits** somewhere is data; only a literal **handed to a call** is a path the test uses. That one restriction takes 2,327 nominations down to 874.
+A literal that merely **sits** somewhere is data; only a literal **handed to a call** is a path the test uses. That one restriction takes 2,327 nominations down to 874.
 
 The positions it throws out are the ones that would have made the rule a nuisance:
 
@@ -63,9 +63,8 @@ A **name bound only to such a literal** is the same habit, and is judged where t
 | `client.get("/v1/whoami")` | **no** — a route, not a file |
 | `_get(server, "/drop")`, where `_get` hands that parameter to `conn.request` | **no** — a route, one same-file hop |
 | `read_file("/etc/passwd")`, `setenv("SHELL", "/bin/bash")` | **no** — a real host file |
-| `PureWindowsPath("/x/a.py")` | **no** — string algebra, no filesystem |
+| `PurePosixPath("/x/a.py")` | **no** — string algebra, no filesystem |
 | `value.startswith("/proc")` | **no** — a comparison operand |
-| `r"C:\proj\AIPass"` | **no** — counted, see below |
 | `Path("/")`, `walk("//")` | **no** — a root separator carries no host |
 
 Every carve-out carries its measured count (over 578 fleet test files):
@@ -77,24 +76,7 @@ Every carve-out carries its measured count (over 578 fleet test files):
 | home-rooted (`hardcoded_path`) | 78 |
 | system root | 60 |
 | pure path class | 26 |
-| drive-rooted (counted) | 29 |
 | string operation | 10 |
-
----
-
-## A drive-rooted literal is counted, never convicted
-
-```python
-assert _spell(_WindowsFlavour(r"C:\proj\AIPass")) == "../wren"
-```
-
-On a POSIX host `tmp_path` cannot produce `C:\proj\AIPass`. A rule that convicted memory's `test_roots_lifecycle` would be demanding a cross-OS test lie about its own subject. All 15 sites in 8 files are that shape. They are counted and the count rides in the file's **passing** message:
-
-```
-Every path in use is built, not written (1 drive-rooted path is counted, which the rule allows)
-```
-
-Same device `named_encoding` uses for latin-1: visible in the numbers, never a verdict.
 
 ---
 
@@ -148,7 +130,7 @@ Two branches were audited for real on the day it landed:
 
 **A literal that is never handed to a call is not convicted** — a default argument, a bare return, an element of a list that is not itself an argument. It is data until something uses it, and ARM A's measurement is why that line sits where it does.
 
-**The system-root list is curated, not inferred.** `/bin`, `/sbin`, `/usr`, `/etc`, `/proc`, `/sys`, `/dev`, `/var/run`, `/opt`, `/Library`, `/System`, `/Applications`. `/tmp` is deliberately absent: a test that hands `/tmp/proj` to the product is doing exactly what `tmp_path` is for.
+**The system-root list is curated, not inferred.** `/bin`, `/sbin`, `/usr`, `/etc`, `/proc`, `/sys`, `/dev`, `/var/run`, `/opt`. `/tmp` is deliberately absent: a test that hands `/tmp/proj` to the product is doing exactly what `tmp_path` is for.
 
 ---
 

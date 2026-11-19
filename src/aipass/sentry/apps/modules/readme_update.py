@@ -23,7 +23,7 @@ from aipass.sentry.apps.handlers.audit_tests import refusal
 from aipass.sentry.apps.modules import CommandRefused
 
 from aipass.cli import console, header
-from aipass.cli.apps.modules import error as display_error, warning
+from aipass.cli import error as display_error, warning
 
 from aipass.sentry.apps.handlers.readme.readme_ops import (
     load_generator,

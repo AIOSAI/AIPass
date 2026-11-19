@@ -3,7 +3,7 @@
 # Description: quick_status has many writers — none may delete another's key
 # Version: 1.2.0
 # Created: 2026-08-13
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/dashboard/status.py, refresh.py, operations.py, template_pusher.py and template_differ.py."""
@@ -327,7 +327,6 @@ class TestDashboardWritesAreAtomicAndLocked:
         assert ops.write_section(branch, "dispatch", {"agents_active": []}) is False
         assert (branch / "DASHBOARD.local.json").read_text(encoding="utf-8") == content
 
-    @pytest.mark.skipif(ops.fcntl is None, reason="no advisory lock on this platform")
     @pytest.mark.parametrize(
         "writer",
         [

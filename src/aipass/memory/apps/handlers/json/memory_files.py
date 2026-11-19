@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.prax import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.json.entry_limits import load_entry_limits, classify_entries
@@ -222,10 +222,12 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         rejection = _validate_entry_limits(file_path, data)
-        if rejection is not None:
-            return rejection
     except Exception as exc:
-        logger.warning(f"[memory_files] Entry-limits validation error (writing anyway): {exc}")
+        # A gate that crashed has not passed: refuse, never write past it.
+        logger.error(f"[memory_files] Refusing {file_path}: entry-limits gate crashed: {type(exc).__name__}: {exc}")
+        return {"success": False, "error": f"entry-limits gate crashed: {type(exc).__name__}: {exc}"}
+    if rejection is not None:
+        return rejection
 
     try:
         _check_entry_counts(file_path, data)
@@ -241,7 +243,6 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
                 json.dump(data, f, indent=2, ensure_ascii=False)
                 f.write("\n")  # Add final newline
 
-            # os.replace, not rename: it overwrites on Windows too.
             os.replace(temp_path, file_path)
 
             json_handler.log_operation("write_memory_file", {"file": file_path.name, "success": True})

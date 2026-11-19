@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_intake.py
 # Description: Tests for the intake/pool_processor handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/intake/pool_processor.py."""

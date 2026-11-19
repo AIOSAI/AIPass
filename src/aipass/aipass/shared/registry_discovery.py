@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: registry_discovery.py
 # Description: Shared registry file discovery (walk-up search)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-06
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """Registry discovery — find *_REGISTRY.json by walking up the directory tree."""
 
-# Stdlib only: importable before drone/prax exist.
+# No branch but prax loads at import: drone's name check is imported inside registries_in.
 import os
 from pathlib import Path
 
@@ -18,13 +18,12 @@ _REGISTRY_GLOB = "*" + _REGISTRY_SUFFIX
 
 
 def registries_in(directory):
-    """Every ``*_REGISTRY.json`` in *directory*, exact-case, sorted."""
-    try:
-        entries = list(directory.glob(_REGISTRY_GLOB))
-    except (OSError, ValueError):
-        return []
-    # Path.glob is case-insensitive on Windows/macOS; re-check the suffix, never the stem.
-    return sorted(p for p in entries if p.name.endswith(_REGISTRY_SUFFIX))
+    """Every registry in *directory*, sorted: glob's listing with no file-type filter, kept only where drone's
+    is_registry_filename agrees; an unreadable or missing directory lists nothing."""
+    from aipass.drone import is_registry_filename
+
+    # A case-insensitive filesystem's glob also answers x_registry.json.
+    return sorted(p for p in directory.glob(_REGISTRY_GLOB) if is_registry_filename(p.name))
 
 
 def _glob_registry(directory):

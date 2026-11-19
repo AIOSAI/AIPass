@@ -1,3 +1,0 @@
-# Project-specific Python packages only.
-# These are installed into the AIPass venv: pip install -r requirements.project.txt
-# Framework packages (drone, prax, chromadb, rich, etc.) are already available via AIPass.

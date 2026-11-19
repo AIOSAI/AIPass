@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rotation.py
 # Description: Tests for the steward rotation handler and module
-# Version: 1.5.0
+# Version: 1.7.0
 # Created:2026-08-12
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/rotation.py and handlers/schedule/rotation.py — the nightly rounds (DPLAN-0287)."""
@@ -39,15 +39,20 @@ from aipass.daemon.apps.handlers.schedule.rotation import (
     render_prompt,
 )
 from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
-from aipass.ai_mail.apps.modules.door_wake import wake_branch
-from aipass.daemon.apps.handlers.schedule.discovery import active_citizens, discover_jobs, framework_root
+from aipass.ai_mail import wake_branch
+from aipass.daemon.apps.handlers.schedule.discovery import (
+    PassportUnreadable,
+    active_citizens,
+    discover_jobs,
+    framework_root,
+)
 from aipass.daemon.apps.modules import rotation as rotation_module
 from aipass.daemon.apps.modules import run as run_module
 
 HANDLER = "aipass.daemon.apps.handlers.schedule.rotation"
 MODULE = "aipass.daemon.apps.modules.rotation"
 RUN = "aipass.daemon.apps.modules.run"
-WAKE_SEAM = "aipass.ai_mail.apps.modules.door_wake.wake_branch"
+WAKE_SEAM = "aipass.ai_mail.wake_branch"
 SCHEDULE_FILE = Path(__file__).resolve().parents[1] / ".daemon" / "schedule.json"
 
 
@@ -195,13 +200,18 @@ class TestBuildRoster:
     def test_an_unreadable_passport_is_left_off_the_roster(self, fleet, classes):
         """A citizen whose passport cannot be read may be a manager: it sits this night out, knob or no knob.
 
-        Mutant killed: build_roster treating an unreadable class (None) as a worker.
+        Mutant killed: build_roster treating an unreadable passport as a worker.
         """
-        unreadable = dict(classes, **{"@commons": None})
+
+        def class_or_unreadable(path):
+            if path.name == "commons":
+                raise PassportUnreadable(f"passport at {path} unreadable")
+            return classes[f"@{path.name}"]
+
         for include_managers in (False, True):
             with (
                 patch(f"{HANDLER}.active_citizens", return_value=fleet),
-                patch(f"{HANDLER}.citizen_class_for", side_effect=lambda p: unreadable[f"@{p.name}"]),
+                patch(f"{HANDLER}.citizen_class_for", side_effect=class_or_unreadable),
             ):
                 roster = build_roster(include_managers=include_managers)
             assert "@commons" not in [c["email"] for c in roster]
@@ -347,6 +357,13 @@ class TestFireRotation:
         assert "empty" in detail
         mock_wake.assert_not_called()
 
+    def test_the_rounds_wake_and_an_empty_roster_reach_the_prax_log(self, roster, caplog):
+        with caplog.at_level("INFO"):
+            self._fire(roster, {}, (True, "session started", False))
+            self._fire([], {}, (True, "", False))
+        assert "[rotation] ROUNDS: @backup — wake_branch(fresh=True, model=opus" in caplog.text
+        assert "[rotation] ROUNDS: roster is empty — nobody to wake" in caplog.text
+
     def test_manager_skipped_by_name_when_lane_missing(self, fleet, classes):
         with (
             patch(f"{HANDLER}.active_citizens", return_value=fleet),
@@ -442,6 +459,16 @@ class TestManagerLane:
         _ok, _detail, mock_wake = self._fire(target, {}, return_value=(FakeStatus("woken"), True))
         assert "provider" not in mock_wake.call_args.kwargs, "wake_branch names the default, not rounds"
 
+    def test_a_wake_that_raises_is_one_prax_error_and_leaves_stderr_to_crashes(self, caplog, capsys):
+        target = {"email": "@commons", "citizen_class": "aipass_framework"}
+        with caplog.at_level("INFO"):
+            self._fire(target, {}, side_effect=RuntimeError("boom"))
+        errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+        assert errors == ["[rotation] ERROR: @commons — boom; pointer advances"]
+        out, err = capsys.readouterr()
+        assert "FAIL: @commons — boom; pointer advances" in out
+        assert err == "", "under the timer stderr is the crash record; a handled failure is not a crash"
+
     def test_wake_exception_is_reported_not_raised(self):
         """Mutant killed: _wake_steward reports a wake exception as errored=False (a miss)."""
         runstate = {}
@@ -459,6 +486,14 @@ class TestManagerLane:
         """
         assert "scheduled" in inspect.signature(wake_branch).parameters
         assert rotation_json(capsys, [], lane=None)["manager_lane_available"] is True
+
+    def test_an_unimportable_wake_raises_never_reads_as_no_lane(self, capsys, monkeypatch):
+        """No fallback: a broken ai_mail import was answered False, so every manager was skipped as if by choice."""
+        # Deleting the name makes the from-import raise ImportError, as a broken ai_mail would.
+        # From its home module, reached through the door: the door then has nothing to hand out.
+        monkeypatch.delattr(inspect.getmodule(wake_branch), "wake_branch")
+        with pytest.raises(ImportError):
+            rotation_json(capsys, [], lane=None)
 
     def test_wake_back_is_a_live_keyword_of_wake_branch(self):
         """Our wake_back=False is only safe while ai_mail's wake_branch takes it.
@@ -494,6 +529,19 @@ class TestRotationCommand:
         assert status["roster_size"] == 2
         assert status["manager_lane_available"] is False
 
+    def test_status_with_no_rotation_job_warns_through_prax(self, roster, caplog, capsys):
+        with (
+            caplog.at_level("WARNING"),
+            patch(f"{MODULE}.find_rotation_jobs", return_value=[]),
+            patch(f"{MODULE}.load_runstate", return_value={}),
+            patch(f"{MODULE}.build_roster", return_value=roster),
+            patch(f"{MODULE}._apply_wake_blocklist", side_effect=lambda r: r),
+            patch(f"{MODULE}._scheduled_lane_available", return_value=True),
+        ):
+            assert rotation_module.handle_command("rotation", []) is True
+        assert "No rotation job configured" in capsys.readouterr().err
+        assert "[rotation] No rotation job configured: the nightly rounds do not run" in caplog.text
+
     def test_status_without_a_rotation_job(self, roster, capsys):
         """Mutant killed: _build_status reports enabled=True with no job."""
         status = rotation_json(capsys, roster, jobs=[])
@@ -518,7 +566,7 @@ class TestRotationCommand:
 
     def test_blocklist_filter_drops_blocked_branches(self, roster, capsys):
         """Mutant killed: _apply_wake_blocklist keeps a blocked entry."""
-        with patch("aipass.ai_mail.apps.modules.door_wake.is_wake_blocked", side_effect=lambda e: e == "@backup"):
+        with patch("aipass.ai_mail.is_wake_blocked", side_effect=lambda e: e == "@backup"):
             status = rotation_json(capsys, roster, jobs=[rotation_job()], real_blocklist=True)
         assert [c["email"] for c in status["roster"]] == ["@commons"]
 
@@ -553,10 +601,11 @@ BUDGET_RULES = (
 class TestShippedRoundsJob:
     """The owner's ruling of 2026-09-10, read off the same file the tick reads."""
 
-    def test_the_job_is_rounds_and_it_is_on(self):
+    def test_the_job_is_rounds_at_five_with_an_on_off_switch(self):
+        """On or off is the owner's switch, so only its shape is pinned."""
         job = shipped_rounds_job()
         assert job["id"] == "rounds"
-        assert job["enabled"] is True
+        assert isinstance(job["enabled"], bool)
         assert job["schedule"] == {"type": "rotation", "time": "05:00"}
 
     def test_opus_fresh_and_no_managers(self):
@@ -597,7 +646,8 @@ class TestShippedRoundsJob:
 class TestRoundsNight:
     """One night end to end through the real tick, nobody woken.
 
-    The shipped stanza, the clock moved to 05:01, and the wake caught at ai_mail's wake_branch seam,
+    The shipped stanza with its switch set by the test (on unless a test turns it off: the shipped
+    flag is the owner's), the clock moved to 05:01, and the wake caught at ai_mail's wake_branch seam,
     so the kwargs pinned are the ones a real fire hands ai_mail. Nights are dated from tomorrow:
     last_run is stamped by the real clock, and a fixed date would go red once the wall clock passed it.
     """
@@ -628,10 +678,10 @@ class TestRoundsNight:
     def night(offset_days: int) -> datetime:
         return datetime.combine(date.today() + timedelta(days=offset_days), time(5, 1))
 
-    def _tick(self, runstate: dict, at: datetime, wake_error: Exception | None = None):
+    def _tick(self, runstate: dict, at: datetime, wake_error: Exception | None = None, enabled: bool = True):
         real_is_due = runstate_mod.is_job_due
         with (
-            patch(f"{RUN}.discover_jobs", return_value=[shipped_rounds_job()]),
+            patch(f"{RUN}.discover_jobs", return_value=[{**shipped_rounds_job(), "enabled": enabled}]),
             patch(f"{RUN}.load_runstate", return_value=runstate),
             patch(f"{RUN}.save_runstate", return_value=True) as mock_save,
             patch(f"{RUN}.is_job_due", side_effect=lambda j, rs: real_is_due(j, rs, now=at)),
@@ -702,6 +752,14 @@ class TestRoundsNight:
         assert results["fired"] == 0
         mock_wake.assert_not_called()
 
+    def test_a_switched_off_job_in_its_window_wakes_no_one_and_writes_no_rounds_row(self):
+        runstate = {}
+        results, mock_wake, _save = self._tick(runstate, self.night(1), enabled=False)
+        assert results["fired"] == 0
+        mock_wake.assert_not_called()
+        assert get_rotation_state(runstate, "@daemon/rounds") == {}
+        assert "@daemon/rounds" not in runstate.get("jobs", {})
+
 
 class TestRoundsScope:
     """The rounds serve src/aipass/* only.
@@ -710,7 +768,7 @@ class TestRoundsScope:
     a projects/* resident and an external-root citizen, all declaring the same class, so only the path decides.
     """
 
-    FLEET = "aipass.daemon.apps.handlers.schedule.discovery.fleet"
+    FLEET = "aipass.daemon.apps.handlers.schedule.discovery"
 
     @pytest.fixture
     def install(self, tmp_path):

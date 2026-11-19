@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_fleet.py
 # Description: Tests for the host API fleet lane — baud --snapshot contract
-# Version: 1.1.6
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-11-05
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/host/fleet.py, the baud --snapshot contract, and the host lane that serves it."""
@@ -36,8 +36,18 @@ from aipass.api.apps.handlers.host import machine as host_machine
 from aipass.api.apps.handlers.host import read_cache as host_read_cache
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
-from aipass.skills.lib.screen_lock import handler as screen_lock
-from aipass.skills.lib.system_status import handler as system_status
+from aipass.skills import (
+    SCREEN_LOCK_METHOD_DBUS,
+    SCREEN_LOCK_METHOD_LOGINCTL,
+    SCREEN_LOCK_REASON_NO_READER,
+    SCREEN_LOCK_REASON_NO_SESSION,
+    SCREEN_LOCK_REASON_READ_FAILED,
+    SYSTEM_STATUS_PSUTIL_RECIPE,
+    SYSTEM_STATUS_REASON_SWITCH_UNREADABLE,
+    SYSTEM_STATUS_REASON_SWITCHED_OFF,
+    SYSTEM_STATUS_REASONS,
+    SYSTEM_STATUS_SECTIONS,
+)
 
 
 # A real card, trimmed from @baud's verified run.
@@ -155,8 +165,6 @@ class TestTheGate:
 PATCH_CONFIG_LOGGER = "aipass.api.apps.handlers.host.config.logger"
 PATCH_FLEET_LOGGER = "aipass.api.apps.handlers.host.fleet.logger"
 
-posix_permissions = pytest.mark.skipif(sys.platform == "win32", reason="os.access X_OK is always true on Windows")
-
 
 def _executable(path: Path, mode: int = 0o755) -> Path:
     """A stand-in binary: a regular file with the given mode."""
@@ -175,7 +183,6 @@ def places(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     repo.mkdir()
     on_path: dict = {}
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setattr(host_fleet, "repo_root", lambda: repo)
     monkeypatch.setattr(host_fleet.shutil, "which", lambda name: on_path.get(name))
 
@@ -239,7 +246,6 @@ class TestBinaryResolution:
         assert str(configured) in message
         assert "set-config --baud-bin default" in message
 
-    @posix_permissions
     def test_a_configured_binary_that_lost_its_bit_is_refused_by_name(self, places: SimpleNamespace) -> None:
         """Present is not enough: a file that cannot be exec'd refuses here, not as a 500 at the exec."""
         configured = _executable(places.elsewhere / "baud-cli")
@@ -272,7 +278,6 @@ class TestBinaryResolution:
         assert positions == sorted(positions), message
         assert message.endswith("Install it: aipass baud install.")
 
-    @posix_permissions
     def test_an_automatic_file_without_the_bit_is_passed_and_named(self, places: SimpleNamespace) -> None:
         """A download nobody chmodded is skipped for the next step, and still named when nothing answers."""
         installed = _executable(places.home / host_fleet.INSTALLED_BINARY_RELATIVE, mode=0o644)
@@ -1006,9 +1011,17 @@ PATCH_MACHINE_LOGGER = "aipass.api.apps.handlers.host.machine.logger"
 PATCH_MACHINE_JSON = "aipass.api.apps.handlers.host.machine.json_handler"
 PATCH_CACHE_JSON = "aipass.api.apps.handlers.host.read_cache.json_handler"
 
-# The door itself, patched where it lives. machine.py imports it inside the
+# @skills' door name, mock.patch on the package: machine.py imports it inside the
 # call, so the stand-in is what every read in these cases reaches.
-PATCH_VITALS_DOOR = "aipass.skills.lib.system_status.handler.machine_vitals"
+PATCH_VITALS_DOOR = "aipass.skills.machine_vitals"
+
+
+PATCH_DENIALS_LOGGER = "aipass.api.apps.handlers.host.denials.logger"
+
+
+def _levels_called(log: Any) -> set:
+    """Which of a patched logger's level methods were called."""
+    return {level for level in ("debug", "info", "warning", "error") if getattr(log, level).called}
 
 
 def _present(**values: Any) -> dict:
@@ -1018,14 +1031,14 @@ def _present(**values: Any) -> dict:
 
 def _absent(reason: str, **values: Any) -> dict:
     """A section that did not, carrying the skill's OWN sentence for its code."""
-    return {"available": False, "reason": reason, "sentence": system_status.REASONS[reason], "detail": None, **values}
+    return {"available": False, "reason": reason, "sentence": SYSTEM_STATUS_REASONS[reason], "detail": None, **values}
 
 
-def _macos_vitals(sampled_at: str = "2026-09-13T07:20:00.000+00:00") -> dict:
+def _sensorless_vitals(sampled_at: str = "2026-09-13T07:20:00.000+00:00") -> dict:
     """
-    What machine_vitals() answers on a Mac running macOS, manufactured here.
+    What machine_vitals() answers on a host with no fan or temperature sensors (a VM, a container), manufactured here.
 
-    psutil has no sensors_temperatures/sensors_fans on macOS, so both answer `platform`."""
+    psutil finds no sensors there, so both answer `platform`."""
     return {
         "ok": True,
         "schema": 1,
@@ -1063,22 +1076,22 @@ class TestTheMachineRoute:
         assert response.status_code == 401
         machine_door.assert_not_called()
 
-    def test_a_mac_with_no_sensors_is_a_200_that_says_so(self, client, auth: dict, machine_door) -> None:
+    def test_a_host_with_no_sensors_is_a_200_that_says_so(self, client, auth: dict, machine_door) -> None:
         """
-        The manufactured macOS host: temp and fan answer `platform`, the rest are numbers.
+        The manufactured sensorless host: temp and fan answer `platform`, the rest are numbers.
 
         Absence carries the skill's sentence and a None where a zero would lie."""
-        machine_door.return_value = _macos_vitals()
-        assert all(name in machine_door.return_value for name in system_status.SECTIONS), "stand-in drifted"
+        machine_door.return_value = _sensorless_vitals()
+        assert all(name in machine_door.return_value for name in SYSTEM_STATUS_SECTIONS), "stand-in drifted"
 
         response = client.get("/v1/machine", headers=auth)
 
         assert response.status_code == 200
         body = response.json()
-        assert body == _macos_vitals()
+        assert body == _sensorless_vitals()
         assert body["fan"]["available"] is False
         assert body["fan"]["reason"] == "platform"
-        assert body["fan"]["sentence"] == system_status.REASONS["platform"]
+        assert body["fan"]["sentence"] == SYSTEM_STATUS_REASONS["platform"]
         assert body["fan"]["current"] is None
         assert body["temp"]["celsius"] is None
         assert body["cpu"]["percent"] == 11.4
@@ -1086,8 +1099,9 @@ class TestTheMachineRoute:
     @pytest.mark.parametrize(
         ("reason", "detail"),
         [
-            ("psutil_missing", system_status.PSUTIL_RECIPE),
-            ("switched_off", "Skill 'system_status' is switched OFF and takes no readings."),
+            ("psutil_missing", SYSTEM_STATUS_PSUTIL_RECIPE),
+            (SYSTEM_STATUS_REASON_SWITCHED_OFF, "Skill 'system_status' is switched OFF and takes no readings."),
+            (SYSTEM_STATUS_REASON_SWITCH_UNREADABLE, "The switch state could not be read, so the skill is OFF."),
             ("a_code_from_the_future", "a refusal this server has never seen"),
         ],
     )
@@ -1117,6 +1131,26 @@ class TestTheMachineRoute:
         }
         assert re.fullmatch("[0-9a-f]{12}", error["ref"])
         assert detail not in response.text
+
+    @pytest.mark.parametrize(
+        ("reason", "handler_level", "denial_level"),
+        [
+            (SYSTEM_STATUS_REASON_SWITCHED_OFF, "info", "info"),
+            (SYSTEM_STATUS_REASON_SWITCH_UNREADABLE, "error", "warning"),
+            ("psutil_missing", "warning", "warning"),
+        ],
+    )
+    def test_a_refusal_logs_by_the_owners_table_on_both_sites(
+        self, client, auth: dict, machine_door, reason: str, handler_level: str, denial_level: str
+    ) -> None:
+        """A deliberate off is the switch working: info on both lines, no warning, no error."""
+        machine_door.return_value = {"ok": False, "reason": reason, "detail": "words"}
+
+        with patch(PATCH_MACHINE_LOGGER) as handler_log, patch(PATCH_DENIALS_LOGGER) as denial_log:
+            assert client.get("/v1/machine", headers=auth).status_code == 503
+
+        assert _levels_called(handler_log) == {handler_level}
+        assert _levels_called(denial_log) == {denial_level}
 
     def test_a_door_that_raises_is_a_503_naming_it_not_a_500(self, client, auth: dict, machine_door) -> None:
         """
@@ -1168,7 +1202,7 @@ class TestTheMachineCache:
 
     def test_two_reads_inside_a_second_are_one_read(self, machine_door) -> None:
         """The second read is the first one's answer: one call, one sampled_at — absent sections included."""
-        machine_door.return_value = _macos_vitals()
+        machine_door.return_value = _sensorless_vitals()
 
         first = host_machine.read_machine()
         second = host_machine.read_machine()
@@ -1181,7 +1215,7 @@ class TestTheMachineCache:
         """Inside 1.0 s the stored answer; past it a fresh read. On a clock this case owns."""
         clock = {"now": 100.0}
         monkeypatch.setattr(host_read_cache, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
-        machine_door.side_effect = [_macos_vitals("first"), _macos_vitals("second")]
+        machine_door.side_effect = [_sensorless_vitals("first"), _sensorless_vitals("second")]
 
         assert host_machine.read_machine()["sampled_at"] == "first"
         clock["now"] = 100.9
@@ -1194,7 +1228,7 @@ class TestTheMachineCache:
         """A skill switched back on answers on the very next request, not after the window."""
         machine_door.side_effect = [
             {"ok": False, "reason": "switched_off", "detail": "off"},
-            _macos_vitals(),
+            _sensorless_vitals(),
         ]
 
         with pytest.raises(host_machine.MachineRefused) as refused:
@@ -1206,7 +1240,7 @@ class TestTheMachineCache:
 
     def test_a_failed_door_is_never_cached(self, machine_door) -> None:
         """A door that raised once is asked again, not refused for the rest of the second."""
-        machine_door.side_effect = [RuntimeError("once"), _macos_vitals()]
+        machine_door.side_effect = [RuntimeError("once"), _sensorless_vitals()]
 
         with pytest.raises(host_machine.MachineDoorFailed):
             host_machine.read_machine()
@@ -1227,13 +1261,13 @@ class TestTheMachineCache:
         """
         The door is imported inside the call, so importing this lane loads no skill.
 
-        Asked of a fresh interpreter, because this one already imported the skill
-        at the top of this file.
+        Asked of a fresh interpreter: the constants this file takes from aipass.skills
+        at its top have already loaded the skill here.
         """
         probe = (
             "import sys\n"
             "import aipass.api.apps.handlers.host.machine\n"
-            "print('aipass.skills.lib.system_status.handler' in sys.modules)\n"
+            "print(any(name.startswith('aipass.skills.') for name in sys.modules))\n"
         )
         result = subprocess.run(
             [sys.executable, "-c", probe],
@@ -1255,14 +1289,14 @@ class TestTheMachineCache:
 PATCH_LOCK_LOGGER = "aipass.api.apps.handlers.host.lock.logger"
 PATCH_LOCK_JSON = "aipass.api.apps.handlers.host.lock.json_handler"
 
-# The door itself, patched where it lives. lock.py imports it inside the call,
+# @skills' door name, mock.patch on the package: lock.py imports it inside the call,
 # so the stand-in is what every read in these cases reaches — never a loginctl.
-PATCH_LOCK_DOOR = "aipass.skills.lib.screen_lock.handler.lock_state"
+PATCH_LOCK_DOOR = "aipass.skills.lock_state"
 
 
-def _lock_answer(locked: bool, method: str = screen_lock.METHOD_LOGINCTL, session: Any = "3") -> dict:
+def _lock_answer(locked: bool, method: str = SCREEN_LOCK_METHOD_LOGINCTL, session: Any = "3") -> dict:
     """An answer in the skill's published shape. The unlocked default is this laptop's, read live."""
-    source = f"logind session {session}" if method == screen_lock.METHOD_LOGINCTL else "GNOME ScreenSaver"
+    source = f"logind session {session}" if method == SCREEN_LOCK_METHOD_LOGINCTL else "GNOME ScreenSaver"
     return {
         "ok": True,
         "locked": locked,
@@ -1273,7 +1307,7 @@ def _lock_answer(locked: bool, method: str = screen_lock.METHOD_LOGINCTL, sessio
     }
 
 
-def _cannot_tell(reason: str = screen_lock.REASON_NO_SESSION) -> dict:
+def _cannot_tell(reason: str = SCREEN_LOCK_REASON_NO_SESSION) -> dict:
     """The skill could not tell: ok False, locked None, its code and a sentence standing in for its own."""
     return {
         "ok": False,
@@ -1283,6 +1317,12 @@ def _cannot_tell(reason: str = screen_lock.REASON_NO_SESSION) -> dict:
         "reason": reason,
         "detail": f"Cannot tell whether the screen is locked ({reason}).",
     }
+
+
+def _switched_off() -> dict:
+    """lock_state() while screen_lock is switched off, in @skills' stated shape."""
+    sentence = "Skill 'screen_lock' is switched OFF. Turn it back on with: drone @skills on screen_lock"
+    return {"ok": False, "locked": None, "method": None, "session": None, "reason": "switched_off", "detail": sentence}
 
 
 @pytest.fixture
@@ -1314,7 +1354,7 @@ class TestTheLockRoute:
 
     @pytest.mark.parametrize(
         "answer",
-        [_lock_answer(locked=False), _lock_answer(locked=True, method=screen_lock.METHOD_DBUS, session=None)],
+        [_lock_answer(locked=False), _lock_answer(locked=True, method=SCREEN_LOCK_METHOD_DBUS, session=None)],
         ids=["unlocked_per_logind", "locked_per_gnome_screensaver"],
     )
     def test_both_answers_arrive_verbatim(self, client, auth: dict, lock_door, answer: dict) -> None:
@@ -1329,7 +1369,7 @@ class TestTheLockRoute:
 
     @pytest.mark.parametrize(
         "reason",
-        [screen_lock.REASON_NO_SESSION, screen_lock.REASON_NO_READER, screen_lock.REASON_READ_FAILED],
+        [SCREEN_LOCK_REASON_NO_SESSION, SCREEN_LOCK_REASON_NO_READER, SCREEN_LOCK_REASON_READ_FAILED],
     )
     def test_cannot_tell_is_a_200_carrying_the_skills_answer(self, client, auth: dict, lock_door, reason: str) -> None:
         """
@@ -1344,6 +1384,15 @@ class TestTheLockRoute:
 
         assert response.status_code == 200
         assert response.json() == _cannot_tell(reason)
+
+    def test_a_switched_off_skill_is_a_200_carrying_its_off_answer_and_sentence(self, client, auth, lock_door) -> None:
+        lock_door.return_value = _switched_off()
+
+        response = client.get("/v1/lock", headers=auth)
+
+        assert response.status_code == 200
+        assert response.json() == _switched_off()
+        assert response.json()["detail"].startswith("Skill 'screen_lock' is switched OFF.")
 
     def test_a_door_that_raises_is_a_503_naming_it_not_a_500(self, client, auth: dict, lock_door) -> None:
         """
@@ -1452,6 +1501,21 @@ class TestTheLockCache:
         assert host_lock.read_lock()["locked"] is True
         assert lock_door.call_count == 2
 
+    def test_a_switch_off_reaches_the_reader_once_the_cached_second_ends(
+        self, lock_door, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The one lag off has here: a reading taken before the switch is served until its 1.0 s ends."""
+        clock = {"now": 100.0}
+        monkeypatch.setattr(host_read_cache, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+        lock_door.side_effect = [_lock_answer(locked=False), _switched_off()]
+
+        assert host_lock.read_lock() == _lock_answer(locked=False)
+        clock["now"] = 101.0
+        assert host_lock.read_lock() == _lock_answer(locked=False)
+        clock["now"] = 101.01
+        assert host_lock.read_lock() == _switched_off()
+        assert lock_door.call_count == 2
+
     def test_cannot_tell_is_served_for_its_window_like_any_reading(self, lock_door) -> None:
         """ok False is an answer, not a refusal: stored for the window, not re-asked per request."""
         lock_door.return_value = _cannot_tell()
@@ -1520,13 +1584,13 @@ class TestTheLockCache:
         """
         The door is imported inside the call, so importing this lane loads no skill.
 
-        Asked of a fresh interpreter, because this one already imported the skill
-        at the top of this file.
+        Asked of a fresh interpreter: the constants this file takes from aipass.skills
+        at its top have already loaded the skill here.
         """
         probe = (
             "import sys\n"
             "import aipass.api.apps.handlers.host.lock\n"
-            "print('aipass.skills.lib.screen_lock.handler' in sys.modules)\n"
+            "print(any(name.startswith('aipass.skills.') for name in sys.modules))\n"
         )
         result = subprocess.run(
             [sys.executable, "-c", probe],

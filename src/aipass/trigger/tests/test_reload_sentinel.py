@@ -3,7 +3,7 @@
 # Description: Tests the handler-mtime reload sentinel that keeps the watcher on shipped code
 # Version: 1.0.1
 # Created: 2026-08-12
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/reload_sentinel.py, the handler-mtime reload sentinel."""
@@ -20,7 +20,6 @@ from unittest.mock import MagicMock
 
 import aipass.trigger.apps.handlers.reload_sentinel as reload_sentinel
 import pytest
-from aipass.trigger.apps.config import trail_logger
 
 
 def _join_sentinel_loops() -> None:
@@ -37,7 +36,7 @@ def sentinel(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
     Unpatched, every detecting test writes reload warnings into the LIVE trail and trigger_json/.
     """
-    monkeypatch.setattr(reload_sentinel, "logger", trail_logger(tmp_path / "reload_sentinel.jsonl"))
+    monkeypatch.setattr(reload_sentinel, "logger", MagicMock())
     monkeypatch.setattr(reload_sentinel, "json_handler", MagicMock())
     monkeypatch.setattr(reload_sentinel, "WATCHED_FILES", ())
     return reload_sentinel

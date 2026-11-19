@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: orchestrator.py
 # Description: Rollover Orchestration Handler
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-03-08
-# Modified: 2026-10-26
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -78,7 +78,7 @@ def local_store_lookup(branch_name: str) -> tuple[Path | None, str | None]:
         return None, LOCAL_STORE_ABSENT
 
     try:
-        registry = detector._read_registry()
+        registry = detector.write_scope()
     except RegistryUnreadable as e:
         logger.error(f"[rollover] No local store for {branch_name}: {e}")
         return None, LOCAL_STORE_REGISTRY_UNREADABLE
@@ -308,14 +308,14 @@ def execute_rollover() -> Dict[str, Any]:
     if success_count > 0:
         try:
             # The published door is the instance; aliased, `trigger` is this function's loop name.
-            from aipass.trigger.apps.modules.core import trigger as trigger_bus
+            from aipass.trigger import trigger as trigger_bus
 
             trigger_bus.fire(
                 "rollover_complete", triggers_count=len(triggers), success_count=success_count, failed_count=len(failed)
             )
             logger.info("[rollover] Fired rollover_complete event")
         except Exception as e:
-            logger.warning(f"[orchestrator] Failed to fire rollover_complete event: {e}")
+            logger.error(f"[orchestrator] Failed to fire rollover_complete event: {e}")
 
         try:
             from aipass.memory.apps.handlers.central_writer import update_central
@@ -335,7 +335,7 @@ def execute_rollover() -> Dict[str, Any]:
             if pool_result and pool_result.get("files_processed", 0) > 0:
                 logger.info(f"[rollover] Memory pool: {pool_result['files_processed']} files processed")
         except Exception as e:
-            logger.info(f"[rollover] Memory pool check: {e}")
+            logger.error(f"[rollover] Memory pool check failed: {e}")
 
     # An all-skipped run is not a fault, and a mixed run still succeeds (its failures
     # are reported by name).

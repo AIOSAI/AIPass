@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_post_compact_regrounding.py
-# Version: 1.2.4
+# Version: 1.3.1
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-11-10
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/lifecycle/post_compact_regrounding.py."""
@@ -22,6 +22,8 @@ import json
 import os
 import time
 from unittest.mock import patch
+
+import pytest
 
 from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 from aipass.hooks.apps.handlers.lifecycle import release_notice as door
@@ -134,12 +136,30 @@ class TestPostCompactRegrounding:
         assert "NAVMAP" in context
         assert "IDENTITY" in context
 
-    def test_cadence_check_failure_is_silent(self, tmp_path):
-
+    def test_cadence_check_failure_raises_to_the_engine(self, tmp_path):
+        """A dark cadence is the engine's ERROR and engine.jsonl row, never a quiet skip of the re-ground."""
         with patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", side_effect=RuntimeError("boom")):
-            result = post_compact_regrounding.handle({"cwd": str(tmp_path)})
+            with pytest.raises(RuntimeError, match="boom"):
+                post_compact_regrounding.handle({"cwd": str(tmp_path)})
 
-        assert result == {"stdout": "", "exit_code": 0}
+    def test_a_raise_while_packing_is_one_engine_fault_line_and_the_tool_call_goes_on(self, engine_fault, tmp_path):
+        handler = f"{post_compact_regrounding.__name__}.handle"
+        with (
+            patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
+            patch("aipass.hooks.apps.modules.cadence.log_regroup_fire", side_effect=RuntimeError("boom")),
+            patch("aipass.hooks.apps.modules.grounding_content.load_kernel", return_value="KERNEL"),
+            patch("aipass.hooks.apps.modules.grounding_content.load_navmap", return_value=""),
+            patch("aipass.hooks.apps.modules.grounding_content.load_branch", return_value=""),
+            patch("aipass.hooks.apps.modules.grounding_content.load_identity", return_value=""),
+            patch(f"{_RN}.build_notice", return_value=""),
+        ):
+            faults, (stdout, code) = engine_fault(
+                "PostToolUse", "post_compact_regrounding", handler, {"cwd": str(tmp_path)}
+            )
+
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1
+        assert f"fault[PostToolUse.post_compact_regrounding.{handler}.RuntimeError@" in faults[0]
 
     def test_end_to_end_replays_incident_multiple_resets_one_fire(self, tmp_path):
         """No mocking of cadence: several PreCompact resets fire back-to-back
@@ -452,7 +472,6 @@ class TestReleaseNoticeModule:
         (real / "work").mkdir()
         (tmp_path / "home").symlink_to(real, target_is_directory=True)
         monkeypatch.setenv("HOME", str(tmp_path / "home"))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
 
         assert _notice(real / "work") == ""
 
@@ -515,11 +534,12 @@ class TestReleaseNoticeModule:
 
     def test_it_writes_nothing(self, tmp_path):
         """The notice reads two files and creates none — no manifest, no stamp,
-        no state file. Proven by a full tree snapshot, paths and mtimes."""
+        no state file. Proven by a full tree snapshot, paths and mtimes, all but the json trail's own dir."""
         cwd = _make_project(tmp_path / "proj", stamped="2.8.1")
+        trail = tmp_path / "hooks"
 
         def snapshot():
-            return sorted((str(p), p.stat().st_mtime_ns) for p in tmp_path.rglob("*"))
+            return sorted((str(p), p.stat().st_mtime_ns) for p in tmp_path.rglob("*") if trail not in (p, *p.parents))
 
         before = snapshot()
         assert _notice(cwd) != ""
@@ -584,10 +604,15 @@ class TestReleaseNoticeSessionStartDoor:
         the same block twice for one compaction."""
         assert self._handle(_make_project(tmp_path / "proj"), "compact") == {"stdout": "", "exit_code": 0}
 
-    def test_a_raising_module_never_escapes_into_session_start(self, tmp_path):
+    def test_a_raising_module_is_one_engine_fault_line_and_the_session_starts(self, engine_fault, tmp_path):
+        handler = f"{door.__name__}.handle"
+        with patch.object(release_notice, "build_notice", side_effect=RuntimeError("boom")):
+            faults, (stdout, code) = engine_fault(
+                "SessionStart", "release_notice", handler, {"cwd": str(tmp_path), "source": "startup"}
+            )
 
-        with patch.object(door, "load_content", side_effect=RuntimeError("boom")):
-            assert door.handle({"cwd": str(tmp_path), "source": "startup"}) == {"stdout": "", "exit_code": 0}
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1 and f"fault[SessionStart.release_notice.{handler}.RuntimeError@" in faults[0]
 
 
 class TestReleaseNoticeCompactDoor:

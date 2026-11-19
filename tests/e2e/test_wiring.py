@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_wiring.py
-# Description: Cross-OS end-to-end WIRING tests against the installed wheel
+# Description: End-to-end WIRING tests against the installed wheel
 # Version: 1.0.0
 # Created: 2026-06-03
 # =============================================
 
-"""Cross-OS end-to-end WIRING tests (FPLAN-0239, P1 of DPLAN-0194).
+"""End-to-end WIRING tests (FPLAN-0239, P1 of DPLAN-0194).
 
 This proves AIPass *wiring* — not units-with-mocks — by building the wheel,
 installing it into a clean venv (see ``conftest.py``), and asserting a 4-tier
@@ -15,10 +15,6 @@ ladder against the real installed package:
     T1  ``aipass init`` scaffolds a project correctly
     T2a a hook actually fires, blocks, and leaves a sentinel record
     T3  ``drone`` resolves a real branch and executes it via subprocess
-
-It is RED-FIRST: it is expected to fail on Windows in known places (symlink
-init, bin-vs-Scripts, /tmp). The harness itself is written to be cross-OS so
-those reds reflect AIPass bugs, not harness bugs.
 """
 
 from __future__ import annotations
@@ -28,7 +24,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -98,24 +93,20 @@ def init_project(clean_venv: CleanVenv, tmp_path_factory: pytest.TempPathFactory
 
     ``aipass init`` REFUSES when a ``*_REGISTRY.json`` sits in or above CWD
     (``_guard_init``), so we run it from a pristine tmp dir whose parents have
-    no registry. ``AIPASS_HOME`` is left UNSET so the .venv-symlink step (a
-    Windows-only failure tracked separately) is skipped — this test must pass
-    on Linux.
+    no registry. A wheel in a clean venv is not an AIPass home, and init refuses
+    without one, so the fixture names a minimal home: a folder holding only
+    ``AIPASS_REGISTRY.json``. It has no .venv, so the symlink step is skipped.
     """
     neutral = tmp_path_factory.mktemp("neutral_init_cwd")
     proj = neutral / "proj"
+    home = tmp_path_factory.mktemp("aipass_home")
+    (home / "AIPASS_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
 
     env = {
         "PATH": _path_env(),
         "HOME": str(neutral),
+        "AIPASS_HOME": str(home),
     }
-    if sys.platform == "win32":
-        # Windows needs a few base vars for subprocess/venv tooling to work.
-        import os as _os
-
-        for key in ("SYSTEMROOT", "TEMP", "TMP", "USERPROFILE", "PATHEXT", "COMSPEC"):
-            if key in _os.environ:
-                env[key] = _os.environ[key]
 
     result = subprocess.run(
         [str(clean_venv.aipass), "init", str(proj), "demo"],
@@ -132,7 +123,7 @@ def init_project(clean_venv: CleanVenv, tmp_path_factory: pytest.TempPathFactory
 
 
 def _path_env() -> str:
-    """Minimal PATH for the init subprocess (portable across OSes)."""
+    """Minimal PATH for the init subprocess."""
     import os
 
     return os.environ.get("PATH", "")
@@ -191,8 +182,7 @@ _RM_GATE_CONFIG = {
 def _fire_hook(clean_venv: CleanVenv, work: Path, command: str, agent_id: str) -> subprocess.CompletedProcess:
     """Invoke the Claude bridge in MODULE form for a single PreToolUse event.
 
-    Module form (``python -m aipass.hooks...``) is venv-portable and avoids the
-    bin/Scripts split — the very bug this suite tests for.
+    Module form (``python -m aipass.hooks...``) is venv-portable.
     """
     payload = json.dumps(
         {
@@ -219,18 +209,22 @@ def _fire_hook(clean_venv: CleanVenv, work: Path, command: str, agent_id: str) -
 
 
 def _hook_env(work: Path) -> dict:
-    """Build a minimal env for the hook subprocess, with AIPASS_HOME isolated."""
+    """Env for hook and trust-registry subprocesses: AIPASS_HOME, HOME and the trust registry all inside ``work``."""
     import os
 
     env = dict(os.environ)
     env["AIPASS_HOME"] = str(work)
+    env["HOME"] = str(work)
+    env["AIPASS_TRUST_REGISTRY"] = str(work / ".aipass" / "trusted_projects.json")
     return env
 
 
-def _engine_log(clean_venv: CleanVenv) -> Path | None:
-    """Glob the installed package for aipass/hooks/logs/engine.jsonl."""
-    hits = sorted(clean_venv.site_packages.glob("aipass/hooks/logs/engine.jsonl"))
-    return hits[0] if hits else None
+def _engine_log(clean_venv: CleanVenv, work: Path) -> Path | None:
+    """The installed hooks package's own engine log, asked of the package under the hook's env."""
+    probe = "from aipass.hooks.apps.handlers.config.diagnostics import LOG_FILE; print(LOG_FILE)"
+    proc = _run([str(clean_venv.python), "-c", probe], env=_hook_env(work))
+    path = Path(proc.stdout.strip())
+    return path if proc.returncode == 0 and path.is_file() else None
 
 
 def _trust_registry(clean_venv: CleanVenv, op: str, work: Path) -> None:
@@ -247,6 +241,7 @@ def _trust_registry(clean_venv: CleanVenv, op: str, work: Path) -> None:
             "-c",
             f"from aipass.hooks.apps.handlers.config.trust_registry import {op}; {op}({str(work)!r})",
         ],
+        env=_hook_env(work),
         capture_output=True,
         text=True,
         timeout=60,
@@ -298,8 +293,9 @@ def test_t2a_rm_gate_blocks(clean_venv: CleanVenv, hook_workspace: Path) -> None
     assert decision.get("decision") == "block", f"stdout was: {proc.stdout!r}"
 
     # Oracle: the engine log must hold a record with OUR sentinel AND hook==rm_gate.
-    log = _engine_log(clean_venv)
-    assert log is not None and log.is_file(), "engine.jsonl not found in installed package"
+    log = _engine_log(clean_venv, hook_workspace)
+    assert log is not None and log.is_file(), "engine.jsonl not found where the installed package writes it"
+    assert log == hook_workspace / ".aipass" / "state" / "hooks" / "logs" / "engine.jsonl"
     assert _log_has_sentinel_for_hook(log, sentinel, "rm_gate"), (
         f"no engine.jsonl record found for sentinel {sentinel} + hook rm_gate"
     )
@@ -363,8 +359,7 @@ def routing_root(clean_venv: CleanVenv, tmp_path_factory: pytest.TempPathFactory
       reproduced against a stand-in and left a 3-row file and no backup on
       disk.  A backup that lives only in the process that can die is not a
       backup;
-    * under ``-n auto --dist loadscope`` (``macos-test.yml``, and
-      ``windows-test.yml`` -- only ``ci.yml`` passes ``--ignore=tests/e2e``)
+    * under ``-n auto --dist loadscope``
       the sibling xdist workers read the synthetic registry for the whole
       window.  Measured: 40 of 60 polled reads by a parallel process saw the
       3-branch file.  A teardown that runs in one process is not a rollback
@@ -373,7 +368,6 @@ def routing_root(clean_venv: CleanVenv, tmp_path_factory: pytest.TempPathFactory
     A SYMLINKED stand-in cannot work and should not be reattempted:
     ``_validate_branch_path`` calls ``.resolve()``, which follows the link back
     into the repo, so containment then fails and the branch is silently dropped.
-    (It would also need Developer Mode or admin on Windows.)
 
     The branch dir holds exactly one file.  ``apps/ai_mail.py`` imports only
     ``aipass.*`` (prax, cli) from the INSTALLED wheel, and ``--help`` returns
@@ -399,8 +393,7 @@ def routing_root(clean_venv: CleanVenv, tmp_path_factory: pytest.TempPathFactory
     )
 
     # Relative paths, resolved by drone against the registry's own dir -- so no
-    # absolute paths, and therefore no separator or drive-letter question on
-    # Windows.
+    # absolute paths.
     registry = {
         "metadata": {"name": "AIPASS", "version": "1.0.0", "total_branches": 3},
         "branches": [

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template.py
 # Description: Skill template management
-# Version: 1.0.1
+# Version: 1.0.3
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """Skill scaffolding templates: resolve a tier, copy it, fill placeholders."""
@@ -13,12 +13,13 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.skills.apps.handlers.json import json_handler
-from aipass.skills.apps.handlers.module_paths import module_file
 
 
-TEMPLATES_DIR = module_file(__file__).parent.parent.parent / "templates"
+TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
 
 VALID_TYPES = ("markdown_only", "with_handler", "full")
+
+PLACEHOLDER = b"{{SKILL_NAME}}"
 
 
 def get_template(template_type):
@@ -42,14 +43,10 @@ def get_template(template_type):
 
 
 def _replace_placeholder_in_file(file_path, skill_name):
-    """Replace {{SKILL_NAME}} placeholder in a single file."""
-    try:
-        content = file_path.read_text(encoding="utf-8")
-        if "{{SKILL_NAME}}" in content:
-            content = content.replace("{{SKILL_NAME}}", skill_name)
-            file_path.write_text(content, encoding="utf-8")
-    except UnicodeDecodeError:
-        logger.warning(f"Skipping binary file during template copy: {file_path}")
+    """Replace {{SKILL_NAME}} in one file, as bytes: a binary file is a file with no match, not an error."""
+    content = file_path.read_bytes()
+    if PLACEHOLDER in content:
+        file_path.write_bytes(content.replace(PLACEHOLDER, skill_name.encode("utf-8")))
 
 
 def copy_template(template_path, target_path, skill_name):
@@ -66,7 +63,6 @@ def copy_template(template_path, target_path, skill_name):
     try:
         shutil.copytree(str(template_path), str(target), ignore=shutil.ignore_patterns("__pycache__"))
 
-        # Posix-spelled and sorted so every host answers the same list: str() spells apps\handlers on Windows.
         created_files = []
         for file_path in target.rglob("*"):
             if not file_path.is_file():

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rotation.py
 # Description: Rounds firing + status surface (drone @daemon rotation)
-# Version: 1.4.0
+# Version: 1.6.0
 # Created: 2026-08-12
-# Modified: 2026-10-26
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -18,7 +18,7 @@ import json
 from typing import List, Optional
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, warning
+from aipass.cli import console, warning
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.schedule.discovery import MANAGER_CLASS, discover_jobs
@@ -91,26 +91,12 @@ def print_help():
     console.print()
 
 
-def _log(message: str) -> None:
-    """Print timestamped log line."""
-    from datetime import datetime
-
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    console.print(f"[{timestamp}] {message}")
-
-
 def _apply_wake_blocklist(roster: List[dict]) -> List[dict]:
     """Drop roster entries ai_mail refuses to wake.
 
     The handler excludes @devpulse structurally; this re-checks the live blocklist.
     """
-    try:
-        from aipass.ai_mail.apps.modules.door_wake import is_wake_blocked
-    # OSError, not only ImportError: the import raises FileNotFoundError under a dead working directory.
-    # Fail-open by design: an unfiltered roster, logged.
-    except (ImportError, OSError) as e:
-        logger.warning("[rotation] Wake blocklist unavailable, roster unfiltered: %s", e)
-        return roster
+    from aipass.ai_mail import is_wake_blocked
 
     kept = []
     for entry in roster:
@@ -125,15 +111,11 @@ def _scheduled_lane_available() -> bool:
     """Report whether ai_mail's wake_branch accepts the scheduled headless lane.
 
     Without the `scheduled` parameter, manager targets are skipped by name rather than dropped into an
-    interactive tmux session.
+    interactive tmux session. A wake that cannot import raises: no lane is ever guessed.
     """
-    try:
-        from aipass.ai_mail.apps.modules.door_wake import wake_branch
+    from aipass.ai_mail import wake_branch
 
-        return "scheduled" in inspect.signature(wake_branch).parameters
-    except (ImportError, TypeError, ValueError) as e:
-        logger.warning("[rotation] Could not inspect wake_branch signature: %s", e)
-        return False
+    return "scheduled" in inspect.signature(wake_branch).parameters
 
 
 def _wake_steward(target: dict, prompt: str, model: str, fresh: bool, provider: Optional[str]) -> tuple:
@@ -141,7 +123,7 @@ def _wake_steward(target: dict, prompt: str, model: str, fresh: bool, provider: 
 
     `errored` separates a crash in the wake path from an ordinary busy target (just a miss).
     """
-    from aipass.ai_mail.apps.modules.door_wake import wake_branch
+    from aipass.ai_mail import wake_branch
 
     email = target["email"]
     kwargs = {
@@ -163,7 +145,7 @@ def _wake_steward(target: dict, prompt: str, model: str, fresh: bool, provider: 
     try:
         status, ok = wake_branch(email, **kwargs)
     except Exception as e:
-        logger.error("[rotation] Exception waking steward %s: %s", email, e)
+        # Logged once, at error, by fire_rotation, which also knows the pointer advanced.
         return False, str(e), True
 
     return ok, status.summary, False
@@ -184,7 +166,8 @@ def fire_rotation(job: dict, runstate: dict, header: str = "") -> tuple:
 
     roster = _apply_wake_blocklist(build_roster(include_managers=include_managers))
     if not roster:
-        _log("ROUNDS: roster is empty — nobody to wake")
+        logger.warning("[rotation] ROUNDS: roster is empty — nobody to wake")
+        console.print("ROUNDS: roster is empty — nobody to wake")
         return False, "rotation roster is empty"
 
     state = get_rotation_state(runstate, key)
@@ -197,7 +180,7 @@ def fire_rotation(job: dict, runstate: dict, header: str = "") -> tuple:
 
     if is_manager and not _scheduled_lane_available():
         detail = "ai_mail scheduled lane not available yet"
-        _log(f"SKIP: {email} — manager, {detail}; pointer advances")
+        console.print(f"SKIP: {email} — manager, {detail}; pointer advances")
         logger.warning("[rotation] Skipped manager steward %s — %s", email, detail)
         record_rotation(runstate, key, email, OUTCOME_SKIPPED, f"{SKIP_MANAGER_LANE}: {detail}")
         return True, f"skipped {email} ({SKIP_MANAGER_LANE})"
@@ -210,23 +193,26 @@ def fire_rotation(job: dict, runstate: dict, header: str = "") -> tuple:
     if header:
         prompt = compose_prompt(header, prompt)
 
-    _log(f"ROUNDS: {email} — wake_branch(fresh={fresh}, model={model}, provider={provider}, manager={is_manager})")
+    rounds = f"ROUNDS: {email} — wake_branch(fresh={fresh}, model={model}, provider={provider}, manager={is_manager})"
+    logger.info("[rotation] %s", rounds)
+    console.print(rounds)
 
     ok, detail, errored = _wake_steward(target, prompt, model, fresh, provider)
 
     if ok:
-        _log(f"OK: {email} — {detail}")
+        console.print(f"OK: {email} — {detail}")
         logger.info("[rotation] Rounds night started for %s", email)
         record_rotation(runstate, key, email, OUTCOME_WOKEN, detail)
         return True, detail
 
     if errored:
-        _log(f"ERROR: {email} — {detail}; pointer advances")
+        logger.error("[rotation] ERROR: %s — %s; pointer advances", email, detail)
+        console.print(f"FAIL: {email} — {detail}; pointer advances")
         record_rotation(runstate, key, email, OUTCOME_FAILED, detail)
         return False, f"wake error for {email}: {detail}"
 
     # Busy target (dispatch lock / interactive occupancy) — named, then passed over.
-    _log(f"MISS: {email} — {detail}; pointer advances, next turn comes round")
+    console.print(f"MISS: {email} — {detail}; pointer advances, next turn comes round")
     logger.warning("[rotation] Steward miss for %s: %s", email, detail)
     record_rotation(runstate, key, email, OUTCOME_MISSED, detail)
     return True, f"missed {email}: {detail}"
@@ -275,6 +261,7 @@ def _print_status(status: dict) -> None:
     console.print()
 
     if status["job_id"] is None:
+        logger.warning("[rotation] No rotation job configured: the nightly rounds do not run")
         warning("No rotation job configured")
         console.print("  [dim]Add one with schedule type 'rotation' — drone @daemon rotation --help[/dim]")
         console.print()

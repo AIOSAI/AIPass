@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_json_handler_contract.py
 # Description: Shared discovery, payloads and redirection for the json_handler contract files (split 2026-10-08)
-# Version: 1.0.0
+# Version: 1.2.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Shared helpers for the tests of every branch's apps/handlers/json/json_handler.py (not test_: never collected)."""
@@ -13,7 +13,6 @@
 
 import importlib.util
 import inspect
-import json
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -24,7 +23,7 @@ from aipass.prax import logger
 
 # Module level, so a checkout without @memory is tolerated with no product import inside a function.
 try:
-    from aipass.memory.apps.modules.door_registry_scope import fleet_branches
+    from aipass.memory import fleet_branches
 except Exception as exc:  # pragma: no cover - exercised only where @memory is absent
     logger.info("[json_handler_contract] @memory unreachable, the roster is the installed glob alone: %s", exc)
     fleet_branches = None
@@ -34,6 +33,9 @@ PACKAGE_ROOT = Path(aipass.__file__).resolve().parent
 
 HANDLER_RELPATH = Path("apps") / "handlers" / "json" / "json_handler.py"
 
+#: The AIPass repo; an external project on this seat runs the contract in its own suite, so CI agrees here.
+REPO_ROOT = PACKAGE_ROOT.parents[1]
+
 
 def _installed_roster() -> dict[str, Path]:
     """The citizens inside the installed package, found by file glob."""
@@ -41,7 +43,7 @@ def _installed_roster() -> dict[str, Path]:
 
 
 def _fleet_roster() -> dict[str, Path]:
-    """Every citizen the registry knows, core and resident and external."""
+    """Every citizen the registry knows whose root lies inside the AIPass repo."""
     # @memory's `fleet_branches()`, the roster @daemon's sweep uses; without @memory the installed glob answers alone.
     roster = _installed_roster()
     if fleet_branches is None:
@@ -54,7 +56,8 @@ def _fleet_roster() -> dict[str, Path]:
     for row in rows:
         root = Path(str(row.get("path", "")))
         name = str(row.get("name", ""))
-        if name and name not in roster and (root / HANDLER_RELPATH).is_file():
+        inside = root.resolve().is_relative_to(REPO_ROOT)
+        if name and name not in roster and inside and (root / HANDLER_RELPATH).is_file():
             roster[name] = root
     return roster
 
@@ -246,16 +249,14 @@ def silence_own_logger(module: Any, monkeypatch: pytest.MonkeyPatch) -> LogRecor
     return recorder
 
 
-def assert_warned_of_corrupt_bytes(module: Any, branch: str) -> None:
-    """A handler with its own logger warned once, naming the corrupt document."""
-    recorder = vars(module).get("logger")
-    if not isinstance(recorder, LogRecorder):
-        return
-    heads = [(level, args[:2]) for level, args in recorder.records]
-    assert heads == [("warning", ("[json_handler] Corrupt JSON %s: %s", "corrupt_config.json"))], (
-        f"{branch}: the corrupt document was not warned of once — {recorder.records!r}"
-    )
-    assert isinstance(recorder.records[0][1][2], json.JSONDecodeError)
+def assert_refuses_and_keeps(call: Any, document: Path, module: Any, branch: str) -> None:
+    """``call()`` raises the handler's InvalidDocument and leaves ``document`` byte-identical."""
+    refusal = getattr(module, "InvalidDocument", None)
+    assert refusal is not None, f"{branch}: the handler exports no InvalidDocument to refuse a bad document with"
+    before = document.read_bytes()
+    with pytest.raises(refusal):
+        call()
+    assert document.read_bytes() == before, f"{branch}: the refused document was rewritten"
 
 
 def redirected(branch: str, target: Path, monkeypatch: pytest.MonkeyPatch) -> Any:

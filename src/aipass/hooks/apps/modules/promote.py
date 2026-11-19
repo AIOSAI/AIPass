@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: promote.py
-# Version: 1.1.0
+# Version: 1.3.0
 # Description: The one step that makes edited hook code live: check, copy, smoke, then point (drone @hooks promote)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-10-24
+# Modified: 2026-11-16
 # =============================================
 
 """Hook code goes live through one explicit step, never by being saved (DPLAN-0356 item 3).
@@ -22,23 +22,24 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.hooks.apps.handlers.module_root import module_file
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 CONSOLE = err_console
 
 HELP_COMMANDS = [
     ("promote", "Check the hook source (ruff, compile, suite), copy it, smoke it, then make it live"),
     ("promote status", "Show which promoted copy every hook process is running"),
+    ("promote rollback", "Point back at the newest retained copy older than the live one, after its smoke"),
 ]
 
-BRANCH_ROOT = module_file(__file__).parent.parent.parent
+BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent
 # Spelled again in handlers/bridges/mount.py, which must stay stdlib-only and
 # cannot import this module; the pins in test_engine hold the two equal.
 POINTER = ".live-current"
@@ -72,7 +73,7 @@ def _hook_env(**extra: str) -> dict:
 
 def _ruff() -> str | None:
     """ruff beside this interpreter (the project venv), else on PATH."""
-    beside = Path(sys.executable).parent / ("ruff.exe" if os.name == "nt" else "ruff")
+    beside = Path(sys.executable).parent / "ruff"
     return str(beside) if beside.is_file() else shutil.which("ruff")
 
 
@@ -141,7 +142,9 @@ def fingerprint(folder: Path) -> str:
 
 
 def _bridge_says(root: Path, name: str, payload: dict) -> tuple[int, str]:
-    env = _hook_env(**{OVERRIDE_ENV: name})
+    # The smoke's raw rm is refused for real; its ledger row is no event of the project's.
+    ledger = str(Path(tempfile.gettempdir()) / "promote-smoke-deletions.jsonl")
+    env = _hook_env(**{OVERRIDE_ENV: name, "AIPASS_DELETION_LOG": ledger})
     bridge = root / "apps" / "handlers" / "bridges" / "claude.py"
     done = subprocess.run(
         [sys.executable, str(bridge), "PreToolUse"],
@@ -236,6 +239,26 @@ def promote(
     return True, report
 
 
+def rollback(root: Path | None = None) -> tuple[bool, list[str]]:
+    """Point at the newest retained copy older than the live one, once it passes its smoke; else refuse."""
+    root = root or BRANCH_ROOT
+    live = live_name(root)
+    if live is None:
+        return False, ["rollback: refused — nothing was ever promoted; the source tree serves"]
+    older = sorted(p.name for p in root.iterdir() if p.is_dir() and p.name.startswith(PREFIX) and p.name < live)
+    if not older:
+        return False, [f"rollback: refused — no retained copy older than {live}"]
+    target = older[-1]
+    ok, detail = check_smoke(root, target)
+    if not ok:
+        logger.warning("[HOOKS] rollback refused: %s failed its smoke: %s", target, detail[:300])
+        return False, [f"rollback: refused — {target} failed its smoke ({detail}); {live} stays live"]
+    point_at(root, target)
+    json_handler.log_operation("rollback", {"live": target, "was": live})
+    logger.info("[HOOKS] rollback: %s is live (was %s)", target, live)
+    return True, [f"check_smoke: ok — {detail}", f"live: {target} (was {live})"]
+
+
 def print_introspection():
     """Print module structure for drone routing."""
     CONSOLE.print("[bold cyan]promote[/bold cyan] — edited hook code goes live only through this step")
@@ -247,6 +270,7 @@ def _print_help() -> None:
     CONSOLE.print()
     CONSOLE.print("  drone @hooks promote          ruff + compile + suite, copy, smoke through the bridge, point")
     CONSOLE.print("  drone @hooks promote status   which copy every hook process runs")
+    CONSOLE.print("  drone @hooks promote rollback point at the newest older copy, after its smoke passes")
     CONSOLE.print()
     CONSOLE.print("Workflow: edit, test, promote. Saving a file changes no seat; promote does.")
 
@@ -260,6 +284,13 @@ def handle_command(command: str, args: list) -> bool:
         return True
     if args and args[0] == "status":
         CONSOLE.print(f"live: {live_name() or 'none promoted — the source tree serves'}")
+        return True
+    if args == ["rollback"]:
+        ok, report = rollback()
+        for line in report:
+            CONSOLE.print(line if ok else f"[red]{line}[/red]")
+        if not ok:
+            sys.exit(1)
         return True
     if args:
         _print_help()

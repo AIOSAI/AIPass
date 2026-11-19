@@ -3,7 +3,7 @@
 # Description: No Product Call Standards Checker Handler
 # Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -104,7 +104,7 @@ def _names_product(node: ast.AST, bound: Set[str], roots: Tuple[str, ...]) -> bo
 def _product_bound(tree: ast.Module, roots: Tuple[str, ...]) -> Set[str]:
     """Module-level names that reach the product, to a fixed point.
 
-    ``SIMPLE_MODULES = [snapshot, versioned]`` at the top of a file is what a
+    ``SIMPLE_MODULES = [drive_sync, settings]`` at the top of a file is what a
     ``@pytest.mark.parametrize("mod", SIMPLE_MODULES)`` test calls through.
     One pass would credit that; two levels of indirection need the loop.
     """

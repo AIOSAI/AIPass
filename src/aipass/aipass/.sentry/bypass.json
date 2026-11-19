@@ -11,49 +11,9 @@
       "reason": "wants_help() is a pure predicate - no I/O, no JSON, no logging - called on EVERY command dispatch before any action runs. Importing json_handler would add a write path and a failure surface to the one function whose whole job is to stop a help probe becoming a write. Measured: the file performs zero JSON operations, so json_handler would be imported solely to satisfy the checker. Fleet-settled shape (DPLAN-0291 help_flag_safety round)."
     },
     {
-      "file": "apps/handlers/cross_os/doctor_rows.py",
-      "standard": "json_structure",
-      "reason": "Builds the rows of `aipass doctor --cross-os` from answers other handlers give and returns them; it opens no file and writes no JSON. The run is logged once where the command runs (doctor.handle_command, doctor_cross_os), gap_registry logs its own read, and preflight logs the e2e run (its three light probes log only a failure to run). Importing json_handler here would be for the checker alone. Split out of doctor.py 2026-09-29 (fleet green leg 5, aipass's decision); kept here, not moved into preflight.py, in leg 6 (aipass's decision): preflight runs probes and prints nothing, the rows need the gap registry and the screen glyphs, and there the checker would pass only on preflight's unrelated e2e log call. Devpulse's exception, compass 495."
-    },
-    {
-      "file": "apps/modules/init_flow.py",
-      "standard": "modules",
-      "reason": "12-stage init flow requires this many lines; splitting would scatter cohesive stage logic across multiple files and break the resumable-progress contract. Re-measured 2026-09-07 (FPLAN-0492 wave 6) after the hand-rolled json writer was replaced by the fleet service: the file is still 1210 lines and the rule is LIVE IN BOTH LANES without this row (audit Modules 95%, checklist modules FAIL). The writer was never what this row was carrying."
-    },
-    {
       "file": "apps/modules/doctor.py",
       "standard": "modules",
       "reason": "Doctor reads system files (registry, passport) directly for health-check diagnosis — pure reads only, no mutations. Using a handler adds indirection without benefit for diagnostic reads."
-    },
-    {
-      "file": "tests/test_init_flow.py",
-      "standard": "permission_flags",
-      "reason": "Assertions verify that the CLI flag name appears/absent in handoff_command output. String is in assertion context only — not a permission bypass in this file."
-    },
-    {
-      "file": "tests/test_handoff_platform.py",
-      "standard": "permission_flags",
-      "reason": "Assertions verify that the CLI flag name appears/absent in build_cli_cmd output. String is in assertion context only — not a permission bypass in this file."
-    },
-    {
-      "file": "apps/handlers/init/bootstrap.py",
-      "standard": "json_structure",
-      "reason": "bootstrap.py is Pure Python only (no module/prax/cli imports) by design — it must work during initial project setup before any AIPass services exist."
-    },
-    {
-      "file": "apps/handlers/init/bootstrap.py",
-      "standard": "log_visibility",
-      "reason": "bootstrap.py is Pure Python only (no module/prax/cli imports) by design — stdlib getLogger is correct here. prax system_logger requires AIPass to be installed, which hasn't happened at bootstrap time."
-    },
-    {
-      "file": "apps/handlers/init/scaffold_manifest.py",
-      "standard": "json_structure",
-      "reason": "Imported BY bootstrap.py, so it inherits bootstrap's Pure Python only contract — importing json_handler here would pull prax into the first-install path bootstrap exists to survive. It reads and writes one JSON document (the scaffold manifest) with stdlib json; every caller that logs is a module above it."
-    },
-    {
-      "file": "apps/handlers/init/scaffold_manifest.py",
-      "standard": "log_visibility",
-      "reason": "Same inheritance as bootstrap.py: prax system_logger requires AIPass to be installed, and this module is on the path that runs before that is true. stdlib getLogger is correct here."
     },
     {
       "file": "apps/modules/doctor.py",
@@ -91,16 +51,6 @@
       "reason": "Private helper module for baud.py — not directly invokable, no introspection needed. Same shape as _doctor_wire.py."
     },
     {
-      "file": "apps/modules/handoff.py",
-      "standard": "introspection",
-      "reason": "aipass is binary-invoked: aipass handoff shows usage; introspection via --info"
-    },
-    {
-      "file": "apps/modules/help_chat.py",
-      "standard": "introspection",
-      "reason": "aipass is binary-invoked: aipass help shows usage; introspection via --info"
-    },
-    {
       "file": "apps/modules/init_flow.py",
       "standard": "introspection",
       "reason": "aipass is binary-invoked: aipass init shows usage; introspection via --info"
@@ -116,61 +66,27 @@
       "reason": "Thin bootstrap orchestrator — preps the target/project dir (mkdir) immediately before shelling out to git clone / setup.sh / aipass init. Pre-subprocess dir prep, not business file ops; a handler adds indirection for 2 mkdir calls in a linear flow (same pattern as init_flow/doctor)."
     },
     {
-      "file": "shared/json_ops.py",
-      "standard": "architecture",
-      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
-    },
-    {
-      "file": "shared/json_ops.py",
-      "standard": "log_visibility",
-      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
-    },
-    {
-      "file": "shared/json_ops.py",
-      "standard": "trigger",
-      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
-    },
-    {
-      "file": "shared/registry_discovery.py",
-      "standard": "architecture",
-      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
-    },
-    {
-      "file": "shared/json_ops.py",
-      "standard": "unused_function",
-      "reason": "backup_json() is consumed by @spawn (cross-branch caller). Appears unused in @aipass-only scan but is a shared API."
-    },
-    {
-      "file": "apps/handlers/provider_wire.py",
-      "standard": "unused_function",
-      "functions": [
-        "refresh_provider_hooks",
-        "refresh_codex"
-      ],
-      "reason": "Called from setup.sh's venv-python heredoc via dynamic import (setup.sh:704-707, DPLAN-0279) — a cross-language caller the AST/corpus scanner can't see. That heredoc is its ONLY caller; no in-process Python caller makes this reachable. Covered directly by tests/test_provider_wire.py. Verified live 2026-08-09. refresh_codex (2026-10-26): the same pattern from setup.sh's Codex block (codex on PATH), its only caller; covered by TestCodexHooks and TestCodexPins."
-    },
-    {
       "file": "apps/aipass.py",
       "standard": "logged_fallback",
-      "lines": [289, 314],
+      "lines": [266],
       "reason": "main() returns a process exit code. 1 is the failure code at every return that carries it (crash, unknown command, @target, import failure); success is 0 through resolve_exit, and a refusal is 2. The caller is the shell, and it tells failure from success. The crash also goes to stderr through error() and its traceback to the log (_log_crash, which never raises from the log). Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13."
     },
     {
       "file": "apps/modules/new_project.py",
       "standard": "logged_fallback",
-      "lines": [147],
+      "lines": [148],
       "reason": "_prompt_agent answers the no_agent flag. EOFError is end of input, which is no answer, so it takes the prompt's printed default Y (False = create the agent), the same as an empty Enter on the line below. That is the answer, not a failure. Ctrl-C raises to handle_command. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-17 (+14: the module door for the host API, FPLAN-0649)."
     },
     {
       "file": "apps/modules/install.py",
       "standard": "logged_fallback",
-      "lines": [127, 205, 624],
-      "reason": "127: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:152). 205: _pid_alive on POSIX, a PermissionError from signal 0 means the process exists under another user, so True is the answer; an unknown is None. 623: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them; again 2026-10-24 (FPLAN-0665 moved them 4 down)."
+      "lines": [168, 221, 675],
+      "reason": "168: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:193). 221: _pid_alive, a PermissionError from signal 0 means the process exists under another user, so True is the answer. 676: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them; again 2026-10-24 (FPLAN-0665 moved them 4 down)."
     },
     {
       "file": "apps/modules/doctor.py",
       "standard": "logged_fallback",
-      "lines": [189, 601],
+      "lines": [184, 629],
       "reason": "187: _configured_aipass_home's two callers read \"\" as no setting: _check_home_agreement (doctor.py:360) skips the comparison, and the pytest collect row (_check_pytest_collect) falls back to the env AIPASS_HOME, then says not set; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 612: _registry_citizen_names's one caller (drone row, doctor.py:667) compares only when names exist; an unreadable registry is the registry row's FAIL ('corrupt JSON', doctor.py:374). Re-read in fleet green leg 7 (aipass's decision); re-pinned 2026-10-15 (FPLAN-0645: one import and the door keyword moved both lines); again 2026-10-15 (FPLAN-0646: the --yes import and the fix orchestration moved them). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: the claude code row and its constant moved both lines); 608 again 2026-10-24 (FPLAN-0665); both 2026-10-25 (FPLAN-0670: the codex hooks import and row); both 2026-10-26 (FPLAN-0704: the shadow import); both 2026-10-27 (FPLAN-0705: the gitignore coverage import); both 2026-10-28 (FPLAN-0732: the smoke import); FPLAN-0734 moved them."
     },
     {
@@ -182,80 +98,38 @@
     {
       "file": "apps/handlers/init/scaffold_manifest.py",
       "standard": "logged_fallback",
-      "lines": [167],
+      "lines": [156],
       "reason": "read_ignore: a .updateignore that does not exist means no ignore patterns, which is the answer []. A file that is there but unreadable raises UpdateIgnoreUnreadable on the next line (fleet green leg 5), so its callers (bootstrap.update_project:418, doctor scaffold group:1098) never read an unreadable file as an empty one. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: docstring closings joined, the line moved up); 2026-10-27 (FPLAN-0705: trusted_hashes and the managed key moved it down)."
     },
     {
       "file": "apps/handlers/system_detect/system_detector.py",
       "standard": "logged_fallback",
-      "lines": [110],
-      "reason": "_shell_from_parent_proc is a probe: None is 'not detected', the same answer as non-POSIX or no /proc entry, and its one caller (detect_shell, system_detector.py:123) keeps its 'unknown' value on None as documented. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: detect_claude_code above it)."
+      "lines": [109],
+      "reason": "_shell_from_parent_proc is a probe: None is 'not detected', the same answer as no /proc entry, and its one caller (detect_shell, system_detector.py:123) keeps its 'unknown' value on None as documented. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: detect_claude_code above it)."
     },
     {
       "file": "apps/handlers/sandbox_check/sandbox_checker.py",
       "standard": "logged_fallback",
-      "lines": [114],
+      "lines": [113],
       "reason": "_find_srt_resolver is a probe: None is 'resolver not found', the same answer as a missing spec or file, and its one caller (check_srt_resolvable, sandbox_checker.py:166) reports the resolver as not found on None. Re-read in fleet green leg 7 (aipass's decision)."
-    },
-    {
-      "file": "tests/test_bootstrap_update.py",
-      "standard": "stdlib_patch",
-      "reason": "File-wide because the stdlib_patch checker passes no line (measured leg 7: a lines [511] rule left the line convicted). The one patch is at _windows_newline_world, line 94 (moved with it from test_bootstrap.py:511 in the 2026-10-08 split). _windows_newline_world manufactures the one platform behaviour Linux cannot produce: write_text translating LF to CRLF when newline is unset (PR #761's windows-setup red). Asserting on disk alone would pass on Linux whatever the writer does, so the pin needs the translation. A product seam would exist for this test alone (every writer goes through write_text_lf already). monkeypatch restores Path.write_text at teardown. Fleet green leg 7 (aipass's decision)."
-    },
-    {
-      "file": "tests/test_registry_case_sweep.py",
-      "standard": "stdlib_patch",
-      "reason": "File-wide because the stdlib_patch checker passes no line (measured leg 7: a lines [73] rule left the line convicted). The one patch is at case_insensitive_fs, line 44. case_insensitive_fs emulates a case-folding filesystem (Windows, default macOS) by widening Path.glob, which a Linux host cannot produce on disk; host_folds_case asks the real host as well, so both answers are pinned. A seam in registry_discovery would exist for the test alone: no product caller hands a glob in. monkeypatch restores Path.glob at teardown. Fleet green leg 7 (aipass's decision)."
-    },
-    {
-      "file": "tests/test_new_project.py",
-      "standard": "through_the_command",
-      "lines": [27],
-      "reason": "Ruling (c), fleet green leg 7: _git_init's one public caller, create_project (new_project/__init__.py:303), runs it after writing the whole project and its registry; the private call pins the contract (main and dev at mint, HEAD on dev, dev cut from the birth commit, an existing repo refused) with only git running, under tmp."
     },
     {
       "file": "tests/test_aipass_main.py",
       "standard": "through_the_command",
-      "lines": [30],
+      "lines": [29],
       "reason": "Ruling (b), fleet green leg 7: the public door, aipass --version, starts the walk at Path(__file__), the live repo, so the walk's contract cannot be handed a tmp tree through it: nearest pyproject named aipass wins, a foreign name or malformed TOML is walked past, a version-less one answers None. The command path itself is pinned through main() in the same class. A start parameter on _resolve_version would exist for the test alone."
     },
     {
       "file": "tests/test_install.py",
       "standard": "through_the_command",
-      "lines": [22, 252, 1364, 1396],
-      "reason": "Ruling (c), fleet green leg 7: run_install, the one public door, clones the repo (_clone_repo), runs setup.sh (_run_setup), fixes ownership (_check_and_fix_owner), fetches baud (_install_phone_face), runs doctor (_run_doctor_preflight) and launches the chat (_end_in_chat, which prompts _ask_permission_mode and builds _build_install_prompt); _resolve_home and _looks_like_aipass_tree prompt and probe before the clone; _registry_user_name and _print_next_steps sit behind the chat launch. Every helper is pinned with the far side stubbed (lines re-pinned 2026-10-15, DPLAN-0409 C3). _resolve_source (--source) is a pure check before the clone, also pinned through run_install. 252: _pid_alive's Windows tasklist branch is unreachable from acquire_install_lock on a POSIX host; it is handed platform and runner instead. Re-pinned 2026-10-24 (FPLAN-0665 moved 246/1322/1354; 1392 is a second _clone_repo pin)."
+      "lines": [31, 1477, 1509],
+      "reason": "Ruling (c), fleet green leg 7: run_install, the one public door, clones the repo (_clone_repo), runs setup.sh (_run_setup), fixes ownership (_check_and_fix_owner), fetches baud (_install_phone_face), then runs the health check and the final screen (_finish, which writes the install report and reads _registry_user_name and _setup_attention); _resolve_home and _looks_like_aipass_tree prompt and probe before the clone. Every helper is pinned with the far side stubbed (lines re-pinned 2026-10-15, DPLAN-0409 C3). _resolve_source (--source) is a pure check before the clone, also pinned through run_install. Re-pinned 2026-11-14 (FPLAN-0924; 1269 is a second _clone_repo pin)."
     },
     {
       "file": "tests/test_doctor.py",
       "standard": "through_the_command",
       "lines": [32],
       "reason": "Ruling (c), fleet green leg 7: _doctor_wire's public callers, run_doctor --fix (fix_provider_settings) and check_provider_manifest with a yes at the prompt, write the provider settings (~/.claude/settings.json); its verify, merge and reconcile rows are pinned on a tmp settings file with the wire stubbed, and the FPLAN-0646 ask tests run through run_doctor and handle_command, reading the module only for its message constants. The module is private because the CLI never routes to it (discover_modules skips it). Re-pinned 2026-10-15 (FPLAN-0646: import re moved it 30 -> 31)."
-    },
-    {
-      "file": "shared/scaffold_content.py",
-      "standard": "imports",
-      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): shared/ is the pre-install library. init and doctor reach it from a fresh clone before aipass.prax can be imported, and @spawn imports it into its own process (docs/shared_contract.md), so the prax logger cannot be a dependency here. Stdlib-only by contract; tests/test_shared_bootstrap_safety.py guards it."
-    },
-    {
-      "file": "shared/project_home.py",
-      "standard": "imports",
-      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): shared/ is the pre-install library. init and doctor reach it from a fresh clone before aipass.prax can be imported, and @spawn imports it into its own process (docs/shared_contract.md), so the prax logger cannot be a dependency here. Stdlib-only by contract; tests/test_shared_bootstrap_safety.py guards it."
-    },
-    {
-      "file": "shared/registry_discovery.py",
-      "standard": "imports",
-      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): shared/ is the pre-install library. init and doctor reach it from a fresh clone before aipass.prax can be imported, and @spawn imports it into its own process (docs/shared_contract.md), so the prax logger cannot be a dependency here. Stdlib-only by contract; tests/test_shared_bootstrap_safety.py guards it."
-    },
-    {
-      "file": "shared/json_ops.py",
-      "standard": "imports",
-      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): shared/ is the pre-install library. init and doctor reach it from a fresh clone before aipass.prax can be imported, and @spawn imports it into its own process (docs/shared_contract.md), so the prax logger cannot be a dependency here. Stdlib-only by contract; tests/test_shared_bootstrap_safety.py guards it."
-    },
-    {
-      "file": "shared/project_home.py",
-      "standard": "log_visibility",
-      "lines": [23],
-      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): the stdlib logging.getLogger on line 23 is the right logger for a pre-install file. aipass.prax is not importable when init first reads the project home, and @spawn imports this module into its own process."
     },
     {
       "file": "shared/scaffold_content.py",
@@ -271,6 +145,234 @@
       "file": "apps/modules/_doctor_smoke.py",
       "standard": "naming",
       "reason": "Leading underscore is intentional — hides from module discovery to pass cli_ux no_internal_modules check."
+    },
+    {
+      "file": "apps/modules/doctor.py",
+      "standard": "fallback",
+      "lines": [182],
+      "reason": "_configured_aipass_home: an unreadable ~/.claude/settings.json reads as no setting so the home-agreement and owner-root lookups go on with the env AIPASS_HOME; the same doctor run's Identity group shows the FAIL row 'global settings ~/.claude/settings.json unreadable - Repair its JSON' (_check_global_aipass_home), plus the [doctor] info line in the aipass log"
+    },
+    {
+      "file": "apps/modules/doctor.py",
+      "standard": "fallback",
+      "lines": [452],
+      "reason": "_find_manifest: an unreadable ~/.claude/settings.json only drops the settings route to AIPASS_HOME; the walk from cwd still runs. Who finds out: the Identity group's FAIL row 'global settings ... unreadable - Repair its JSON' in the same doctor run, and the hooks WARN row 'manifest not found' when no route finds it"
+    },
+    {
+      "file": "apps/modules/doctor.py",
+      "standard": "fallback",
+      "lines": [627],
+      "reason": "_registry_citizen_names: an unreadable registry yields no names, so the drone row names no extras (it never claims more than its routed count). The same run's Identity group reads the same _find_registry file and shows the FAIL row 'registry corrupt JSON - Manually inspect AIPASS_REGISTRY.json'; warning line '[doctor] could not read registry for citizen names' in the log"
+    },
+    {
+      "file": "apps/modules/install.py",
+      "standard": "fallback",
+      "lines": [132],
+      "reason": "_fire_lock_removed: import guard for the @trigger event bus; the lock is already removed, only the file_deleted event is lost. Warning line '[install] trigger unavailable for file_deleted event' in the aipass log; nothing a person acts on rides on the event"
+    },
+    {
+      "file": "apps/modules/install.py",
+      "standard": "fallback",
+      "lines": [153],
+      "reason": "_lock_holder_pid: an unreadable lock gives no pid, and acquire_install_lock treats an unknown holder as alive and never steals it: the install stops with the error line 'REFUSED: another install of <home> is already running (lock: <path>). Wait for it to finish, or delete the lock if you know it is dead.' The safe direction, shown on stderr"
+    },
+    {
+      "file": "apps/modules/install.py",
+      "standard": "fallback",
+      "lines": [166],
+      "reason": "_clear_stale_lock: FileNotFoundError at unlink means another process removed the stale lock first, so the lock IS free (True is the fact, not a stand-in); the retry claims it with O_EXCL, which refuses loudly if someone else got there. The 'Clearing a stale install lock' warning line has already printed"
+    },
+    {
+      "file": "apps/modules/install.py",
+      "standard": "fallback",
+      "lines": [220],
+      "reason": "_pid_alive: PermissionError from kill(pid, 0) (EPERM) proves the process exists under another user, so True is the answer, not a default; the lock is then left alone and the REFUSED error line names it"
+    },
+    {
+      "file": "apps/modules/install.py",
+      "standard": "fallback",
+      "lines": [231],
+      "reason": "release_install_lock: FileNotFoundError means the lock is already gone, which is what release wants; the install's result is unaffected (the docstring: a failed release must not mask the install). Info line '[install] lock already gone at release'"
+    },
+    {
+      "file": "apps/modules/install.py",
+      "standard": "fallback",
+      "lines": [254],
+      "reason": "_announce_cloned_branch: a best-effort courtesy line naming the branch the clone landed on; it must never fail an install. When git cannot be read the line is simply absent, and the doctor/finish screen that follows reports the tree's health"
+    },
+    {
+      "file": "apps/aipass.py",
+      "standard": "fallback",
+      "lines": [24],
+      "reason": "Version-conditional import: tomllib is stdlib on 3.11+, and on 3.10 the same parser is the tomli package, a declared dependency (pyproject: tomli>=2; python_version < '3.11'). Not a stand-in, the same library under its 3.10 name"
+    },
+    {
+      "file": "apps/aipass.py",
+      "standard": "fallback",
+      "lines": [29],
+      "reason": "Fires only on a Python 3.10 install missing its declared tomli dependency (a broken install); the one effect is that aipass --version prints the installed package metadata version instead of the live tree's pyproject version, a real version either way. Info line '[AIPASS] tomllib/tomli unavailable, pyproject version read disabled' in the aipass log"
+    },
+    {
+      "file": "apps/modules/baud.py",
+      "standard": "fallback",
+      "lines": [104],
+      "reason": "_api_host_config: optional cross-branch @api module. None is handed to point_api_at/point_api_at_binary/readiness, which print \"@api's face-dir setting is not available on this install. Run: drone @api host-api set-config --face-dir <dest>\" (and the baud-bin twin), and baud status prints 'unknown (@api's face_dir is not available on this install)'; warning line '[baud] @api host_api module not importable'"
+    },
+    {
+      "file": "apps/modules/_doctor_wire.py",
+      "standard": "fallback",
+      "lines": [237],
+      "reason": "_codex_model_row: an unreadable `codex debug models` catalog is not read as a pass: slugs=None turns into the WARN row 'codex model  <model>: model catalog unreadable' on the doctor screen, plus a warning log line with the parse error"
+    },
+    {
+      "file": "apps/modules/_doctor_fix.py",
+      "standard": "fallback",
+      "lines": [82],
+      "reason": "_build_placement_items: an agent path outside project_root cannot be made relative, so the remediation shows its absolute path, which is the accurate path, not a stand-in; the 'Misplaced agent' item and its fix command still print with it"
+    },
+    {
+      "file": "apps/handlers/opencode_cli.py",
+      "standard": "fallback",
+      "lines": [88],
+      "reason": "_auth_names: unparseable `opencode auth list` output returns None, and the only caller turns None into the WARN row 'opencode login <first line of output> - Run: opencode auth list' on the doctor screen; warning line '[opencode_cli] opencode auth list unreadable'"
+    },
+    {
+      "file": "apps/handlers/admin_lane.py",
+      "standard": "fallback",
+      "lines": [118],
+      "reason": "admin_lane_state: _holder_cert reads the same registry through _holder_entry first, so an unreadable registry has already raised there and been added to 'unreadable', which the lane screen prints; this second catch only stops the same failure crashing a repeat read"
+    },
+    {
+      "file": "apps/handlers/settings_backup.py",
+      "standard": "fallback",
+      "lines": [110],
+      "reason": "_reserve_backup_name: FileExistsError on an O_EXCL create means that suffix is taken, so the loop tries the next one; nothing stands in and no backup is overwritten (the docstring: two doors in the same second never overwrite each other). Not a failure, so there is nothing to report"
+    },
+    {
+      "file": "apps/handlers/provider_wire.py",
+      "standard": "fallback",
+      "lines": [404],
+      "reason": "read_codex_config: version-conditional import, tomllib (3.11+) or the same parser as tomli on 3.10 (declared dependency); when neither imports, the inner handler hands on the reason 'reading config.toml needs Python 3.11+ or the tomli package', shown as the codex rows' WARN detail"
+    },
+    {
+      "file": "apps/handlers/provider_wire.py",
+      "standard": "fallback",
+      "lines": [454],
+      "reason": "set_codex_pins: version-conditional import, tomllib or tomli (same parser); when neither imports nothing is written and the returned line 'Skipped the Codex config pins: setting them needs Python 3.11+ or the tomli package' is printed by the caller"
+    },
+    {
+      "file": "apps/handlers/baud/phone_setup.py",
+      "standard": "fallback",
+      "lines": [199],
+      "reason": "_local_hhmm: an expiry that is not ISO 8601 is shown raw ('at <value>') instead of as local HH:MM; the person sees the door's own value, nothing is hidden"
+    },
+    {
+      "file": "apps/handlers/baud/fetch.py",
+      "standard": "fallback",
+      "lines": [91],
+      "reason": "resolve_token: gh is an optional token source; with no gh the token is None and the public download is tried first. If that fails, fetch_release raises FetchError 'No public baud release asset found (HTTP n) and no GitHub token to try the API: Set GITHUB_TOKEN or log in with the gh CLI.' on stderr"
+    },
+    {
+      "file": "apps/handlers/baud/fetch.py",
+      "standard": "fallback",
+      "lines": [95],
+      "reason": "resolve_token: gh that cannot run is the same as no gh (an optional token source); None leads to the FetchError naming 'Set GITHUB_TOKEN or log in with the gh CLI' when the public route fails. The exception type is logged, never the token"
+    },
+    {
+      "file": "apps/handlers/baud/point.py",
+      "standard": "fallback",
+      "lines": [120],
+      "reason": "phone_url: a courtesy 'Then open:' line after baud install; an unusable @api config prints the visible placeholder 'http://<host>:<port>/phone.html (see: drone @api host-api config)', which names where to read the real URL"
+    },
+    {
+      "file": "apps/handlers/system_detect/system_detector.py",
+      "standard": "fallback",
+      "lines": [53],
+      "reason": "detect_git is a probe, not a check: {'found': False} is the answer 'git is not on PATH', never a pass. Its one caller, doctor's System group (doctor.py _check_system), turns it into a FAIL row 'git  not found' with the cure 'Install git: https://git-scm.com/downloads'."
+    },
+    {
+      "file": "apps/handlers/system_detect/system_detector.py",
+      "standard": "fallback",
+      "lines": [82],
+      "reason": "detect_claude_code is a probe: {'found': False} is the answer 'claude is not on PATH'. Its one caller, doctor's _claude_code_row, prints the row 'claude code  not on PATH'; it is a plain row by design because AIPass runs under Codex and OpenCode too, so a missing claude is not a failure."
+    },
+    {
+      "file": "apps/handlers/system_detect/system_detector.py",
+      "standard": "fallback",
+      "lines": [107],
+      "reason": "_shell_from_parent_proc is the second probe for the shell name, run only when $SHELL is unset: None means 'not detected', the same answer as no /proc entry. The doctor System row prints the shell as 'unknown', so the person sees that the shell was not detected; nothing is judged on the shell name."
+    },
+    {
+      "file": "apps/handlers/sandbox_check/sandbox_checker.py",
+      "standard": "fallback",
+      "lines": [91],
+      "reason": "_read_userns_sysctl is read only after the bwrap trivial sandbox already failed, to add the AppArmor sysctl as a hint. sysctl missing (non-Ubuntu) or timing out drops only the '(apparmor_restrict_unprivileged_userns=N)' suffix; doctor's 'bwrap functional' row is FAIL either way, carrying bwrap's own exit code and stderr."
+    },
+    {
+      "file": "apps/handlers/sandbox_check/sandbox_checker.py",
+      "standard": "fallback",
+      "lines": [131],
+      "reason": "_srt_install_hint builds remediation text, not a verdict: with no npm on PATH the plain 'npm install -g @anthropic-ai/sandbox-runtime' is the right hint. The srt row it decorates is already FAIL in doctor's Sandbox group; the node row above it is FAIL when node (and so npm) is missing."
+    },
+    {
+      "file": "apps/handlers/sandbox_check/sandbox_checker.py",
+      "standard": "fallback",
+      "lines": [145],
+      "reason": "_srt_install_hint: 'npm root -g' failing only drops the '(installs to <prefix>)' courtesy suffix from the hint; the hint still names the install command, and the srt row it sits on is FAIL in doctor's Sandbox group."
+    },
+    {
+      "file": "shared/project_home.py",
+      "standard": "fallback",
+      "lines": [196],
+      "reason": "find_fenceless_projects: a corrupt settings.local.json is listed as fenceless, not skipped, so doctor shows a WARN row 'instruction fence: <project>' with the cure 'Run aipass init update <project>'. That command now refuses and names the corrupt file ('<path> is unusable (...): fix or move it aside', bootstrap._load_json). Doctor only reads; the file is left untouched."
+    },
+    {
+      "file": "apps/handlers/init/scaffold_manifest.py",
+      "standard": "fallback",
+      "lines": [91],
+      "reason": "read_manifest: a corrupt manifest reads as no recorded hashes, the safe direction. decide() then keeps every file that differs from the template ('unknown provenance'), so an update never overwrites one. Doctor's Scaffold group shows the WARN row 'scaffold manifest  not stamped'. Raising here would crash doctor, which catches only UpdateIgnoreUnreadable (doctor.py is agent A's lane); the better cure, a ManifestUnreadable doctor shows as a row, is HELD."
+    },
+    {
+      "file": "apps/handlers/structure_scan/structure_scanner.py",
+      "standard": "fallback",
+      "lines": [154],
+      "reason": "Python 3.10 compatibility: requires-python is >=3.10 and pyproject declares tomli for python_version < '3.11', so importing tomli where stdlib tomllib is absent is the supported path, not a stand-in for a failure."
+    },
+    {
+      "file": "apps/handlers/structure_scan/structure_scanner.py",
+      "standard": "fallback",
+      "lines": [157],
+      "reason": "No tomllib and no tomli: the reason ('no TOML parser: Python X.Y has no tomllib and tomli is not installed') goes into *why* and the function returns None for 'unknown', never 'no packages'. Doctor's Structure group prints it as a WARN row with 'install tomli or fix pyproject.toml' (doctor.py), and placement is not measured against unknown packages."
+    },
+    {
+      "file": "apps/handlers/provider_wire.py",
+      "standard": "unused_function",
+      "functions": [
+        "refresh_provider_hooks",
+        "refresh_codex"
+      ],
+      "reason": "Called from setup.sh's venv-python heredoc via dynamic import (setup.sh:704-707, DPLAN-0279) — a cross-language caller the AST/corpus scanner can't see. That heredoc is its ONLY caller; no in-process Python caller makes this reachable. Covered directly by tests/test_provider_wire.py. Verified live 2026-08-09. refresh_codex (2026-10-26): the same pattern from setup.sh's Codex block (codex on PATH), its only caller; covered by TestCodexHooks and TestCodexPins."
+    },
+    {
+      "file": "apps/handlers/readme_map/__init__.py",
+      "standard": "fallback",
+      "lines": [86],
+      "reason": "Not on the audit list but flagged in this file. read_readme_at returns None after an ERROR log naming the path. Its one caller, apps/modules/read.py _render_readme, prints the error 'Could not read <path>.' to the person and logs ERROR, so a None never renders as an empty README."
+    },
+    {
+      "file": "apps/handlers/init/bootstrap.py",
+      "standard": "json_structure",
+      "reason": "bootstrap.py is the init/update handler: its operation is recorded once by its module: init_flow.py logs aipass_init and aipass_init_update through json_handler with the handler's whole result; a handler log_operation would record the same run twice."
+    },
+    {
+      "file": "apps/handlers/init/scaffold_manifest.py",
+      "standard": "json_structure",
+      "reason": "scaffold_manifest.py is a step of bootstrap's init/update: its operation is recorded once by its module: init_flow.py logs aipass_init and aipass_init_update through json_handler with the handler's whole result; a handler log_operation would record the same run twice."
+    },
+    {
+      "file": "shared/json_ops.py",
+      "standard": "trigger",
+      "reason": "backup_json is one step of @spawn's update (spawn/apps/handlers/update_ops.py), which records the run itself (update_executed); the event belongs to the caller that knows what was backed up and why, not to the shared helper."
     }
   ]
 }

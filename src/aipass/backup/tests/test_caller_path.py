@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_caller_path.py
 # Description: Tests for caller-CWD path resolution across user-facing commands
-# Version: 1.0.8
+# Version: 1.1.1
 # Created: 2026-08-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/path/caller.py and caller-CWD resolution."""
@@ -24,13 +24,12 @@ from aipass.backup.apps.handlers.drive import share as share_handler
 from aipass.backup.apps.handlers.path.caller import caller_cwd, resolve_caller_path
 from aipass.backup.apps.handlers.project import registry
 from aipass.backup.apps.modules import all as all_mod
-from aipass.backup.apps.modules import drive_clear, drive_stats, drive_sync, snapshot, versioned
+from aipass.backup.apps.modules import drive_clear, drive_stats, drive_sync, snapshot
 from aipass.backup.apps.modules import register as register_mod
-from aipass.backup.apps.modules import restore as restore_mod
 from aipass.backup.apps.modules import share as share_mod
 from aipass.backup.apps.modules import status as status_mod
 from aipass.backup.apps.modules.register import resolve_project
-from aipass.cli.apps.modules import command_failed
+from aipass.cli import command_failed
 
 
 def _arguments(func, call) -> dict:
@@ -63,19 +62,21 @@ class TestResolveCallerPath:
         assert resolve_caller_path(str(target)) == target.resolve()
         assert resolve_caller_path(target) == Path(target).resolve()
 
-    def test_unset_caller_env_resolves_against_process_cwd(self, tmp_path: Path, monkeypatch) -> None:
-        """Without the env var (direct invocation), process CWD is the caller."""
+    def test_unset_caller_env_refuses_a_relative_path(self, tmp_path: Path, monkeypatch) -> None:
+        """Without the env var a relative path raises, never resolves against the process cwd."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
 
-        assert resolve_caller_path("rel.txt") == (tmp_path / "rel.txt").resolve()
+        with pytest.raises(RuntimeError, match="AIPASS_CALLER_CWD is not set"):
+            resolve_caller_path("rel.txt")
 
-    def test_empty_caller_env_means_process_cwd_not_root(self, tmp_path: Path, monkeypatch) -> None:
-        """An empty AIPASS_CALLER_CWD is treated as unset, not as '/'."""
+    def test_empty_caller_env_raises_not_root_or_cwd(self, tmp_path: Path, monkeypatch) -> None:
+        """An empty AIPASS_CALLER_CWD is treated as unset: it raises, never '/' or the process cwd."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("AIPASS_CALLER_CWD", "")
 
-        assert caller_cwd() == tmp_path.resolve()
+        with pytest.raises(RuntimeError, match="AIPASS_CALLER_CWD is not set"):
+            caller_cwd()
 
     def test_caller_cwd_returns_the_exported_dir(self, tmp_path: Path, monkeypatch) -> None:
         """caller_cwd() returns exactly what drone exported."""
@@ -283,13 +284,11 @@ class TestEveryLaneUsesCallerCwd:
     @pytest.mark.parametrize(
         ("module", "runner", "args", "expected"),
         [
-            (snapshot, "run_snapshot", ["."], lambda root: call(root)),
-            (versioned, "run_versioned", ["."], lambda root: call(root)),
+            (snapshot, "run_snapshot", ["."], lambda root: call(root, show_panels=True)),
             (all_mod, "run_all", ["."], lambda root: call(root, show_panels=True)),
             (drive_sync, "run_drive_sync", ["."], lambda root: call(root, project_name="", note="", force=False)),
             (drive_stats, "run_drive_stats", ["."], lambda root: call(root)),
             (drive_clear, "run_drive_clear", ["."], lambda root: call(root, force=False)),
-            (restore_mod, "run_list_versions", [".", "list", "a.py"], lambda root: call(root, "a.py")),
         ],
     )
     def test_dot_names_the_caller_dir_not_the_process_cwd(
@@ -306,16 +305,3 @@ class TestEveryLaneUsesCallerCwd:
         assert module.handle_command(module.PRIMARY_COMMAND, args) is True
 
         assert ran.call_args == expected(str(caller.resolve()))
-
-    def test_restore_writes_its_output_in_the_caller_dir(self, tmp_path: Path, monkeypatch) -> None:
-        """Mutant: the output path is opened against the process cwd, the backup branch under drone."""
-        caller = tmp_path / "caller"
-        caller.mkdir()
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))
-        ran = MagicMock(name="run_restore_file")
-        monkeypatch.setattr(restore_mod, "run_restore_file", ran)
-
-        restore_mod.handle_command("restore", [str(caller), "file", "a.py", "out.py"])
-
-        assert ran.call_args == call(str(caller.resolve()), "a.py", str((caller / "out.py").resolve()))

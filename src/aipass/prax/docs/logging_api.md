@@ -14,7 +14,7 @@ from aipass.prax import logger
 logger.info("Processing started")
 ```
 
-This works from any branch. Prax detects the caller via stack introspection and routes to the correct log file. If prax fails to import, a NullLogger fallback prevents crashes.
+This works from any branch. Prax detects the caller via stack introspection and routes to the correct log file. There is no fallback logger: if the logger chain cannot import, `from aipass.prax import logger` raises exactly as `from aipass.prax.apps.modules.logger import system_logger` does, and so does `get_direct_logger`. Pinned in a subprocess by `test_logger_module.py::TestBrokenChainRaises`.
 
 Four levels are available — `debug()`, `info()`, `warning()`, `error()`.
 
@@ -59,7 +59,7 @@ under any suite unless the test redirects that constant itself.
 ## Pattern B — Direct Logger (for prax internals)
 
 ```python
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 
 logger = get_direct_logger()
 logger.info("Direct log entry")
@@ -85,8 +85,11 @@ branch can keep a verbose local log while the central aggregation stays quiet:
 ```
 
 Precedence is `AIPASS_LOG_LEVEL` → the tier's `log_level` → `INFO`. An
-unrecognised value warns once and falls back to `INFO` rather than silently
-picking a level nobody asked for.
+unrecognised value warns once, on load's trail (`prax/logs/load.jsonl`), and
+uses `INFO`.
+
+The default line format is the pipe form, `%(asctime)s | %(name)s | %(levelname)s | %(message)s`;
+`prax_logger_config.json` is git-ignored, so a fresh clone logs what a configured seat logs.
 
 **Levels bind when a logger is created, not per call.** A long-running process
 (Mission Control, a daemon, a bot) picks up a level change on restart — setting
@@ -104,10 +107,11 @@ Measured by object identity against a real consumer:
 | `setitem(sys.modules, "aipass.prax")` | REAL |
 | `patch("<the consuming module>.logger")` | **MOCK** |
 
-The cause is in this package's own `__init__.py`: `__getattr__` resolves
-`logger` once and caches the object in `globals()`, so the object is copied at
-the package boundary and copied again into each consumer's globals. Anything
-patched at or above `aipass.prax` is upstream of a copy already taken. **The last
+The cause is the consumer's own from-import: `from aipass.prax import logger`
+copies the object into the consumer's globals at import time. The package door
+caches nothing (`__getattr__` reads the home on every access), but anything
+patched at or above `aipass.prax` is still upstream of the copy the consumer
+already took. **The last
 dot must be resolved at call time**, which only the consumer-module patch does.
 
 **The technique, one line per consuming module:**
@@ -121,7 +125,7 @@ list is fragile; the consumer-module patch is still the only one that reaches.
 
 ## The logging path fires no events
 
-`SystemLogger._ensure_watcher` does not call `trigger.fire`, and nothing on the
+`SystemLogger` checks no watcher and calls no `trigger.fire`, and nothing on the
 path from `from aipass.prax import logger` to a written line imports
 `aipass.trigger`. That graph costs most of a first log line, so the hot path stays
 clear of it: a fresh interpreter that imports the logger and logs one line has
@@ -129,3 +133,36 @@ clear of it: a fresh interpreter that imports the logger and logs one line has
 `test_logger_module.py::TestLoggingPathIsTriggerFree`. The `startup` event still
 exists for whoever fires it deliberately (`drone @trigger fire startup`); error
 catch-up on start belongs to trigger's own `log_watcher_service`.
+
+## Door two — the trail, and prax's own diagnostics
+
+```python
+from aipass.prax import trail
+
+log = trail(Path(__file__).parents[2] / "logs" / "jobs.jsonl")  # must be <dir>/logs/<name>.jsonl
+log.warning("job failed", job="sweep", error=str(exc))
+```
+
+A trail line is `{"ts", "level", "msg", **fields}` in a `.jsonl` file the log
+watcher never reads, so a loop on the watched path can log without feeding
+itself. A failed write raises; there is no drop counter.
+
+Prax's own files log their diagnostics the same way, through
+`handlers/logging/trail.py`'s `PraxTrail("<module>")`, onto
+`prax/logs/<module>.jsonl` (`$AIPASS_TEST_LOG_DIR/prax/logs/` under a test).
+Only the files that build door one hold stdlib `logging`, and prax publishes
+that list.
+
+## What prax publishes
+
+`aipass.prax.apps.modules.logger` exports two facts for other branches:
+
+| name | what |
+|---|---|
+| `log_backup_count()` | backups the `.log` tiers keep, the deeper of `system_logs` and `local_logs`, read from the config at call time; a reader of rotated `.log.N` files walks this many |
+| `LOGGING_ALLOWED` | `(path under src/aipass, reason)` pairs: the only prax files allowed to import stdlib `logging` — `setup.py` and `direct.py`, which build door one on stdlib `Logger` and handlers |
+| `LOGGER_DOORS` | `(path under src/aipass, reason)` pairs: the only files whose classes are logging doors — `SystemLogger` (`logger.py`), `DirectLogger` (`direct.py`), `TrailLogger` and `PraxTrail` (`trail.py`); sentry's one_logger reads it for its level-shaped-class key |
+
+`test_logger_module.py::TestPublishedLoggingFacts` pins `LOGGING_ALLOWED` to the
+files that actually import `logging`, and `LOGGER_DOORS` to the files that define a class with two or
+more level methods, so neither list can drift.

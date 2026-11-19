@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_fix.py
 # Description: Structure remediation report for aipass doctor --fix
-# Version: 1.1.1
+# Version: 1.4.0
 # Created: 2026-05-15
-# Modified: 2026-10-24
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -13,10 +13,12 @@ doctor_fix — structure remediation report for aipass doctor --fix
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 from typing import List, NamedTuple, Optional
 
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
@@ -24,7 +26,10 @@ from aipass.aipass.shared.registry_discovery import find_registry as _discover_r
 from aipass.aipass.shared.project_home import _detect_aipass_home
 
 from aipass.aipass.apps.handlers.json import json_handler
+from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
+    SEED_RELATIVE_PATH,
+    TREE_REGISTRY_NAME,
     check_placement,
     check_pyproject,
     check_registry_consistency,
@@ -89,6 +94,9 @@ def _build_placement_items(agents: list, project_root: Path, project: str) -> Li
     return items
 
 
+_DOCTOR_CURES = {"no_passport": "No readable passport", "no_seed": "No passport seed"}
+
+
 def _build_registry_items(project_root: Path, agents: list, project: str) -> List[RemediationItem]:
     """Build remediation items for registry consistency issues."""
     items: List[RemediationItem] = []
@@ -96,6 +104,16 @@ def _build_registry_items(project_root: Path, agents: list, project: str) -> Lis
     if not reg_path or not reg_path.exists():
         return items
     for issue in check_registry_consistency(reg_path, agents):
+        if issue.problem in _DOCTOR_CURES:
+            items.append(
+                RemediationItem(
+                    severity="critical",
+                    category="registry",
+                    description=f"{_DOCTOR_CURES[issue.problem]}: {issue.branch_name} at {issue.registered_path}",
+                    fix_command="aipass doctor --fix",
+                )
+            )
+            continue
         items.append(
             RemediationItem(
                 severity="warning",
@@ -107,10 +125,115 @@ def _build_registry_items(project_root: Path, agents: list, project: str) -> Lis
     return items
 
 
+REINSTALL = "Run the installer again: ./aipass install (rebuilds the environment, keeps personal files)"
+NO_SEED_BACKUP = "No seed was written while the passport existed: restore .trinity/passport.json from a backup"
+
+
+def _registry_for(project_root: Optional[Path]) -> Optional[Path]:
+    """The project's registry, or None when doctor runs outside one."""
+    reg_path = _discover_registry(start_path=project_root) if project_root else None
+    return reg_path if reg_path is not None and reg_path.exists() else None
+
+
+def _unseated(project_root: Path, reg_path: Path, problem: str) -> dict:
+    """Registered citizens showing one registry problem, name -> citizen folder."""
+    issues = check_registry_consistency(reg_path, scan_agents(project_root), project_root=project_root)
+    return {i.branch_name: project_root / i.registered_path for i in issues if i.problem == problem}
+
+
+def _export_refusal(folder_name: str, output: str) -> str:
+    """spawn's refusal for this citizen, verbatim: its export prints '<branch>: <reason>' per refused seed."""
+    prefix = f"{folder_name.lower()}: "
+    for line in output.splitlines():
+        if line.strip().startswith(prefix):
+            return line.strip()[len(prefix) :]
+    lines = output.strip().splitlines()
+    return lines[-1].strip() if lines else "export-seeds wrote no seed"
+
+
+def export_missing_seeds(project_root: Optional[Path]) -> List[tuple]:
+    """doctor --fix: write each missing seed through spawn's export-seeds, then re-read the check.
+
+    Rows are (label, glyph, detail, remediation). spawn's door does not serve the export, so the command
+    runs, the way the owner fix runs sync-registry. A refused seed is a FAIL carrying spawn's reason.
+    """
+    reg_path = _registry_for(project_root)
+    if project_root is None or reg_path is None:
+        return []
+    unseeded = _unseated(project_root, reg_path, "no_seed")
+    refusals: dict = {}
+    for name, folder in unseeded.items():
+        cmd = ["drone", "@spawn", "export-seeds", "--confirm", "--root", str(reg_path.parent), "--only", folder.name]
+        env = {**os.environ, "COLUMNS": "1000"}  # an unwrapped refusal line is the reason, verbatim
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=reg_path.parent, env=env)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            refusals[name] = str(exc)
+        else:
+            refusals[name] = _export_refusal(folder.name, proc.stdout + "\n" + proc.stderr)
+
+    still = _unseated(project_root, reg_path, "no_seed")
+    rows: List[tuple] = []
+    for name, folder in unseeded.items():
+        if name not in still:
+            rows.append((f"registry: {name}", GLYPH_PASS, f"seed written: {folder / SEED_RELATIVE_PATH}", ""))
+            continue
+        logger.error("[doctor] seed for %s not written: %s", name, refusals[name])
+        rows.append((f"registry: {name}", GLYPH_FAIL, f"seed not written: {refusals[name]}", ""))
+    return rows
+
+
+def _restore_advice(reg_path: Path, folder: Path) -> str:
+    """The installer rebuilds the AIPass tree's own citizens only; a project citizen gets its own truth."""
+    if reg_path.name == TREE_REGISTRY_NAME:
+        return REINSTALL
+    return "" if (folder / SEED_RELATIVE_PATH).is_file() else NO_SEED_BACKUP
+
+
+def repair_passports(project_root: Optional[Path]) -> List[tuple]:
+    """doctor --fix: restore each damaged citizen's passport through spawn's door, then re-read the check.
+
+    Rows are (label, glyph, detail, remediation). spawn's restore_citizen writes only the missing .trinity
+    files; a restore that raises, or a passport still unreadable afterwards, is a FAIL with spawn's reason.
+    """
+    reg_path = _registry_for(project_root)
+    if project_root is None or reg_path is None:
+        return []
+    damaged = _unseated(project_root, reg_path, "no_passport")
+    if not damaged:
+        return []
+
+    from aipass.spawn import restore_citizen
+
+    rows: List[tuple] = []
+    for name, folder in damaged.items():
+        try:
+            written = restore_citizen(name, reg_path)
+        except (LookupError, OSError, ValueError) as exc:
+            logger.error("[doctor] passport restore for %s failed: %s", name, exc)
+            advice = _restore_advice(reg_path, folder)
+            rows.append((f"registry: {name}", GLYPH_FAIL, f"passport not restored: {exc}", advice))
+            continue
+        rows.append((f"registry: {name}", GLYPH_PASS, "passport restored: " + ", ".join(map(str, written)), ""))
+
+    still = _unseated(project_root, reg_path, "no_passport")
+    for i, (label, glyph, detail, _fix) in enumerate(rows):
+        if glyph == GLYPH_PASS and (name := label.removeprefix("registry: ")) in still:
+            logger.error("[doctor] passport for %s is still not readable after its restore", label)
+            rows[i] = (label, GLYPH_FAIL, f"{detail}; still not readable", _restore_advice(reg_path, still[name]))
+    return rows
+
+
 def _build_root_artifact_items(project_root: Path, project: str) -> List[RemediationItem]:
     """Remediation items for stray root-level artifacts."""
     items: List[RemediationItem] = []
-    for hit in check_root_artifacts(project_root, aipass_home=_detect_aipass_home()):
+    aipass_home = _detect_aipass_home()
+    if aipass_home is None:
+        # Without the home, its own .venv cannot be told from a stray one.
+        items.append(
+            RemediationItem("critical", "aipass_home", "AIPass home not found", "Set AIPASS_HOME=/path/to/AIPass")
+        )
+    for hit in check_root_artifacts(project_root, aipass_home=aipass_home):
         if hit.severity == "pass":
             continue
         severity = "info" if hit.severity == "info" else "warning"

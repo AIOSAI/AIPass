@@ -3,7 +3,7 @@
 # Description: Tests for the intake auto_process handler and the pool module
 # Version: 1.2.0
 # Created: 2026-06-06
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # Category: memory/tests
 # =============================================
 
@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.cli.apps.modules import resolve_exit
+from aipass.cli import resolve_exit
 
 from aipass.memory.apps.handlers.intake import auto_process
 from aipass.memory.apps.handlers.monitor import detector

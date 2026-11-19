@@ -180,7 +180,7 @@ def merge_pr(pr_number: str, caller: str) -> dict:
 
         # Fire pr_merged event (non-blocking — never fail the merge workflow)
         try:
-            from aipass.trigger.apps.modules.core import trigger
+            from aipass.trigger import trigger
 
             trigger.fire("pr_merged", pr_number=pr_number, title=title)
         except Exception as exc:

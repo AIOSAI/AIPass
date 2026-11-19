@@ -3,7 +3,7 @@
 # Description: The templates module — operation_start, operation_complete, routing, demo
 # Version: 1.1.3
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/templates.py — the operation output templates."""
@@ -130,8 +130,7 @@ class TestOperationStart:
     def test_details_in_output(self, plain_console, tmp_path):
         console, get_output = plain_console
         target = tmp_path / "app"
-        # The whole line is asserted, so it must never wrap: the temp root is about
-        # 108 characters on the Windows runner, one short of the capture width.
+        # The whole line is asserted, so it must never wrap.
         console.width = len(str(target)) + 80
         with patch.object(templates, "CONSOLE", console):
             templates.operation_start("Deploying", target=target, mode="fast")

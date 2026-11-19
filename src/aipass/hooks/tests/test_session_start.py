@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_start.py
-# Version: 1.5.0
+# Version: 1.6.0
 # Description: Tests for the SessionStart handlers: cadence reset, the culture file, the session pointer
 # Branch: hooks
 # Created: 2026-07-07
-# Modified: 2026-11-04
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_start.py."""
@@ -16,7 +16,6 @@
 
 import json
 import os
-import sys
 from unittest.mock import patch
 
 import pytest
@@ -27,6 +26,7 @@ from aipass.hooks.apps.handlers.lifecycle.session_start import handle, handle_cu
 from aipass.hooks.apps.modules.cadence import should_fire
 
 CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
+SESSION_START = "aipass.hooks.apps.handlers.lifecycle.session_start"
 
 
 def _branch(tmp_path):
@@ -129,6 +129,21 @@ class TestSessionPointer:
         branch = _branch(tmp_path)
         handle_session_pointer({"session_id": session_id, "source": "startup", "cwd": str(branch)})
         assert _pointer(branch) is None
+
+    def test_a_raising_pointer_door_is_one_engine_fault_line_and_the_session_starts(
+        self, engine_fault, monkeypatch, tmp_path
+    ):
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("door down")
+
+        branch = _branch(tmp_path)
+        handler = f"{SESSION_START}.handle_session_pointer"
+        hook_data = {"session_id": "s-claude", "source": "startup", "cwd": str(branch)}
+        with patch("aipass.ai_mail.write_pointer", boom):
+            faults, (stdout, code) = engine_fault("SessionStart", "session_pointer", handler, hook_data)
+
+        assert code != 2 and stdout == "" and _pointer(branch) is None
+        assert len(faults) == 1 and f"fault[SessionStart.session_pointer.{handler}.RuntimeError@" in faults[0]
 
 
 class TestCulture:
@@ -273,12 +288,16 @@ class TestSessionStartHandler:
         assert result["stdout"] == ""
         assert json.loads((tmp_path / "aipass-cadence-no-stdout.json").read_text(encoding="utf-8"))["turn"] == -1
 
-    def test_cadence_import_failure_does_not_crash(self, monkeypatch):
-        """None under the name in sys.modules makes the real import raise ModuleNotFoundError."""
-        monkeypatch.setitem(sys.modules, cadence_mod.__name__, None)
-        result = handle({"source": "startup"})
+    def test_a_failed_cadence_reset_is_one_engine_fault_line_and_the_session_starts(self, engine_fault, monkeypatch):
+        def boom(**_kwargs):
+            raise RuntimeError("state unwritable")
 
-        assert result == {"stdout": "", "exit_code": 0}
+        monkeypatch.setattr(cadence_mod, "reset_counter", boom)
+        handler = f"{SESSION_START}.handle"
+        faults, (stdout, code) = engine_fault("SessionStart", "cadence_reset", handler, {"source": "startup"})
+
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1 and f"fault[SessionStart.cadence_reset.{handler}.RuntimeError@" in faults[0]
 
 
 @pytest.mark.usefixtures("_fresh_cadence")

@@ -35,6 +35,18 @@ place, and exits 1.
 
 ---
 
+## Only the admin seat runs a real delete
+
+A real `delete` or `delete --retire` runs from the verified admin seat only: the same rail
+`retire-project` asks (`is_verified_admin_caller()`, five legs). A verifier that raises
+answers no. The check runs after the branch resolves and before the confirmation prompt, so
+a refused caller is never asked and nothing is touched; the refusal names the cure (mail
+@devpulse the branch and why), exits 1, and is logged with the caller, the target and the
+time (`delete_refused` in spawn's operation log). `--dry-run` previews from any seat and says
+the real run is the admin seat's.
+
+---
+
 ## Delete refuses protected branches; `--retire` is the door for a live citizen
 
 `is_protected()` guards three layers, any one sufficient:
@@ -42,6 +54,8 @@ place, and exits 1.
 1. The hardcoded floor — the branch factory, the orchestration branch and the router.
 2. A registry entry carrying `owner: true`.
 3. A passport with `citizenship.registered: true`.
+
+A layer that cannot be read (a corrupt registry or passport) answers protected, and the delete is refused.
 
 Since `create` writes `registered: true`, a branch is protected from the moment it exists,
 and a plain `delete` refuses it, naming the flag that retires it.
@@ -83,7 +97,7 @@ count, the archive path, whether this seat could run `--yes`, and writes nothing
 ## Receipts
 
 Every removal writes rows to the fleet deletion trail, `<AIPass>/.ai_central/deletions.jsonl`,
-through `@drone`'s `door_deletion_log.record_deletion`, beside `drone rm`'s own rows. Rows are
+through `@drone`'s `record_foreign_deletion` (`from aipass.drone import record_foreign_deletion`), beside `drone rm`'s own rows. Rows are
 measured and validated before anything is removed: drone's door writes on call and refuses a
 row missing `lane`, `outcome`, `caller`, `resolved` or `target`, so a row that would be
 refused stops the removal instead.

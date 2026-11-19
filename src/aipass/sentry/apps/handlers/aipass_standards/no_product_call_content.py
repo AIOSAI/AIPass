@@ -3,7 +3,7 @@
 # Description: No Product Call Standards Content Handler
 # Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -40,7 +40,7 @@ def get_no_product_call_standards() -> str:
         "",
         "  [green]•[/green] a name bound by an [green]aipass.*[/green] import, or a project branch's own top package",
         "  [green]•[/green] a module-level constant whose value reaches one (fixed point) —",
-        "    SIMPLE_MODULES = [snapshot, versioned] is how a parametrized test",
+        "    SIMPLE_MODULES = [drive_sync, settings] is how a parametrized test",
         "    reaches mod.handle_command with the import three screens up",
         "  [green]•[/green] a dotted string starting [green]aipass.[/green] — import_module and mock.patch",
         "    both take the product by name, not by binding",

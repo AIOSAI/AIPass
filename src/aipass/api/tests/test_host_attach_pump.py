@@ -3,7 +3,7 @@
 # Description: Tests for the attach lane's room and pump — the tmux command, a real PTY, resize and hangup
 # Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/attach.py's room and PTY, and apps/handlers/host/pump.py's control frames."""
@@ -35,7 +35,6 @@ from aipass.api.tests.support_host_attach import (
     StubSession,
     detach_and_wait,
     fastapi_required,
-    pty_required,
     source_of,
     wait_for_log,
 )
@@ -261,7 +260,6 @@ class TestNoSessionIsEverKilledHere:
         assert "SIGHUP" in names
 
 
-@pty_required
 class TestThePumpMovesRealBytes:
     """A PTY that cannot carry bytes is a PTY that carries nothing."""
 
@@ -315,7 +313,6 @@ class TestThePumpMovesRealBytes:
         session.hangup()
 
 
-@pty_required
 class TestTheRoomCanActuallyHearAResize:
     """The bug that made every resize a no-op, and the two halves of its fix."""
 
@@ -372,10 +369,7 @@ class TestTheRoomCanActuallyHearAResize:
             session = host_attach.open_attach("api")
 
         try:
-            if hasattr(os, "getpgid"):
-                assert os.getpgid(session.process.pid) != os.getpgid(os.getpid())
-            else:
-                pytest.fail("this platform opens a PTY and has no os.getpgid to read the child's group by")
+            assert os.getpgid(session.process.pid) != os.getpgid(os.getpid())
         finally:
             session.hangup()
 
@@ -432,20 +426,11 @@ class TestTheRoomCanActuallyHearAResize:
 
     def test_a_real_child_ends_up_owning_the_terminal(self, quiet: Any, tmux_preflight: Any) -> None:
         """The property itself, on a real process rather than a mock."""
-        # Both reads happen while the child lives: macOS answers ESRCH for a reaped pid where Linux keeps a zombie's
-        # pgid, so the stand-in refuses after hangup and moving a read below it goes red here too.
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
-        def macos_getpgid(pid: int) -> int:
-            if session.closed:
-                raise ProcessLookupError(errno.ESRCH, "No such process")
-            if hasattr(os, "getpgid"):
-                return os.getpgid(pid)
-            pytest.fail("this platform opens a PTY and has no os.getpgid to read the child's group by")
-
         try:
-            child_group = macos_getpgid(session.process.pid)
+            child_group = os.getpgid(session.process.pid)
             # Until the child's exec claims the terminal, the foreground is still ours.
             deadline = time.monotonic() + 5
             foreground = os.tcgetpgrp(session.descriptor)
@@ -458,7 +443,6 @@ class TestTheRoomCanActuallyHearAResize:
         assert foreground == child_group
 
 
-@pty_required
 class TestResizeIsAnIoctlAndItsArgumentsAreOrdered:
     """struct winsize is (rows, cols, xpixel, ypixel) — ROWS FIRST."""
 
@@ -494,7 +478,6 @@ class TestResizeIsAnIoctlAndItsArgumentsAreOrdered:
             cat_session.resize("wide", 30)
 
 
-@pty_required
 class TestHangupDetachesAndNeverKillsTheRoom:
     """The lifecycle promise, tested against a real process."""
 
@@ -545,10 +528,7 @@ class TestHangupDetachesAndNeverKillsTheRoom:
             session = host_attach.open_attach("api")
 
         try:
-            if hasattr(os, "getsid"):
-                assert os.getsid(session.process.pid) == session.process.pid
-            else:
-                pytest.fail("this platform opens a PTY and has no os.getsid to read the child's session by")
+            assert os.getsid(session.process.pid) == session.process.pid
         finally:
             session.hangup()
 

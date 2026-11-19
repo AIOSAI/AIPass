@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: placeholders.py
 # Description: Placeholder replacement engine
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """Placeholder replacement engine for agent templates."""
@@ -13,12 +13,9 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.spawn.apps.handlers.metadata import detect_profile
-from aipass.spawn.apps.handlers.registry import find_registry
-
-# Underscore-private, but the one shared home detector; a local copy would drift from it.
-from aipass.aipass.shared.project_home import _detect_aipass_home
+from aipass.spawn.apps.handlers.registry import aipass_home, find_registry
 
 
 def replace_placeholders(content, replacements):
@@ -29,12 +26,8 @@ def replace_placeholders(content, replacements):
 
 
 def _aipass_home():
-    """Return the AIPass installation root as a Path, or None when undetectable."""
-    home = _detect_aipass_home()
-    if not home:
-        logger.info("[spawn] AIPass home not detectable — residency falls back to 'external'")
-        return None
-    return Path(home).resolve()
+    """The AIPass home; raises when drone's answer names none, so residency is never guessed."""
+    return aipass_home()
 
 
 def resolve_residency(target_dir) -> str:

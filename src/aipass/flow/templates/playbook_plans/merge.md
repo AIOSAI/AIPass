@@ -75,6 +75,7 @@ just that one merge commit — **cosmetic and trivially resolved**.
 - [ ] Confirm what's shipping — scan uncommitted changes + already-pushed dev commits ahead of main: `git rev-list --count main..dev` (read git, raw ok)
 - [ ] No surprise files (stray `/tmp` artifacts, test pollution, `.recovery`/`.archive` churn). Clean = archive, never delete.
 - [ ] **Version state check** (informs the bump decision): read the **two** release-tied versions — `grep '^version' pyproject.toml` and `grep __version__ src/aipass/__init__.py` (they should match; if drifted, note it) — and what PyPI already has: `curl -s https://pypi.org/pypi/aipass/json | python3 -c "import sys,json;print(json.load(sys.stdin)['info']['version'])"`. PyPI rejects a duplicate, so the target must be > published.
+- [ ] **Bump the Claude pin in the image:** `claude --version` on the host, then set `ARG CLAUDE_CODE_VERSION` in the repo-root `Dockerfile` to it and commit with the rest. The image installs exactly that version; a stale pin ships an old Claude.
 - [ ] **Release tag: default YES with PATCH bump.** Every dev-to-main merge ships a PATCH bump + tag so PyPI always tracks main (the owner's ruling S318, 2026-07-17 — version numbers carry no significance during beta). Override to MINOR/MAJOR only when warranted; skip only if explicitly told.
 
 ## 2. Verify, commit, CHANGELOG
@@ -105,7 +106,7 @@ The PR gate (verified against `.github/workflows/`, Linux only since 2026-11-08)
 - [ ] `ci.yml` → **lint** alone. The full lane (test matrix, sentry-audit, coverage) sits beside it as `ci.yml(full_disabled)`, unread by Actions; rename it back to restore.
 - [ ] `security.yml` → **dependency-scan**, **CodeQL**
 - [ ] `e2e-wheel.yml` → Linux wheel smoke (path-filtered: fires on `src/**`, `tests/e2e/**`, `pyproject.toml`; not required)
-- [ ] Required checks in the classic branch protection on `main` (`settings/branches`, not the ruleset): **lint**, **dependency-scan**, **CodeQL**. Branch protection names checks by JOB id, not workflow name; a required check whose job no longer runs parks the PR as "Expected/waiting" forever. No Windows or macOS lane: `windows-test.yml(windows_disabled)` and `macos-test.yml(macos_disabled)` are unread by Actions.
+- [ ] Required checks in the classic branch protection on `main` (`settings/branches`, not the ruleset): **lint**, **dependency-scan**, **CodeQL**. Branch protection names checks by JOB id, not workflow name; a required check whose job no longer runs parks the PR as "Expected/waiting" forever.
 - [ ] **Hash-pinned CI deps:** tool installs are pinned from `.github/requirements/*.txt` locks. A new security advisory against a pinned dep (esp. pip-audit's 29-package tree) can red `security.yml` with zero code change on our side. Fix = dependabot lock bump (grouped weekly, label `ci`) or regen via the `pip-compile` command in each `.in` file header — never a code revert.
 - [ ] If "all green but can't merge": it's usually post-push mergeability **lag**. Confirm ground truth via the public API (no gh, no gate):
       - `curl -s https://api.github.com/repos/AIOSAI/AIPass/commits/<sha>/check-runs` → all check-runs success (incl. app checks: codecov, CodeQL)

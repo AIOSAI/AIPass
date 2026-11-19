@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: switch_handler.py
 # Description: Per-skill off-switch — state, declaration, systemd actuation
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-18
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -44,59 +44,47 @@ def get_state_path() -> Path:
     return json_handler.get_json_path("switch", "data").parent / STATE_FILENAME
 
 
-def read_state() -> Dict[str, Any]:
-    """Read the recorded switch state.
+def _read_document() -> Dict[str, Any]:
+    """Read the whole switch state document; an absent one is a clean start with every skill on.
 
     Not json_handler.load_json: it overwrites an unparseable document with a fresh
     template, which would flip every skill back ON and erase why they were off."""
     state_path = get_state_path()
     if not state_path.exists():
-        return {}
+        return {"skills": {}}
 
+    fix = f"Repair it, or remove it with `drone rm {state_path}` to reset every skill to ON."
     try:
         raw = state_path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise SwitchStateUnreadable(
-            f"Could not read the skill switch state at {state_path}: {exc}. "
-            f"Fix the file's permissions, or delete it to reset every skill to ON."
-        ) from exc
+        raise SwitchStateUnreadable(f"Could not read the skill switch state at {state_path}: {exc}. {fix}") from exc
 
     try:
         document = json.loads(raw)
     except ValueError as exc:
-        raise SwitchStateUnreadable(
-            f"The skill switch state at {state_path} is not valid JSON: {exc}. "
-            f"Repair it, or delete {STATE_FILENAME} to reset every skill to ON."
-        ) from exc
+        raise SwitchStateUnreadable(f"The skill switch state at {state_path} is not valid JSON: {exc}. {fix}") from exc
 
     if not isinstance(document, dict) or not isinstance(document.get("skills"), dict):
         raise SwitchStateUnreadable(
-            f"The skill switch state at {state_path} has no 'skills' map, so which "
-            f"skills are off cannot be told. Repair it, or delete {STATE_FILENAME} "
-            f"to reset every skill to ON."
+            f"The skill switch state at {state_path} has no 'skills' map, so which skills are off cannot be told. {fix}"
         )
 
-    return document["skills"]
+    return document
 
 
-def write_state(skills: Dict[str, Any]) -> bool:
-    """Persist the switch state through the fleet's atomic writer."""
+def read_state() -> Dict[str, Any]:
+    """Read the recorded switch state: the skills map."""
+    return _read_document()["skills"]
+
+
+def write_state(skills: Dict[str, Any], created: str | None = None) -> bool:
+    """Persist the switch state atomically; created is the caller's, None for a new document."""
     state_path = get_state_path()
     today = datetime.now().date().isoformat()
 
-    created = today
-    if state_path.exists():
-        try:
-            existing = json.loads(state_path.read_text(encoding="utf-8"))
-            if isinstance(existing, dict):
-                created = existing.get("created", today)
-        except (OSError, ValueError) as exc:
-            # A rewrite over an unreadable document is always allowed: it is how an operator recovers.
-            logger.warning("Rewriting an unreadable switch state document: %s", exc)
-
     document = {
         "module_name": "switch",
-        "created": created,
+        "created": created or today,
         "last_updated": today,
         "skills": skills,
     }
@@ -125,13 +113,12 @@ def off_reason(skill_name: str) -> str | None:
 
 
 def set_enabled(skill_name: str, enabled: bool, reason: str | None = None) -> bool:
-    """Record a skill's on/off value."""
-    try:
-        skills = read_state()
-    except SwitchStateUnreadable as exc:
-        # Recovery, not data loss: the operator states the intent the file could no longer carry.
-        logger.warning("Replacing an unreadable switch state document: %s", exc)
-        skills = {}
+    """Record a skill's on/off value.
+
+    Raises SwitchStateUnreadable over an unreadable document and writes nothing: a fresh
+    start would drop every other skill's switch and overwrite the file an operator could repair."""
+    document = _read_document()
+    skills = document["skills"]
 
     previous = skills.get(skill_name)
     previous = previous if isinstance(previous, dict) else {}
@@ -152,7 +139,7 @@ def set_enabled(skill_name: str, enabled: bool, reason: str | None = None) -> bo
         entry["reason"] = previous["reason"]
 
     skills[skill_name] = entry
-    saved = write_state(skills)
+    saved = write_state(skills, created=document.get("created"))
 
     json_handler.log_operation(
         "switch_set",

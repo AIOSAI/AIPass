@@ -19,7 +19,7 @@ from datetime import datetime
 from aipass.memory.apps.handlers.json import json_handler, config_loader
 from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data, write_memory_file_simple
 from aipass.memory.apps.handlers.monitor.detector import _count_file_lines, file_limits, undrainable_in
-from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.prax import get_system_logger
 
 logger = get_system_logger()
 

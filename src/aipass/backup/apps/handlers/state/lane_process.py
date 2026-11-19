@@ -1,16 +1,14 @@
 # =================== AIPass ====================
 # Name: lane_process.py
 # Description: The lane's process seen from outside — alive, really a backup lane for this root, and how to end it
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """A running lane's process, seen from another process (DPLAN-0412)."""
 
-# psutil, never /proc, so the same code answers on Linux, macOS and Windows.
 # Two guards before any signal: live_lane (alive, not a zombie, not a recycled pid) and lane_for_root.
-# On Windows terminate is TerminateProcess: no SIGTERM handler runs, so the running file is left behind.
 
 from datetime import datetime
 from pathlib import Path
@@ -102,7 +100,7 @@ def cmdline_is_lane(cmdline: list[str], verb: str, project_root: str) -> bool:
         if not rest:
             return False
         said = rest[0]
-        if said == verb or (said == LEGACY_VERB and verb in ("snapshot", "versioned", "all")):
+        if said == verb or (said == LEGACY_VERB and verb in ("snapshot", "all")):
             return _names_root(rest[1:], verb, project_root)
         return False
     return False

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: compact.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Injects live state for post-compact recovery (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-10-28
+# Modified: 2026-11-17
 # =============================================
 
 """Reads branch state and injects recovery context before compaction."""
@@ -16,7 +16,8 @@ import os
 import subprocess
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 
 def _read_last_session(branch_dir: Path) -> str | None:
@@ -41,7 +42,7 @@ def _read_last_session(branch_dir: Path) -> str | None:
                 result.append(f"Key learnings available: {', '.join(keys)}")
         return "\n".join(result) if result else None
     except Exception as exc:
-        logger.info("[HOOKS] compact: read session failed: %s", exc)
+        logger.warning("[HOOKS] compact: read session failed: %s", exc)
         return None
 
 
@@ -67,64 +68,67 @@ def _get_git_info() -> str | None:
             result.append(f"Uncommitted changes: {len(lines)} files")
         return "\n".join(result) if result else None
     except Exception as exc:
-        logger.info("[HOOKS] compact: git info failed: %s", exc)
+        logger.warning("[HOOKS] compact: git info failed: %s", exc)
         return None
 
 
 def handle(hook_data: dict) -> dict:
+    """Inject live branch state after a compact; each call leaves one json trail entry."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Inject live branch state for post-compact recovery."""
     try:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         cadence.reset_counter(hook_data=hook_data, caller="compact")
     except Exception as exc:
-        logger.info("[HOOKS] compact: cadence reset failed: %s", exc)
+        logger.warning("[HOOKS] compact: cadence reset failed: %s", exc)
 
     try:
         importlib.import_module("aipass.hooks.apps.modules.grounding_receipt").mark_pending(hook_data)
     except Exception as exc:
         logger.error("[HOOKS] compact: grounding receipt not set pending: %s", exc)
 
-    try:
-        cwd = hook_data.get("cwd", "") or str(Path.cwd())
-        context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
-        branch_dir = context_window.find_branch_dir(cwd)
-        branch_name = branch_dir.name if branch_dir else "unknown"
+    cwd = hook_data.get("cwd", "") or str(Path.cwd())
+    context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
+    branch_dir = context_window.find_branch_dir(cwd)
+    branch_name = branch_dir.name if branch_dir else "unknown"
 
-        sections: list[str] = []
+    sections: list[str] = []
+    sections.append(
+        f"POST-COMPACT RECOVERY — @{branch_name}\n\n"
+        "Context just compacted. Below is your live state. Use it to continue seamlessly."
+    )
+
+    git_info = _get_git_info()
+    if git_info:
+        sections.append(f"## Git\n{git_info}")
+
+    if branch_dir:
+        session_info = _read_last_session(branch_dir)
+        if session_info:
+            sections.append(f"## Last Session\n{session_info}")
+
+    is_dispatched = os.environ.get("AIPASS_SESSION_TYPE") == "dispatched"
+    if is_dispatched:
         sections.append(
-            f"POST-COMPACT RECOVERY — @{branch_name}\n\n"
-            "Context just compacted. Below is your live state. Use it to continue seamlessly."
+            "## DISPATCHED AGENT — SAVE STATE NOW\n"
+            "Before continuing work, you MUST update your memories:\n"
+            "1. Update .trinity/local.json — add/update current session with work done so far\n"
+            "2. Then continue your task from where the summary left off\n\n"
+            "This is non-optional. Compaction just happened — if you don't save now, work history is lost."
+        )
+    else:
+        sections.append(
+            "## Recovery Protocol\n"
+            "- Continue where the summary left off — don't restart or ask generic questions\n"
+            "- .trinity/local.json has full session history and key_learnings — read it if you need more context\n"
+            "- Save memories proactively — compaction just proved you need to\n"
+            "- Match the conversation tone from before compaction"
         )
 
-        git_info = _get_git_info()
-        if git_info:
-            sections.append(f"## Git\n{git_info}")
-
-        if branch_dir:
-            session_info = _read_last_session(branch_dir)
-            if session_info:
-                sections.append(f"## Last Session\n{session_info}")
-
-        is_dispatched = os.environ.get("AIPASS_SESSION_TYPE") == "dispatched"
-        if is_dispatched:
-            sections.append(
-                "## DISPATCHED AGENT — SAVE STATE NOW\n"
-                "Before continuing work, you MUST update your memories:\n"
-                "1. Update .trinity/local.json — add/update current session with work done so far\n"
-                "2. Then continue your task from where the summary left off\n\n"
-                "This is non-optional. Compaction just happened — if you don't save now, work history is lost."
-            )
-        else:
-            sections.append(
-                "## Recovery Protocol\n"
-                "- Continue where the summary left off — don't restart or ask generic questions\n"
-                "- .trinity/local.json has full session history and key_learnings — read it if you need more context\n"
-                "- Save memories proactively — compaction just proved you need to\n"
-                "- Match the conversation tone from before compaction"
-            )
-
-        return {"stdout": "\n\n".join(sections), "exit_code": 0, "sound": "pre compact"}
-
-    except Exception as exc:
-        logger.info("[HOOKS] compact: unexpected error: %s", exc)
-        return {"stdout": "", "exit_code": 0}
+    return {"stdout": "\n\n".join(sections), "exit_code": 0, "sound": "pre compact"}

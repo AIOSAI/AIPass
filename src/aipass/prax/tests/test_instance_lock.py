@@ -3,7 +3,7 @@
 # Description: Tests for the monitor single-instance lock
 # Version: 2.0.0
 # Created: 2026-07-10
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/monitoring/instance_lock.py."""
@@ -21,8 +21,6 @@ import pytest
 
 from aipass.prax.apps.handlers.monitoring import instance_lock as mod
 
-needs_flock = pytest.mark.skipif(mod.fcntl is None, reason="no fcntl on this platform: the lock is a no-op")
-
 
 @pytest.fixture(autouse=True)
 def lock_world(monkeypatch, tmp_path):
@@ -36,7 +34,6 @@ def lock_world(monkeypatch, tmp_path):
     mod.release()
 
 
-@needs_flock
 class TestTryAcquire:
     """One holder at a time, decided by the kernel lock, not by the file's contents."""
 

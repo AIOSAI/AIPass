@@ -1,40 +1,37 @@
 # =================== AIPass ====================
 # Name: readme_map/__init__.py
 # Description: Branch-name to README-path lookup and live README reads
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
-"""readme_map — branch-name → README-path lookup for help_chat live reads.
-
-Only the path map is cached; content never is: every read hits the current file.
-"""
+"""readme_map — branch-name → README-path lookup for `aipass read`; the map is cached, content never."""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
+from aipass.aipass.shared.project_home import _detect_aipass_home
 from aipass.prax import logger
 
 _AIPASS_ROOT: Path | None = None
 
 
 def _detect_aipass_root() -> Path:
-    """Detect the AIPass project root (parent of src/aipass/)."""
+    """The AIPass project root (parent of src/aipass/); raises, never an empty map, when there is none."""
     env_home = os.environ.get("AIPASS_HOME")
     if env_home:
         return Path(env_home)
 
-    current = Path(__file__).resolve()
-    for parent in current.parents:
-        src_aipass = parent / "src" / "aipass"
-        if src_aipass.is_dir():
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "src" / "aipass").is_dir():
             return parent
 
-    # parents[5] is the root in the source layout: src/aipass/aipass/apps/handlers/readme_map/.
-    return Path(__file__).resolve().parents[5]
+    if not (home := _detect_aipass_home()):
+        raise RuntimeError("No AIPass home found, so no branch README can be read: set AIPASS_HOME=/path/to/AIPass")
+    return Path(home)
 
 
 _README_MAP: dict[str, Path] | None = None
@@ -43,7 +40,8 @@ _README_MAP: dict[str, Path] | None = None
 def _build_readme_map() -> dict[str, Path]:
     """Build the branch → README.md path map. Called once, result cached.
 
-    No hardcoded roster: any src/aipass/<dir>/README.md counts, so a new branch is findable."""
+    No hardcoded roster: any src/aipass/<dir>/README.md counts, so a new branch is findable.
+    A dot-dir is tooling, never a branch: pytest's .pytest_cache ships a README.md."""
     global _AIPASS_ROOT
     if _AIPASS_ROOT is None:
         _AIPASS_ROOT = _detect_aipass_root()
@@ -53,7 +51,8 @@ def _build_readme_map() -> dict[str, Path]:
     if not src_aipass.is_dir():
         return result
     for readme in sorted(src_aipass.glob("*/README.md")):
-        result[readme.parent.name] = readme
+        if not readme.parent.name.startswith("."):
+            result[readme.parent.name] = readme
     return result
 
 
@@ -75,19 +74,6 @@ def list_branches() -> list[str]:
 
     Reflects the filesystem as it was when the cached map was first built."""
     return list(_get_map().keys())
-
-
-def read_readme_lines(branch: str) -> list[str] | None:
-    """Live-read README.md for a branch. Returns list of lines, or None on error."""
-    readme_path = get_readme_path(branch)
-    if readme_path is None:
-        return None
-    try:
-        with open(readme_path, encoding="utf-8") as fh:
-            return fh.readlines()
-    except OSError as exc:
-        logger.error("[readme_map] Could not read %s: %s", readme_path, exc)
-        return None
 
 
 def read_readme_at(readme_path: Path) -> str | None:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch3.py
 # Description: Batch 3 tests for 8 sentry checker handlers
-# Version: 1.1.2
+# Version: 1.2.1
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/log_structure_check.py and seven batch-3 sibling checkers."""
@@ -194,6 +194,29 @@ class TestLogVisibilityCheck:
         assert result["score"] == 100
         assert result["passed"] is True
 
+    @pytest.mark.parametrize(
+        "prax_import",
+        [
+            "from aipass.prax import logger\n",
+            "from aipass.prax import (\n    json_handler,\n    logger as log,\n)\n",
+            "from aipass.prax.apps.modules.logger import system_logger\n",
+        ],
+    )
+    def test_prax_logger_in_either_spelling_satisfies_a_get_logger_file(self, tmp_path, prax_import):
+        """FPLAN-1024: the door form is the import the rule asks for; the long form is front_door's to judge."""
+        content = prax_import + "import logging\nmylog = logging.getLogger(__name__)\n"
+        result = log_visibility_check.check_module(_write_temp_py(tmp_path, "door.py", content))
+        rows = {c["name"]: c for c in result["checks"]}
+        assert rows["Prax logger imported"]["passed"] is True
+
+    def test_another_prax_door_name_is_not_the_logger_and_the_cure_names_the_door(self, tmp_path):
+        content = "from aipass.prax import json_handler\nimport logging\nmylog = logging.getLogger(__name__)\n"
+        result = log_visibility_check.check_module(_write_temp_py(tmp_path, "not_logger.py", content))
+        rows = {c["name"]: c for c in result["checks"]}
+        assert rows["Prax logger imported"]["message"] == (
+            "stdlib getLogger() on lines [3] without prax's logger (from aipass.prax import logger)"
+        )
+
 
 class TestLogStructureAndVisibilityReadCodeLinesOnly:
     """Both checkers judge code lines through the shared prose_lines helper; docstrings are prose."""
@@ -342,6 +365,14 @@ class TestModulesCheck:
         assert result["passed"] is True
 
 
+PERMISSION_SAMPLES = Path(__file__).parent / "fixtures" / "permission_flags"
+
+
+def _permission_sample(name: str) -> str:
+    """Read a permission_flags sample; the flag lives in data so this file never carries it."""
+    return (PERMISSION_SAMPLES / f"{name}.txt").read_text(encoding="utf-8")
+
+
 class TestPermissionFlagsCheck:
     """Tests for permission_flags_check.check_module."""
 
@@ -365,10 +396,7 @@ class TestPermissionFlagsCheck:
 
     def test_permission_flags_violation_caught(self, tmp_path):
         """File using dangerously-skip-permissions is caught."""
-        content = textwrap.dedent("""\
-            CMD = "--dangerously-skip-permissions"
-            run(CMD)
-        """)
+        content = _permission_sample("flag_in_code_then_run")
         filepath = _write_temp_py(tmp_path, "bad_perm.py", content)
 
         checker = self._import()
@@ -381,9 +409,7 @@ class TestPermissionFlagsCheck:
 
     def test_permission_flags_bypass_respected(self, tmp_path):
         """Bypass rule for permission_flags yields score 100."""
-        content = textwrap.dedent("""\
-            CMD = "--dangerously-skip-permissions"
-        """)
+        content = _permission_sample("flag_in_code")
         filepath = _write_temp_py(tmp_path, "bypass_perm.py", content)
 
         checker = self._import()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for memory tests — write fence, infrastructure stand-ins, live-fleet guards
-# Version: 1.3.0
+# Version: 1.5.2
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-18
 # Category: memory/tests
 # =============================================
 
@@ -26,13 +26,15 @@ from unittest.mock import MagicMock
 # Captured before any mock: the branch json shim binds `from aipass.prax import json_handler`,
 # so the prax stand-in below must carry it or a reimport of the json package fails.
 from aipass.prax import json_handler as _prax_json_service
+from aipass.prax import branch_state_root as _prax_branch_state_root
 
 # Captured at collection so no test's sys.modules stand-in can shadow it.
 from aipass.memory.apps.handlers import write_fence as _write_fence
 from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.handlers.templates import trinity_push
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.memory.tests.support_config_verbs import _real_verbs
+from aipass.trigger import Trigger as _Trigger
 
 # Nothing under .archive/ is a test.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
@@ -58,6 +60,8 @@ def _mock_infrastructure(monkeypatch):
     prax_mod.__path__ = [str(Path(__file__).resolve().parents[2] / "prax")]
     prax_mod.logger = mock_logger  # type: ignore[attr-defined]
     prax_mod.json_handler = _prax_json_service  # type: ignore[attr-defined]
+    prax_mod.branch_state_root = _prax_branch_state_root  # type: ignore[attr-defined]
+    setattr(prax_mod, "get_system_logger", MagicMock(return_value=mock_logger))
     prax_modules_mod = MagicMock()
     prax_modules_mod.logger = MagicMock()
     prax_modules_mod.logger.get_system_logger = MagicMock(return_value=mock_logger)
@@ -76,29 +80,33 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
 
-    mock_trigger = MagicMock()
-    mock_trigger.fire = MagicMock()
-    trigger_mod = MagicMock()
-    trigger_mod.Trigger = mock_trigger
-    monkeypatch.setitem(sys.modules, "aipass.trigger", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
+
+@pytest.fixture(autouse=True)
+def bus(monkeypatch):
+    """@trigger's bus, fire patched on the class (trigger's one supported route): the instance reaches it too.
+
+    No memory test fires the real bus; a test asks for this fixture to read its calls or set side_effect."""
+    recorder = MagicMock(return_value={})
+    monkeypatch.setattr(_Trigger, "fire", recorder)
+    return recorder
 
 
 @pytest.fixture
 def live_fleet():
     """The real installation's repo root, or SKIP if this machine has no fleet.
 
-    An empty registry is the absence of a measurement, not a pass. BOTH lanes' roots are checked.
+    An empty registry is the absence of a measurement, not a pass. BOTH lanes are checked, the push by its scope.
     """
-    for root in (registry_scope.REPO_ROOT, trinity_push._REPO_ROOT):
-        registry = root / registry_scope.CORE_REGISTRY
-        if not registry.is_file():
-            pytest.skip(f"no {registry_scope.CORE_REGISTRY} at {root} -- live-state guard skipped")
-        if not _registry_branch_rows(registry):
-            pytest.skip(f"{registry_scope.CORE_REGISTRY} at {root} has no branch rows -- live-state guard skipped")
-    return registry_scope.REPO_ROOT
+    root = registry_scope.REPO_ROOT
+    registry = root / registry_scope.CORE_REGISTRY
+    if not registry.is_file():
+        pytest.skip(f"no {registry_scope.CORE_REGISTRY} at {root} -- live-state guard skipped")
+    if not _registry_branch_rows(registry):
+        pytest.skip(f"{registry_scope.CORE_REGISTRY} at {root} has no branch rows -- live-state guard skipped")
+    push_scope = trinity_push.resolve_scope()
+    if push_scope["error"] or not push_scope["branches"]:
+        pytest.skip(f"the push lane resolves no fleet ({push_scope['error']}) -- live-state guard skipped")
+    return root
 
 
 @pytest.fixture
@@ -183,7 +191,7 @@ def _an_external_citizen_exists(repo_root, declared):
 
 @pytest.fixture
 def case_insensitive_filesystem(monkeypatch):
-    """Make ``Path.glob`` match the way Windows and macOS match.
+    """Make ``Path.glob`` match the way a case-insensitive filesystem matches.
 
     Pins the widened match on Linux, not a skipif; ``fnmatchcase`` because ``fnmatch`` consults the host.
     """
@@ -211,7 +219,7 @@ def case_insensitive_filesystem(monkeypatch):
 
 @pytest.fixture
 def case_insensitive_exists(monkeypatch):
-    """Make ``Path.exists`` case-fold as Windows does; it only ever ADDS a True, so a global patch is safe."""
+    """``Path.exists`` case-folded as on a case-insensitive filesystem; it only ADDS a True: a global patch is safe."""
     import os as _os
 
     real_exists = Path.exists
@@ -231,8 +239,8 @@ def case_insensitive_exists(monkeypatch):
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
-    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    """Rich sizes an unpinned console on every print: 80 under pytest's capture,
+    the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 
@@ -248,3 +256,17 @@ def clean_command_state() -> Generator[None, None, None]:
 def verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Real config_loader + rollover module wired to a MINTED config and registry (see :func:`_real_verbs`)."""
     return _real_verbs(tmp_path, monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def _registry_refusals_start_unlogged(monkeypatch):
+    """The once-per-state refusal set is process-wide: a fresh one per test, or one test silences the next."""
+    monkeypatch.setattr(registry_scope, "_LOGGED_REFUSALS", {})
+
+
+@pytest.fixture(autouse=True)
+def _prax_stand_in_carries_append_jsonl(_mock_infrastructure, monkeypatch):
+    """A module first imported under the prax stand-in must resolve its door, and no test appends a real record."""
+    import sys
+
+    monkeypatch.setattr(sys.modules["aipass.prax"], "append_jsonl", MagicMock(), raising=False)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.9.0
+# Version: 1.11.0
 # Created: 2026-06-15
-# Modified: 2026-10-26
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -14,10 +14,11 @@ Reference: docs/scheduler_tick.md
 
 import sys
 import time
+from pathlib import Path
 from typing import List
 
-from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.prax import branch_state_root, logger
+from aipass.cli import console
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.modules.rotation import ROTATION_TYPE, fire_rotation
@@ -46,10 +47,9 @@ from aipass.daemon.apps.handlers.schedule import command_job
 from aipass.daemon.apps.handlers.schedule.job_reference import job_reference_lines
 from aipass.daemon.apps.handlers.schedule import recovery
 from aipass.daemon.apps.handlers.schedule import tick_lock
-from aipass.daemon.apps.handlers.module_root import module_file
 
-_DAEMON_ROOT = module_file(__file__).parents[2]  # src/aipass/daemon/
-LOCK_FILE = _DAEMON_ROOT / "daemon_json" / "schedule.lock"
+_DAEMON_ROOT = Path(__file__).resolve().parents[2]  # src/aipass/daemon/
+LOCK_FILE = branch_state_root("daemon") / "daemon_json" / "schedule.lock"
 
 HANDLED_COMMANDS = {"run"}
 
@@ -95,12 +95,13 @@ def print_help():
         console.print(line)
 
 
-def _log(message: str) -> None:
-    """Print timestamped log line."""
-    from datetime import datetime
+def _event(message: str) -> None:
+    """One tick event: the prax line is the record (stdout is null under the timer), the console a hand run's report.
 
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    console.print(f"[{timestamp}] {message}")
+    Defined here so a handler's event, handed this callback, lands in logs/run.log: prax names the file by caller.
+    """
+    logger.info("[run] %s", message)
+    console.print(message)
 
 
 def _blocked_reason(status) -> str:
@@ -119,7 +120,8 @@ def _mail_notice(to: str, subject: str, body: str) -> None:
     """Send a command job's notify.email mail. A mail that fails is logged; it never changes the fire."""
     failure = command_job.send_mail(to, subject, body, _DAEMON_ROOT)  # signed @daemon: cwd is identity
     if failure:
-        _log(f"WARNING: notify mail to {to} not sent — {failure}")
+        # stdout, not warning(): under the timer stderr is the crash record, and this is not a crash.
+        console.print(f"Notify mail to {to} not sent — {failure}")
         logger.warning("[run] notify mail to %s not sent: %s", to, failure)
 
 
@@ -131,7 +133,7 @@ def _fire_command_job(job: dict) -> tuple:
     owner, job_id, command = job["owner"], job["id"], job["command"]
     mail_to = command_job.notify_email(job)
 
-    _log(f"FIRE: {owner}/{job_id} -> command: {command}")
+    console.print(f"FIRE: {owner}/{job_id} -> command: {command}")
     logger.info("[run] FIRE %s/%s command: %s", owner, job_id, command)
     if mail_to:
         _mail_notice(mail_to, *command_job.start_mail(job))
@@ -140,7 +142,7 @@ def _fire_command_job(job: dict) -> tuple:
         command, job.get("branch_path"), command_job.timeout_for(job), command_job.ok_exit_codes_for(job)
     )
     done = command_job.done_text(result)
-    _log(f"DONE: {owner}/{job_id} — {done}")
+    console.print(f"DONE: {owner}/{job_id} — {done}")
     (logger.info if result.ok else logger.warning)("[run] DONE %s/%s %s", owner, job_id, done)
     if mail_to:
         _mail_notice(mail_to, *command_job.finish_mail(job, result))
@@ -166,7 +168,7 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
             logger.warning("[run] Failed to fire %s/%s: %s", job["owner"], job["id"], detail)
         return (OUTCOME_FIRED if ok else OUTCOME_FAILED), detail
 
-    from aipass.ai_mail.apps.modules.door_wake import wake_branch
+    from aipass.ai_mail import wake_branch
 
     owner = job["owner"]
     job_id = job["id"]
@@ -179,7 +181,7 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
     # Absent stays absent: the default provider is wake_branch's to name, not a second copy here.
     provider_kwarg = {"provider": provider} if provider else {}
 
-    _log(f"FIRE: {owner}/{job_id} -> wake_branch({owner}, fresh={fresh}, model={model}, provider={provider})")
+    _event(f"FIRE: {owner}/{job_id} -> wake_branch({owner}, fresh={fresh}, model={model}, provider={provider})")
 
     try:
         status, ok = wake_branch(
@@ -197,23 +199,23 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
             **provider_kwarg,
         )
         if ok:
-            _log(f"OK: {owner}/{job_id} — {status.summary}")
+            console.print(f"OK: {owner}/{job_id} — {status.summary}")
             logger.info("[run] Fired %s/%s successfully", owner, job_id)
             return OUTCOME_FIRED, ""
 
         blocked = _blocked_reason(status)
         if blocked:
-            _log(f"BLOCKED: {owner}/{job_id} — {blocked}; stays due, retries this window")
+            console.print(f"BLOCKED: {owner}/{job_id} — {blocked}; stays due, retries this window")
             logger.info("[run] Blocked firing %s/%s: %s — not recorded as a run", owner, job_id, blocked)
             return OUTCOME_BLOCKED, blocked
 
         msg = status.summary
-        _log(f"FAIL: {owner}/{job_id} — {msg}")
+        console.print(f"FAIL: {owner}/{job_id} — {msg}")
         logger.warning("[run] Failed to fire %s/%s: %s", owner, job_id, msg)
         return OUTCOME_FAILED, msg
     except Exception as e:
         logger.error("[run] Exception firing %s/%s: %s", owner, job_id, e)
-        _log(f"ERROR: {owner}/{job_id} — {e}")
+        console.print(f"FAIL: {owner}/{job_id} — exception: {e}")
         return OUTCOME_FAILED, str(e)
 
 
@@ -239,19 +241,20 @@ def _seed_interval_slots(enabled: List[dict], runstate: dict, dry_run: bool) -> 
                 owner,
                 job_id,
             )
-            _log(
+            console.print(
                 f"WARNING: {owner}/{job_id} — no slot, first fire is immediate at this tick's minute "
                 "(never, if its interval is not a positive number)"
             )
             continue
 
         if dry_run:
-            _log(f"DRY RUN — would seed {owner}/{job_id} from slot {slot}")
+            console.print(f"DRY RUN — would seed {owner}/{job_id} from slot {slot}")
             continue
 
         seeded = seed_interval_slot(runstate, job)
         if seeded is None:
-            _log(
+            logger.warning("[run] %s/%s slot %r not seeded", owner, job_id, slot)
+            console.print(
                 f"WARNING: {owner}/{job_id} — slot {slot!r} not seeded: an unreadable slot fires "
                 "immediately, an interval that is not a positive number never fires"
             )
@@ -259,7 +262,7 @@ def _seed_interval_slots(enabled: List[dict], runstate: dict, dry_run: bool) -> 
 
         seeded_count += 1
         next_run = runstate["jobs"][job_key(owner, job_id)].get("next_run")
-        _log(f"SEED: {owner}/{job_id} — slot {slot}, last_run seeded {seeded}, first fire {next_run}")
+        _event(f"SEED: {owner}/{job_id} — slot {slot}, last_run seeded {seeded}, first fire {next_run}")
 
     if seeded_count and not dry_run:
         save_runstate(runstate)
@@ -279,7 +282,7 @@ def _report_missed_windows(enabled: List[dict], runstate: dict, dry_run: bool) -
         catch_up = catch_up_on(job.get("schedule", {}))
 
         if dry_run:
-            _log(f"DRY RUN — would record MISSED {owner}/{job_id} (window {window})")
+            console.print(f"DRY RUN — would record MISSED {owner}/{job_id} (window {window})")
             continue
 
         if not note_missed_window(runstate, owner, job_id):
@@ -291,7 +294,7 @@ def _report_missed_windows(enabled: List[dict], runstate: dict, dry_run: bool) -
         failed_at = failed_today_at(runstate, owner, job_id)
         unrun = f"no successful run (last attempt failed at {failed_at})" if failed_at else "no run"
         logger.warning("[run] MISSED %s/%s: window %s closed with %s; %s", owner, job_id, window, unrun, tail)
-        _log(f"MISSED: {owner}/{job_id} — window {window} closed with {unrun}; {tail}")
+        console.print(f"MISSED: {owner}/{job_id} — window {window} closed with {unrun}; {tail}")
 
     if missed_count and not dry_run:
         save_runstate(runstate)
@@ -330,22 +333,27 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
     }
 
     json_handler.log_operation("scheduler_tick", {"dry_run": dry_run})
+    # A dry run tells the console only: it changed nothing, so it owes the log nothing.
+    lane_log = console.print if dry_run else _event
 
-    _log("Discovering .daemon/ schedule files...")
+    console.print("Discovering .daemon/ schedule files...")
     skipped_owners: set = set()
-    jobs = discover_jobs(skipped_owners=skipped_owners)
+    refusals: list = []
+    jobs = discover_jobs(skipped_owners=skipped_owners, refusals=refusals)
     results["discovered"] = len(jobs)
+    for refusal in refusals:
+        console.print(f"Refused, not scheduled: {refusal}")
 
     if not jobs:
-        _log("No jobs discovered.")
+        console.print("No jobs discovered.")
         return results
 
     enabled = [j for j in jobs if j.get("enabled", True)]
     results["enabled"] = len(enabled)
-    _log(f"Found {len(jobs)} job(s), {len(enabled)} enabled")
+    console.print(f"Found {len(jobs)} job(s), {len(enabled)} enabled")
 
     if not enabled:
-        _log("No enabled jobs.")
+        console.print("No enabled jobs.")
         return results
 
     # Save prunes now: quiet ticks never reach the save in the fire loop. A half-read owner keeps its rows.
@@ -353,12 +361,12 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
     pruned = prune_orphans(runstate, active_keys, keep_owners=skipped_owners)
     if pruned and not dry_run:
         save_runstate(runstate)
-        _log(f"Pruned {pruned} orphan runstate entr{'y' if pruned == 1 else 'ies'}")
+        _event(f"Pruned {pruned} orphan runstate entr{'y' if pruned == 1 else 'ies'}")
 
     results["seeded"] = _seed_interval_slots(enabled, runstate, dry_run)
 
     # Before the due check: an open window can only supersede its queued entry if the entry exists.
-    gap, results["queued"] = catch_up_lane.detect_and_queue(enabled, runstate, dry_run, _log)
+    gap, results["queued"] = catch_up_lane.detect_and_queue(enabled, runstate, dry_run, lane_log)
 
     results["missed"] = _report_missed_windows(enabled, runstate, dry_run)
 
@@ -367,18 +375,18 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
     results["skipped"] = len(enabled) - len(due_jobs)
 
     if not due_jobs:
-        _log("No jobs due at this time.")
+        console.print("No jobs due at this time.")
         for j in enabled:
-            _log(f"  {j['owner']}/{j['id']} — not due")
-        results["drained"] = catch_up_lane.drain_one(runstate, enabled, dry_run, _log, _fire_job)
+            console.print(f"  {j['owner']}/{j['id']} — not due")
+        results["drained"] = catch_up_lane.drain_one(runstate, enabled, dry_run, lane_log, _fire_job)
         return results
 
-    _log(f"{len(due_jobs)} job(s) due:")
+    console.print(f"{len(due_jobs)} job(s) due:")
     for j in due_jobs:
-        _log(f"  {j['owner']}/{j['id']} ({j['schedule']['type']})")
+        console.print(f"  {j['owner']}/{j['id']} ({j['schedule']['type']})")
 
     if dry_run:
-        _log("DRY RUN — no jobs fired.")
+        console.print("DRY RUN — no jobs fired.")
         return results
 
     for job in due_jobs:
@@ -389,7 +397,7 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
         superseded = recovery.drop_from_queue(runstate, job["owner"], job["id"])
         missed_list = superseded.get("missed", []) if superseded else []
         if superseded:
-            _log(
+            _event(
                 f"SUPERSEDED: {job['owner']}/{job['id']} — regular window arrived first, "
                 f"carrying {len(missed_list)} missed window(s) on this wake"
             )
@@ -402,7 +410,7 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
             if caught_up:
                 results["caught_up"] += 1
                 window = window_label(job["schedule"])
-                _log(f"CAUGHT UP: {job['owner']}/{job['id']} — ran after its {window} window closed")
+                _event(f"CAUGHT UP: {job['owner']}/{job['id']} — ran after its {window} window closed")
             update_job_runstate(runstate, job["owner"], job["id"], job["schedule"], caught_up=caught_up)
         elif outcome == OUTCOME_BLOCKED:
             # Never stamps last_run: the job stays due for the next tick.
@@ -417,9 +425,9 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
             time.sleep(1.0)
 
     # At most one catch-up per tick, and only after the on-time fires.
-    results["drained"] = catch_up_lane.drain_one(runstate, enabled, dry_run, _log, _fire_job)
+    results["drained"] = catch_up_lane.drain_one(runstate, enabled, dry_run, lane_log, _fire_job)
 
-    _log(
+    _event(
         f"Tick complete: {results['fired']} fired, {results['failed']} failed, "
         f"{results['blocked']} blocked, {results['skipped']} skipped, "
         f"{results['seeded']} seeded, {results['missed']} missed, {results['caught_up']} caught up, "
@@ -435,14 +443,9 @@ def _run_with_lock(dry_run: bool = False) -> int:
     """
     tick_lock.prepare(LOCK_FILE)
 
-    if not tick_lock.available():
-        _log("fcntl not available (non-Unix), running without lock.")
-        results = run_tick(dry_run)
-        return 1 if results["failed"] > 0 else 0
-
     handle = tick_lock.acquire(LOCK_FILE)
     if handle is None:
-        _log("Another scheduler instance is running, skipping.")
+        _event("Another scheduler instance is running, skipping.")
         return 0
 
     try:
@@ -465,12 +468,12 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     dry_run = "--dry-run" in args
 
-    _log("=" * 60)
-    _log("Decentralized scheduler tick")
+    console.print("=" * 60)
+    console.print("Decentralized scheduler tick")
 
     exit_code = _run_with_lock(dry_run)
 
-    _log("=" * 60)
+    console.print("=" * 60)
 
     if exit_code != 0:
         sys.exit(exit_code)

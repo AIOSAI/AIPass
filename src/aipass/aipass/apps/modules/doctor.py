@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.14.0
+# Version: 1.18.1
 # Created: 2026-04-16
-# Modified: 2026-10-28
+# Modified: 2026-11-18
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -16,18 +16,16 @@ import re
 import subprocess
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
-from rich.markup import escape
-from aipass.cli.apps.modules import console, error as cli_error, success
+
+from rich.text import Text
+from aipass.cli import console, error as cli_error
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.shared.registry_discovery import find_registry as _discover_registry
 from aipass.aipass.shared.project_home import _detect_aipass_home, find_fenceless_projects
 
-from aipass.aipass.apps.handlers.cross_os import RunRecordError, generate_run_record
-from aipass.aipass.apps.handlers.cross_os.doctor_rows import check_cross_os, record_path_arg
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.aipass.apps.handlers.provider_wire import platform_bridge_command
 from aipass.aipass.apps.handlers.settings_backup import DOOR_DOCTOR_FIX, DOOR_INSTALL
 from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     check_broker_alive,
@@ -37,7 +35,6 @@ from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     check_rg_present,
     check_sandbox_flag,
     check_srt_resolvable,
-    is_linux,
 )
 from aipass.aipass.apps.handlers.admin_lane import check_admin_lane
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
@@ -78,7 +75,6 @@ from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_ram,
     detect_shell,
 )
-from aipass.aipass.apps.handlers.module_root import module_file
 from aipass.aipass.apps.handlers.ui.progress import (
     GLYPH_FAIL,
     GLYPH_PASS,
@@ -91,8 +87,7 @@ COMMAND = "doctor"
 
 AGENTS_MD_MIN_CLAUDE = (2, 1, 277)
 
-# module_file, not resolve(): import-time cwd read on Windows (module_root).
-_BRANCH_ROOT = module_file(__file__).parents[2]
+_BRANCH_ROOT = Path(__file__).resolve().parents[2]
 
 
 class CheckResult(NamedTuple):
@@ -266,14 +261,36 @@ def _check_home_agreement(active: str, configured: str) -> List[CheckResult]:
     ]
 
 
+_NO_OWNER_ROOT = (
+    "no AIPass project here and no AIPASS_HOME",
+    "cd into an AIPass project, or export AIPASS_HOME=/path/to/aipass",
+)
+
+
+def _owner_project_root() -> Path | None:
+    """The project sync-registry reads: cwd's, else AIPASS_HOME's (env, then global settings)."""
+    home = os.environ.get("AIPASS_HOME", "") or _configured_aipass_home()
+    for start in (Path.cwd(), Path(home) if home else None):
+        if start is None:
+            continue
+        reg = _discover_registry(start_path=start)
+        if reg is not None and reg.exists():
+            return reg.parent
+    return None
+
+
 def _check_owner_seating() -> List[CheckResult]:
     """Check owner/identity health via the frozen sync-registry --check contract."""
+    root = _owner_project_root()
+    if root is None:
+        return [CheckResult("owner", GLYPH_WARN, *_NO_OWNER_ROOT)]
     try:
         proc = subprocess.run(
             ["drone", "@spawn", "sync-registry", "--check", "--json"],
             capture_output=True,
             text=True,
             timeout=30,
+            cwd=root,
         )
     except FileNotFoundError:
         logger.info("[doctor] drone not on PATH — skipping owner seating check")
@@ -283,10 +300,15 @@ def _check_owner_seating() -> List[CheckResult]:
         return [CheckResult("owner", GLYPH_WARN, "check timed out", "")]
 
     stdout = proc.stdout.strip()
-    if not stdout:
-        if proc.returncode == 0:
-            return [CheckResult("owner", GLYPH_PASS, "clean (no details)", "")]
-        return [CheckResult("owner", GLYPH_WARN, "no output from check", "")]
+    if not stdout:  # an exit code alone is no verdict: the check printed nothing
+        return [
+            CheckResult(
+                "owner",
+                GLYPH_WARN,
+                f"sync-registry --check printed nothing (exit {proc.returncode})",
+                f"Run 'drone @spawn sync-registry --check --json' in {root}",
+            )
+        ]
 
     try:
         data = json.loads(stdout)
@@ -318,12 +340,16 @@ def _check_owner_seating() -> List[CheckResult]:
 
 def _fix_owner_seating() -> List[CheckResult]:
     """Delegate owner/identity repair to spawn's sync-registry --fix."""
+    root = _owner_project_root()
+    if root is None:
+        return [CheckResult("owner fix", GLYPH_WARN, *_NO_OWNER_ROOT)]
     try:
         proc = subprocess.run(
             ["drone", "@spawn", "sync-registry", "--fix"],
             capture_output=True,
             text=True,
             timeout=60,
+            cwd=root,
         )
     except FileNotFoundError:
         logger.info("[doctor] drone not on PATH — skipping owner fix")
@@ -442,12 +468,10 @@ def _find_manifest() -> Path | None:
 def check_provider_manifest(
     interactive: bool = False,
     settings_path: Optional[Path] = None,
-    os_name: Optional[str] = None,
 ) -> List[CheckResult]:
     """Check provider settings against manifest. Returns hook/env/permission results.
 
-    Public: init_flow's report reads the manifest gaps through it. The --fix write lives in
-    fix_provider_settings. settings_path and os_name are test seams; product callers pass neither.
+    The --fix write lives in fix_provider_settings. settings_path is a test seam; product callers pass none.
     """
     if settings_path is None:
         settings_path = Path.home() / ".claude" / "settings.json"
@@ -475,19 +499,23 @@ def check_provider_manifest(
         return results
 
     manifest_hooks = claude_section.get("hooks", [])
-    provider: dict = {}
+    provider: object = {}
+    unreadable = "Repair its JSON by hand; doctor judges nothing against it until then"
     if settings_path.exists():
         try:
             provider = json.loads(settings_path.read_text(encoding="utf-8"))
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             logger.warning("[doctor] provider settings read error: %s", exc)
-    provider = provider if isinstance(provider, dict) else {}
+            return [
+                CheckResult("hooks", GLYPH_FAIL, f"provider settings unreadable: {settings_path}: {exc}", unreadable)
+            ]
+    if not isinstance(provider, dict):
+        return [CheckResult("hooks", GLYPH_FAIL, f"provider settings not a JSON object: {settings_path}", unreadable)]
     provider_hooks: dict = provider.get("hooks", {})
 
     missing_hooks = []
     for hook in manifest_hooks:
-        # Same OS transform provider_wire applies at write time, so verify agrees with write.
-        command = platform_bridge_command(hook.get("command", ""), os_name)
+        command = hook.get("command", "")
         event = hook.get("event", "")
         if not command or not event:
             continue
@@ -580,8 +608,8 @@ def check_provider_manifest(
             missing_settings,
             settings_path=settings_path,
         )
-        if wired:  # the re-read after a wire reads the same file, on the same platform
-            return check_provider_manifest(interactive=False, settings_path=settings_path, os_name=os_name)
+        if wired:  # the re-read after a wire reads the same file
+            return check_provider_manifest(interactive=False, settings_path=settings_path)
 
     return results
 
@@ -653,7 +681,8 @@ def _check_drone_systems() -> List[CheckResult]:
 
     routed = _drone_system_names(proc.stdout)
     if not routed:
-        return [CheckResult("drone", GLYPH_PASS, "ok", "")]
+        logger.warning("[doctor] drone systems listed no agents: %r", proc.stdout[:200])
+        return [CheckResult("drone", GLYPH_WARN, "drone systems listed no agents", "Run 'drone systems' to see why")]
 
     registered = _registry_citizen_names()
     # Only drone-side extras matter here. A citizen the registry lists but drone
@@ -674,9 +703,7 @@ def _check_drone_systems() -> List[CheckResult]:
 
 
 def _home_venv_python(home: Path) -> Path:
-    """The home's venv interpreter: .venv/Scripts/python.exe on Windows, else .venv/bin/python."""
-    if os.name == "nt":
-        return home / ".venv" / "Scripts" / "python.exe"
+    """The home's venv interpreter: .venv/bin/python."""
     return home / ".venv" / "bin" / "python"
 
 
@@ -772,6 +799,12 @@ def _check_community() -> List[CheckResult]:
     return results
 
 
+_UNSEATED = {
+    "no_passport": ("no readable passport", "Run 'aipass doctor --fix'"),
+    "no_seed": ("no passport seed", "Run 'aipass doctor --fix'"),
+}
+
+
 def _check_structure() -> List[CheckResult]:
     """Run Structure group checks — agent placement, pollution, registry consistency."""
     results: List[CheckResult] = []
@@ -825,6 +858,9 @@ def _check_structure() -> List[CheckResult]:
         reg_issues = check_registry_consistency(reg_path, agents, project_root=project_root)
         if reg_issues:
             for issue in reg_issues:
+                if issue.problem in _UNSEATED:
+                    results.append(CheckResult(f"registry: {issue.branch_name}", GLYPH_FAIL, *_UNSEATED[issue.problem]))
+                    continue
                 glyph = GLYPH_FAIL if issue.problem == "missing" else GLYPH_WARN
                 results.append(
                     CheckResult(f"registry: {issue.branch_name}", glyph, issue.problem, issue.registered_path)
@@ -853,7 +889,9 @@ def _check_structure() -> List[CheckResult]:
 
     # Nested projects/<name> must exclude the host's AGENTS.md and CLAUDE.md pairs,
     # or Claude Code inherits them through the ancestor walk.
-    if aipass_home:
+    if aipass_home is None:
+        results.append(CheckResult("aipass home", GLYPH_FAIL, "not found", "Set AIPASS_HOME=/path/to/AIPass"))
+    else:
         fenceless = find_fenceless_projects(aipass_home)
         if fenceless:
             for proj in fenceless:
@@ -912,10 +950,6 @@ def _check_sandbox() -> List[CheckResult]:
         ]
 
     results: List[CheckResult] = []
-    if not is_linux():
-        results.append(CheckResult("sandbox", GLYPH_PASS, "kernel sandbox: Linux-only, not checked", ""))
-        return results
-
     results.append(CheckResult("sandbox flag", GLYPH_PASS, "AIPASS_SANDBOX_ENABLED=ON", ""))
 
     def _sev(ok: bool) -> str:
@@ -948,77 +982,6 @@ def _check_sandbox() -> List[CheckResult]:
     results.append(CheckResult("broker daemon", _sev(broker["alive"]), broker["detail"], ""))
 
     return results
-
-
-def run_cross_os(run_e2e: bool = False) -> int:
-    """Render only the cross-OS pre-flight group (`aipass doctor --cross-os`).
-
-    Returns the error (FAIL) count; warnings do not fail, matching run_doctor.
-    When ``run_e2e`` is set (``--cross-os --e2e``), the heavy e2e suite runs too.
-    """
-    console.print()
-    console.print("[bold cyan]aipass doctor --cross-os[/bold cyan]")
-    console.print("[dim]machine pre-flight (Layer-3-lite) — augments, never replaces, the human acceptance pass[/dim]")
-    if run_e2e:
-        console.print("[dim]--e2e: running the heavy Phase-2 e2e wiring suite (builds a wheel + fresh venv)…[/dim]")
-    console.print()
-
-    checks = check_cross_os(run_e2e=run_e2e)
-    pass_count = 0
-    warn_count = 0
-    error_count = 0
-
-    console.print("  [bold]Cross-OS[/bold]")
-    for check in checks:  # rows carry registry and probe text, never markup: escaped so brackets print as written
-        line = format_check(escape(check.label), check.glyph, escape(check.detail), escape(check.remediation))
-        console.print(line)
-        if check.glyph == GLYPH_PASS:
-            pass_count += 1
-        elif check.glyph == GLYPH_WARN:
-            warn_count += 1
-        else:
-            error_count += 1
-    console.print()
-
-    console.print("[dim]─────────────────────────────────[/dim]")
-    console.print(
-        f"  [green]✓ pass: {pass_count}[/green]  "
-        f"[yellow]! warnings: {warn_count}[/yellow]  "
-        f"[red]✗ errors: {error_count}[/red]"
-    )
-    console.print()
-
-    logger.info("[doctor] cross-os run — pass=%d warn=%d error=%d", pass_count, warn_count, error_count)
-    return error_count
-
-
-def run_cross_os_record(path: str | None = None, run_e2e: bool = False) -> int:
-    """Generate a machine pre-flight Run Record (`aipass doctor --cross-os --record`).
-
-    Returns 0 on success, 1 if the file could not be written (never crashes).
-    """
-    console.print()
-    console.print("[bold cyan]aipass doctor --cross-os --record[/bold cyan]")
-    console.print(
-        "[dim]machine pre-flight DRAFT — auto-fills what the machine can prove; "
-        "a human still runs the real Layer-3 pass[/dim]"
-    )
-    if run_e2e:
-        console.print("[dim]--e2e: running the heavy Phase-2 e2e suite (builds a wheel + fresh venv)…[/dim]")
-    console.print()
-
-    try:
-        written = generate_run_record(path, run_heavy_e2e=run_e2e)
-    except RunRecordError as exc:
-        cli_error(str(exc))
-        logger.error("[doctor] cross-os run record failed: %s", exc)
-        return 1
-
-    success(f"Run Record written: {written}")
-    console.print("[dim]Complete the '— human' rows and run the real Layer-3 acceptance pass before it counts.[/dim]")
-    console.print()
-    logger.info("[doctor] cross-os run record written to %s", written)
-    return 0
 
 
 def _check_tier0(root: Path, aipass_home: str | None, preview: str) -> List[CheckResult]:
@@ -1086,10 +1049,7 @@ def _check_shared_skills(root: Path) -> List[CheckResult]:
 
     state = bs.shared_skills_state(root)
     fix = f"Run: {_FIX_COMMAND}"
-    symlinks = (
-        "on Windows it needs 'git config core.symlinks true' and the right to make links; without "
-        f"them {_FIX_COMMAND} writes a copy that will not follow {bs.SKILLS_REL}"
-    )
+    symlinks = f"where the filesystem refuses links, {_FIX_COMMAND} writes a copy that will not follow {bs.SKILLS_REL}"
     rows: List[CheckResult] = []
     if not state["skills"]:
         rows.append(
@@ -1110,7 +1070,7 @@ def _check_shared_skills(root: Path) -> List[CheckResult]:
         rows.append(CheckResult("skills link", GLYPH_WARN, detail, f"{fix} ({symlinks})"))
     elif link == bs.LINK_STATE_COPY:
         detail = f"{bs.SKILLS_LINK_REL} is a copy, not a link: it will not follow {bs.SKILLS_REL}"
-        rows.append(CheckResult("skills link", GLYPH_WARN, detail, f"Make it the link: {symlinks}"))
+        rows.append(CheckResult("skills link", GLYPH_WARN, detail, f"Make it the link to ../{bs.SKILLS_REL}"))
     else:
         detail = f"{bs.SKILLS_LINK_REL} points at {state['link_to']}, not {bs.SKILLS_REL}"
         rows.append(CheckResult("skills link", GLYPH_WARN, detail, f"Point it at ../{bs.SKILLS_REL}"))
@@ -1188,6 +1148,8 @@ def _check_scaffold() -> List[CheckResult]:
         results.append(CheckResult("scaffold version", GLYPH_WARN, f"{stamped or 'unstamped'} → {installed}", preview))
 
     aipass_home = _detect_aipass_home()
+    if aipass_home is None:
+        results.append(CheckResult("aipass home", GLYPH_FAIL, "not found", "Set AIPASS_HOME=/path/to/AIPass"))
 
     # tier0 is the prompt injected every turn — the one file whose drift a
     # manager feels immediately, so it gets its own line rather than a count.
@@ -1239,12 +1201,13 @@ def _compute_doctor_groups(
     fix: bool = False,
     door: str = DOOR_DOCTOR_FIX,
     yes: bool = False,
+    non_interactive: bool = False,
 ) -> Dict[str, List[CheckResult]]:
     """Run all six check groups (optionally auto-fixing). Returns them by group name.
 
-    With *fix*, the settings step shows its plan and asks once before writing:
-    *yes* skips the question, door ``install`` never asks, and *door*
-    names the writer in the settings backup and receipt.
+    With *fix*, the settings step shows its plan and asks once before writing: *yes* skips
+    the question, *non_interactive* writes nothing, and *door* names the writer in the
+    settings backup and receipt.
     """
     group_specs = [
         ("System", _check_system),
@@ -1259,11 +1222,19 @@ def _compute_doctor_groups(
     with make_doctor_progress() as progress:
         for name, runner in group_specs:
             task_id = progress.add_task(f"checking {name}...", total=None)
-            groups[name] = runner()
+            try:
+                groups[name] = runner()
+            except (OSError, ValueError, RuntimeError) as exc:
+                # A corrupt or unreadable input raises in the handlers; the group shows it, the run goes on.
+                logger.error("[doctor] %s checks could not run: %s", name, exc)
+                groups[name] = [CheckResult(name.lower(), GLYPH_FAIL, f"could not run: {exc}", "Repair what it names")]
             progress.remove_task(task_id)
 
     if fix:
-        settings_rows = [CheckResult(*row) for row in fix_provider_settings(_find_manifest(), door=door, yes=yes)]
+        settings_rows = [
+            CheckResult(*row)
+            for row in fix_provider_settings(_find_manifest(), door=door, yes=yes, non_interactive=non_interactive)
+        ]
         manifest_results = check_provider_manifest()
         if manifest_results:
             groups["Services"] = merge_manifest_rows(groups.get("Services", []), manifest_results)
@@ -1280,11 +1251,29 @@ def _compute_doctor_groups(
         services = groups.get("Services", [])
         groups["Services"] = [r for r in services if r.label != "wire verify"] + wire_recheck
 
-        owner_fix = _fix_owner_seating()
-        if any(r.glyph == GLYPH_PASS for r in owner_fix):
-            owner_fix = _check_owner_seating()  # exit 0 is not proof the seat is clean
+        from aipass.aipass.apps.modules._doctor_fix import export_missing_seeds, repair_passports
+
+        # Seeds while passports still exist, then passports, then seating: the seating check must see the restored
+        # seat (spawn's --fix cannot restore one).
+        root = find_project_root(Path.cwd())
+        if seed_fix := [CheckResult(*row) for row in export_missing_seeds(root)]:
+            seeded = {r.label for r in seed_fix}
+            groups["Structure"] = [r for r in groups.get("Structure", []) if r.label not in seeded] + seed_fix
+        if passport_fix := [CheckResult(*row) for row in repair_passports(root)]:
+            repaired = {r.label for r in passport_fix}
+            structure = [r for r in groups.get("Structure", []) if r.label not in repaired]
+            groups["Structure"] = structure + passport_fix
+            seat = [r for r in groups.get("Identity", []) if not r.label.startswith("owner")]
+            groups["Identity"] = seat + _check_owner_seating()
+
         identity = groups.get("Identity", [])
-        groups["Identity"] = [r for r in identity if not r.label.startswith("owner")] + owner_fix
+        owner_rows = [r for r in identity if r.label.startswith("owner")]
+        # A clean seat is not repaired: spawn's gate refuses a seatless caller such as the installer.
+        if not owner_rows or any(r.glyph != GLYPH_PASS for r in owner_rows):
+            owner_fix = _fix_owner_seating()
+            if any(r.glyph == GLYPH_PASS for r in owner_fix):
+                owner_fix = _check_owner_seating()  # exit 0 is not proof the seat is clean
+            groups["Identity"] = [r for r in identity if not r.label.startswith("owner")] + owner_fix
 
         skills_fix = _fix_shared_skills()
         if skills_fix:
@@ -1356,26 +1345,46 @@ def run_doctor(
     return error_count
 
 
-def run_doctor_preflight(fix: bool = True) -> tuple[int, List[str]]:
-    """Run doctor automatically in the install tail, before the concierge says hello.
+def run_doctor_preflight(
+    non_interactive: bool = False,
+    yes: bool = False,
+) -> tuple[Dict[str, List[CheckResult]], tuple[int, int, int]]:
+    """The install's health check: doctor --fix under the install door, printed; *yes* is install's --yes.
 
-    Hook wiring is P1: a still-broken hooks/wire-verify result comes back separately for the
-    top of the ACTION NEEDED block. Returns (error_count, hook_action_items).
+    Returns the groups after the fix and their (pass, warn, error) counts, for the install report.
     """
     console.print()
-    console.print("[bold cyan]Running aipass doctor...[/bold cyan]")
+    console.print("[bold cyan]Running aipass doctor --fix...[/bold cyan]")
     console.print()
 
-    groups = _compute_doctor_groups(fix=fix, door=DOOR_INSTALL)
-    _pass_count, _warn_count, error_count = _print_doctor_groups(groups)
+    groups = _compute_doctor_groups(fix=True, door=DOOR_INSTALL, yes=yes, non_interactive=non_interactive)
+    counts = _print_doctor_groups(groups)
+    logger.info("[doctor] install health check complete — pass=%d warn=%d error=%d", *counts)
+    return groups, counts
 
-    logger.info("[doctor] preflight complete — errors=%d", error_count)
 
-    hook_labels = {"hooks", "wire verify"}
-    hook_action_items = [
-        f"{r.label}: {r.detail}" for r in groups.get("Services", []) if r.label in hook_labels and r.glyph != GLYPH_PASS
+def write_preflight_rows(rows_path: Path, non_interactive: bool = False, yes: bool = False) -> None:
+    """``doctor --fix --rows-json PATH``: the install's health check, run in the home, its rows for the report.
+
+    Writes {"counts": {pass, warn, error}, "rows": every non-PASS row after the fix}; an unwritable path raises.
+    """
+    groups, (passed, warned, errored) = run_doctor_preflight(non_interactive=non_interactive, yes=yes)
+    rows = [
+        {
+            "group": group,
+            "label": row.label,
+            "severity": "warning" if row.glyph == GLYPH_WARN else "error",
+            "detail": Text.from_markup(row.detail).plain,
+            "remediation": row.remediation,
+        }
+        for group, checks in groups.items()
+        for row in checks
+        if row.glyph != GLYPH_PASS
     ]
-    return error_count, hook_action_items
+    rows_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"counts": {"pass": passed, "warn": warned, "error": errored}, "rows": rows}
+    rows_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    json_handler.log_operation("doctor_preflight_rows", {"path": str(rows_path), "rows": len(rows)})
 
 
 def print_introspection() -> None:
@@ -1400,6 +1409,10 @@ def print_help() -> None:
     console.print("  [green]aipass doctor --fix[/green]     [dim]# Settings plan + diff, ask once; owner repair[/dim]")
     console.print("  [green]aipass doctor --fix --yes[/green][dim]# The same, writing without the question[/dim]")
     console.print("  [green]aipass doctor --fix --json[/green][dim]# Remediation + settings plan as JSON[/dim]")
+    console.print(
+        "  [green]aipass doctor --fix --rows-json PATH[/green] [dim]# install's health check: rows + counts to PATH;"
+        " --non-interactive writes no settings[/dim]"
+    )
     console.print("  [green]aipass doctor --smoke[/green]   [dim]# + one live model turn per installed provider[/dim]")
     console.print("  [green]aipass doctor --smoke --json[/green] [dim]# hooks' smoke results as JSON[/dim]")
     console.print(
@@ -1407,12 +1420,6 @@ def print_help() -> None:
     )
     console.print("    [dim]--smoke spends one model turn per installed provider and needs each one's login;[/dim]")
     console.print("    [dim]not installed, no login, or a spent quota is a skip. Never part of --fix.[/dim]")
-    console.print("  [green]aipass doctor --cross-os[/green][dim]# OS-gap + routing/version/hooks pre-flight[/dim]")
-    console.print("  [green]aipass doctor --cross-os --e2e[/green][dim]# …also run the heavy e2e suite[/dim]")
-    console.print(
-        "  [green]aipass doctor --cross-os --record [PATH][/green]"
-        "[dim]# write a machine pre-flight Run Record draft (human completes it)[/dim]"
-    )
     console.print()
     console.print("[yellow]OUTPUT:[/yellow]  pass / warn / error (color-coded)")
     console.print("[yellow]EXIT:[/yellow]    0 = pass/warn  |  1 = errors found")
@@ -1432,27 +1439,20 @@ def handle_command(command: str, args: list[str]) -> bool:
         print_introspection()
         return True
 
-    if "--cross-os" in args:
-        e2e = "--e2e" in args
-        if "--record" in args:
-            record_path = record_path_arg(args)
-            rc = run_cross_os_record(record_path, run_e2e=e2e)
-            json_handler.log_operation("doctor_cross_os_record", {"path": record_path, "e2e": e2e, "rc": rc})
-            if rc != 0:
-                raise SystemExit(1)
-            return True
-        error_count = run_cross_os(run_e2e=e2e)
-        json_handler.log_operation("doctor_cross_os", {"error_count": error_count, "e2e": e2e})
-        if error_count > 0:
-            raise SystemExit(1)
-        return True
-
     verbose = "--verbose" in args or "-v" in args
     fix_mode = "--fix" in args
     json_mode = "--json" in args
     yes_mode = "--yes" in args
     smoke_mode = "--smoke" in args
     model = args[args.index("--model") + 1] if "--model" in args[:-1] else ""
+    rows_json = args[args.index("--rows-json") + 1] if "--rows-json" in args[:-1] else ""
+
+    if rows_json:
+        if not fix_mode:
+            cli_error("--rows-json reports the install's health check: run it with --fix")
+            raise SystemExit(2)
+        write_preflight_rows(Path(rows_json), non_interactive="--non-interactive" in args, yes=yes_mode)
+        return True
 
     if smoke_mode and fix_mode:
         cli_error("--smoke spends model turns and never runs with --fix: run them apart")

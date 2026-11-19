@@ -6,7 +6,7 @@
 
 The branch watcher reads `system_logs/*.log` and the `logs/*.log` of every declared citizen:
 core, resident and external, the rows of `fleet_branches()` from memory's door
-(`aipass.memory.apps.modules.door_registry_scope`). A project takes part by being declared in
+(`from aipass.memory import fleet_branches`). A project takes part by being declared in
 `AIPASS_ROOTS.json`; its registry makes its citizens real. A citizen with no `logs/` yet is
 skipped and named once at INFO. Each log dir's branch is its address (`@my_agent` is MY_AGENT,
 whatever the directory is called). The census is re-read at most every `FLEET_TTL_SECONDS`
@@ -56,17 +56,28 @@ has no watch, so its `system_logs` copy is the one read until the next restart. 
 test-fixture logs) keep being watched — that is the only reason the directory is still
 read at all.
 
+**The suffix is the whole rule.** Every `*.log` in a watched dir is read, trigger's own
+logs included; a `.jsonl` trail never is. No file name and no phrase is skipped: a line
+that loops is written to a trail at its source instead. A rotated tail is looked for
+across `log_backup_count()` backups, prax's configured depth read at the time of the
+rotation.
+
+**A failure the watcher survives is reported, not swallowed.** A raise out of a watchdog
+callback would end the observer thread, so a failing warning line, error line, rotated
+drain or state flush goes to `handlers/failure_report.py`: a `logs/failures.jsonl` line,
+a `Failing handlers` row in `medic status` and one mail to @devpulse; the next success
+clears the row. Unreadable `trigger_data.json` raises at start instead of resetting
+every position to EOF.
+
 **Branch attribution comes from the live tree, not a list.** `_known_branch_names()`
 reads the branch directories (60s TTL) instead of trusting a hardcoded roster, so a new
 branch is attributed the moment its directory exists. A static list survives as a floor
 for when the tree cannot be read. `UNKNOWN` means what it says: nobody in the tree owns
 this log.
 
-**Path classification is separator-agnostic.** `classify_log_path()` matches on
+**Path classification reads path components.** `classify_log_path()` matches on
 `PurePath.parts` — `"aipass" in parts and "logs" in parts` for a branch log,
-`"system_logs" in parts` for a system log — not on `"/logs/" in path`, which matches
-forward slashes only and would skip every branch log on Windows while reporting healthy.
-Pinned on both platforms from either one with `PureWindowsPath` and `PurePosixPath`.
+`"system_logs" in parts` for a system log — not on `"/logs/" in path`.
 
 ---
 

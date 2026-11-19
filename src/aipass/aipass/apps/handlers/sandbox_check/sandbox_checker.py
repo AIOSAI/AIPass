@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sandbox_checker.py
 # Description: Kernel sandbox prerequisite checks for aipass doctor
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-06-10
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Sandbox prerequisite checker — detects bwrap, node, srt, rg, broker.
@@ -18,7 +18,6 @@ import os
 import shutil
 import socket
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Callable, Dict
 
@@ -101,27 +100,27 @@ def check_node_present() -> Dict[str, Any]:
     return {"found": bool(path), "path": path}
 
 
-def _find_srt_resolver(find_spec: Callable[[str], Any] = importlib.util.find_spec) -> Path | None:
-    """Locate _srt_resolve.mjs inside the sibling aipass.hooks branch.
+def _find_srt_resolver(find_spec: Callable[[str], Any] = importlib.util.find_spec) -> Path | str:
+    """Locate _srt_resolve.mjs inside the sibling aipass.hooks branch; a str is why it is not there.
 
     find_spec (a test seam) keeps the path checkout-independent; aipass.hooks is a
     namespace package, so it resolves via submodule_search_locations.
     """
     try:
         spec = find_spec("aipass.hooks")
-    except (ImportError, ValueError, ModuleNotFoundError) as exc:
-        logger.info("[sandbox_check] aipass.hooks not importable: %s", exc)
-        return None
+    except (ImportError, ValueError) as exc:
+        logger.warning("[sandbox_check] aipass.hooks not importable: %s", exc)
+        return f"aipass.hooks not importable ({exc})"
 
     if spec is None or not spec.submodule_search_locations:
-        logger.info("[sandbox_check] aipass.hooks package not found")
-        return None
+        logger.warning("[sandbox_check] aipass.hooks package not found")
+        return "aipass.hooks package not found"
 
     hooks_dir = Path(next(iter(spec.submodule_search_locations)))
     resolver = hooks_dir / "apps" / "modules" / "_srt_resolve.mjs"
     if not resolver.is_file():
         logger.warning("[sandbox_check] srt resolver script missing at %s", resolver)
-        return None
+        return f"srt resolver script missing at {resolver}"
     return resolver
 
 
@@ -164,9 +163,9 @@ def check_srt_resolvable(find_spec: Callable[[str], Any] = importlib.util.find_s
         }
 
     resolver = _find_srt_resolver(find_spec)
-    if resolver is None:
-        json_handler.log_operation("sandbox_check_srt", {"found": False})
-        return {"found": False, "path": None, "install_hint": _srt_install_hint()}
+    if isinstance(resolver, str):
+        json_handler.log_operation("sandbox_check_srt", {"found": False, "reason": resolver})
+        return {"found": False, "path": None, "install_hint": f"{resolver}: re-run setup.sh in AIPASS_HOME"}
 
     try:
         proc = subprocess.run(
@@ -185,8 +184,10 @@ def check_srt_resolvable(find_spec: Callable[[str], Any] = importlib.util.find_s
         if tried:
             logger.info("[sandbox_check] srt not resolvable, tried:\n%s", tried)
 
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+    except (subprocess.TimeoutExpired, OSError) as exc:
         logger.warning("[sandbox_check] srt resolve error: %s", exc)
+        json_handler.log_operation("sandbox_check_srt", {"found": False, "reason": str(exc)})
+        return {"found": False, "path": None, "install_hint": f"the srt resolver did not run: {exc}"}
 
     json_handler.log_operation("sandbox_check_srt", {"found": False})
     return {
@@ -257,12 +258,3 @@ def _find_broker_socket(repo_root: Path | None) -> Path | None:
             break
 
     return None
-
-
-def is_linux(platform: str | None = None) -> bool:
-    """Return True if running on Linux.
-
-    ``platform`` is a test seam; None reads sys.platform.
-    """
-    platform = sys.platform if platform is None else platform
-    return platform.startswith("linux")

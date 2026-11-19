@@ -1,6 +1,6 @@
 # Unused Function Standards
 **Status:** Draft v1
-**Date:** 2026-10-03
+**Date:** 2026-11-16
 
 ---
 
@@ -44,7 +44,9 @@ AST-parses each file to find `def` and `async def` definitions. A file Python ca
 - **Framework conventions:** `main()` and `handle_command()`
 - **Decorated functions:** Any function with a decorator (`@property`, `@staticmethod`, `@track_operation`, etc.)
 - **Overrides of an imported base** (2026-10-03, sentry fleet green leg 10) -- a method whose class inherits from an imported class that defines the same name in its own body (`class Watcher(FileSystemEventHandler): def on_created(...)`). The base calls it by name, so it is used. The base's source is located with `importlib.util.find_spec` on the top-level package only and read with `ast`, never imported or run. One level only: a name the base inherits from its own base, a base the imports do not name, and a base Python ships as compiled code stay convicted. A name a registry or another branch calls is NOT this rule (see the next row and What this check actually measures)
-- **A dotted-path string** (2026-10-03, sentry fleet green leg 11) -- a string literal that is a whole import path and nothing else (`"aipass.x.lib.helper"`, `f"{_SECURITY}.edit_gate.tripwire"`) keeps its last segment as a reference: a registry names a handler so and a loader calls it by that name (hooks `config/gates.py`). Prose that mentions a path (`"see lib.helper"`), a path with a tail (`"lib.helper.txt"`, `"...helper()"`) and a bare suffix (`".helper"`) are not one. A name only ANOTHER branch calls stays convicted: the scan is per-branch and cannot see it; that line takes a bypass in its own branch with the caller as the reason (hooks `trust_registry.enroll`, called from `shared/project_home.py`)
+- **A dotted-path string** (2026-10-03, sentry fleet green leg 11) -- a string literal that is a whole import path and nothing else (`"aipass.x.lib.helper"`, `f"{_SECURITY}.edit_gate.tripwire"`) keeps its last segment as a reference: a registry names a handler so and a loader calls it by that name (hooks `config/gates.py`). Prose that mentions a path (`"see lib.helper"`), a path with a tail (`"lib.helper.txt"`, `"...helper()"`) and a bare suffix (`".helper"`) are not one.
+- **A caller in another branch** -- every sibling directory of the branch is read once per process, its `tests/` skipped; a product file there that names `aipass.<branch>` (an import or a dotted string) joins the corpus. A caller that never names the package stays invisible and takes a bypass with the caller as the reason
+- **A handler the repo's `.aipass/hooks.json` names** -- a `"handler"` value under `aipass.<branch>.` keeps its last segment as a reference: the hook engine imports it by that string and calls it. Neither input is in the audit cache's stamp: a new outside caller clears a cached row on the branch's next change or `--full`
 
 ### Phase 4: Reference Counting
 

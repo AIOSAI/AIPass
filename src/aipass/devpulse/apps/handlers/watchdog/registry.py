@@ -14,13 +14,11 @@ import json
 import os
 import secrets
 import signal
-import subprocess
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.devpulse.apps.handlers.file_lock import FileLock
 from aipass.devpulse.apps.handlers.json import json_handler
 
@@ -30,9 +28,6 @@ _STORAGE_VERSION = 1
 _HANDLE_HASH_LEN = 6
 _KILL_WAIT_SECONDS = 2.0
 _KILL_POLL_INTERVAL = 0.1
-
-# A wedged host must not hang a liveness check; a healthy ``ps`` answers in milliseconds.
-_PROBE_TIMEOUT_SECONDS = 5.0
 
 
 def _devpulse_root() -> Path:
@@ -53,22 +48,22 @@ def _empty_store() -> dict:
     return {"version": _STORAGE_VERSION, "watches": []}
 
 
+class RegistryUnreadable(RuntimeError):
+    """The registry file exists but cannot be read as a registry; writing over it would drop live watches."""
+
+
 def _load_store_unlocked(storage_path: Path) -> dict:
-    """Load the registry without locking — caller is responsible for locking."""
+    """Load the registry without locking — caller is responsible for locking. A missing file is an empty registry."""
     if not storage_path.exists():
         return _empty_store()
     try:
         data = json.loads(storage_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("[watchdog.registry] could not load %s: %s", storage_path, exc)
-        return _empty_store()
-
-    if not isinstance(data, dict):
-        return _empty_store()
+        raise RegistryUnreadable(f"watch registry {storage_path} unreadable: {exc}") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("watches", []), list):
+        raise RegistryUnreadable(f"watch registry {storage_path} is not a registry object: {type(data).__name__}")
     data.setdefault("version", _STORAGE_VERSION)
     data.setdefault("watches", [])
-    if not isinstance(data["watches"], list):
-        data["watches"] = []
     return data
 
 
@@ -108,74 +103,21 @@ def _is_zombie_linux(pid: int) -> bool | None:
     return False
 
 
-def _is_zombie_ps(pid: int) -> bool:
-    """``ps -o state= -p <pid>`` — the portable half of ``is_zombie``.
-
-    The state may carry modifier flags (``Z+``, ``Zs``). A gone pid prints nothing:
-    not-a-zombie is right there, as the liveness caller has already proved otherwise.
-    """
-    try:
-        done = subprocess.run(
-            ["ps", "-o", "state=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=_PROBE_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.info("[watchdog.registry] ps state unusable for pid=%s: %s", pid, exc)
-        return False
-    return done.stdout.strip().startswith("Z")
-
-
 def is_zombie(pid: int) -> bool:
     """True if ``pid`` has exited but has not been reaped. False on any error.
 
-    Portable, never Linux-only: ``os.kill(pid, 0)`` SUCCEEDS for a zombie, so a
-    killed-but-unreaped pid would read alive and ``kill_watch`` report it unkilled.
+    ``os.kill(pid, 0)`` SUCCEEDS for a zombie, so a killed-but-unreaped pid
+    would read alive and ``kill_watch`` report it unkilled.
     """
-    if sys.platform == "linux":
-        # A zombie keeps its /proc entry; no entry (None) means gone or reaped, not a zombie.
-        return _is_zombie_linux(pid) is True
-    return _is_zombie_ps(pid)
-
-
-def _pid_alive_windows(pid: int) -> bool:
-    """Windows-safe liveness via OpenProcess + GetExitCodeProcess (mirrors agent.py)."""
-    import ctypes
-    from ctypes import wintypes
-
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    STILL_ACTIVE = 259
-
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]  # Windows-only
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        return False
-    try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return False
-        return exit_code.value == STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
+    # A zombie keeps its /proc entry; no entry (None) means gone or reaped, not a zombie.
+    return _is_zombie_linux(pid) is True
 
 
 def _signal_zero(pid: int) -> str:
     """Probe ``pid`` with signal 0 and name the kernel's answer.
 
-    ``"exists"``, ``"absent"`` or ``"foreign"`` (another user's). Raises on
-    Windows, where signal 0 terminates the target.
+    ``"exists"``, ``"absent"`` or ``"foreign"`` (another user's).
     """
-    if sys.platform == "win32":
-        raise OSError("signal 0 terminates the target on Windows; is_pid_alive routes Windows to OpenProcess")
     try:
         os.kill(pid, 0)
     except ProcessLookupError as exc:
@@ -188,15 +130,12 @@ def _signal_zero(pid: int) -> str:
 
 
 def is_pid_alive(pid: int) -> bool:
-    """Return True if the process exists and is not a zombie. Windows-safe.
+    """Return True if the process exists and is not a zombie.
 
     A probe that raises is a defect to see, never a pid to assume alive.
     """
     if not isinstance(pid, int) or pid <= 0:
         return False
-    if sys.platform == "win32":
-        # os.kill(pid, 0) TERMINATES the target on Windows — use OpenProcess.
-        return _pid_alive_windows(pid)
     answer = _signal_zero(pid)
     if answer == "absent":
         return False

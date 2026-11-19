@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.6.1
+# Version: 4.7.0
 # Description: Boot wrapper — attach-first menu, resumes by pointer (0448), steps aside while dispatched (0449)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-30
-# Modified: 2026-10-25
+# Modified: 2026-11-17
 # =============================================
 
 """Boot wrapper for Claude Code sessions.
@@ -23,7 +23,8 @@ import sys
 import time
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 _DEFAULT_ARGS = ["--permission-mode", "bypassPermissions"]
 _CHAT_LIMIT = 5
@@ -39,7 +40,7 @@ def _execvp(file: str, args: list[str]) -> None:
 
 
 def _kill(pid: int, sig: int) -> None:
-    """Signal seam, late-bound like _execvp. OSError (WinError 87, dead PID) goes to the caller's handler."""
+    """Signal seam, late-bound like _execvp. OSError (ESRCH, a dead PID) goes to the caller's handler."""
     try:
         os.kill(pid, sig)
     except OSError:
@@ -71,7 +72,7 @@ def _find_tmux() -> str | None:
 def _tmux_session_exists(name: str) -> bool:
     """Check if a tmux session with the given name exists.
 
-    No tmux (Windows, or absent) answers "no session" rather than raising.
+    No tmux answers "no session" rather than raising.
     """
     try:
         result = subprocess.run(
@@ -133,7 +134,7 @@ def _find_tmux_session_for_pid(pid: int) -> str | None:
 
 
 def _get_ppid(pid: int) -> int | None:
-    """Get parent PID portably (Linux + macOS). Returns None on failure."""
+    """Get parent PID. Returns None on failure."""
     try:
         result = subprocess.run(
             ["ps", "-o", "ppid=", "-p", str(pid)],
@@ -213,7 +214,8 @@ def _read_choice(prompt: str = "> ") -> str:
         tty.close()
         return choice
     except OSError as exc:
-        logger.info("[SESSION_BOOT] /dev/tty not available: %s", exc)
+        logger.warning("[SESSION_BOOT] /dev/tty not available: %s", exc)
+        sys.stderr.write(f"\n  No terminal to read a choice from ({exc}): taking the default.\n")
         return ""
 
 
@@ -325,6 +327,7 @@ def _pinned_cli_version() -> str:
         return str(data.get("cli", {}).get("claude", {}).get("pinned_version", ""))
     except (OSError, json.JSONDecodeError, AttributeError, TypeError) as exc:
         logger.info("[SESSION_BOOT] cannot read pinned version: %s", exc)
+        sys.stderr.write(f"  !! CLI version pin unreadable ({manifest}: {exc}): version drift unchecked\n")
         return ""
 
 
@@ -338,7 +341,8 @@ def _running_cli_version(claude_bin: str) -> str:
             timeout=10,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        logger.info("[SESSION_BOOT] cannot read running version: %s", exc)
+        logger.warning("[SESSION_BOOT] cannot read running version: %s", exc)
+        sys.stderr.write(f"  !! {claude_bin} --version failed ({exc}): version drift unchecked\n")
         return ""
     return (result.stdout or "").strip().split(" ")[0]
 
@@ -365,8 +369,9 @@ def _warn_on_version_drift(claude_bin: str) -> str:
 
 
 def boot(cwd: str | None = None, extra_args: list[str] | None = None) -> dict:
-    """Boot Claude Code — present menu when sessions exist."""
+    """Boot Claude Code — present menu when sessions exist. The trail entry comes first: most paths exec away."""
     cwd = cwd or str(Path.cwd().resolve())
+    json_handler.log_operation("boot", {"seat": cwd, "headless": bool(extra_args and "-p" in extra_args)})
     branch = Path(cwd).name
     claude_bin = _resolve_claude_binary()
 
@@ -405,11 +410,6 @@ def boot(cwd: str | None = None, extra_args: list[str] | None = None) -> dict:
     if live:
         return _menu_live(live, branch, claude_bin, defaults, extra_args, cwd)
     return _menu_no_live(branch, claude_bin, defaults, extra_args, cwd)
-
-
-def _has_bg(sessions: list[dict]) -> bool:
-    """Check if any session is a background session."""
-    return any(s.get("kind") in ("bg", "background") for s in sessions)
 
 
 def _get_collateral_bg(branch: str) -> list[dict]:
@@ -494,7 +494,7 @@ def _takeover_bg(
 def _is_session_file_present(pid: int | None) -> bool:
     """Check if a CC session file exists for the given PID.
 
-    Via cc_sessions._claude_home(), live: Path.home() raises with no %USERPROFILE%, and redirects must move it.
+    Via cc_sessions._claude_home(), live: Path.home() can raise, and redirects must move it.
     """
     if pid is None:
         return False
@@ -589,7 +589,7 @@ def _session_pointer():
     """
     import importlib
 
-    return importlib.import_module("aipass.ai_mail.apps.modules.door_session_pointer")
+    return importlib.import_module("aipass.ai_mail")
 
 
 def _chat_age(modified: float) -> str:
@@ -750,12 +750,9 @@ def _menu_multi(
     if choice in ("exit", "q", "quit"):
         return {"exit_code": 0, "action": "quit"}
 
-    try:
-        idx = int(choice) - 1
-        if 0 <= idx < len(transcripts):
-            return _open_chat(transcripts[idx], live, branch, claude_bin, defaults, extra_args, cwd=branch_cwd)
-    except (ValueError, IndexError):
-        logger.info("[SESSION_BOOT] Invalid menu choice: %r", choice)
+    if choice.isdecimal() and 0 <= int(choice) - 1 < len(transcripts):
+        return _open_chat(transcripts[int(choice) - 1], live, branch, claude_bin, defaults, extra_args, cwd=branch_cwd)
+    logger.info("[SESSION_BOOT] Invalid menu choice: %r", choice)
 
     sys.stderr.write("  Pick a number, Enter, 'n', or 'c'. Exiting.\n")
     return {"exit_code": 1, "error": "unknown choice"}
@@ -864,6 +861,7 @@ def _dispatch_lock(cwd: str) -> dict | None:
         data = json.loads(lock_file.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         logger.info("[SESSION_BOOT] Unreadable dispatch lock %s: %s", lock_file, exc)
+        sys.stderr.write(f"  !! Dispatch lock unreadable ({lock_file}: {exc}): cannot tell if an agent works here.\n")
         return None
     pid = data.get("pid")
     if not pid:
@@ -885,7 +883,8 @@ def _menu_dispatched(
 ) -> dict:
     """An agent is WORKING in this branch — resume steps aside (FPLAN-0449).
 
-    A second claude on one session id takes its background-task state and the job dies; the presence gate cannot stop that.
+    A second claude on one session id takes its background-task state and the job dies;
+    the presence gate cannot stop that.
     """
     branch_cwd = cwd or str(Path.cwd())
     age = ""

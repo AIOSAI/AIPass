@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: structure_scanner.py
 # Description: Project structure validation for aipass doctor
-# Version: 1.3.0
+# Version: 1.5.0
 # Created: 2026-05-14
-# Modified: 2026-10-27
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -73,7 +73,7 @@ class RegistryIssue(NamedTuple):
 
     branch_name: str
     registered_path: str
-    problem: str  # "missing" or "mismatch"
+    problem: str  # "missing", "no_passport" (missing or unreadable) or "no_seed"
 
 
 def find_project_root(start: Path) -> Optional[Path]:
@@ -315,6 +315,28 @@ def detect_pollution(agents: List[AgentInfo]) -> List[PollutionHit]:
     return hits
 
 
+TREE_REGISTRY_NAME = "AIPASS_REGISTRY.json"
+SEED_RELATIVE_PATH = Path(".aipass") / "passport.seed.json"
+
+
+def _passport_readable(passport: Path) -> bool:
+    """True when the passport file parses as JSON; missing and unreadable are the same damage."""
+    try:
+        json.loads(passport.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _seed_expected(registry_path: Path, passport: Path) -> bool:
+    """spawn's export scope: the tree's own registry seeds core citizens only, a project seeds every citizen."""
+    if registry_path.name != TREE_REGISTRY_NAME:
+        return True
+    doc = json.loads(passport.read_text(encoding="utf-8"))
+    citizenship = doc.get("citizenship") if isinstance(doc, dict) else None
+    return isinstance(citizenship, dict) and citizenship.get("residency") == "core"
+
+
 def check_registry_consistency(
     registry_path: Path,
     agents: List[AgentInfo],
@@ -344,10 +366,11 @@ def check_registry_consistency(
         reg_path = p.resolve() if p.is_absolute() else (anchor / p).resolve()
         if not reg_path.exists():
             issues.append(RegistryIssue(name, path_str, "missing"))
-        elif str(reg_path) not in agent_paths:
-            trinity = reg_path / ".trinity" / "passport.json"
-            if not trinity.exists():
+        elif not _passport_readable(passport := reg_path / ".trinity" / "passport.json"):
+            if str(reg_path) not in agent_paths:
                 issues.append(RegistryIssue(name, path_str, "no_passport"))
+        elif _seed_expected(registry_path, passport) and not (reg_path / SEED_RELATIVE_PATH).is_file():
+            issues.append(RegistryIssue(name, path_str, "no_seed"))
 
     return issues
 

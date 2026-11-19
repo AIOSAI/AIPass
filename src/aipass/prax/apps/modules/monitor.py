@@ -1,14 +1,13 @@
 # =================== AIPass ====================
 # Name: monitor.py
 # Description: Unified Monitoring Module
-# Version: 0.5.1
+# Version: 0.5.3
 # Created: 2025-11-23
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """PRAX Monitor Module - Mission Control for Autonomous Branches."""
 
-import os
 import sys
 import argparse
 import threading
@@ -17,18 +16,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-from aipass.cli.apps.modules import console, header, error
+from aipass.cli import console, header, error
 
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.fleet import fleet_rows
 
 from aipass.prax.apps.handlers.monitoring.unified_stream import print_event, print_command_separator, print_hook_event
 from aipass.prax.apps.handlers.monitoring.event_queue import MonitoringEvent, MonitoringQueue
@@ -36,8 +29,6 @@ from aipass.prax.apps.handlers.monitoring import instance_lock
 from aipass.prax.apps.handlers.monitoring.pid_cache import get_pid_for_branch as _get_pid_for_branch
 from aipass.prax.apps.handlers.cli.help_flags import wants_help
 from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument, refuse, unknown_option
-
-import json as _json
 
 
 _stop_event = threading.Event()  # Thread-safe shutdown signal
@@ -371,27 +362,26 @@ def _get_watch_directories(repo_root: Path) -> list[tuple[Path, bool]]:
     """
     dirs: list[tuple[Path, bool]] = []
 
-    registry_path = repo_root / "AIPASS_REGISTRY.json"
-    if registry_path.exists():
-        try:
-            data = _json.loads(registry_path.read_text(encoding="utf-8"))
-            for branch in data.get("branches", []):
-                branch_path = repo_root / branch.get("path", "")
-                if not branch_path.exists():
-                    continue
-                apps_dir = branch_path / "apps"
-                if apps_dir.exists():
-                    dirs.append((apps_dir, True))
-                dirs.append((branch_path, False))
-                trinity_dir = branch_path / ".trinity"
-                if trinity_dir.exists():
-                    dirs.append((trinity_dir, False))
-        except (ValueError, OSError) as e:
-            logger.warning(
-                f"[monitor] Could not read the branch registry ({type(e).__name__}), so the live "
-                f"monitor will watch no branch folders for file changes — only the CLI session "
-                f"folders. The log feed is unaffected and the registry file was not modified."
-            )
+    try:
+        rows = fleet_rows(repo_root)
+    except Exception as e:
+        rows = []
+        logger.warning(
+            f"[monitor] Could not read the fleet ({type(e).__name__}: {e}), so the live "
+            f"monitor will watch no branch folders for file changes — only the CLI session "
+            f"folders. The log feed is unaffected and no file was modified."
+        )
+    for row in rows:
+        branch_path = row["path"]
+        if not branch_path.exists():
+            continue
+        apps_dir = branch_path / "apps"
+        if apps_dir.exists():
+            dirs.append((apps_dir, True))
+        dirs.append((branch_path, False))
+        trinity_dir = branch_path / ".trinity"
+        if trinity_dir.exists():
+            dirs.append((trinity_dir, False))
 
     claude_projects = Path.home() / ".claude" / "projects"
     if claude_projects.exists():
@@ -586,15 +576,9 @@ def _rate_tracker_worker():
     from aipass.prax.apps.handlers.monitoring.rate_tracker import scan_rates, configure, SCAN_INTERVAL
     from aipass.prax.apps.handlers.config.load import get_system_logs_dir
 
-    try:
-        from aipass.trigger.apps.modules.core import trigger
+    from aipass.trigger import trigger
 
-        event_cb = trigger.fire
-    except ImportError as exc:
-        logger.info("[monitor] trigger not available for rate tracker: %s", exc)
-        event_cb = None
-
-    configure(logs_dir=get_system_logs_dir(), event_callback=event_cb)
+    configure(logs_dir=get_system_logs_dir(), event_callback=trigger.fire)
 
     while not _stop_event.is_set():
         try:
@@ -675,7 +659,7 @@ def _print_status():
 def _standalone_run_args(tokens: List[str], passthrough: List[str]) -> List[str]:
     """Turn `python -m ...monitor [run] [branches] [--flags]` into handle_command args.
 
-    A leading 'run' is the subcommand, not a branch name (the systemd unit runs `monitor run`).
+    A leading 'run' is the subcommand, not a branch name.
     """
     tokens = list(tokens)
     saw_run = bool(tokens) and tokens[0] == "run"

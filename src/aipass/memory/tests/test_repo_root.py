@@ -3,7 +3,7 @@
 # Description: Pins for handlers/repo_root.py - one repo-root answer, never the cwd
 # Version: 1.3.0
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/repo_root.py."""
@@ -12,7 +12,6 @@
 # runs on every machine; STRUCTURAL pins sweep the tree so no lane keeps a private copy.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(external) — module_file() on Windows, where resolve() reads the cwd; the sweep pins its callers
 
 import importlib
 import inspect
@@ -33,10 +32,6 @@ from aipass.memory.tests.dead_cwd import (
     ACCESSOR_SHAPE,
     DEAD_CWD_WORLD,
     DELETE_CWD_WORLD,
-    POSIX_EMULATED_WORLD,
-    REALPATH_DENIED_WORLD,
-    WINDOWS_EMULATED_WORLD,
-    WINDOWS_REALPATH_WORLD,
 )
 
 # Judged by the parts BELOW the walk's root: a checkout under a dir named dropbox must not hide itself.
@@ -281,23 +276,11 @@ _IMPORT_TIME_LANES = [
     "aipass.memory.apps.handlers.rollover.orchestrator",
 ]
 
-# The condition pinned is "os.getcwd() raises". Denying getcwd builds it on every
-# platform; deleting the cwd cannot run on Windows (the directory is locked).
-# TestBothConstructionsAgree proves the two equivalent on POSIX.
+# The condition pinned is "os.getcwd() raises", built by denying getcwd or deleting the cwd.
+# TestBothConstructionsAgree proves the two equivalent.
 _DENY_CWD = DEAD_CWD_WORLD
 
 _DELETE_CWD = DELETE_CWD_WORLD
-
-_WINDOWS_CANNOT_DELETE_ITS_OWN_CWD = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason=(
-        "Windows locks a process's working directory, so it cannot be deleted from inside — "
-        "this WORLD cannot be built here by this construction (PermissionError WinError 32 at "
-        "the rmdir, before the pin's own claim is ever reached). The same defect is pinned on "
-        "every platform by the getcwd-denial construction, and the two are proved equivalent "
-        "on POSIX by TestBothConstructionsAgree."
-    ),
-)
 
 
 class TestEveryImportTimeLaneSurvivesADeadWorkingDirectory:
@@ -305,7 +288,7 @@ class TestEveryImportTimeLaneSurvivesADeadWorkingDirectory:
 
     _NOT_OURS = "/aipass/prax/"
 
-    @pytest.mark.parametrize("world", [_DENY_CWD, pytest.param(_DELETE_CWD, marks=_WINDOWS_CANNOT_DELETE_ITS_OWN_CWD)])
+    @pytest.mark.parametrize("world", [_DENY_CWD, _DELETE_CWD])
     @pytest.mark.parametrize("module", _IMPORT_TIME_LANES)
     def test_importing_survives(self, module, world):
         probe = f"import os, sys\nsys.path.insert(0, {_src_root()!r})\n{world}import {module}\nprint('OK')\n"
@@ -326,7 +309,7 @@ class TestEveryImportTimeLaneSurvivesADeadWorkingDirectory:
 class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
     """@prax's copy is neutralised in the child, so what remains is memory's tree alone."""
 
-    @pytest.mark.parametrize("world", [_DENY_CWD, pytest.param(_DELETE_CWD, marks=_WINDOWS_CANNOT_DELETE_ITS_OWN_CWD)])
+    @pytest.mark.parametrize("world", [_DENY_CWD, _DELETE_CWD])
     @pytest.mark.parametrize("module", _IMPORT_TIME_LANES)
     def test_this_branch_imports_in_a_bare_world(self, module, world):
         probe = (
@@ -374,15 +357,14 @@ class TestTheDeadCwdProbeIsAHonestInstrument:
     )
 
     def test_denying_getcwd_makes_reading_the_cwd_raise(self):
-        """The portable construction. Runs on Windows, where the other cannot."""
+        """The injected construction."""
         result = subprocess.run(
             [sys.executable, "-c", _DENY_CWD + self._CHECK], capture_output=True, text=True, encoding="utf-8"
         )
         assert "RAISED" in result.stdout, f"{result.stdout}{result.stderr}"
 
-    @_WINDOWS_CANNOT_DELETE_ITS_OWN_CWD
     def test_deleting_the_cwd_makes_reading_the_cwd_raise(self):
-        """The real world, where the platform allows it to be built."""
+        """The real world."""
         result = subprocess.run(
             [sys.executable, "-c", _DELETE_CWD + self._CHECK], capture_output=True, text=True, encoding="utf-8"
         )
@@ -392,8 +374,8 @@ class TestTheDeadCwdProbeIsAHonestInstrument:
 class TestBothConstructionsAgree:
     """What licenses using the injected world where the real one cannot be built.
 
-    On POSIX both worlds are built and compared; if they stop agreeing, the Windows
-    coverage rests on an expired claim.
+    Both worlds are built and compared; if they stop agreeing, the pins that only deny
+    getcwd rest on an expired claim.
     """
 
     _ASK = (
@@ -417,13 +399,12 @@ class TestBothConstructionsAgree:
             encoding="utf-8",
         )
 
-    @_WINDOWS_CANNOT_DELETE_ITS_OWN_CWD
     def test_the_two_worlds_produce_the_same_answer(self):
         denied, deleted = self._run(_DENY_CWD), self._run(_DELETE_CWD)
         assert denied.returncode == 0, denied.stderr
         assert deleted.returncode == 0, deleted.stderr
         assert denied.stdout.strip() == deleted.stdout.strip(), (
-            f"the injected world and the real one disagree — the Windows coverage rests on them "
+            f"the injected world and the real one disagree — the getcwd-denial pins rest on them "
             f"agreeing.\ndenied:  {denied.stdout!r}\ndeleted: {deleted.stdout!r}"
         )
 
@@ -431,7 +412,7 @@ class TestBothConstructionsAgree:
 class TestAFilenameIsNotAnExistsCall:
     """``exists_exactly`` — the half of the pair with no glob to warn a reader.
 
-    A cased literal folds on Windows and macOS; a folded bait file accepted as THE
+    A cased literal folds on a case-insensitive filesystem; a folded bait file accepted as THE
     REPO ROOT would hand every writer a tree nobody chose.
     """
 
@@ -594,148 +575,6 @@ class TestTheDeniedWorldSurvivesEveryWayPathlibCallsIt:
             assert retyped not in source, f"{module.__name__} retyped the world instead of importing it"
 
 
-_WINDOWS_REALPATH = WINDOWS_REALPATH_WORLD
-
-
-class TestResolvingOwnFileIsACwdReadOnWindows:
-    """The Windows CI reds, and they were NOT the world being unbuildable.
-
-    ``ntpath.realpath`` reads ``os.getcwd()`` unconditionally and ``Path.resolve()``
-    goes through it, so on Windows every ``Path(__file__).resolve()`` is a cwd read.
-    """
-
-    def _probe(self, module):
-        return (
-            "import sys, pathlib\n"
-            f"sys.path.insert(0, {_src_root()!r})\n" + _WINDOWS_REALPATH + _DENY_CWD + f"import {module}\n"
-            "print('OK')\n"
-        )
-
-    def test_the_injected_world_really_reads_the_cwd(self):
-        """Positive control: prove ``resolve()`` bites before trusting the pins."""
-        probe = (
-            "import pathlib\n" + _WINDOWS_REALPATH + _DENY_CWD + "try:\n"
-            "    pathlib.Path(__file__ if '__file__' in dir() else '/tmp').resolve()\n"
-            "    print('NO_RAISE')\n"
-            "except FileNotFoundError:\n"
-            "    print('RAISED')\n"
-        )
-        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8")
-
-        assert "RAISED" in result.stdout, f"{result.stdout}{result.stderr}"
-
-    @pytest.mark.parametrize("module", _IMPORT_TIME_LANES)
-    def test_this_branch_imports_where_resolving_a_path_reads_the_cwd(self, module):
-        result = subprocess.run(
-            [sys.executable, "-c", self._probe(module)], capture_output=True, text=True, encoding="utf-8"
-        )
-
-        assert result.returncode == 0, (
-            f"{module} died where Path.resolve() reads the cwd — this is the Windows CI red "
-            f"reproduced on POSIX:\n{result.stderr}"
-        )
-        assert "OK" in result.stdout
-
-    def test_no_import_time_line_in_this_branch_resolves_its_own_file(self):
-        """The structural half, because the behavioural half only covers what it imports."""
-        offenders = []
-        for path in _SOURCES:
-            text = path.read_text(encoding="utf-8")
-            prose = _prose_lines(text)
-            for number, line in enumerate(text.splitlines(), start=1):
-                stripped = line.strip()
-                if stripped.startswith("#") or number in prose:
-                    continue
-                if "Path(__file__).resolve()" not in stripped:
-                    continue
-                offenders.append(f"{path.relative_to(_APPS.parent)}:{number}")
-
-        assert offenders == [], (
-            "use repo_root.module_file(__file__) — resolve() reads the cwd on Windows: " + ", ".join(offenders)
-        )
-
-
-class TestNothingReadsTheStackAtImportTime:
-    """``inspect.stack()`` is a cwd read on Windows, and I could not reproduce it here.
-
-    On POSIX a getcwd denial is swallowed inside ``inspect.getabsfile``; on Windows
-    ``ntpath.abspath`` does not raise and the unprotected ``realpath`` dies. This pin
-    fails on the line the construct is written on, in files no probe imports.
-    """
-
-    def test_no_module_reached_during_import_walks_the_stack_with_inspect(self):
-        offenders = []
-        for path in _SOURCES:
-            text = path.read_text(encoding="utf-8")
-            prose = _prose_lines(text)
-            for number, line in enumerate(text.splitlines(), start=1):
-                stripped = line.strip()
-                if stripped.startswith("#") or number in prose:
-                    continue
-                if "inspect.stack()" in stripped:
-                    offenders.append(f"{path.relative_to(_APPS.parent)}:{number}")
-
-        assert offenders == [], (
-            "inspect.stack() resolves every frame's source file, which reads the working "
-            "directory on Windows — walk sys._getframe() instead: " + ", ".join(offenders)
-        )
-
-
-class TestTheStackReadIsReproducibleAfterAll:
-    """The behavioural half of the pin above, which this branch said was impossible.
-
-    Two ingredients, and missing either gives a green: deny ``os.path.realpath``, and
-    give the top frame a PSEUDO-FILENAME (``python -c``), since ``getsourcefile()``
-    returns early for a real file. The third test is the negative control proving that.
-    """
-
-    _WORLD = REALPATH_DENIED_WORLD
-
-    # The crash is inside ``inspect.stack()`` itself, so the construct IS the reproduction.
-    _PROBE = (
-        "import inspect\n"
-        "try:\n"
-        "    depth = len(inspect.stack())\n"
-        "except Exception as exc:\n"
-        "    print('RAISED', type(exc).__name__)\n"
-        "else:\n"
-        "    print('SURVIVED', depth)\n"
-    )
-
-    def test_the_shipped_guard_imports_clean_in_the_world_that_kills_the_old_one(self):
-        probe = (
-            f"import sys\nsys.path.insert(0, {_src_root()!r})\n{self._WORLD}"
-            "import aipass.memory.apps.handlers\nprint('OK')\n"
-        )
-        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8")
-        assert result.returncode == 0, (
-            "handlers/__init__.py could not be imported with os.path.realpath denied — "
-            "this is the Windows CI crash, reproduced.\n" + result.stderr
-        )
-        assert "OK" in result.stdout
-
-    def test_the_construct_the_guard_used_to_call_dies_in_that_same_world(self):
-        """Positive control: the world is hostile, and hostile to THIS call."""
-        result = subprocess.run(
-            [sys.executable, "-c", self._WORLD + self._PROBE], capture_output=True, text=True, encoding="utf-8"
-        )
-        assert result.returncode == 0, result.stderr
-        assert "RAISED FileNotFoundError" in result.stdout, (
-            "The realpath denial did not reach inspect.stack(), so the pin above is measuring nothing: " + result.stdout
-        )
-
-    def test_the_crash_needs_a_pseudo_filename_frame_not_just_the_denial(self, tmp_path):
-        """Negative control FOR the control: same world, real file, no crash."""
-        script = tmp_path / "from_a_real_file.py"
-        script.write_text(self._WORLD + self._PROBE, encoding="utf-8")
-        result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, encoding="utf-8")
-        assert result.returncode == 0, result.stderr
-        assert result.stdout.startswith("SURVIVED"), (
-            "A frame from a real file reached the unprotected realpath, which contradicts "
-            "getsourcefile()'s os.path.exists fast path: " + result.stdout
-        )
-
-
 class TestTheFenceStillJudgesInADeadWorkingDirectory:
     """The old guard's dead-cwd pins, on the fence's public shape.
 
@@ -776,252 +615,3 @@ class TestTheFenceStillJudgesInADeadWorkingDirectory:
         seat.parent.mkdir(parents=True)
         shutil.copy(support_fence.__file__, seat)
         assert self._run(seat, "pkg") == "DENIED Caller branch: unknown"
-
-
-class TestTheTwoWorldsMustNotBeStacked:
-    """Denying MORE can deny LESS — on POSIX. This class used to say it everywhere.
-
-    On POSIX ``abspath`` raises inside ``inspect.getabsfile()``'s own try, so a getcwd
-    denial is swallowed; on nt ``abspath`` never reads the cwd and ``ntpath.realpath``
-    does. Keyed on ``os.name`` (which path module), not ``sys.platform``.
-
-    ==================  ========  ========
-    world               posix     nt
-    ==================  ========  ========
-    realpath denied     DIES      DIES
-    getcwd denied       SURVIVES  DIES
-    both denied         SURVIVES  DIES
-    ==================  ========  ========
-
-    nt rows are measured on the real Windows runner and under WINDOWS_EMULATED_WORLD here.
-    """
-
-    _PROBE = (
-        "import inspect\n"
-        "try:\n"
-        "    inspect.stack()\n"
-        "except Exception:\n"
-        "    print('DIES')\n"
-        "else:\n"
-        "    print('SURVIVES')\n"
-    )
-
-    _EXPECTED = {
-        ("posix", "realpath"): "DIES",
-        ("posix", "getcwd"): "SURVIVES",
-        ("posix", "both"): "SURVIVES",
-        ("nt", "realpath"): "DIES",
-        ("nt", "getcwd"): "DIES",
-        ("nt", "both"): "DIES",
-    }
-
-    _DENIALS = {
-        "realpath": REALPATH_DENIED_WORLD,
-        "getcwd": DEAD_CWD_WORLD,
-        "both": DEAD_CWD_WORLD + REALPATH_DENIED_WORLD,
-    }
-
-    def _verdict(self, world: str) -> str:
-        result = subprocess.run(
-            [sys.executable, "-c", world + self._PROBE], capture_output=True, text=True, encoding="utf-8"
-        )
-        assert result.returncode == 0, result.stderr
-        return result.stdout.strip()
-
-    _EMULATIONS = {"posix": POSIX_EMULATED_WORLD, "nt": WINDOWS_EMULATED_WORLD}
-
-    def test_the_posix_emulation_actually_arms(self):
-        """Arming probe for the posix emulation.
-
-        Posix ``realpath`` of an ABSOLUTE path must not touch the cwd; the SURVIVES rows rest on it.
-        """
-        world = (
-            POSIX_EMULATED_WORLD
-            + DEAD_CWD_WORLD
-            + (
-                "import os\n"
-                "try:\n"
-                "    os.path.realpath('/already/absolute')\n"
-                "    print('ABSOLUTE_REALPATH_IGNORED_THE_CWD')\n"
-                "except FileNotFoundError:\n"
-                "    print('IT_READ_THE_CWD')\n"
-            )
-        )
-        result = subprocess.run([sys.executable, "-c", world], capture_output=True, text=True, encoding="utf-8")
-        assert result.returncode == 0, result.stderr
-        assert "ABSOLUTE_REALPATH_IGNORED_THE_CWD" in result.stdout, (
-            "the posix half is not installed, so the rows below are measuring the host: " + result.stdout
-        )
-
-    def _world_for(self, platform: str) -> str:
-        """The emulation every row runs under. Extracted so a pin can convict it."""
-        return self._EMULATIONS[platform]
-
-    def test_every_row_runs_under_an_emulation(self):
-        """No row inherits the host: a world is chosen for every platform."""
-        assert set(self._EXPECTED_PLATFORMS) == set(self._EMULATIONS), (
-            "the emulation table and the row list disagree — a platform with no world, "
-            "or a world no row runs under, makes the loop below prove nothing"
-        )
-        for platform in self._EXPECTED_PLATFORMS:
-            world = self._world_for(platform)
-            assert world, f"the {platform} rows run bare, so on a {platform}-foreign host they measure the runner"
-            assert world in self._EMULATIONS.values()
-
-    _EXPECTED_PLATFORMS = ("posix", "nt")
-
-    def test_neither_row_inherits_the_host(self):
-        """An unemulated row is a row about the runner."""
-        assert set(self._EMULATIONS) == {"posix", "nt"}, self._EMULATIONS
-        for platform, emulation in self._EMULATIONS.items():
-            under_the_other_host = self._EMULATIONS["nt" if platform == "posix" else "posix"]
-            verdict = self._verdict(under_the_other_host + emulation + DEAD_CWD_WORLD)
-            assert verdict == self._EXPECTED[(platform, "getcwd")], (
-                f"the {platform} emulation did not survive being run on the other platform's host — "
-                "it is reading os.path instead of building its own semantics"
-            )
-
-    def test_the_platform_emulation_actually_arms(self):
-        """Arming probe: without BOTH halves patched, the nt rows are posix rows."""
-        world = (
-            WINDOWS_EMULATED_WORLD
-            + DEAD_CWD_WORLD
-            + (
-                "import os\n"
-                "try:\n"
-                "    os.path.abspath('relative')\n"
-                "    print('ABSPATH_SURVIVED_THE_DENIAL')\n"
-                "except FileNotFoundError:\n"
-                "    print('ABSPATH_DIED')\n"
-            )
-        )
-        result = subprocess.run([sys.executable, "-c", world], capture_output=True, text=True, encoding="utf-8")
-        assert result.returncode == 0, result.stderr
-        assert "ABSPATH_SURVIVED_THE_DENIAL" in result.stdout, (
-            "the Win32 abspath half is not installed, so the nt rows below are measuring posix: " + result.stdout
-        )
-
-    @pytest.mark.parametrize("denial", ["realpath", "getcwd", "both"])
-    @pytest.mark.parametrize("platform", ["posix", "nt"])
-    def test_the_table_holds(self, platform, denial):
-        # BOTH rows are emulated: a bare posix row measures whatever the host is.
-        prefix = self._world_for(platform)
-        expected = self._EXPECTED[(platform, denial)]
-        assert self._verdict(prefix + self._DENIALS[denial]) == expected, (
-            f"the {platform} row for a {denial} denial moved. On posix that would be a change in "
-            "CPython's inspect.getmodule; on nt it would mean the emulation no longer matches the "
-            "runner. Re-read dead_cwd.py and the CI log before trusting either world."
-        )
-
-    def test_no_probe_in_this_branch_stacks_them_outside_the_table(self):
-        """Structural: only the table above may build the masking world."""
-        offenders = []
-        for path in _walk(Path(__file__).parent, "test_*.py"):
-            if path.name == Path(__file__).name:
-                continue
-            text = path.read_text(encoding="utf-8")
-            if "DEAD_CWD_WORLD + REALPATH_DENIED_WORLD" in text:
-                offenders.append(path.name)
-        assert offenders == [], "these stack the two denials and measure a kinder world: " + ", ".join(offenders)
-
-
-class TestTheWindowsWorldSurvivesEveryWayPathlibReachesRealpath:
-    """Python 3.10 held its own copy of ``os.path.realpath``, and my probe missed it.
-
-    3.10's ``_NormalAccessor`` captured ``os.path.realpath`` at pathlib import, so a later
-    rebind is never read. No 3.10 here, so the accessor is BUILT and the pins run anywhere;
-    a real 3.10 run that disagrees overrules this stand-in.
-    """
-
-    # The captured function is a SENTINEL that touches no filesystem or cwd: ntpath's
-    # real realpath reads the cwd itself, so RAISED would not discriminate on nt.
-    _PRE_CAPTURED_ACCESSOR = (
-        "import os, pathlib\n"
-        "def _original_realpath(p, *a, **k):\n"
-        "    return p\n"
-        "os.path.realpath = _original_realpath\n"
-        "class _NormalAccessor:\n"
-        "    realpath = staticmethod(os.path.realpath)\n"
-        "pathlib._NormalAccessor = _NormalAccessor\n"
-        "pathlib._the_accessor = _NormalAccessor()\n"
-    )
-
-    # A POSIX-absolute literal is drive-relative on nt (equivalent given the sentinel).
-    _PROBE_PATH = "SENTINEL_PATH_NOT_A_REAL_FILE"
-
-    # Through an instance, which makes the staticmethod load-bearing.
-    _ASK_THE_ACCESSOR = (
-        "import pathlib\n"
-        "try:\n"
-        f"    got = pathlib._the_accessor.realpath({_PROBE_PATH!r})\n"
-        "    print('NO_RAISE', got)\n"
-        "except FileNotFoundError:\n"
-        "    print('RAISED')\n"
-    )
-
-    _BARE_PATCH = (
-        "import os\n"
-        "_before = os.path.realpath\n"
-        "def _reads_the_cwd(p, *a, **k):\n"
-        "    os.getcwd()\n"
-        "    return _before(p, *a, **k)\n"
-        "os.path.realpath = _reads_the_cwd\n"
-    )
-
-    def _verdict(self, world: str) -> str:
-        result = subprocess.run([sys.executable, "-c", world], capture_output=True, text=True, encoding="utf-8")
-        assert result.returncode == 0, result.stderr
-        return result.stdout.strip()
-
-    def test_the_bare_patch_never_reaches_a_pre_captured_accessor(self):
-        """The 3.10 defect, reproduced on this interpreter. Red before the cure."""
-        world = self._PRE_CAPTURED_ACCESSOR + self._BARE_PATCH + DEAD_CWD_WORLD + self._ASK_THE_ACCESSOR
-        assert self._verdict(world).startswith("NO_RAISE"), (
-            "a bare os.path.realpath patch now reaches a pre-captured accessor, which would "
-            "mean the 3.10 red had some other cause — re-read the CI log before trusting this file"
-        )
-
-    def test_the_shipped_world_does_reach_it(self):
-        """The cure: patch the accessor when one exists, exactly as the getcwd world does."""
-        world = self._PRE_CAPTURED_ACCESSOR + WINDOWS_REALPATH_WORLD + DEAD_CWD_WORLD + self._ASK_THE_ACCESSOR
-        assert self._verdict(world) == "RAISED", (
-            "WINDOWS_REALPATH_WORLD did not arm through the accessor — this is the Python 3.10 "
-            "NO_RAISE from CI, reproduced"
-        )
-
-    def test_it_still_arms_where_there_is_no_accessor_at_all(self):
-        """3.11+ has no accessor. The cure must not depend on finding one."""
-        world = (
-            WINDOWS_REALPATH_WORLD
-            + DEAD_CWD_WORLD
-            + (
-                "import pathlib\n"
-                "try:\n"
-                "    pathlib.Path('/tmp').resolve()\n"
-                "    print('NO_RAISE')\n"
-                "except FileNotFoundError:\n"
-                "    print('RAISED')\n"
-            )
-        )
-        assert self._verdict(world) == "RAISED"
-
-    @pytest.mark.parametrize("host", ["posix", "nt"])
-    def test_these_verdicts_do_not_move_when_the_host_changes(self, host):
-        """An instrument must not import the platform."""
-        under = POSIX_EMULATED_WORLD if host == "posix" else WINDOWS_EMULATED_WORLD
-        bare = under + self._PRE_CAPTURED_ACCESSOR + self._BARE_PATCH + DEAD_CWD_WORLD + self._ASK_THE_ACCESSOR
-        cured = under + self._PRE_CAPTURED_ACCESSOR + WINDOWS_REALPATH_WORLD + DEAD_CWD_WORLD + self._ASK_THE_ACCESSOR
-
-        assert self._verdict(bare).startswith("NO_RAISE"), f"host={host}: the bare patch verdict is host-dependent"
-        assert self._verdict(cured) == "RAISED", f"host={host}: the cured world's verdict is host-dependent"
-
-    def test_the_accessor_still_answers_correctly_when_the_cwd_is_fine(self):
-        """A world that raises for the right reason can still return the wrong path.
-
-        Without ``staticmethod`` the accessor binds and eats the path; every raise-shaped pin stays green.
-        """
-        world = self._PRE_CAPTURED_ACCESSOR + WINDOWS_REALPATH_WORLD + self._ASK_THE_ACCESSOR
-        assert self._verdict(world) == f"NO_RAISE {self._PROBE_PATH}", (
-            "the patched accessor did not return the path it was handed — a bound plain "
-            "function eats the argument. It must be a staticmethod."
-        )

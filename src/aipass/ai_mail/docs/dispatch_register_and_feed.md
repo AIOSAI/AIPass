@@ -159,8 +159,8 @@ trade of detection latency for zero idle cost. `drone @ai_mail dispatch register
 lists what is open and flags what is overdue.
 
 **The two-hour latency is the fallback, not the only signal.** Rows carrying a
-`monitor_pid` also expose `monitor_alive` on read — the process is checked (Linux
-reads `/proc`, Windows `OpenProcess`) at the moment someone looks, never stored, because a stored liveness is
+`monitor_pid` also expose `monitor_alive` on read — the process is checked (`/proc`
+is read) at the moment someone looks, never stored, because a stored liveness is
 stale the instant it is written. A dead monitor is therefore visible on the next
 watchdog pass (five minutes) instead of at `expected_by`.
 
@@ -242,7 +242,7 @@ the read and the lock is refused, never reopened; a widen that adds nothing writ
 It sends no mail: the admin tells the target. There is no narrowing and no change of root.
 
 The grant needs no revoke: it is open exactly while its row is, so the monitor's exit, a
-reply, a stop and a close each end it. `door_dispatch_grant.granted(caller_branch,
+reply, a stop and a close each end it. `aipass.ai_mail.granted(caller_branch,
 dispatch_id, target_path)` answers `{allowed, dispatch_id, reason}` for one write, derived at
 that read: the row is outstanding, carries a grant, was sent to that caller, is before
 `expected_by`, and its `monitor_alive` is `True` (`None` refuses). `dispatch_id` is the
@@ -276,10 +276,12 @@ wrote the mailbox during its run.
 
 ### Feed records for delivered mail
 
-`kind: "mail"` lines carry three **additive** string keys — `mail_id` (the
+`kind: "mail"` lines carry four **additive** string keys — `mail_id` (the
 message's `id` in the recipient's `.ai_mail.local/inbox.json`), `recipient` (the
 branch, no @) and `project` (the recipient's project as its registry names it:
-`BAUD_REGISTRY.json` → `baud`, `unknown` when no registry names it). The body
+`BAUD_REGISTRY.json` → `baud`, `unknown` when no registry names it) and `mail_kind`
+(the message's kind, [mail_kinds.md](mail_kinds.md): its contract and the feed's rate
+limit). The body
 stays subject plus a 100-char preview; the keys are the way to the whole message.
 An upsert update writes no line, so it carries none. `wake` lines carry none either.
 

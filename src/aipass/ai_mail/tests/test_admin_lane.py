@@ -3,7 +3,7 @@
 # Description: Tests for admin-grant verification + dispatch wiring (FPLAN-0401 Phase 4)
 # Version: 1.1.3
 # Created: 2026-08-12
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/users/verified_caller.py and the dispatch admin-wiring it feeds."""
@@ -21,15 +21,17 @@
 # sentry: no-test-needed(shared) — is_verified_admin_caller(), never called here: tests/test_cross_project_bridge.py
 
 import json
+import sys
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+import aipass.devpulse
 from aipass.ai_mail.apps.handlers.users.verified_caller import verify_admin_caller
 from aipass.ai_mail.apps.modules.dispatch import handle_command
-from aipass.devpulse.apps.modules.door_admin_grant import compute_signature
+from aipass.devpulse import compute_signature
 
 
 def _dispatch_send(args):
@@ -44,7 +46,7 @@ _H_SEND = "aipass.ai_mail.apps.handlers.email.send"
 _ES = "aipass.ai_mail.apps.modules.email_send"
 _H_VERIFIED = "aipass.ai_mail.apps.handlers.users.verified_caller"
 
-_REFERENCE = "aipass.devpulse.apps.modules.door_admin_grant"
+_REFERENCE = "aipass.devpulse"
 
 _KEY_HEX = "a" * 64  # 32 bytes, fixture only — never written outside tmp_path
 
@@ -200,6 +202,8 @@ class TestVerifyAdminCaller:
             return real_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", _boom)
+        # The door loads the home through importlib, bypassing __import__: hide the name at its home instead.
+        monkeypatch.delattr(sys.modules[aipass.devpulse.verify_admin_grant.__module__], "verify_admin_grant")
         ok, reason = verify_admin_caller()
         assert ok is False
         assert "lane dark" in reason.lower()

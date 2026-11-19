@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: introspection_check.py
 # Description: Introspection Standards Checker Handler
-# Version: 1.0.4
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -18,7 +18,8 @@ from pathlib import Path
 from typing import Dict, Optional
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
+from aipass.sentry.apps.handlers.aipass_standards.modules_check import is_second_door
 
 # APPLIES_TO: the no-args gate is a module behaviour.
 APPLIES_TO = "production"
@@ -30,7 +31,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks = []
     path = Path(module_path)
 
-    # Normalize to forward slashes so string matching works on Windows too
     module_path = Path(module_path).as_posix()
 
     if is_bypassed(module_path, "introspection", bypass_rules=bypass_rules):
@@ -93,8 +93,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         }
 
     is_entry_point = _is_entry_point(module_path, path)
-    # A door is a re-export with no CLI: the modules standard reads its shape, there is nothing to introspect
-    is_module = "/modules/" in module_path and path.parent.name == "modules" and not path.name.startswith("door_")
+    # front_door convicts a second door (a retired pattern); asking it for a CLI would report it twice.
+    in_modules = "/modules/" in module_path and path.parent.name == "modules"
+    is_module = in_modules and not is_second_door(module_path, content)
 
     if not is_entry_point and not is_module:
         return {
@@ -135,7 +136,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             checks.append(order_check)
 
     if is_entry_point:
-        dispatch_check = check_correct_dispatch(tree, path.name)
+        dispatch_check = check_correct_dispatch(tree, path.name, module_path, bypass_rules)
         if dispatch_check:
             checks.append(dispatch_check)
 
@@ -144,7 +145,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         if gate_check:
             checks.append(gate_check)
 
-    content_check = check_content_references(tree, path.name)
+    content_check = check_content_references(tree, path.name, module_path, bypass_rules)
     if content_check:
         checks.append(content_check)
 
@@ -153,6 +154,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         if help_check:
             checks.append(help_check)
 
+    checks = [c if c["name"] in _SITE_CHECKS else _waive_file_level(c, module_path, bypass_rules) for c in checks]
     passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
@@ -691,8 +693,10 @@ def _ast_contains_help_string(node: ast.AST) -> bool:
     return False
 
 
-def check_correct_dispatch(tree: ast.Module, filename: str) -> Optional[Dict]:
-    """Verify that no-args calls print_introspection() and --help calls print_help()."""
+def check_correct_dispatch(
+    tree: ast.Module, filename: str, module_path: str = "", bypass_rules: list | None = None
+) -> Optional[Dict]:
+    """Verify that no-args calls print_introspection() and --help calls print_help(); each wrong block is a site."""
     main_func = _find_main_function(tree)
     if main_func is None:
         main_func = _find_name_main_block(tree)
@@ -700,53 +704,21 @@ def check_correct_dispatch(tree: ast.Module, filename: str) -> Optional[Dict]:
         return None
 
     known_names = collect_help_predicate_names(tree)
-
-    for node in ast.walk(main_func):
-        if not isinstance(node, ast.If):
-            continue
-
-        if _is_no_args_check(node):
-            calls = _get_function_calls_in_block(node.body)
-            if "print_help" in calls and "print_introspection" not in calls:
-                return {
-                    "name": "Correct dispatch",
-                    "passed": False,
-                    "message": (
-                        f"No-args block calls print_help() in {filename} "
-                        f"(line {node.lineno}) — should call "
-                        f"print_introspection() (introspection != help)"
-                    ),
-                }
-
-        if _is_help_check(node, known_names):
-            calls = _get_function_calls_in_block(node.body)
-            introspection_funcs = calls & {"print_introspection", "_show_pack_module_introspection"}
-            if introspection_funcs and "print_help" not in calls:
-                return {
-                    "name": "Correct dispatch",
-                    "passed": False,
-                    "message": (
-                        f"--help block calls {introspection_funcs.pop()}() in "
-                        f"{filename} (line {node.lineno}) — should call "
-                        f"print_help() (help != introspection)"
-                    ),
-                }
-
-        # A compound conditional (`if not remaining or remaining[0] in ["--help"]`) is caught here too.
-        if _ast_contains_help_string(node.test):
-            calls = _get_function_calls_in_block(node.body)
-            introspection_funcs = calls & {"print_introspection", "_show_pack_module_introspection"}
-            if introspection_funcs and "print_help" not in calls:
-                return {
-                    "name": "Correct dispatch",
-                    "passed": False,
-                    "message": (
-                        f"Block with --help condition calls "
-                        f"{introspection_funcs.pop()}() in {filename} "
-                        f"(line {node.lineno}) — --help should show help, "
-                        f"not introspection"
-                    ),
-                }
+    scope = main_func.name if isinstance(main_func, ast.FunctionDef) else FILE_SCOPE
+    faults = [
+        (node.lineno, fault)
+        for node in ast.walk(main_func)
+        if isinstance(node, ast.If) and (fault := _dispatch_fault(node, known_names, filename))
+    ]
+    open_faults = [
+        fault
+        for line, fault in faults
+        if not is_bypassed(module_path, "introspection", line=line, bypass_rules=bypass_rules, name=scope)
+    ]
+    if open_faults:
+        return {"name": "Correct dispatch", "passed": False, "message": "; ".join(open_faults)}
+    if faults:
+        return {"name": "Correct dispatch", "passed": True, "message": f"All {len(faults)} wrong blocks waived"}
 
     return {
         "name": "Correct dispatch",
@@ -767,8 +739,10 @@ def _get_function_calls_in_block(body: list) -> set:
     return calls
 
 
-def check_content_references(tree: ast.Module, filename: str) -> Optional[Dict]:
-    """Check that print_introspection() and print_help() reference drone commands, not python3 standalone execution."""
+def check_content_references(
+    tree: ast.Module, filename: str, module_path: str = "", bypass_rules: list | None = None
+) -> Optional[Dict]:
+    """print_introspection() and print_help() reference drone commands, not python3; each reference is a site."""
     target_funcs = {"print_introspection", "print_help"}
     python3_refs = []
 
@@ -785,8 +759,13 @@ def check_content_references(tree: ast.Module, filename: str) -> Optional[Dict]:
     if not found_funcs:
         return None  # No relevant functions to check
 
-    if python3_refs:
-        refs_str = ", ".join(f"{fn}() line {ln}" for fn, ln in python3_refs[:3])
+    open_refs = [
+        (fn, ln)
+        for fn, ln in python3_refs
+        if not is_bypassed(module_path, "introspection", line=ln, bypass_rules=bypass_rules, name=fn)
+    ]
+    if open_refs:
+        refs_str = ", ".join(f"{fn}() line {ln}" for fn, ln in open_refs)
         return {
             "name": "Content references",
             "passed": False,
@@ -796,6 +775,8 @@ def check_content_references(tree: ast.Module, filename: str) -> Optional[Dict]:
                 f'use "drone @branch command" instead'
             ),
         }
+    if python3_refs:
+        return {"name": "Content references", "passed": True, "message": f"All {len(python3_refs)} python3 refs waived"}
 
     return {
         "name": "Content references",
@@ -828,3 +809,39 @@ def check_module_help_interception(tree: ast.Module, filename: str) -> Optional[
             f"handle_command() in {filename} does not intercept --help — flag may fall through to business logic"
         ),
     }
+
+
+#: The checks whose findings are sites (a line in a function); every other check's finding is file-level.
+_SITE_CHECKS = frozenset({"Content references", "Correct dispatch"})
+
+
+def _dispatch_fault(node: ast.If, known_names: frozenset, filename: str) -> Optional[str]:
+    """What is wrong with one conditional of main(): no-args showing help, or --help showing introspection."""
+    calls = _get_function_calls_in_block(node.body)
+    introspection_funcs = calls & {"print_introspection", "_show_pack_module_introspection"}
+    if _is_no_args_check(node) and "print_help" in calls and "print_introspection" not in calls:
+        return (
+            f"No-args block calls print_help() in {filename} (line {node.lineno}) — should call "
+            f"print_introspection() (introspection != help)"
+        )
+    if not introspection_funcs or "print_help" in calls:
+        return None
+    if _is_help_check(node, known_names):
+        return (
+            f"--help block calls {sorted(introspection_funcs)[0]}() in {filename} (line {node.lineno}) — should call "
+            f"print_help() (help != introspection)"
+        )
+    # A compound conditional (`if not remaining or remaining[0] in ["--help"]`) is caught here too.
+    if _ast_contains_help_string(node.test):
+        return (
+            f"Block with --help condition calls {sorted(introspection_funcs)[0]}() in {filename} "
+            f"(line {node.lineno}) — --help should show help, not introspection"
+        )
+    return None
+
+
+def _waive_file_level(check: Dict, module_path: str, bypass_rules: list | None) -> Dict:
+    """A failing file-level check passed by a row naming FILE_SCOPE under functions."""
+    if check["passed"] or not is_bypassed(module_path, "introspection", bypass_rules=bypass_rules, name=FILE_SCOPE):
+        return check
+    return {**check, "passed": True, "message": f"Waived by a {FILE_SCOPE} bypass row: {check['message']}"}

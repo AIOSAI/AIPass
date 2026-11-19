@@ -20,7 +20,7 @@ import time
 from typing import List, Tuple
 
 from aipass.cli import console
-from aipass.cli.apps.modules import error, success
+from aipass.cli import error, success
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.audit import discovery
 from aipass.sentry.apps.handlers.cli.help_flags import wants_help

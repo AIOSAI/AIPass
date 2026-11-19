@@ -9,7 +9,7 @@ Re-derived from the real tree 2026-09-15. Depth lives in docs/, indexed by READM
 ```
 apps/
 ├── trigger.py              → entry point, auto-discovers modules/
-├── config.py               → constants, atomic_write_json, json_file_lock, TrailLogger
+├── config.py               → constants, atomic_write_json, json_file_lock
 ├── log_watcher_service.py  → the systemd daemon: watchers + its own catch-up + reload sentinel
 ├── modules/
 │   ├── core.py             → event bus: fire / status / list
@@ -22,6 +22,7 @@ apps/
     ├── error_registry.py   → SHA1 fingerprints, circuit breaker, suppression gate, backoff
     ├── error_reporter.py   → report_error() plus the source-fix email pipeline
     ├── escalation.py       → repeat-signature counting and the digest email
+    ├── failure_report.py   → a survived failure: failures.jsonl line, medic status row, one mail
     ├── log_watcher.py      → the branch log watcher (watchdog, position tracking)
     ├── medic_state.py      → medic_state.json persistence
     ├── reload_sentinel.py  → restarts the service when handler code changes

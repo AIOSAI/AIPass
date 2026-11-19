@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: instance_lock.py
 # Description: Single-instance lock for the prax monitor
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-07-10
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """Single-instance lock for the prax monitor's fleet-wide duties (the log rate tracker).
@@ -17,13 +17,11 @@ import os
 from pathlib import Path
 from typing import IO, Optional
 
-try:
-    import fcntl
-except ImportError:  # Windows: no lock, every monitor takes the duties
-    fcntl = None  # type: ignore[assignment]
+import fcntl
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.state_root import branch_root, state_home
 
 logger = get_direct_logger()
 
@@ -32,18 +30,16 @@ _held_file: Optional[IO[str]] = None
 
 
 def get_lock_path() -> Path:
-    """Return the path for the monitor lock file (prax/prax_json/monitor.lock)."""
+    """Return the path for the monitor lock file (prax_json/monitor.lock in prax's state folder)."""
     if _lock_path_override is not None:
         return _lock_path_override
-    return Path(__file__).resolve().parents[3] / "prax_json" / "monitor.lock"
+    return state_home(branch_root("prax")) / "prax_json" / "monitor.lock"
 
 
 def try_acquire() -> bool:
     """Take the lock without blocking. True if this process now holds it."""
     global _held_file
     json_handler.log_operation("instance_lock_acquire", {"pid": os.getpid()})
-    if fcntl is None:
-        return True
     lock_path = get_lock_path()
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_file = open(lock_path, "a+", encoding="utf-8")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: prune.py
 # Description: Prune module — lists, and with --apply removes, stored copies the ignore spec now matches
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Prune Module — stored copies of paths the ignore spec now matches.
@@ -11,24 +11,16 @@
 Reference: docs/store_cleanup.md
 """
 
-import os
 import sys
 from pathlib import Path
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.cleanup.prune import apply_prune, find_prunable
 from aipass.backup.apps.handlers.path.builder import backup_root
-from aipass.backup.apps.handlers.path.caller import resolve_caller_path
+from aipass.backup.apps.handlers.path.caller import resolve_caller_path, store_delete_refusal
 from aipass.backup.apps.handlers.report.formatter import _human_bytes
 
 MODULE_NAME = "prune"
@@ -36,7 +28,7 @@ PRIMARY_COMMAND = "prune"
 USAGE = "prune <project_root|@name> [--apply]"
 
 #: What one candidate is called in each store.
-UNITS = {"snapshots": "files", "versioned": "file-folders"}
+UNITS = {"snapshots": "files"}
 
 
 def print_introspection():
@@ -52,8 +44,8 @@ def print_help():
     print_introspection()
     console.print()
     console.print(f"Usage: {USAGE}")
-    console.print("  Lists, per top-level directory, the snapshots/ files and versioned/")
-    console.print("  file-folders whose project path the ignore spec now matches.")
+    console.print("  Lists, per top-level directory, the snapshots/ files whose project")
+    console.print("  path the ignore spec now matches. Snapshot files only.")
     console.print("  Without --apply nothing is deleted. --apply deletes them,")
     console.print("  one trail row each.")
 
@@ -127,7 +119,13 @@ def handle_command(command: str, args: list) -> bool:
         error(f"prune takes one project and --apply: got {' '.join(args)}", suggestion=USAGE)
         return True
 
-    run_prune(str(resolve_caller_path(positional[0])), apply="--apply" in args)
+    project_root = resolve_caller_path(positional[0])
+    apply = "--apply" in args
+    refusal = store_delete_refusal("prune --apply", project_root) if apply else None
+    if refusal:
+        error(f"Prune refused: {refusal}")
+        return True
+    run_prune(str(project_root), apply=apply)
     return True
 
 

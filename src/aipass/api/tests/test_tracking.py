@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_tracking.py
 # Description: Tests for usage tracking handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/usage/tracking.py, the usage tracking handler."""
@@ -12,6 +12,7 @@
 # sentry: no-test-needed(external) — the live OpenRouter generation endpoint; urlopen is mocked, no network
 # sentry: no-test-needed(constant) — DEFAULT_REQUEST_TIMEOUT's value
 
+import importlib.util
 import json
 from datetime import datetime
 from pathlib import Path
@@ -29,6 +30,16 @@ from aipass.api.apps.handlers.usage.tracking import (
 )
 
 _TRACKING_MOD = "aipass.api.apps.handlers.usage.tracking"
+
+
+def test_api_json_dir_is_under_the_state_root(monkeypatch, tmp_path):
+    """API_JSON_DIR is <state root>/api/api_json; set at import, so a private copy is executed under a test root."""
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+    spec = importlib.util.spec_from_file_location("_tracking_probe", tracking.__file__)
+    assert spec and spec.loader
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+    assert probe.API_JSON_DIR == tmp_path / "api" / "api_json"
 
 
 def _answer(mock_urlopen: MagicMock, payload: object) -> None:

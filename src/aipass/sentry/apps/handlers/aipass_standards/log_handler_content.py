@@ -3,7 +3,7 @@
 # Description: Log Handler Standards Content
 # Version: 1.0.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -54,7 +54,7 @@ def get_log_handler_standards() -> str:
     # [CORRECT] If custom handler needed, use RotatingFileHandler with limits
 
 [yellow]WHY THIS MATTERS:[/yellow]
-  On 2026-02-26, telegram bots using plain FileHandler accumulated
+  On 2026-02-26, one integration's bots using plain FileHandler accumulated
   181,566 log lines (~100K ERROR lines) that crashed ALL drone commands.
   The error catchup scanner tried to process 100K errors, hit Python's
   recursion limit, and cascaded into system-wide failure.

@@ -3,7 +3,7 @@
 # Description: Owner-capability caller guard for devpulse owner-only tools
 # Version: 1.5.0
 # Created: 2026-07-10
-# Modified: 2026-10-22
+# Modified: 2026-11-17
 # =============================================
 
 """Owner-capability guard for devpulse's owner-only tools."""
@@ -12,16 +12,18 @@ import os
 from pathlib import Path
 
 from aipass.prax import logger
+from aipass.spawn import find_registry, get_owner, is_owner, registry_is_writable_document
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.devpulse.apps.handlers.owner.admin_grant import _resolve_verified_caller
 
 
-def _resolve_caller() -> tuple[str, Path]:
+def _resolve_caller() -> tuple[str, Path | None]:
     """``(email, cwd)`` from the AIPASS_CALLER_* rail only: drone sets cwd to the branch, so no rail, no caller."""
     caller_cwd_env = os.environ.get("AIPASS_CALLER_CWD", "")
-    caller_cwd = Path(caller_cwd_env) if caller_cwd_env else Path.cwd()
+    if not caller_cwd_env:
+        return "", None
     branch = _resolve_verified_caller()
-    return (f"@{branch}" if branch else ""), caller_cwd
+    return (f"@{branch}" if branch else ""), Path(caller_cwd_env)
 
 
 def _legacy_devpulse_heuristic(caller_cwd: Path) -> bool:
@@ -29,20 +31,11 @@ def _legacy_devpulse_heuristic(caller_cwd: Path) -> bool:
     return caller_cwd.name == "devpulse" or any(p.name == "devpulse" for p in caller_cwd.parents)
 
 
-def _owner_decision(email: str, caller_cwd: Path) -> bool:
+def _owner_decision(email: str, caller_cwd: Path | None) -> bool:
     """Decide whether ``email`` owns the project at ``caller_cwd``, against the caller's own registry."""
-    try:
-        # Lazy: keeps cold start fast and lets an ImportError reach the fail-safe.
-        from aipass.spawn.apps.modules.door_owner import (
-            find_registry,
-            get_owner,
-            is_owner,
-            registry_is_writable_document,
-        )
-    except ImportError as exc:
-        logger.warning("[owner_guard] owner resolver unavailable (%s) — legacy heuristic", exc)
-        return _legacy_devpulse_heuristic(caller_cwd)
-
+    if caller_cwd is None:
+        logger.warning("[owner_guard] no AIPASS_CALLER_CWD rail — refusing")
+        return False
     if get_owner(start_path=caller_cwd) is None:
         # None also means UNREADABLE; only the unsealed case may reach the heuristic, or any dir named devpulse passes.
         registry_path = find_registry(start_path=caller_cwd)
@@ -63,8 +56,6 @@ def owner_address(start_path: Path | None = None) -> str | None:
     builder must not become a traceback, and a caller can still tell a crashed lookup from an unsealed project.
     """
     try:
-        from aipass.spawn.apps.modules.door_owner import get_owner
-
         entry = get_owner(start_path=start_path) if start_path is not None else get_owner()
     except Exception as exc:
         logger.warning("[owner_guard] owner lookup failed: %s", exc)

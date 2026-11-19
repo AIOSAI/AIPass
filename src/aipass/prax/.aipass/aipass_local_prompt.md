@@ -14,7 +14,7 @@ The logging and monitoring backbone. Every branch logs through prax — `from ai
 
 ```
 prax/
-├── __init__.py                 # Public API, lazy (PEP 562): logger, append_jsonl, json_handler
+├── __init__.py                 # The one import door, lazy (PEP 562), no cache: __all__ is the list
 ├── apps/
 │   ├── prax.py                 # Entry point — discovers modules, routes commands, zero logic
 │   ├── modules/                # One orchestrator per verb: logger, monitor, dashboard,
@@ -29,8 +29,7 @@ prax/
 │   │   ├── logging/            # Setup, rotation, introspection, direct logger, jsonl
 │   │   ├── monitoring/         # Event queue, branch detect/scope, log watcher, rate tracker,
 │   │   │                       #   filters, commons feed, instance lock, pid cache
-│   │   ├── registry/           # Module registry load/save
-│   │   └── status/             # STATUS.md sync handler
+│   │   └── registry/           # Module registry load/save
 │   ├── plugins/                # devpulse_dashboard: git, session and dispatch sections
 │   └── integrations/           # Per-integration prompt and config
 ├── templates/                  # DASHBOARD.template.json — the dashboard schema
@@ -43,21 +42,21 @@ prax/
 # Logging system
 
  - Canonical import: `from aipass.prax import logger`. Works from any branch, no setup call.
- - Direct logger: `from aipass.prax.apps.modules.logger import get_direct_logger` — for prax internals inside watchdog threads or the import chain, where the stack walk would recurse.
+ - Direct logger: `from aipass.prax.apps.handlers.logging.direct import get_direct_logger` — for prax internals inside watchdog threads or the import chain, where the stack walk would recurse.
  - Auto-routing by stack introspection: caller's module, branch and file path decide the destination.
  - Two-tier placement: `system_logs/<branch>_<module>.log` central, `<branch>/logs/<module>.log` local. Both rotate by size.
- - Env override before the stack walk: `AIPASS_LOG_NAME` or `AIPASS_BOT_ID`, for shared base classes that would otherwise all log as one caller.
+ - Env override before the stack walk: `AIPASS_LOG_NAME`, for shared base classes that would otherwise all log as one caller.
  - Projects outside AIPass get their own `system_logs/` and `logs/` under their own root.
- - Self-healing: missing directories are created, an unknown caller falls back and says so, and a failed prax import hands back a NullLogger rather than taking the caller down.
+ - Self-healing: missing directories are created and an unknown caller is routed to system_logs/external/ and says so. A failed prax import raises in every spelling: no fallback logger.
 
 # Critical rules
 
  - Prax is the only logging system. No branch runs its own setup.
  - Infrastructure only — no application logic, no alerting on log content beyond growth rate.
  - No cross-branch file edits. Issue in another branch's code? Mail the owner.
- - Handlers are internal. Other branches import `aipass.prax` or `aipass.prax.apps.modules.*` and nothing deeper.
+ - Handlers are internal. Other branches import from the package door only: `from aipass.prax import <name>`, never a path under `apps/`.
  - Dashboards are generated. Services update their own section through `write_section()`, never by editing the file.
- - Caps other branches read are constants, not numbers to copy: `SUBJECT_CAP`, `DASHBOARD_CHAR_BUDGET` in `apps.modules.dashboard`, contract in `docs/dashboard_caps.md`.
+ - Caps other branches read are constants, not numbers to copy: `SUBJECT_CAP`, `DASHBOARD_CHAR_BUDGET` on the package door, contract in `docs/dashboard_caps.md`.
 
 # Gotchas
 

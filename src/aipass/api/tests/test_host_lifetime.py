@@ -3,7 +3,7 @@
 # Description: Tests for a serve that outlives the shell that started it
 # Version: 1.1.2
 # Created: 2026-08-20
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/host/lifetime.py, a detached serve, its record and its log."""
@@ -123,32 +123,13 @@ class TestTheChildIsGenuinelyDetached:
     """
 
     def test_the_child_gets_its_own_session(self, runtime: Path, bind_ok: None) -> None:
-        """One keyword, and the whole fix is it — SPELLED PER PLATFORM.
-
-        start_new_session is POSIX-only; Windows accepts it and silently does nothing."""
+        """One keyword, and the whole fix is it."""
         with patch.object(subprocess, "Popen", return_value=_spawned()) as popen:
             host_lifetime.serve_detached()
 
         handed = popen.call_args.kwargs
 
-        if sys.platform == "win32":
-            detached_process = 0x00000008
-            create_new_process_group = 0x00000200
-            assert handed["creationflags"] & detached_process
-            assert handed["creationflags"] & create_new_process_group
-            assert "start_new_session" not in handed, "a POSIX no-op was passed on Windows"
-        else:
-            assert handed["start_new_session"] is True
-            assert "creationflags" not in handed
-
-    def test_the_detach_keywords_are_never_empty(self, runtime: Path, bind_ok: None) -> None:
-        """Vacuity floor for the branch above."""
-        with patch.object(subprocess, "Popen", return_value=_spawned()) as popen:
-            host_lifetime.serve_detached()
-
-        handed = popen.call_args.kwargs
-
-        assert handed.get("start_new_session") or handed.get("creationflags"), "nothing detaches the child"
+        assert handed["start_new_session"] is True
 
     def test_the_child_never_shares_the_callers_stdin(self, runtime: Path, bind_ok: None) -> None:
         """A detached server reading a closed terminal is a server that stalls."""
@@ -203,6 +184,10 @@ class TestTheLogSurvivesARestart:
             record = host_lifetime.serve_detached()
 
         assert record["log"] == str(host_lifetime.log_path())
+
+    def test_the_transcript_is_never_named_for_the_log_watcher(self, runtime: Path) -> None:
+        """Trigger's watcher reads every .log in logs/; a transcript carries any text."""
+        assert host_lifetime.log_path().name == "host_api_serve.out"
 
 
 class TestAServerThatDiedOnStartIsNotReportedAsRunning:
@@ -283,7 +268,6 @@ class TestFindingTheRunningServer:
         assert "already running" in str(refusal.value)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="zombies and os.kill(pid, 0) are POSIX")
 class TestADeadChildIsDead:
     """
     A dead child, reaped or not, is never reported as a running server.
@@ -311,8 +295,15 @@ class TestADeadChildIsDead:
         finally:
             child.wait()
 
+    def test_a_reap_that_fails_for_another_reason_is_raised(self, runtime: Path) -> None:
+        """Only ChildProcessError means "not ours"; any other OSError is a fault, not a no."""
+        host_lifetime.record_path().write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
 
-@pytest.mark.skipif(sys.platform == "win32", reason="SIGTERM and os.kill(pid, 0) are POSIX")
+        with patch.object(os, "waitpid", side_effect=OSError(5, "Input/output error")):
+            with pytest.raises(OSError):
+                host_lifetime.running()
+
+
 class TestStopping:
     """Asked to leave, never shot — and the record is cleared either way."""
 
@@ -344,9 +335,9 @@ class TestStopping:
 
         assert record is not None
         assert signal.SIGTERM in [call.args[1] for call in killed.call_args_list]
-        assert not hasattr(signal, "SIGKILL") or signal.SIGKILL not in [
-            call.args[1] for call in killed.call_args_list
-        ], "a graceful shutdown was cut short"
+        assert signal.SIGKILL not in [call.args[1] for call in killed.call_args_list], (
+            "a graceful shutdown was cut short"
+        )
         assert not host_lifetime.record_path().exists()
 
     def test_a_server_that_will_not_go_is_said_out_loud(
@@ -533,17 +524,15 @@ class TestTheServerRunsOnItsHomesInterpreter:
     `aipass install` runs these doors in the uv tool venv, which has no
     fastapi; the server it spelled as itself died on start. It is the home's server."""
 
-    @pytest.fixture(params=[("linux", "bin", "python"), ("win32", "Scripts", "python.exe")])
-    def other_home(self, request: Any, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
-        platform, directory, name = request.param
+    @pytest.fixture
+    def other_home(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
         home = runtime / "home"
-        python = home / ".venv" / directory / name
+        python = home / ".venv" / "bin" / "python"
         entry = home / "src" / "aipass" / "api" / "apps" / "api.py"
         for made in (python, entry):
             made.parent.mkdir(parents=True, exist_ok=True)
             made.write_text("", encoding="utf-8")
         monkeypatch.setenv("AIPASS_HOME", str(home))
-        monkeypatch.setattr(sys, "platform", platform)
         return {"python": python, "entry": entry, "branch": entry.parents[1]}
 
     def test_a_detached_server_is_the_homes_python_and_api_run_from_the_home(
@@ -581,8 +570,7 @@ class TestTheServerRunsOnItsHomesInterpreter:
     ) -> None:
         """The home's drone reads this record: status, stop and a repair serve --detach must find it."""
         home = tmp_path / "home"
-        python = home / ".venv" / ("Scripts" if sys.platform == "win32" else "bin")
-        python = python / ("python.exe" if sys.platform == "win32" else "python")
+        python = home / ".venv" / "bin" / "python"
         entry = home / "src" / "aipass" / "api" / "apps" / "api.py"
         for made in (python, entry):
             made.parent.mkdir(parents=True, exist_ok=True)
@@ -599,7 +587,6 @@ class TestTheServerRunsOnItsHomesInterpreter:
 
         operations.log_operation.assert_called_once_with("host_api_serve_detached", record)
         assert record["log"] == str(home_logs / host_lifetime.LOG_NAME)
-        # Compare as a Path: a str(home) substring check fails on Windows.
         assert log.info.call_args_list[0].args[1] == home
         assert {host_lifetime.record_path().parent, host_lifetime.log_path().parent} == {home_logs}
         assert host_lifetime.unit_path().parent == home_logs
@@ -759,7 +746,6 @@ class TestTheInstallReportNamesAConflictItCanSee:
         monkeypatch.setattr(host_autostart, "is_supported", supported)
         monkeypatch.setattr(host_autostart, "supervised_pid", lambda: 0)
         monkeypatch.setattr(host_lifetime, "_alive", lambda pid: pid == 4242)
-        monkeypatch.setattr("sys.platform", "linux")
         monkeypatch.setattr(host_autostart.shutil, "which", lambda name: f"/bin/{name}" if name == "loginctl" else None)
         asked: list = []
 

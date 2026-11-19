@@ -3,7 +3,7 @@
 # Description: Tests for the branch health module (entry-count + entry-size wrapper)
 # Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/health.py -- get_branch_health()."""
@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.cli import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.json import entry_limits as _entry_limits
 from aipass.memory.apps.handlers.json import lint_handler as _lint_handler
 from aipass.memory.apps.handlers.monitor import detector as _detector

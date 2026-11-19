@@ -26,8 +26,7 @@ Live counts come from the run, not from a table: `-q` prints them, and `--collec
 prints the collected total without executing anything.
 
 `conftest.py` carries the isolation this branch depends on: an autouse fixture that redirects the
-deletion store away from the live `.ai_central/`, the `deletable_cwd` marker Windows skips, and the
-reset of the caller-identity dedupe set.
+deletion store away from the live `.ai_central/`, and the reset of the caller-identity dedupe set.
 
 ---
 
@@ -40,7 +39,8 @@ reset of the caller-identity dedupe set.
 | Handlers | `test_registry_handler.py`, `test_discovery.py`, `test_executor.py` |
 | Commit gate | `test_commit_gate_branch_mapping.py` |
 | Infrastructure | `test_module_registry.py`, `test_config.py`, `test_generic_adapter.py` |
-| Features | `test_rm.py`, `test_commands.py`, `test_scan.py` |
+| Features | `test_commands.py`, `test_scan.py` |
+| drone rm | `test_rm.py` (containment and fences), `test_rm_archive.py`, `test_rm_stale.py`, `test_rm_dot.py`; shared fixtures in `conftest.py` |
 | Deletion record | `test_deletion_log.py` |
 | Broker | `test_broker.py` |
 | Standards | `test_cli_routing.py` |

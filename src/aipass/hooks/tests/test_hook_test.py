@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_hook_test.py
-# Version: 1.4.0
+# Version: 1.6.0
 # Description: Tests for the portable hook test runner
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/hook_test.py and the parity and smoke handlers it drives."""
@@ -15,15 +15,18 @@
 # sentry: no-test-needed(stdlib) — tempfile.gettempdir() choosing where the synthetic file lands
 # sentry: no-test-needed(ruff) — that modules/hook_test.py parses and imports the engine it drives
 
+import importlib
 import json
 import os
 import sqlite3
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+import aipass.prax as prax
 from aipass.hooks.apps.handlers.config import diagnostics
 from aipass.hooks.apps.handlers.parity import runner, smoke
 from aipass.hooks.apps.handlers.prompt import temporal
@@ -454,6 +457,14 @@ class TestParity:
         assert claude["env"]["AIPASS_SESSION_TYPE"] == "dispatched"
         assert not [key for key in claude["env"] if key.startswith("CLAUDE")]
 
+    def test_a_pointer_that_cannot_be_read_raises_and_is_not_read_as_never_written(self, monkeypatch, tmp_path):
+        FakeClis(monkeypatch, tmp_path, {})
+        branch = tmp_path / "canary"
+        branch.mkdir()
+        (branch / ".ai_mail.local").write_text("", encoding="utf-8")
+        with pytest.raises(NotADirectoryError):
+            runner.run_session("claude", "hi", branch)
+
     def test_lane_a_sends_one_probe_mail_to_the_branch_before_the_sessions(self, monkeypatch, tmp_path):
         fake = FakeClis(monkeypatch, tmp_path, {})
         with pytest.raises(SystemExit):
@@ -469,6 +480,16 @@ class TestParity:
         written = json.loads(report.read_text(encoding="utf-8"))
         assert written["ok"] is True
         assert [row["verdict"] for row in written["rows"]] == ["same"] * 4
+
+    def test_json_reports_follow_praxs_state_root_never_the_package(self, monkeypatch, tmp_path):
+        FakeClis(monkeypatch, tmp_path, {"claude": _ALL_FOUR_REFUSE, "codex": _ALL_FOUR_REFUSE})
+        try:
+            with patch.object(prax, "branch_state_root", lambda branch: tmp_path / "state" / branch):
+                importlib.reload(hook_test)
+            _parity(tmp_path, "--lane", "C", "--json")
+            assert len(list((tmp_path / "state" / "hooks" / "artifacts" / "reports").glob("parity_*.json"))) == 1
+        finally:
+            importlib.reload(hook_test)
 
     def test_one_provider_launches_only_that_cli_and_compares_nothing(self, monkeypatch, tmp_path, capsys):
         fake = FakeClis(monkeypatch, tmp_path, {"claude": _ALL_FOUR_REFUSE})
@@ -533,10 +554,8 @@ class FakeSmokeClis:
         self.stderr = ""
         self.session = True
         self.limited: set[str] = set()
-        self.during = None
-        # Path.home() reads HOME on POSIX and USERPROFILE on Windows.
+        self.during: Callable[[Path], None] | None = None
         monkeypatch.setenv("HOME", str(self.home))
-        monkeypatch.setenv("USERPROFILE", str(self.home))
         monkeypatch.delenv("OPENCODE_DB", raising=False)
         monkeypatch.delenv("OPENCODE_CONFIG_DIR", raising=False)
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
@@ -552,10 +571,10 @@ class FakeSmokeClis:
         monkeypatch.setattr(smoke.subprocess, "run", self._run)
 
     def install(self, name: str) -> None:
-        """A stub on PATH; Windows' which wants a PATHEXT suffix, POSIX's the execute bit."""
-        for stub in (self.bin / name, self.bin / f"{name}.cmd"):
-            stub.write_text("", encoding="utf-8")
-            stub.chmod(0o755)
+        """A stub on PATH, with the execute bit."""
+        stub = self.bin / name
+        stub.write_text("", encoding="utf-8")
+        stub.chmod(0o755)
 
     def _run(self, argv, **kwargs):
         self.calls.append({"argv": argv, **kwargs})
@@ -566,7 +585,7 @@ class FakeSmokeClis:
             return subprocess.CompletedProcess(argv, 1, "", self.stderr)
         hook = temporal.handle({"prompt": kwargs["input"]})["stdout"] if self.hook_ran else "Temporal: no hook"
         # The model's reply carries the ack even when no hook ran: only the hook's own row may count.
-        reply = "ok smoke-ack:" + temporal.SMOKE_NONCE.search(kwargs["input"]).group(1)
+        reply = "ok smoke-ack:" + temporal.SMOKE_NONCE.findall(kwargs["input"])[0]
         getattr(self, f"_{provider}")(hook, reply, kwargs["input"])
         if provider == "opencode" and argv[argv.index("-m") + 1] in self.limited:
             refusal = {"type": "error", "sessionID": "ses_oc", "error": {"type": "provider.free-limit"}}

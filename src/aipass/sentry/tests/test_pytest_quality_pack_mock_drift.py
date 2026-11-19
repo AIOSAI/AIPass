@@ -3,7 +3,7 @@
 # Description: pytest_quality pack, mock_drift checker pins (split from test_pytest_quality_pack.py)
 # Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/pytest_quality_standards/mock_drift_check.py."""
@@ -394,7 +394,7 @@ class TestMockDriftBranchCheck:
         assert any("test_broken.py" in check["message"] for check in result["checks"])
 
 
-# Minimised from `_windows_spelled`: a lambda over a module-level `Path` whose `Path.cwd()` runs only when the git-ignored registry marker is absent, so green on a dev seat and red on a clean checkout.
+# Minimised from a batch7 helper: a lambda over a module-level `Path` whose `Path.cwd()` runs only when the git-ignored registry marker is absent, so green on a dev seat and red on a clean checkout.
 
 _FINDER = """
 from pathlib import Path
@@ -439,7 +439,7 @@ def _standin_project(root: Path, product: str, replacement: str) -> Path:
 
 
         def _posix(*parts):
-            return Path(*(str(p).replace("\\\\", "/") for p in parts))
+            return Path(*parts)
 
 
         class _FakePath(type(Path())):
@@ -447,11 +447,11 @@ def _standin_project(root: Path, product: str, replacement: str) -> Path:
 
 
         class TestRead:
-            def _windows_spelled(self, monkeypatch):
+            def _patch_path(self, monkeypatch):
                 monkeypatch.setattr(finder, "Path", {replacement})
 
             def test_reads(self, monkeypatch):
-                self._windows_spelled(monkeypatch)
+                self._patch_path(monkeypatch)
                 assert finder.read is not None
         """,
     )
@@ -463,12 +463,12 @@ class TestMockDriftClassStandIn:
 
     def test_the_batch7_lambda_over_path_is_convicted_at_its_helper(self, tmp_path):
         """MUTATION CAUGHT: the `Attribute` arm of `_class_uses` disabled - `Path.cwd()` reads as no use."""
-        _standin_project(tmp_path, _FINDER, 'lambda *a: Path(*(str(p).replace("\\\\", "/") for p in a))')
+        _standin_project(tmp_path, _FINDER, "lambda *a: Path(*a)")
 
         rows = _standin_rows(tmp_path)
 
         assert [(row["nodeid"], row["target"], row["species"]) for row in rows] == [
-            ("tests/test_finder.py::TestRead::_windows_spelled", "mypkg.finder.Path", "CLASS-STANDIN")
+            ("tests/test_finder.py::TestRead::_patch_path", "mypkg.finder.Path", "CLASS-STANDIN")
         ]
         assert "Path.cwd" in rows[0]["reason"]
         assert "src/mypkg/finder.py:5" in rows[0]["reason"]
@@ -537,4 +537,4 @@ class TestMockDriftClassStandIn:
 
         assert (cured["score"], cured["checks"][1]["passed"]) == (100, True)
         assert (convicted["score"], convicted["checks"][1]["passed"]) == (0, False)
-        assert "tests/test_finder.py::TestRead::_windows_spelled" in convicted["checks"][1]["message"]
+        assert "tests/test_finder.py::TestRead::_patch_path" in convicted["checks"][1]["message"]

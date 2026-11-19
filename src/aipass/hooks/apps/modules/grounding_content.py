@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: grounding_content.py
-# Version: 1.4.2
+# Version: 1.5.0
 # Description: Shared content loaders for grounding prompt injections (DPLAN-0276), each rendered under its cap
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-01
-# Modified: 2026-11-01
+# Modified: 2026-11-17
 # =============================================
 
 """Loads raw grounding content — kernel, navmap, branch, identity — with no cadence gating."""
@@ -14,8 +14,9 @@ import json
 import os
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 CONSOLE = err_console
 
@@ -87,7 +88,7 @@ def _find_project_file(filename: str) -> Path | None:
 def _is_user_state_dir(candidate: Path) -> bool:
     """True when *candidate* is the per-user ~/.aipass (trust registry, commons.db), not a stamped tree.
 
-    samefile, not spelling: Windows can reach the same directory through an 8.3 name.
+    samefile, not spelling: a symlink can reach the same directory.
     """
     try:
         return candidate.samefile(Path.home() / ".aipass")
@@ -358,6 +359,7 @@ def grounding_report(hook_data: dict) -> tuple[list[tuple[str, str]], list[str]]
         reason = _FAILURE_OF[label](hook_data)
         if reason:
             failures.append(_unhomed(reason))
+    json_handler.log_operation("grounding_report", {"loaded": [name for name, _ in sections], "failed": len(failures)})
     return sections, failures
 
 

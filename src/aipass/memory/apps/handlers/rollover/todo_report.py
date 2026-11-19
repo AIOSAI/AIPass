@@ -3,7 +3,7 @@
 # Description: Todo-pad reports for rollover run/check and the todo verbs (count, backlog, restore)
 # Version: 1.1.0
 # Created: 2026-09-15
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -17,6 +17,7 @@ Reference: docs/todos_and_backlog.md
 from typing import Any
 
 from aipass.prax import logger
+from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover import todo_roll
@@ -94,6 +95,10 @@ def roll_pad(branch: str | None = None) -> dict[str, str]:
         return stop
 
     name = target["name"]
+    if branch is not None:
+        refusal = caller_gate.other_branch_refusal("rollover run --branch", name, f"@{name}'s todo pad")
+        if refusal:
+            return _report(ERROR, f"@{name} todos NOT rolled - {refusal}")
     outcome = todo_roll.roll_todos(name, local_path=target["local"], backlog_path=target["backlog"])
     if not outcome.get("success"):
         return _report(ERROR, f"@{name} todos NOT rolled - {outcome.get('error')}")

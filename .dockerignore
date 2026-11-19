@@ -1,0 +1,3 @@
+# The image is built from the release wheel alone.
+*
+!dist/*.whl

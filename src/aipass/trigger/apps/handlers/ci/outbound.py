@@ -1,23 +1,19 @@
 # =================== AIPass ====================
 # Name: outbound.py
 # Description: CI red lane's doors out - mail, dispatch (mail plus wake), the notification feed, the awake count
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-22
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """
 CI Outbound Handler - every message the lane sends leaves through here
-
-Silent by contract: it runs on the event path, so it logs to a `.jsonl` trail, never through prax.
 """
 
 from typing import Any, Callable, Dict, Optional
 
-from aipass.trigger.apps.config import TRIGGER_ROOT, trail_logger
+from aipass.prax import logger
 from aipass.trigger.apps.handlers.json import json_handler
-
-logger = trail_logger(TRIGGER_ROOT / "logs" / "ci_lane.jsonl")
 
 MANAGER = "@devpulse"
 REVIEWER = "@sentry"
@@ -54,7 +50,7 @@ def wake(to_branch: str, subject: str) -> bool:
     """Wake *to_branch* with @trigger as sender, so its exit wakes @trigger back to read the reply."""
     try:
         # ai_mail's published door, never its handlers.
-        from aipass.ai_mail.apps.modules.door_wake import wake_branch
+        from aipass.ai_mail import wake_branch
 
         _status, woke = wake_branch(to_branch, fresh=False, sender="@trigger", subject=subject)
         return bool(woke)
@@ -76,23 +72,16 @@ def dispatch(to_branch: str, subject: str, body: str) -> bool:
 
 
 def feed(state: str, title: str, body: str, /, **extra: Any) -> str:
-    """One `system` event from source `ci` on the feed: answers written, refused, no_door or unavailable."""
+    """One `system` event from source `ci` on the feed: answers written or refused."""
     payload: Dict[str, str] = {
         key: str(extra.get(key, "") or "") for key in ("run_id", "workflow", "step", "owner", "url")
     }
     payload["state"] = state
-    try:
-        import aipass.ai_mail as ai_mail
+    from aipass.ai_mail import send_notification
 
-        send = getattr(ai_mail, "send_notification", None)
-    except (ImportError, OSError) as exc:
-        logger.warning(f"feed not written, ai_mail unavailable: {exc}")
-        return "unavailable"
-    # ai_mail publishes no feed writer yet; the call is built to the contract and waits on that door.
-    if send is None:
-        logger.warning(f"feed not written, ai_mail publishes no send_notification: {state} {title}")
-        return "no_door"
-    written = bool(send(kind="system", source="ci", title=title.splitlines()[0][:120], body=body, extra=payload))
+    written = bool(
+        send_notification(kind="system", source="ci", title=title.splitlines()[0][:120], body=body, extra=payload)
+    )
     json_handler.log_operation("ci_feed", {"state": state, "written": written})
     return "written" if written else "refused"
 
@@ -110,10 +99,5 @@ def awake_count() -> int:
 
 
 def cap_allows() -> bool:
-    """True when one more wake stays within the cap; an unreadable register answers no, so the wake queues."""
-    try:
-        count = awake_count()
-    except Exception as exc:
-        logger.warning(f"dispatch register unreadable, wake queued: {exc}")
-        return False
-    return count < AWAKE_CAP
+    """True when one more wake stays within the cap; an unreadable register raises."""
+    return awake_count() < AWAKE_CAP

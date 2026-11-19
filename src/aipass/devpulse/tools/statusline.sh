@@ -34,10 +34,6 @@ done
 if [ -z "$branch" ]; then
     if [[ "$dir" == *"/src/aipass/"* ]]; then
         branch=$(echo "$dir" | sed 's|.*/src/aipass/||' | cut -d/ -f1)
-    elif [[ "$dir" == *"/src/commons"* ]]; then
-        branch="commons"
-    elif [[ "$dir" == *"/src/skills"* ]]; then
-        branch="skills"
     elif [[ "$dir" == *"/AIPass"* ]]; then
         branch="root"
     fi
@@ -91,7 +87,7 @@ WD_REG="$HOME/Projects/AIPass/src/aipass/devpulse/.watchdog/watchdog_active.json
 wd_session=$(echo "$input" | jq -r '.session_id // empty')
 wd_beat=0
 if [ -f "$WD_HB" ]; then
-    wd_hb_ts=$(stat -c %Y "$WD_HB" 2>/dev/null || stat -f %m "$WD_HB" 2>/dev/null)
+    wd_hb_ts=$(stat -c %Y "$WD_HB" 2>/dev/null)
     wd_now=$(date +%s)
     if [ -n "$wd_hb_ts" ] && [ $((wd_now - wd_hb_ts)) -le 15 ] 2>/dev/null; then
         wd_beat=1

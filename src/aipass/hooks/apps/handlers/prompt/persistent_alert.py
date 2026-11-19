@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: persistent_alert.py
-# Version: 1.2.1
+# Version: 1.2.2
 # Description: Injects advisory banners for active alerts on UserPromptSubmit — on arrival, then on cadence
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-14
-# Modified: 2026-10-25
+# Modified: 2026-11-15
 # =============================================
 
 """Injects advisory banners for active alerts from .aipass/alerts.json.
@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 _GUARD_DIR = Path(tempfile.gettempdir())
 _MAX_ALERTS_SHOWN = 10
@@ -52,7 +52,7 @@ def _active_alerts(alerts_path: Path) -> list[dict]:
     try:
         data = json.loads(alerts_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        logger.info("[HOOKS] persistent_alert: read error: %s", exc)
+        logger.warning("[HOOKS] persistent_alert: read error: %s", exc)
         return []
 
     alerts = data.get("alerts", []) if isinstance(data, dict) else []

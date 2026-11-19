@@ -3,7 +3,7 @@
 # The CLI contract — exit codes, introspection, the import door
 
 **Branch** spawn · **Code** `apps/spawn.py`, `apps/modules/__init__.py`,
-`apps/handlers/class_registry.py`, `apps/handlers/docs_page.py`
+`apps/handlers/class_registry.py`, `apps/handlers/bootstrap_render.py`
 
 ---
 
@@ -27,6 +27,20 @@ never mistaken for "your fleet is already migrated" by anything reading the exit
 
 ---
 
+## Seats — who runs a lane that rewrites another citizen
+
+A real run of `repair --apply` (relocate, rename, clean-pollution, scan), `adopt-citizen --apply`,
+`update --apply`, `sync-registry --fix` and `migrate-passports --confirm` moves, renames,
+rewrites or removes files in branches that are not the caller's, so it runs from @spawn's own
+verified seat or the verified admin seat only (`apps/handlers/seat_gate.py`, ai_mail's
+verified-caller rail; a verifier that raises answers no). Any other seat is refused
+before anything is read or written, exits 1, is told to mail @spawn or @devpulse the branch and
+why, and the refusal is logged with the caller, the verb, the target and the time
+(`write_refused`). Every preview stays open to every seat and ends by naming who may run it for
+real. `delete` is stricter: its real run is the admin seat's alone ([retire.md](retire.md)).
+
+---
+
 ## Introspection
 
 The module and command inventory is generated from the code that runs it, so it is never
@@ -37,15 +51,40 @@ because the parser is built with `add_help=False`.
 
 ---
 
-## The class registry — the gateway other branches import through
+## The package door — what other branches import
 
 `apps/handlers/` is internal to this branch; its `__init__` refuses cross-branch imports and
-points callers here. Other branches that need to resolve a `citizen_class` read spawn's
-registry through the modules gateway rather than mirroring the class table — a mirror makes
-the reader a fleet-wide single point of failure the moment spawn renames a class.
+points callers at the package door, `src/aipass/spawn/__init__.py`. The door hands out each
+name from its home on every access (PEP 562 `__getattr__` over a name-to-home table, no cache),
+so a bare `import aipass.spawn` loads nothing under `apps/`, and a patch on the home reaches
+every caller that reads through the door. `apps/modules/__init__.py` re-exports nothing.
+
+| Names | Home |
+|---|---|
+| `spawn_agent` | `apps/modules/core.py` |
+| `CITIZEN_CLASSES`, `FORBIDDEN_CLASSES`, `LEGACY_CLASSES`, `get_available_classes`, `get_template_dir`, `refuse_legacy_class`, `refuse_retired_or_forbidden`, `validate_class` | `apps/handlers/class_registry.py` |
+| `find_registry`, `get_owner`, `is_owner`, `registry_is_writable_document` | `apps/handlers/registry.py` |
+| `render_bootstrap_trinity`, `restore_citizen` | `apps/handlers/bootstrap_render.py` |
+
+`render_bootstrap_trinity(branch_name, target, citizen_class, role, registry_path)` is the install
+script's one call: it writes the `.trinity` files a core branch lacks (a tracked passport seed
+first, then the template) and returns the names written. It never overwrites an existing file,
+and an unreadable registry or a seed that fails validation raises. A core citizen's module renders
+as `aipass.<name>`; a project citizen's stays the bare name.
+
+`restore_citizen(branch_name, registry_path)` is the same render for a repair: the folder comes
+from the citizen's registry row, and its name, class and role from its own seed, so no class or
+role list lives outside the seeds. It writes only the missing files and returns their names. A
+passport that is present but not a JSON object counts as missing: it is renamed beside itself to
+`passport.json.corrupt-<id>`, so its bytes are kept, and a fresh one is rendered. An
+unregistered name raises `LookupError`, and a citizen without a seed raises `FileNotFoundError`.
+
+Other branches that need to resolve a `citizen_class` read spawn's registry through the door
+rather than mirroring the class table — a mirror makes the reader a fleet-wide single point
+of failure the moment spawn renames a class.
 
 ```python
-from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
+from aipass.spawn import get_template_dir, refuse_legacy_class
 
 get_template_dir("specialist")           # -> Path to the one citizen template
 get_template_dir("aipass_framework")     # -> ValueError naming the retired name AND 'specialist'
@@ -65,37 +104,26 @@ spawn's own fence (`apps/handlers/__init__.py`, v2.1) in a fresh interpreter per
 case. Every newborn is born with the same fence: `templates/citizen/apps/handlers/__init__.py`
 is devpulse's fence template verbatim, placeholders intact, and the template ships the pair
 `tests/test_handlers_fence.py` and `tests/support_fence.py` so a newborn pins its own fence
-from its first run. `tests/test_template_import_guard.py` pins the template's fence before
-any mint: a foreign seat refused by name, an outside seat refused as unknown, kin and the
-modules door allowed, a dead cwd survived, and a cwd inside the newborn buying a foreign seat
-nothing.
+from its first run. The fence's refusal names the package door, `from aipass.<branch> import
+<name>`. A newborn is also born with that door: `templates/citizen/__init__.py` is the
+same PEP 562 door with an empty name table, so a bare import loads nothing under `apps/` and
+every name raises `AttributeError` until one is added. `spawn update` never overwrites an
+existing `.py`, so a branch's real door is reported for review, never replaced.
+`tests/test_template_import_guard.py` pins the template's fence before any mint: a foreign
+seat refused by name, an outside seat refused as unknown, kin allowed, the empty door passing
+the template's own `door` probe from a foreign seat, a dead cwd survived, and a cwd inside the
+newborn buying a foreign seat nothing.
 
 ---
 
-## The docs page skeleton — one source, read live
+## A newborn's docs index
 
-Every branch's `docs/*.md` pages share one shape, scored by @sentry's `docs_page` standard.
-The skeleton that shows the shape is `templates/docs_page.md`, and sentry renders it through
-the same gateway on every call — neither side keeps a copy.
-
-```python
-from aipass.spawn.apps.modules import docs_page_template
-
-docs_page_template()   # -> the skeleton text, read from disk on this call
-                       # -> OSError when it cannot be read; there is no fallback shape
-```
-
-The skeleton sits beside `templates/citizen/`, never inside it. Everything in the citizen
-tree is stamped into every newborn, so a skeleton there would arrive as a placeholder page in
-every branch; beside it, no walk reaches it — not the copy, not the manifest a mint is
-verified against, not the update engine. The handler reads and returns and performs no
-operation of its own, so it logs nothing; the render is sentry's operation.
-
-What a newborn does carry is the index: `templates/citizen/docs/README.md` is a back-link,
-a title and one line, and it names the standard rather than the size cap, which sentry owns.
-`tests/test_modules_gateway.py` pins the door, `tests/test_template_hygiene.py` pins the
-skeleton's shape and that no mint carries it, and `tests/test_birth_receipt.py` pins that the
-index copies no cap.
+Every branch's `docs/*.md` pages share one shape, scored by @sentry's `docs_page` standard;
+`drone @sentry standard docs_page` shows it, and spawn keeps no copy. A newborn carries no page,
+only the index: `templates/citizen/docs/README.md` is a back-link, a title and one line, and it
+names the standard rather than the size cap, which sentry owns. `tests/test_template_hygiene.py`
+pins that the index is the only file a newborn's `docs/` holds, and `tests/test_birth_receipt.py`
+pins that the index copies no cap.
 
 ---
 

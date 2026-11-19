@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_audit.py
 # Description: Unit tests for handlers/audit/
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/audit/audit_display.py, discovery.py and branch_audit.py."""
@@ -61,6 +61,21 @@ def test_format_standard_name_empty(capsys):
     """An empty name stays empty."""
     lines = _branch_summary(capsys, "", **_failed_branch_check(""))
     assert "    └─  issues:" in lines
+
+
+def test_the_overall_line_says_how_many_sites_bypass_rows_waive(capsys):
+    lines = _branch_summary(capsys, "naming", waived=40)
+    assert any(line.startswith("  Overall:") and "· 40 waived by bypass rows" in line for line in lines)
+
+
+def test_the_system_summary_totals_the_waived_sites(capsys):
+    results = [
+        {"branch": {"name": n}, "scores": {"naming": 100}, "average": 100, "waived": w} for n, w in (("a", 3), ("b", 4))
+    ]
+    audit_display.print_system_summary(results)
+    assert (
+        "  Waived sites:          7 (bypass rows; a 100 with rows waived is not a clean 100)" in capsys.readouterr().out
+    )
 
 
 def test_render_violations_shows_file_paths(capsys):
@@ -216,15 +231,4 @@ def test_uppercase_registry_name_no_entry_when_only_uppercase_file(tmp_path, mon
     _registry(tmp_path, [{"name": "BACKUP", "path": str(branch_dir)}], monkeypatch)
 
     result = discovery.discover_branches()
-    # Case folding is a property of the filesystem, not of the OS name, so ask
-    # the directory the test just wrote instead of guessing from platform.
-    lowercase_resolves = (apps_dir / "backup.py").exists()
-
-    if lowercase_resolves:
-        # Case-insensitive filesystem (default macOS/Windows): BACKUP.py answers
-        # to backup.py, so the branch IS found -- under the lowercase entry name.
-        assert len(result) == 1
-        assert result[0]["entry_file"].endswith("backup.py")
-    else:
-        # Case-sensitive filesystem (Linux): no lowercase entry file, no branch.
-        assert result == []
+    assert result == []

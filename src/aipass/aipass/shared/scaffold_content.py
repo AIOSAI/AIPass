@@ -3,7 +3,7 @@
 # Description: Shared template content generators for project scaffolding
 # Version: 1.6.2
 # Created: 2026-04-22
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -321,10 +321,6 @@ def gitignore() -> str:
         ".vscode/\n"
         ".idea/\n"
         ".claude/worktrees/\n"
-        "\n"
-        "# OS\n"
-        ".DS_Store\n"
-        "Thumbs.db\n"
         "\n"
         "# Archives and disabled files (renamed, never deleted)\n"
         ".archive/\n"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_content.py
 # Description: JSON Structure Standards Content Handler
-# Version: 3.1.0
+# Version: 3.1.3
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -96,7 +96,8 @@ def get_json_structure_standards() -> str:
         "",
         "  The shim resolves NO paths of its own: the service derives this",
         "  branch's root from the shim's [dim]__file__[/dim], deliberately without",
-        "  [dim]resolve()[/dim] so a dead cwd on Windows cannot poison it. That is why",
+        "  [dim]resolve()[/dim], so a symlinked checkout keeps the path it was",
+        "  imported by. That is why",
         "  the check above accepts a shim with no [dim]Path(__file__)[/dim] in it.",
         "",
         "  [yellow]Bind, never wrap.[/yellow] The service reads the calling module at",
@@ -131,6 +132,10 @@ def get_json_structure_standards() -> str:
         '  [dim]{"file": "apps/handlers/init/bootstrap.py",[/dim]',
         '  [dim] "standard": "json_structure",[/dim]',
         '  [dim] "reason": "Pure Python bootstrap — no branch imports by design"}[/dim]',
+        "",
+        "  Every json_structure finding is file-level and has no line: a row with",
+        '  [dim]"lines"[/dim] waives nothing. [dim]"functions": ["<file>"][/dim] waives the',
+        "  file-level findings; a row with no scope waives the whole file.",
         "",
         "─" * 70,
         "",
@@ -254,7 +259,8 @@ def get_json_structure_standards() -> str:
         "     [dim]and a diagnostic that needs the logger it is emitted from is a[/dim]",
         "     [dim]second crash wearing a diagnostic's clothes (@memory).[/dim]",
         "  [yellow]![/yellow]  BOTH clauses are measured by the checker, neither is declared:",
-        "     [dim]no aipass import ANYWHERE (function-level counts), AND the logging[/dim]",
+        "     [dim]no aipass import ANYWHERE (function-level counts) but prax's trail[/dim]",
+        "     [dim]door, the logger built for this layer, AND the logging[/dim]",
         "     [dim]chain's own imports reach the module. Measured on 2026-08-31: 79[/dim]",
         "     [dim]fleet modules import nothing from aipass; 9 are in the chain. One[/dim]",
         "     [dim]clause alone would exempt either all 79 or ai_mail's whole dispatch[/dim]",

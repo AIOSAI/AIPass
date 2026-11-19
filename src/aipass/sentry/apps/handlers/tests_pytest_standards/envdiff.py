@@ -144,11 +144,6 @@ WIDTH_AXIS_LIMITS: Tuple[str, ...] = (
     "COLUMNS is honoured by whatever the target's own renderer consults. The header "
     "record proves the CHILD's stdlib terminal-size resolver saw the requested width; "
     "it does not prove every renderer inside the target asked that resolver.",
-    "Windows is untested here. COLUMNS is not exported by cmd.exe or PowerShell, so "
-    "no Windows developer has the environment this axis constructs; the variable is "
-    "still honoured by shutil.get_terminal_size() and by Rich when a parent sets it, "
-    "but a renderer calling the Win32 console API directly would ignore it. No "
-    "measurement on Windows backs this paragraph.",
     "Nodeids are relative to pytest's rootdir. Both variants run the identical "
     "invocation from the identical cwd, so they share one rootdir - a run whose "
     "rootdir differed would make the whole subtraction meaningless and is refused.",

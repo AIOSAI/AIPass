@@ -3,21 +3,27 @@
 # Description: Tests for migrate_json_file - moving live state off trio-owned paths
 # Version: 1.0.0
 # Created: 2026-08-07
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
-"""Tests for apps/config.py: migrate_json_file and _archive_legacy_file."""
+"""Tests for apps/config.py: migrate_json_file, _archive_legacy_file and where trigger_json lives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(behaviour) — the trio regeneration in apps/handlers/json/json_handler.py; the json handler owns it
+# sentry: no-test-needed(behaviour) — the trio regeneration in apps/handlers/json/json_handler.py; that handler owns it
 
 import json
 from pathlib import Path
 
 import pytest
 
-from aipass.trigger.apps import config as config_module
-from aipass.trigger.apps.config import ARCHIVE_DIR_NAME, TrailLogger, migrate_json_file
+from aipass.trigger.apps.config import ARCHIVE_DIR_NAME, TRIGGER_JSON_DIR, TRIGGER_ROOT, migrate_json_file
+from aipass.trigger.apps.handlers import error_registry, escalation, failure_report, log_watcher, medic_state
+from aipass.trigger.apps.handlers.events import runaway_handler, startup
+from aipass.trigger.apps.handlers.json import config_loader
+
+# conftest's sandboxes swap these per test; the values bound at import are the ones under test.
+_STARTUP_SUPPRESSED_LOG = startup.SUPPRESSED_LOG
+_CONFIG_LOADER_TRAIL = config_loader.logger.path
 
 LIVE_STATE = {
     "config": {"medic_enabled": True, "muted_branches": [{"name": "flow", "expires_at": None}]},
@@ -95,16 +101,15 @@ class TestMigrateJsonFile:
         assert json.loads(legacy.read_text(encoding="utf-8")) == blank_template
         assert not (tmp_path / ARCHIVE_DIR_NAME).exists()
 
-    def test_unreadable_legacy_is_left_in_place(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Corrupt legacy file is not archived and not guessed at — a human decides."""
-        monkeypatch.setattr(config_module, "logger", TrailLogger(tmp_path / "logs" / "config.jsonl"))
+    def test_unreadable_legacy_is_left_in_place(self, tmp_path: Path) -> None:
+        """Pins the default: an unreadable legacy file answered None under a warning; now it raises, left in place."""
         legacy = tmp_path / "trigger_config.json"
         new = tmp_path / "medic_state.json"
         legacy.parent.mkdir(parents=True, exist_ok=True)
         legacy.write_text("{not json", encoding="utf-8")
 
-        # None, not False: False means "nothing to migrate"; an unreadable file is work left undone.
-        assert migrate_json_file(legacy, new) is None
+        with pytest.raises(RuntimeError, match=r"trigger_config\.json unreadable"):
+            migrate_json_file(legacy, new)
         assert legacy.exists()
         assert not new.exists()
 
@@ -121,3 +126,40 @@ class TestMigrateJsonFile:
         archived = sorted(p.name for p in archive_dir.glob("trigger_config*.json"))
         assert len(archived) == 2
         assert json.loads((archive_dir / "trigger_config.json").read_text(encoding="utf-8")) == {"older": True}
+
+
+class TestStateFolder:
+    """trigger_json comes from prax's state root, never from counting folders up from config.py."""
+
+    def test_trigger_json_follows_the_state_root_redirect_not_the_code_folder(self) -> None:
+        # conftest set AIPASS_TEST_LOG_DIR before import, so prax's root sits outside the code folder.
+        assert TRIGGER_JSON_DIR.name == "trigger_json"
+        assert TRIGGER_JSON_DIR.parent.name == "trigger"
+        assert not TRIGGER_JSON_DIR.is_relative_to(TRIGGER_ROOT)
+
+    def test_every_state_file_and_log_sits_under_the_state_root_beside_trigger_json(self) -> None:
+        root = TRIGGER_JSON_DIR.parent
+        logs = root / "logs"
+        assert [
+            error_registry.REGISTRY_FILE,
+            error_registry.CB_STATE_FILE,
+            log_watcher.TRIGGER_DATA_FILE,
+            escalation.ESCALATION_LOG,
+            failure_report.FAILURES_LOG,
+            runaway_handler.DECISION_LOG,
+            _STARTUP_SUPPRESSED_LOG,
+            medic_state.MEDIC_SUPPRESSED_LOG,
+            medic_state.RATE_LIMITED_LOG,
+            _CONFIG_LOADER_TRAIL,
+        ] == [
+            root / "trigger_json" / "error_registry.json",
+            root / "trigger_json" / "trigger_cb_state.json",
+            root / "trigger_data.json",
+            logs / "escalation.jsonl",
+            logs / "failures.jsonl",
+            logs / "runaway_suppressed.jsonl",
+            logs / "medic_suppressed.jsonl",
+            logs / "medic_suppressed.jsonl",
+            logs / "rate_limited.jsonl",
+            logs / "config_loader.jsonl",
+        ]

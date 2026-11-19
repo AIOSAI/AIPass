@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_verify.py
 # Description: Tests for verify module (plan vectorization check)
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/verify.py."""
@@ -86,6 +86,22 @@ class TestGetMemoryPython:
         monkeypatch.setattr(lane, "_MEMORY_VENV_PYTHON", tmp_path / "nonexistent" / ".venv" / "bin" / "python")
         result = _python_used(monkeypatch)
         assert result == sys.executable
+
+    def test_the_interpreter_choice_is_logged_once(self, monkeypatch, tmp_path):
+        """Which python carries the ML lane is said out loud, once per choice, never per call."""
+        monkeypatch.delenv("AIPASS_MEMORY_PYTHON", raising=False)
+        missing = tmp_path / "nonexistent" / ".venv" / "bin" / "python"
+        monkeypatch.setattr(lane, "_MEMORY_VENV_PYTHON", missing)
+        monkeypatch.setattr(lane, "_ANNOUNCED", set())
+        said = MagicMock()
+        monkeypatch.setattr(lane, "logger", said)
+
+        lane.memory_python()
+        lane.memory_python()
+
+        said.info.assert_called_once_with(
+            f"[lane] ML interpreter {sys.executable} (this process: no {missing}, no AIPASS_MEMORY_PYTHON)"
+        )
 
 
 class TestCheckPlanSubprocess:
@@ -460,3 +476,39 @@ class TestDiscoverHandlers:
         dir_names = list(result.keys())
         assert dir_names == ["alpha", "middle", "zebra"]
         assert result["alpha"] == ["a_module.py", "handler.py", "z_module.py"]
+
+
+class TestTheLaneLogsAChildThatDiedBeforeReplying:
+    """A child that dies before replying leaves only stderr: run_json logs its tail; a JSON refusal is the caller's."""
+
+    def _run(self, monkeypatch, returncode, stdout, stderr):
+        said = MagicMock()
+        monkeypatch.setattr(lane, "logger", said)
+        monkeypatch.setattr(lane, "memory_python", lambda: "/usr/bin/python3")
+        monkeypatch.setattr(
+            subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
+        )
+        return lane.run_json(lane.CHROMA_SUBPROCESS_SCRIPT, {"operation": "x"}, 5, "probe"), said
+
+    def test_a_crash_logs_label_exit_and_the_stderr_tail(self, monkeypatch):
+        stderr = "\n".join(f"trace line {n:02d}" for n in range(40))
+        result, said = self._run(monkeypatch, -9, "", stderr)
+
+        assert result["success"] is False
+        said.warning.assert_called_once()
+        line = said.warning.call_args.args[0]
+        assert "probe" in line and "-9" in line
+        assert "trace line 39" in line
+        assert "trace line 00" not in line
+
+    def test_a_json_refusal_on_a_nonzero_exit_is_not_logged_here(self, monkeypatch):
+        result, said = self._run(monkeypatch, 1, json.dumps({"success": False, "error": "refused"}), "")
+
+        assert result["error"] == "probe failed (exit 1): refused"
+        said.warning.assert_not_called()
+
+    def test_a_reply_that_is_not_an_object_is_logged(self, monkeypatch):
+        result, said = self._run(monkeypatch, 0, "[1, 2]", "")
+
+        assert result["success"] is False
+        said.warning.assert_called_once()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trigger_check.py
 # Description: Trigger Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -14,10 +14,12 @@ Reference: trigger.md
 
 import ast
 import re
+from functools import partial
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 from aipass.prax import logger
-from aipass.sentry.apps.handlers.bypass.utils import matching_rule
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed, matching_rule
+from aipass.sentry.apps.handlers.aipass_standards.check_support import find_enclosing_function, parse
 from aipass.sentry.apps.handlers.json import json_handler
 
 AUDIT_SCOPE = "all_files"
@@ -48,13 +50,46 @@ def is_trigger_handler(file_path: str) -> bool:
     return "trigger" in file_path and "handlers/events" in file_path
 
 
+def _never_waived(_line: int) -> bool:
+    """A sub-check called on its own waives nothing; check_module hands each one a per-site ask instead."""
+    return False
+
+
+def _site_waived(module_path: str, line: int, bypass_rules: list | None, tree: Optional[ast.Module]) -> bool:
+    """Whether a scoped row waives the finding at this line, inside the function holding it.
+
+    Module-level code is FILE_SCOPE; an unparseable file names no function, so only a lines row reaches it.
+    """
+    if not bypass_rules:
+        return False
+    holder = find_enclosing_function(tree, line) if tree is not None else None
+    name = holder.name if holder else (FILE_SCOPE if tree is not None else None)
+    return is_bypassed(module_path, "trigger", line=line, bypass_rules=bypass_rules, name=name)
+
+
+def _waive_file_level(check: Dict, module_path: str, bypass_rules: list | None) -> Dict:
+    """A failing whole-file check passed by a row naming FILE_SCOPE under functions."""
+    if check["passed"] or not is_bypassed(module_path, "trigger", bypass_rules=bypass_rules, name=FILE_SCOPE):
+        return check
+    return {**check, "passed": True, "message": f"Waived by a {FILE_SCOPE} bypass row: {check['message']}"}
+
+
+def _line_verdict(name: str, found: List[int], waived: Callable[[int], bool], defect: str, clean: str) -> Dict:
+    """One check over line sites: fails on any site no row waives, says so when rows waived them all."""
+    open_lines = [i for i in found if not waived(i)]
+    if open_lines:
+        return {"name": name, "passed": False, "message": f"{defect} on lines {open_lines[:3]}"}
+    if found:
+        return {"name": name, "passed": True, "message": f"{defect} on lines {found[:3]}: waived by scoped bypass rows"}
+    return {"name": name, "passed": True, "message": clean}
+
+
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """Check if module follows Trigger standards"""
     checks = []
     path = Path(module_path)
 
-    # File-wide gate, so no line= is passed: forwarding one would advertise scope
-    # support to the inert-rule map that no caller exercises.
+    # A row with no lines/functions waives the whole file; scoped rows are asked per site below.
     rule = matching_rule(module_path, "trigger", bypass_rules=bypass_rules)
     if rule is not None:
         category, reason = rule.get("category"), rule.get("reason")
@@ -92,21 +127,25 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         }
 
     is_handler = is_trigger_handler(module_path)
+    # Each finding is a site: its line, inside the function holding it. Parsed only when a row could waive one.
+    tree = parse(content, module_path, tag="trigger_check") if bypass_rules else None
+    waived = partial(_site_waived, module_path, bypass_rules=bypass_rules, tree=tree)
 
     if is_handler:
-        logger_check = check_no_logger_imports(content, lines, module_path)
+        logger_check = check_no_logger_imports(content, lines, module_path, waived=waived)
         checks.append(logger_check)
 
     if is_handler:
-        print_check = check_no_print_statements(content, lines, module_path)
+        print_check = check_no_print_statements(content, lines, module_path, waived=waived)
         checks.append(print_check)
 
     trigger_import_check = check_trigger_import_pattern(content, lines, module_path)
     if trigger_import_check:
-        checks.append(trigger_import_check)
+        # A missing import has no line: the whole file is its site.
+        checks.append(_waive_file_level(trigger_import_check, module_path, bypass_rules))
 
     if is_handler:
-        naming_check = check_handler_naming(content, lines, module_path)
+        naming_check = check_handler_naming(content, lines, module_path, waived=waived)
         if naming_check:
             checks.append(naming_check)
 
@@ -121,7 +160,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                 }
             )
         else:
-            event_pattern_check = check_missing_trigger_events(content, lines, module_path)
+            event_pattern_check = check_missing_trigger_events(content, lines, module_path, waived=waived)
             if event_pattern_check:
                 checks.append(event_pattern_check)
 
@@ -142,7 +181,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "TRIGGER"}
 
 
-def check_no_logger_imports(_content: str, lines: List[str], _module_path: str) -> Dict:
+def check_no_logger_imports(
+    _content: str, lines: List[str], _module_path: str, waived: Callable[[int], bool] = _never_waived
+) -> Dict:
     """
     Check that trigger handlers don't import Prax logger
 
@@ -162,17 +203,18 @@ def check_no_logger_imports(_content: str, lines: List[str], _module_path: str) 
         elif "system_logger" in stripped and "import" in stripped:
             violations.append(i)
 
-    if violations:
-        return {
-            "name": "No logger imports",
-            "passed": False,
-            "message": f"Handler imports Prax logger (causes recursion) on lines {violations[:3]}",
-        }
+    return _line_verdict(
+        "No logger imports",
+        violations,
+        waived,
+        "Handler imports Prax logger (causes recursion)",
+        "Handler correctly has no Prax logger imports",
+    )
 
-    return {"name": "No logger imports", "passed": True, "message": "Handler correctly has no Prax logger imports"}
 
-
-def check_no_print_statements(_content: str, lines: List[str], _module_path: str) -> Dict:
+def check_no_print_statements(
+    _content: str, lines: List[str], _module_path: str, waived: Callable[[int], bool] = _never_waived
+) -> Dict:
     """
     Check that trigger handlers don't use print()
 
@@ -204,14 +246,13 @@ def check_no_print_statements(_content: str, lines: List[str], _module_path: str
         if re.search(r"(?<![.\w])print\s*\(", line):
             violations.append(i)
 
-    if violations:
-        return {
-            "name": "No print statements",
-            "passed": False,
-            "message": f"Handler uses print() (must be silent) on lines {violations[:3]}",
-        }
-
-    return {"name": "No print statements", "passed": True, "message": "Handler correctly has no print statements"}
+    return _line_verdict(
+        "No print statements",
+        violations,
+        waived,
+        "Handler uses print() (must be silent)",
+        "Handler correctly has no print statements",
+    )
 
 
 def _is_trigger_branch(file_path: str) -> bool:
@@ -219,12 +260,18 @@ def _is_trigger_branch(file_path: str) -> bool:
 
     It defines trigger.fire(), so it must not be required to import itself.
     """
-    normalized = file_path.replace("\\", "/")
-    return "/trigger/apps/" in normalized
+    return "/trigger/apps/" in file_path
+
+
+_DOOR_IMPORT = r"from\s+aipass\.trigger\s+import\s+[^\n#]*\btrigger\b"
+_LONG_IMPORTS = (
+    r"from\s+aipass\.trigger\.apps\.modules\.core\s+import\s+trigger\b",
+    r"from\s+aipass\.trigger\.apps\.modules\s+import\s+(?:core|trigger)\b",
+)
 
 
 def check_trigger_import_pattern(content: str, _lines: List[str], _module_path: str) -> Optional[Dict]:
-    """Check for correct trigger import patterns"""
+    """Check that a file firing trigger events imports trigger: by the door, or by a long path front_door convicts."""
     if "trigger" not in content.lower():
         return None
 
@@ -235,43 +282,44 @@ def check_trigger_import_pattern(content: str, _lines: List[str], _module_path: 
             "message": "Trigger branch file — self-reference, import not required",
         }
 
-    has_trigger_import = False
     has_trigger_fire = "trigger.fire(" in content
+    has_door_import = re.search(_DOOR_IMPORT, content) is not None
+    has_long_import = any(re.search(pattern, content) for pattern in _LONG_IMPORTS) or (
+        "_trigger" in content and "trigger.apps.modules.core" in content
+    )
 
-    valid_patterns = [
-        r"from\s+aipass\.trigger\.apps\.modules\.core\s+import\s+trigger\b",
-        r"from\s+aipass\.trigger\.apps\.modules\s+import\s+(?:core|trigger)\b",
-    ]
+    if has_door_import:
+        return {"name": "Trigger import pattern", "passed": True, "message": "Imports trigger through its front door"}
 
-    for pattern in valid_patterns:
-        if re.search(pattern, content):
-            has_trigger_import = True
-            break
+    if has_long_import:
+        return {
+            "name": "Trigger import pattern",
+            "passed": True,
+            "message": "Imports trigger by a path under trigger's apps/ (front_door judges the form; "
+            "the door form is from aipass.trigger import trigger)",
+        }
 
-    if "_trigger" in content and "trigger.apps.modules.core" in content:
-        has_trigger_import = True
-
-    if has_trigger_fire and not has_trigger_import:
+    if has_trigger_fire:
         return {
             "name": "Trigger import pattern",
             "passed": False,
-            "message": "Uses trigger.fire() but missing proper import",
+            "message": "Uses trigger.fire() but never imports trigger — add: from aipass.trigger import trigger",
         }
-
-    if has_trigger_import:
-        return {"name": "Trigger import pattern", "passed": True, "message": "Correct trigger import pattern"}
 
     return None
 
 
-def check_handler_naming(_content: str, lines: List[str], _module_path: str) -> Optional[Dict]:
+def check_handler_naming(
+    _content: str, lines: List[str], _module_path: str, waived: Callable[[int], bool] = _never_waived
+) -> Optional[Dict]:
     """
     Check that handler functions follow naming convention
 
-    Pattern: handle_{event_name}(**kwargs)
+    Pattern: handle_{event_name}(**kwargs); each misnamed def is a site at its def line.
     """
     handler_functions = []
     bad_handlers = []
+    waived_handlers = []
 
     for i, line in enumerate(lines, 1):
         match = re.match(r"^def\s+(\w+)\s*\(", line)
@@ -282,7 +330,7 @@ def check_handler_naming(_content: str, lines: List[str], _module_path: str) -> 
             if "handle" in func_name.lower():
                 handler_functions.append(func_name)
                 if not func_name.startswith("handle_"):
-                    bad_handlers.append(func_name)
+                    (waived_handlers if waived(i) else bad_handlers).append(func_name)
 
     if not handler_functions:
         return None
@@ -294,10 +342,12 @@ def check_handler_naming(_content: str, lines: List[str], _module_path: str) -> 
             "message": f"Handler functions should be handle_{{event}}: {bad_handlers}",
         }
 
+    named = [f for f in handler_functions if f not in waived_handlers]
+    waived_note = f"; misnamed, waived by scoped bypass rows: {waived_handlers}" if waived_handlers else ""
     return {
         "name": "Handler naming",
         "passed": True,
-        "message": f"Handler functions correctly named: {handler_functions}",
+        "message": f"Handler functions correctly named: {named}{waived_note}",
     }
 
 
@@ -389,14 +439,18 @@ def _enclosing_function(functions: Optional[List[Dict]], line: int) -> Optional[
     return best
 
 
-def check_missing_trigger_events(content: str, lines: List[str], _module_path: str) -> Optional[Dict]:
+def check_missing_trigger_events(
+    content: str, lines: List[str], _module_path: str, waived: Callable[[int], bool] = _never_waived
+) -> Optional[Dict]:
     """
     Detect event-like patterns that should use trigger.fire() but don't.
 
     The exemption is per function body: a fire in A never exempts B. Pattern 10's
     unit is the enclosing function; module level and unparseable files stay file-level.
+    Each matched line is a site a scoped row may waive.
     """
     violations = []
+    waived_lines: List[int] = []
     has_trigger_fire = "trigger.fire(" in content
     functions = _function_index(content)
 
@@ -412,7 +466,7 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
                 continue
             owner = _enclosing_function(functions, i) if inline else _function_at(functions, i)
             if not (owner["satisfied"] if owner else has_trigger_fire):
-                matched_lines.append(i)
+                (waived_lines if waived(i) else matched_lines).append(i)
         return matched_lines
 
     # Pattern 1: watchdog FileSystemEventHandler. The class marker gates the file;
@@ -524,6 +578,12 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
     if rename_lines:
         violations.append(f".rename() file move on lines {rename_lines}")
 
+    if not violations and waived_lines:
+        return {
+            "name": "Missing trigger events",
+            "passed": True,
+            "message": f"Missing trigger.fire() on lines {waived_lines}: waived by scoped bypass rows",
+        }
     if not violations:
         return None
 

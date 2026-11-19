@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: store.py
 # Description: Compass storage core — SQLite/FTS5 rated decision store
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-06-16
-# Modified: 2026-10-22
+# Modified: 2026-11-17
 # =============================================
 
 """Compass storage core — the SQLite/FTS5 layer for rated decisions.
@@ -11,24 +11,17 @@
 Kept apart from the @memory vector store on purpose: compass is curated truth, @memory is ingest-all story.
 """
 
-import logging
 import re
 import sqlite3
 from datetime import date
 from pathlib import Path
 from typing import Optional
 
-try:
-    from aipass.prax.apps.modules.logger import system_logger as logger
-except Exception as _prax_exc:  # pragma: no cover - defensive fallback only
-    logger = logging.getLogger("aipass.devpulse.compass")
-    logger.info("[compass] prax logger unavailable, using stdlib logging: %s", _prax_exc)
+from aipass.prax import branch_state_root, logger
 
 from aipass.devpulse.apps.handlers.json import json_handler
-from aipass.devpulse.apps.handlers.module_root import module_file
 
-_BRANCH_ROOT = module_file(__file__).parents[3]
-DEFAULT_DB_PATH = _BRANCH_ROOT / "devpulse_json" / "compass" / "compass.db"
+DEFAULT_DB_PATH = branch_state_root("devpulse") / "devpulse_json" / "compass" / "compass.db"
 
 VALID_RATINGS = ("good", "bad", "impressive", "interesting")
 VALID_SOURCES = ("devpulse", "user")

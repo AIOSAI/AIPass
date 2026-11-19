@@ -15,16 +15,18 @@ branch follows the one file.
 from aipass.prax import json_handler          # the entry point, the only sanctioned import
 ```
 
-- `apps/handlers/json/json_service.py` — the implementation. Stdlib only, so it
-  imports without the logger graph. No `resolve()`, no `getcwd()`, no
-  `inspect.stack()`: it runs with a deleted working directory.
+- `apps/handlers/json/json_service.py` — the implementation. Stdlib plus prax's
+  trail, so it imports without the logger graph; its diagnostics (an unreadable
+  document, a failed write, a failed data bump) are lines on
+  `prax/logs/json_service.jsonl`, and a failed trail write raises. No `getcwd()` and no `inspect.stack()`: it
+  runs with a deleted working directory. No `resolve()` either: a symlinked
+  path names the branch it is under, not the one it points to.
 - `apps/handlers/json/json_handler.py` — prax's own shim, byte-identical in
   every branch; sentry accepts it by hash, not by substring. It BINDS the
   service's callables and never wraps them: a wrapper would add a stack frame and
   silently rename every entry in the operations log.
 - The default document is in code, not a template file — a default that lives in
-  a file can go missing, and a handler whose default is missing stops
-  self-healing exactly when it is needed.
+  a file can go missing exactly when a new module needs it.
 
 **What the entry point hands you.** `from aipass.prax import json_handler` gives
 you the **service module** — `for_module()`, `JsonHandle`, `InvalidDocument`,
@@ -45,17 +47,44 @@ base keys (`created`/`last_updated`) is healed, not refused. The config
 `log_operation` still answers the log's own `True`. There is no success/failure
 counter, because the call carries no success signal; older
 `operations_successful`/`operations_failed` keys are left exactly as they are.
-The bump is a read-modify-write like the log itself, so under racing writers
-`operations_total` is a lower bound, not an exact count, and it costs one more
-staged write per call. `rate_tracker` keeps its `files` in that same
-`rate_tracker_data.json`, and its save sets only `files` (and `module_name` when
-absent) on the document it loaded, so `created` and the counters survive a scan.
+The log append and the bump are one read-modify-write under one exclusive
+`flock` per module (`<module>.lock` beside the documents), so `operations_total`
+is exact for `log_operation`'s writers, and the bump costs one more staged write
+per call. Writers to one module queue in the kernel; different modules never
+wait on each other. A killed holder's lock dies with it: the file left on disk
+means nothing and is never inspected. A live holder kept past
+`LOCK_DEADLINE_SECONDS` (2 s, about 1,500 uncontended writes at ~1.3 ms) makes
+the waiter give up once: `log_operation` answers `False` and logs one ERROR on
+prax's trail naming the module, the lock file and the reason. Nothing is written
+without the lock. A caller's own `load_json`/`save_json` round trip on a data
+document takes no lock and can still race the bump.
 
-**Healing is per module, per call — there is no sweep.** `ensure_json_exists`
-regenerates exactly one document (`<module>_<type>.json`) when it is missing,
-empty, unreadable or structurally invalid. The one exception is a data document
-that parses as a dict: it is healed in place (missing base keys added, every
-other key kept) rather than regenerated. `ensure_module_jsons` does the
+**`update_json(module, json_type, fn)` is the locked round trip.** It takes the
+same `<module>.lock` `log_operation` takes, so an update and a bump queue on one
+lock and neither loses the other's write; a second lock keyed by the document's
+path would let them race. It loads the document, calls `fn(document)` and saves
+what `fn` returns: `True`, or it raises. If `fn` raises, nothing is written. A
+missing document starts from the in-code default. A corrupt or misshaped one is
+moved to `<name>.corrupt-<stamp>` beside itself, logged at ERROR and refused with
+`InvalidDocument`, so the next call starts from the default; one that cannot be
+read at all stays where it is, since unreadable is not proof of damage. `flock`
+belongs to an open file, so a thread asking again for a lock it holds would wait
+on itself: `fn` calling `update_json` or `log_operation` on the same module is
+refused at once (`LockReentry`, a `LockTimeout`), one ERROR, never a wait. A lock
+not acquired is logged at ERROR and raised. `update_json` is on the service's
+handle, not the shim: the shim is byte-identical fleet-wide. `rate_tracker` keeps
+its `files` in `rate_tracker_data.json` and saves them through `update_json`,
+setting only `files` (and `module_name` when absent), so `created` and the
+counters survive every scan.
+
+**A missing document is created; a bad one is refused, never overwritten.**
+`ensure_json_exists` writes the default for exactly one document
+(`<module>_<type>.json`) when it does not exist. One that exists but is empty,
+unreadable or structurally invalid raises `InvalidDocument` naming the path, and
+the file is left as it is: overwriting it with the default would lose the keys
+its owner wrote. `load_json` raises the same way. The one heal is a data document
+that parses as a dict: missing base keys are added in place, every other key
+kept. `ensure_module_jsons` does the
 three types for one module. Nothing walks a directory and nothing repairs
 another module's documents: a self-heal that ranges wider than the call that
 triggered it would rewrite state nobody asked about, in a process that may only
@@ -64,7 +93,7 @@ have wanted to log one line.
 **The package init is lazy** (PEP 562 `__getattr__` in `aipass/prax/__init__.py`).
 `logger`, `append_jsonl` and `json_handler` resolve on first attribute access.
 `from aipass.prax import json_handler` in a fresh interpreter imports a fixed set
-of prax modules (`EXPECTED_COLD_FOOTPRINT`) and no third-party package: `aipass.trigger` and the whole watchdog edge
+of prax modules (`EXPECTED_COLD_FOOTPRINT`: the service, and the writer and trail its diagnostics ride) and no third-party package: `aipass.trigger` and the whole watchdog edge
 stay cold. Pinned by `TestLazyInitImportFootprint` in
 `tests/test_logger_module.py`, which measures in a subprocess — in-process the
 number is meaningless, pytest has already imported prax's world.
@@ -72,9 +101,13 @@ number is meaningless, pytest has already imported prax's world.
 **Return semantics:** `save_json` raises `WriteFailed` rather than answering
 `False` (a lost document must not look like success) and `InvalidDocument`
 rather than `False` (a caller bug is not a disk failure). `write_json` answers
-`bool`. `log_operation` is telemetry and answers `False` on a write failure — it
-runs on the monitor's display and watchdog threads, where a raising writer is
-silent half-death.
+`bool`. `log_operation` is telemetry and answers `False` on a write failure or a
+refused document (logged at ERROR, the file untouched) — it runs on the
+monitor's display and watchdog threads, where a raising writer is silent
+half-death. One case raises: a state folder that cannot be created or written
+raises `StateRootUnwritable` (an `OSError`), its message naming the folder and
+the errno (`EACCES`, `EROFS`). With no folder there is nowhere left to report a
+`False` through.
 
 ## Write rules
 
@@ -113,12 +146,40 @@ itself:
 ```python
 @property
 def json_dir(self) -> Path:                      # json_service.py
-    name = self.branch_root.name
+    return state_root_of(self.branch_root) / f"{self.branch_root.name}_json"
+
+def state_root_of(branch_root: Path) -> Path:    # apps/handlers/state_root.py
     test_dir = os.environ.get("AIPASS_TEST_LOG_DIR")
     if test_dir:
-        return Path(test_dir) / name / f"{name}_json"
-    return self.branch_root / f"{name}_json"
+        return Path(test_dir) / branch_root.name
+    return state_home(branch_root)
 ```
+
+**Where state lives.** `state_home` answers the branch folder itself for a
+checkout or an editable install, and `~/.aipass/state/<branch>/` for a branch
+under this interpreter's install directories (`sysconfig` purelib or platlib; a
+venv under `~/src/` counts as installed). Under either root the names are the
+same: `logs/` and `<branch>_json/`. `system_logs/` of an install is
+`~/.aipass/system_logs`. Other branches ask the same question through the door:
+
+```python
+from aipass.prax import branch_state_root
+branch_state_root("flow") / "flow_json"
+```
+
+`for_module(__file__)` takes the branch root as `parents[3]` of the shim's
+path, which also holds for the hook engine's snapshot
+(`hooks/.live-<stamp>/handlers/json/json_handler.py` gives `hooks/`), but only
+by coincidence of depth. `for_branch(name)` gives the same handle by the
+branch's package name, wherever the calling file runs from:
+
+```python
+_h = json_handler.for_branch("hooks")
+```
+
+A name that is no AIPass branch (no `aipass.<name>` package, no `apps/` in it,
+or not an identifier) raises `LookupError` at that call, so a shim fails at its
+own import, never inside a later `log_operation`. There is no default branch.
 
 **Resolved per call, never captured at import**, and that is the whole reason it
 works. A module-level constant cannot be redirected by a conftest that runs after

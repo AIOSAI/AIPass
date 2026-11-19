@@ -2,9 +2,9 @@
 
 # The engine
 
-**Branch** hooks · **Code** `apps/modules/engine.py`, `apps/modules/promote.py`, `apps/handlers/bridges/mount.py`, `apps/handlers/config/gates.py`, `apps/handlers/config/output_merge.py`, `apps/handlers/module_root.py`
+**Branch** hooks · **Code** `apps/modules/engine.py`, `apps/modules/promote.py`, `apps/handlers/bridges/mount.py`, `apps/handlers/config/gates.py`, `apps/handlers/config/output_merge.py`
 
-The dispatch path from a normalized event to a handler, how a source edit becomes live code, why a broken gate refuses while a broken injector is skipped, how the stdouts become one document, and why every module in this branch must import in a process whose working directory is gone.
+The dispatch path from a normalized event to a handler, how a source edit becomes live code, why a broken gate refuses while a broken injector is skipped, and how the stdouts become one document.
 
 ---
 
@@ -36,6 +36,24 @@ Any failed check refuses and leaves the live copy untouched. The newest 3 copies
 
 The workflow: edit -> test -> `drone @hooks promote`.
 
+`drone @hooks promote rollback` points `.live-current` back at the newest kept copy older than the live one, after the same bridge smoke passes on it. It refuses, exits 1 and leaves the pointer as it is when nothing was ever promoted, when no older copy is kept, or when the older copy fails its smoke:
+
+```
+check_smoke: ok — <the smoke's detail>
+live: .live-20200102T000000Z (was .live-20200103T000000Z)
+```
+
+## A Raising Handler's Log Lines
+
+A handler that raises (any exception, `SystemExit` included, caught on its worker thread) is logged as two lines. The ERROR line holds its identity alone, so its fingerprint at @trigger never moves with the exception's text or the line number:
+
+```
+ERROR | [HOOKS] handler raised fault[<event>.<hook>.<handler dotted path>.<ExcType>@<file basename>] in <function> line <n>
+INFO  | [HOOKS] handler raised, its text: <handler dotted path> <ExcType>: <text, newlines escaped, cut at 500 chars>
+```
+
+The marker holds no whitespace and no `]` (either is written `_`). A handler that outlives its timeout logs `handler timed out fault[<event>.<hook>.<handler>.HandlerTimeout@<module>.py] after <n>s` at ERROR. `logs/engine.jsonl` keeps the raw exception text in the row's `stderr_preview`. A `KeyboardInterrupt` on the calling thread is never caught.
+
 ## Gates Fail Closed
 
 `apps/handlers/config/gates.py` says, in code and never in config, which hooks are gates and how each fails:
@@ -44,47 +62,25 @@ The workflow: edit -> test -> `drone @hooks promote`.
 - `FAIL_OPEN`, each with its reason: `presence_gate` (a broken one would refuse every prompt, including the one that fixes it) and `subagent_gate` (a block at SubagentStop would trap the sub-agent in a loop).
 - Everything else is an injector (prompt, lifecycle, notification handlers): a crash is logged and skipped, and one broken injector never blocks the rest.
 
-Each fail-closed gate also refuses the call it guards when it crashes internally (its own `GATE_CRASHED` text). One layer up, the bridge refuses a PreToolUse call when the engine cannot load at all (block JSON and exit 2; Codex: a deny envelope); every other event exits 0 with the reason on stderr.
+Each fail-closed gate also refuses the call it guards when it crashes internally (its own `GATE_CRASHED` text). One layer up, the bridge refuses a PreToolUse call when the engine cannot load at all (block JSON and exit 2; Codex: a deny envelope); every other event exits 0 with the reason on stderr. The refusal is sent before the break is recorded, and nothing the record does can undo it ([wiring.md](wiring.md#when-a-bridge-breaks)).
+
+## A Blocked Seat
+
+When the engine cannot load, every PreToolUse in every session of the fleet is refused with `HOOKS BROKEN`, until a person fixes it. No agent can repair it: each agent's tools pass through the same bridge, so the agent can still read prompts and answer, but cannot run a command or edit a file. The repair is the owner's, from a terminal outside any agent session (a plain shell runs no hooks):
+
+1. Read the cause: `tail -5 src/aipass/hooks/logs/bridge.log` (from the repo root). Each line names the exception and the event.
+2. If the line names the promoted hooks copy (a module under `.live-<stamp>`), point back to the previous copy: `drone @hooks promote rollback`, or by hand, `ls -d src/aipass/hooks/.live-2*` lists the 3 kept, and `echo .live-<earlier stamp> > src/aipass/hooks/.live-current` serves it on the next hook call.
+3. If it names another branch's source (prax most often: the bridges import it live, never from a snapshot), restore that file in the same terminal, with git or by hand.
+4. Prove the gate answers again: `echo '{"tool_name":"Read","tool_input":{"file_path":"README.md"},"cwd":"'"$PWD"'"}' | .venv/bin/python src/aipass/hooks/apps/handlers/bridges/claude.py PreToolUse; echo "exit $?"` prints `exit 0`. A `HOOKS BROKEN` text and `exit 2` means it is still down.
+5. The agents need nothing: their next tool call goes through.
+
+A bridge file that is itself half-edited cannot answer at all; the shell guard on the PreToolUse row refuses for it, with `HOOKS BROKEN: claude.py exited <n> without an answer` (the table in [wiring.md](wiring.md#when-a-bridge-breaks)). Edit a bridge only from a terminal, and run step 4 after.
 
 ## Dynamic Dispatch
 
 Handlers are called **dynamically at runtime** — the engine uses `importlib.import_module()` + `getattr()` on the dotted handler path from `hooks.json` (e.g., `aipass.hooks.apps.handlers.prompt.identity.handle`). Handlers are never statically imported. This means static analysis tools (including sentry's dead_code checker) cannot see that they are used: run unshielded, `dead_code` reports dispatched handlers as unreferenced, which is this indirection and not rot. Shielded, `dead_code` audits 100%.
 
-`hooks.json` wires 37 entries under 36 distinct names — `auto_process` is the one name wired twice, on UserPromptSubmit and PreCompact. **35 of the 37 are `enabled: true`**: `feedback_pulse` is off by choice in this repo, and `auto_watchdog` is off because its handler is retired. The AIPass root `.aipass/hooks.json` is read with no trust check, so editing it changes what fires and never turns the hooks off; it is a protected file, written by the admin seat alone. Firing evidence is a *narrow* window — `logs/engine.jsonl` rotates at `JSONL_MAX_BYTES = 500_000` keeping one `.1` backup (prax `jsonl_writer.py`), so it holds minutes to tens of minutes of live traffic and absence from it is **not** evidence of a dead wire. A short window routinely misses the PreCompact-only handlers (`pre_compact`, `pre_compact_rollover`, `pre_compact_prep`) and the SessionStart ones (`cadence_reset`, `release_notice`), whose events fire rarely. `feedback_pulse` does appear, but as `{"action": "skipped_disabled"}`: it is wired `enabled: false` in this repo, so it is dispatched and declines.
-
-## Importing Without a Working Directory
-
-Every hooks module must import in a process whose working directory is gone.
-`ntpath.realpath` reads `os.getcwd()` UNCONDITIONALLY — not only for relative
-paths, the way `posixpath` does — and `Path.resolve()` routes through it. So on
-Windows every `Path(__file__).resolve()` *reached at import time* is an
-import-time working-directory dependency, and a process whose cwd was deleted
-cannot import the module at all.
-
-**The one spelling:** `apps/handlers/module_root.py` → `module_file(__file__)`.
-It still attempts `.resolve()` — normalising symlinks is why the call exists —
-and falls back to the absolute spelling only in the world where the alternative
-is a dead import. New module-level `__file__` resolution goes through it.
-
-**The guard is the first site.** `apps/handlers/__init__.py` runs a
-cross-branch import guard on *every* hooks import, so a dead-cwd failure there
-masks every other site: each module reports that one line. `tests/test_import_dead_cwd.py`
-pins the whole tree, discovered by walk rather than listed.
-
-**Two worlds, because one proves half.** World A emulates ntpath (`realpath`
-reads cwd, `getcwd` denied) and convicts an unguarded `resolve()`; on Linux it
-does NOT convict `inspect.stack()`, because there the raise happens inside
-`getabsfile()` where inspect catches it. World B denies `os.path.realpath`
-outright and convicts `inspect.stack()` at `inspect.py:1009`. The guard
-walks frames with `sys._getframe` and reads the import line with `linecache`.
-
-The `inspect.stack()` ban is **structural** (AST, not grep): the guard's
-caller-is-None branch is unreachable from any import probe, so a regrown call
-there is invisible to the world tests and caught only by the AST pin. AST and not a string ban because this guard's own
-docstrings name the defect, and a spelling ban convicts prose while acquitting
-code.
-
----
+`hooks.json` wires 42 entries under 40 distinct names — two names are wired twice: `auto_process` on UserPromptSubmit and PreCompact, `post_compact_regrounding` on PostToolUse and PostCompact. **41 of the 42 are `enabled: true`**: `feedback_pulse` is off by choice in this repo. The AIPass root `.aipass/hooks.json` is read with no trust check, so editing it changes what fires and never turns the hooks off; it is a protected file, written by the admin seat alone. Firing evidence is a *narrow* window — `logs/engine.jsonl` rotates at `JSONL_MAX_BYTES = 500_000` keeping one `.1` backup (prax `jsonl_writer.py`), so it holds minutes to tens of minutes of live traffic and absence from it is **not** evidence of a dead wire. A short window routinely misses the PreCompact-only handlers (`pre_compact`, `pre_compact_rollover`, `pre_compact_prep`) and the SessionStart ones (`cadence_reset`, `release_notice`), whose events fire rarely. `feedback_pulse` does appear, but as `{"action": "skipped_disabled"}`: it is wired `enabled: false` in this repo, so it is dispatched and declines.
 
 ## Related
 

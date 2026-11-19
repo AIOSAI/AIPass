@@ -19,12 +19,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -x "$SCRIPT_DIR/.venv/bin/aipass" ]]; then
     exec "$SCRIPT_DIR/.venv/bin/aipass" "$@"
 fi
-if [[ -x "$SCRIPT_DIR/.venv/Scripts/aipass.exe" ]]; then
-    exec "$SCRIPT_DIR/.venv/Scripts/aipass.exe" "$@"
-fi
-if [[ -x "$SCRIPT_DIR/.venv/Scripts/aipass" ]]; then
-    exec "$SCRIPT_DIR/.venv/Scripts/aipass" "$@"
-fi
 
 # --- Pre-setup: only 'install' works ---
 if [[ "${1:-}" == "install" ]]; then
@@ -36,13 +30,13 @@ fi
 cat <<'HELP'
 AIPass is not set up yet.
 
-  ./aipass install                # set up AIPass (venv + deps + hooks), ends in a welcome chat
-  ./aipass install --no-chat      # set up only, skip the welcome chat
+  ./aipass install                # set up AIPass (venv + deps + hooks), ends in a health check and install report
+  ./aipass install --no-finish    # set up only, skip the health check and report
 
 After setup, all aipass commands become available:
-  ./aipass doctor    # system health
-  ./aipass help      # how-does-X-work Q&A
-  ./aipass init run  # scaffold a new project
+  ./aipass doctor            # system health
+  ./aipass install --finish  # rerun the health check and install report
+  ./aipass --help            # every command
 
 Quick start:
   git clone https://github.com/AIOSAI/AIPass.git

@@ -3,7 +3,7 @@
 # Description: Tests for the snapshot handlers -- BackupResult error semantics, mirror-delete cleanup, snapshot copy
 # Version: 2.2.1
 # Created: 2026-06-12
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for the snapshot handlers in apps/handlers/: report/result.py, cleanup/mirror.py, copy/snapshot.py."""
@@ -239,7 +239,7 @@ class TestCopySnapshotUpgrade:
 class TestAFailedCopyIsRetried:
     """A run with a failed copy must not let the next run's quick-check call the snapshot current."""
 
-    @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs a POSIX file a user cannot read")
+    @pytest.mark.skipif(os.geteuid() == 0, reason="needs a file a user cannot read")
     def test_a_file_that_failed_to_copy_lands_on_the_next_run_with_nothing_else_changed(self, tmp_path: Path) -> None:
         """Mutant: the timestamp map is saved after a failed copy, so the next run returns "no changes"."""
         project = tmp_path / "project"
@@ -262,8 +262,8 @@ class TestAFailedCopyIsRetried:
         assert stored.read_text(encoding="utf-8") == "locked"
 
 
-class TestTheLongPathGuardIsWindowsOnly:
-    """260 is Windows' MAX_PATH; elsewhere the OS enforces its own limit and the file is stored."""
+class TestALongPathIsStored:
+    """A store path over 260 characters is stored; the OS enforces its own limit."""
 
     PARENT = "p" * 200
 
@@ -276,27 +276,13 @@ class TestTheLongPathGuardIsWindowsOnly:
         assert len(str(dest / self.PARENT / "a.txt")) > 260
         return source, dest, f"{self.PARENT}/a.txt"
 
-    def test_a_path_over_260_is_stored_where_the_os_allows_it(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(path_builder, "_MAX_PATH", None)
+    def test_a_path_over_260_is_stored_where_the_os_allows_it(self, tmp_path: Path) -> None:
         source, dest, rel = self._long_source(tmp_path)
 
         result = copy_snapshot([(str(source / rel), rel)], str(dest), str(source))
 
         assert (result["files_copied"], result["errors"]) == (1, [])
         assert (dest / self.PARENT / "a.txt").read_text(encoding="utf-8") == "deep"
-
-    def test_under_the_windows_limit_a_path_over_260_is_refused_with_an_errors_row(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(path_builder, "_MAX_PATH", 260)
-        source, dest, rel = self._long_source(tmp_path)
-
-        result = copy_snapshot([(str(source / rel), rel)], str(dest), str(source))
-
-        assert (result["files_copied"], result["errors"]) == (0, [f"{rel}: path too long (>260 chars)"])
-        assert not (dest / self.PARENT).exists()
 
 
 # =============================================

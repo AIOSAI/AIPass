@@ -1,17 +1,16 @@
 # =================== AIPass ====================
 # Name: session_start.py
-# Version: 1.5.0
+# Version: 1.6.0
 # Description: Resets cadence counter on new chat / clear; injects the culture file; writes the session pointer
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-07
-# Modified: 2026-11-04
+# Modified: 2026-11-17
 # =============================================
 
 """SessionStart: resets the cadence counter, injects the culture file, writes the session pointer.
 
-The cadence reset re-fires loaders at turn 0. It skips resume (context carries grounding) and
-compact (PreCompact reset already; twice re-arms the regroup token).
+The reset skips resume (context carries grounding) and compact (PreCompact reset; twice re-arms the regroup).
 """
 
 import importlib
@@ -19,12 +18,21 @@ import json
 import os
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 _SKIP_SOURCES = frozenset({"resume", "compact"})
 
 
 def handle(hook_data: dict) -> dict:
+    """Reset the cadence counter unless resumed; each call leaves one json trail entry."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Reset cadence counter unless this is a resume."""
     source = hook_data.get("source", "")
 
@@ -32,18 +40,21 @@ def handle(hook_data: dict) -> dict:
         logger.info("[HOOKS] session_start: skipped cadence reset (source=%s)", source)
         return {"stdout": "", "exit_code": 0}
 
-    try:
-        cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
-        cadence.reset_counter(hook_data=hook_data, caller="session_start")
-        logger.info("[HOOKS] session_start: cadence reset (source=%s)", source)
-    except Exception as exc:
-        logger.info("[HOOKS] session_start: cadence reset failed: %s", exc)
-        return {"stdout": "", "exit_code": 0}
-
+    cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+    cadence.reset_counter(hook_data=hook_data, caller="session_start")
+    logger.info("[HOOKS] session_start: cadence reset (source=%s)", source)
     return {"stdout": "", "exit_code": 0, "sound": "cadence reset"}
 
 
 def handle_culture(hook_data: dict) -> dict:
+    """Inject the host's culture file; each call leaves one json trail entry."""
+    result = _handle_culture(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle_culture", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle_culture(hook_data: dict) -> dict:
     """Inject the host's $AIPASS_HOME/.claude/AGENTS.md on purpose, projects too: a project's voice is its AGENTS.md.
 
     Skipped for Claude inside AIPASS_HOME, which reads the file natively there; Codex never does."""
@@ -79,6 +90,14 @@ def _interactive(provider: str, hook_data: dict) -> bool:
 
 
 def handle_session_pointer(hook_data: dict) -> dict:
+    """Record this session as the resume target; each call leaves one json trail entry."""
+    result = _handle_session_pointer(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle_session_pointer", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle_session_pointer(hook_data: dict) -> dict:
     """Record this session as the branch's resume target, with the CLI running it, so a resume reopens that CLI.
 
     A compact keeps the session, so its pointer is already right. A bridge that names no provider is Claude's.
@@ -93,11 +112,8 @@ def handle_session_pointer(hook_data: dict) -> dict:
     if not _interactive(provider, hook_data):
         logger.info("[HOOKS] session_start: headless %s session %s, pointer left as is", provider, session_id)
         return {"stdout": "", "exit_code": 0}
-    try:
-        door = importlib.import_module("aipass.ai_mail.apps.modules.door_session_pointer")
-        written = door.write_pointer(branch, session_id, "session-start", provider=provider)
-    except Exception as exc:  # a missed pointer costs a resume, never the session
-        logger.info("[HOOKS] session_start: session pointer not written for %s: %s", branch, exc)
-        return {"stdout": "", "exit_code": 0}
+    from aipass.ai_mail import write_pointer
+
+    written = write_pointer(branch, session_id, "session-start", provider=provider)
     logger.info("[HOOKS] session_start: pointer %s -> %s (%s) written=%s", branch, session_id, provider, written)
     return {"stdout": "", "exit_code": 0}

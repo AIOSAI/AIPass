@@ -26,8 +26,7 @@ GROUP = "static_ruff_pt"
 
 RULE_SELECTOR = "PT"
 
-#: A POSIX-only name would report "not installed" on every Windows machine that has it.
-RUFF_NAMES = ("ruff", "ruff.exe")
+RUFF_NAMES = ("ruff",)
 
 RUFF_TIMEOUT_SECONDS = 120
 
@@ -53,7 +52,7 @@ SPECIFICATION = {
 
 
 def _interpreter_siblings() -> List[Path]:
-    """The candidate ruff paths beside the running interpreter, both spellings."""
+    """The candidate ruff paths beside the running interpreter."""
     beside = Path(sys.executable).parent
     return [beside / name for name in RUFF_NAMES]
 

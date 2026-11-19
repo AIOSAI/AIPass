@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checklist.py
 # Description: Unit tests for the checklist module
-# Version: 1.3.6
+# Version: 1.4.1
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/checklist.py."""
@@ -125,8 +125,8 @@ def test_run_checklist_python_file_no_checkers(tmp_path, monkeypatch):
     assert results == [{"standard": "(error)", "passed": False, "detail": "No checkers discovered"}]
 
 
-def test_a_door_passes_every_standard_on_the_checklist(tmp_path, monkeypatch):
-    """The door shape (DPLAN-0404 leg 1) passes the real pack: no CLI, no introspection, no logic asked."""
+def test_a_second_door_fails_front_door_alone_on_the_checklist(tmp_path, monkeypatch):
+    """A door_ module is a retired pattern: the real pack fails it on front_door, one report, no other row."""
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
     monkeypatch.setattr(checklist, "discover_checkers", branch_audit.discover_checkers)
     door = tmp_path / "aipass" / "memory" / "apps" / "modules" / "door_entry_limits.py"
@@ -146,12 +146,14 @@ def test_a_door_passes_every_standard_on_the_checklist(tmp_path, monkeypatch):
     )
 
     results = checklist.run_checklist(str(door))
-    assert [r["standard"] for r in results if not r["passed"]] == []
-    assert len(results) == 42
+    standards = [r["standard"] for r in results]
+    assert [r["standard"] for r in results if not r["passed"]] == ["front_door"]
+    assert len(standards) == len(set(standards)) and "modules" in standards
 
-    # The same door with a function in it is a wrong shape: modules FAILS on the checklist, not a tick at 80.
+    # Logic in it does not make it a module: the door_ name is still front_door's finding, modules does not re-judge.
     door.write_text(door.read_text(encoding="utf-8") + "\n\ndef helper():\n    return 1\n", encoding="utf-8")
-    assert "modules" in [r["standard"] for r in checklist.run_checklist(str(door)) if not r["passed"]]
+    failed = [r["standard"] for r in checklist.run_checklist(str(door)) if not r["passed"]]
+    assert ("front_door" in failed, "modules" in failed) == (True, False)
 
 
 def test_run_checklist_throwaway_temp_path_skipped(tmp_path, monkeypatch):

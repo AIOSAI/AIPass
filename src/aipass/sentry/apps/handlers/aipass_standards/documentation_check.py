@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: documentation_check.py
 # Description: Documentation Standards Checker Handler
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Documentation Standards Checker Handler
@@ -19,7 +19,7 @@ from typing import Dict, List
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
 
 AUDIT_SCOPE = "all_files"
 # Applies to production source only: a test documents itself by its name and assertions.
@@ -75,10 +75,19 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "DOCUMENTATION",
         }
 
+    # A missing module docstring is the whole file's finding: a row waives it by FILE_SCOPE under functions.
     docstring_check = check_module_docstring(lines)
+    if not docstring_check["passed"] and is_bypassed(
+        module_path, "documentation", bypass_rules=bypass_rules, name=FILE_SCOPE
+    ):
+        docstring_check = {
+            **docstring_check,
+            "passed": True,
+            "message": f"Waived by a {FILE_SCOPE} bypass row: {docstring_check['message']}",
+        }
     checks.append(docstring_check)
 
-    function_docs_check = check_function_docstrings(content, lines)
+    function_docs_check = check_function_docstrings(content, lines, module_path, bypass_rules)
     checks.append(function_docs_check)
 
     passed_checks = sum(1 for check in checks if check["passed"])
@@ -156,17 +165,32 @@ def _public_functions_by_ast(content: str):
     return found
 
 
-def _judge(found: list) -> Dict:
-    """Turn the parsed function list into this check's verdict."""
+def _judge(found: list, module_path: str = "", bypass_rules: list | None = None) -> Dict:
+    """Turn the parsed function list into this check's verdict.
+
+    Each undocumented function is a site: a row waives it by its def line or by its name.
+    """
     if not found:
         return {"name": "Function docstrings", "passed": True, "message": "No public functions to check"}
 
-    undocumented = [f"{name} (line {line})" for name, line, documented in found if not documented]
+    missing = [(name, line) for name, line, documented in found if not documented]
+    undocumented = [
+        f"{name} (line {line})"
+        for name, line in missing
+        if not bypass_rules
+        or not is_bypassed(module_path, "documentation", line=line, bypass_rules=bypass_rules, name=name)
+    ]
     if undocumented:
         return {
             "name": "Function docstrings",
             "passed": False,
             "message": f"{len(undocumented)} public functions missing docstrings: {undocumented[0]}",
+        }
+    if missing:
+        return {
+            "name": "Function docstrings",
+            "passed": True,
+            "message": f"All {len(missing)} undocumented public functions waived by scoped bypass rows",
         }
     return {
         "name": "Function docstrings",
@@ -175,11 +199,13 @@ def _judge(found: list) -> Dict:
     }
 
 
-def check_function_docstrings(content: str, lines: List[str]) -> Dict:
+def check_function_docstrings(
+    content: str, lines: List[str], module_path: str = "", bypass_rules: list | None = None
+) -> Dict:
     """Check that public functions have docstrings."""
     parsed = _public_functions_by_ast(content)
     if parsed is not None:
-        return _judge(parsed)
+        return _judge(parsed, module_path, bypass_rules)
 
     # AST unavailable: fall back to the line scan rather than reporting clean, since a
     # file we could not read has not been proven to document anything.
@@ -192,10 +218,7 @@ def check_function_docstrings(content: str, lines: List[str]) -> Dict:
                 func_name = match.group(1)
                 public_functions.append((func_name, i))
 
-    if not public_functions:
-        return {"name": "Function docstrings", "passed": True, "message": "No public functions to check"}
-
-    undocumented = []
+    found = []
     for func_name, line_num in public_functions:
         has_docstring = False
         for check_line in range(line_num, min(line_num + 30, len(lines) + 1)):
@@ -206,18 +229,6 @@ def check_function_docstrings(content: str, lines: List[str]) -> Dict:
                     break
                 if check_line > line_num and (check_stripped.startswith("def ") or check_stripped.startswith("class ")):
                     break
-        if not has_docstring:
-            undocumented.append(f"{func_name} (line {line_num})")
+        found.append((func_name, line_num, has_docstring))
 
-    if undocumented:
-        return {
-            "name": "Function docstrings",
-            "passed": False,
-            "message": f"{len(undocumented)} public functions missing docstrings: {undocumented[0]}",
-        }
-
-    return {
-        "name": "Function docstrings",
-        "passed": True,
-        "message": f"All {len(public_functions)} public functions have docstrings",
-    }
+    return _judge(found, module_path, bypass_rules)

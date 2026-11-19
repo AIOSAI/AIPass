@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: health.py
 # Description: Branch health module — public API (entry-count + entry-size)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-16
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -14,23 +14,13 @@ Consumer severity: should_rollover -> INFO (auto-fires at PreCompact), never WAR
 total_violations > 0 -> WARNING (a write got past the cap gate).
 """
 
-import os
-import sys
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
 from aipass.memory.apps.handlers.json.lint_handler import run_lint
 
-# read_scope, not _read_registry: health never writes, so it reads the declared fleet incl. externals.
+# read_scope, not write_scope: health never writes, so it reads the declared fleet incl. externals.
 from aipass.memory.apps.handlers.monitor.detector import (
     RegistryUnreadable,
     _get_memory_file_path,
@@ -108,7 +98,7 @@ def get_branch_health(branch_name: str) -> dict:
 
 def print_introspection() -> None:
     """Display module introspection (sentry standard)."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]health Module[/bold cyan]")
@@ -138,7 +128,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     if not (args[0].startswith("@") and len(args[0]) > 1):
         error(f"health: unknown subcommand '{args[0]}'")
@@ -155,7 +145,7 @@ def handle_command(command: str, args: list) -> bool:
 
 def _print_health(result: dict) -> None:
     """Render one ``get_branch_health`` answer: a refusal through ``error()``, else the facts."""
-    from aipass.cli.apps.modules import console, error, warning
+    from aipass.cli import console, error, warning
 
     if not result.get("success"):
         error(f"health: {result.get('error')}")

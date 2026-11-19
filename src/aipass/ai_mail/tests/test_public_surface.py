@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_public_surface.py
 # Description: Tests for ai_mail's package-level public surface (the feed, register, outstanding and inbox doors)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-16
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for aipass/ai_mail/__init__.py's public surface: feed_path(), register_path(), outstanding_dispatches()."""
@@ -12,8 +12,8 @@
 # through PEP 562 __getattr__; feed_path() is the one construction site for the path.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(windows_compat) — monitor_alive()'s Windows OpenProcess leg (_monitor_alive_windows)
 
+import importlib
 import json
 import subprocess
 import sys
@@ -26,6 +26,36 @@ import aipass.ai_mail as ai_mail
 import aipass.ai_mail.apps.handlers.notify as notify
 from aipass.ai_mail import feed_path, register_path
 from aipass.ai_mail.apps.handlers.dispatch import register
+from aipass.ai_mail.apps.handlers.users import verified_caller
+
+_H = "aipass.ai_mail.apps.handlers"
+DOOR_HOMES = {
+    "is_verified_admin_caller": f"{_H}.users.verified_caller",
+    "resolve_verified_caller": f"{_H}.users.verified_caller",
+    "wake_branch": f"{_H}.dispatch.wake",
+    "is_wake_blocked": f"{_H}.dispatch.wake",
+    "resolve_resume_target": f"{_H}.dispatch.session_pointer",
+    "write_pointer": f"{_H}.dispatch.session_pointer",
+    "read_pointer": f"{_H}.dispatch.session_pointer",
+    "mint_session_id": f"{_H}.dispatch.session_pointer",
+    "transcript_dir": f"{_H}.dispatch.session_pointer",
+    "codex_thread_file": f"{_H}.dispatch.session_pointer",
+    "opencode_db": f"{_H}.dispatch.session_pointer",
+    "CLAUDE": f"{_H}.dispatch.session_pointer",
+    "CODEX": f"{_H}.dispatch.session_pointer",
+    "OPENCODE": f"{_H}.dispatch.session_pointer",
+    "granted": f"{_H}.dispatch.grant",
+    "open_grants": f"{_H}.dispatch.grant",
+    "GRANT_KEY": f"{_H}.dispatch.grant",
+    "deliver_email_to_branch": f"{_H}.email.delivery",
+}
+
+
+def _clean_probe(code: str) -> str:
+    """Run code in a fresh interpreter, where the suite's own imports cannot hide a load."""
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert done.returncode == 0, done.stderr[-600:]
+    return done.stdout.strip()
 
 
 class TestFeedPathDoor:
@@ -211,6 +241,29 @@ class TestNotificationDoor:
         assert "send_notification" in ai_mail.__all__
 
 
+class TestMailKindDoor:
+    """The reader @hooks, @api and BAUD use for a stored message's kind."""
+
+    @pytest.mark.parametrize(
+        "message, kind",
+        [
+            ({"kind": "medic", "subject": "Dispatch complete: x"}, "medic"),
+            ({"kind": "job_failed"}, "job_failed"),
+            ({"from": "@ai_mail", "subject": "Dispatch complete: @x finished (exit 0)"}, "notice"),
+            ({"from": "@daemon", "subject": "Command job started: @s/j"}, "notice"),
+            ({"from": "@daemon", "subject": "Command job passed: @s/j"}, "notice"),
+            ({"from": "@trigger", "subject": "[REPEAT] ERROR x5"}, "mail"),
+            ({"from": "@daemon", "subject": "Command job FAILED: @s/j"}, "mail"),
+            ({"kind": "urgent", "subject": "Dispatch complete: x"}, "mail"),
+        ],
+    )
+    def test_a_stored_kind_is_read_as_is_and_a_message_without_one_reads_notice_or_mail(self, message, kind):
+        assert ai_mail.mail_kind(message) == kind
+
+    def test_the_door_is_advertised_in_dunder_all(self):
+        assert "mail_kind" in ai_mail.__all__
+
+
 class TestImportStaysLight:
     """The reason the door is lazy."""
 
@@ -260,3 +313,48 @@ class TestImportStaysLight:
 
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "1 notifications.jsonl"
+
+
+class TestTheFrontDoor:
+    """The names other branches take from ai_mail, handed out from their real homes."""
+
+    @pytest.mark.parametrize("name, home", DOOR_HOMES.items())
+    def test_each_door_name_is_the_same_object_its_home_gives(self, name, home):
+        assert getattr(ai_mail, name) is getattr(importlib.import_module(home), name)
+
+    @pytest.mark.parametrize("name", DOOR_HOMES)
+    def test_each_door_name_is_advertised_in_dunder_all_and_dir(self, name):
+        assert name in ai_mail.__all__
+        assert name in dir(ai_mail)
+
+    def test_a_patch_on_the_home_reaches_a_caller_reading_through_the_door(self, monkeypatch):
+        """The door never caches: a cached copy would hand a foreign gate the real verdict under a test's patch."""
+        assert ai_mail.is_verified_admin_caller is verified_caller.is_verified_admin_caller
+        monkeypatch.setattr(verified_caller, "is_verified_admin_caller", lambda *a, **k: "patched")
+
+        assert ai_mail.is_verified_admin_caller() == "patched"
+
+    def test_a_bare_package_import_loads_nothing_under_apps(self):
+        probe = (
+            "import sys, aipass.ai_mail; print(sorted(m for m in sys.modules if m.startswith('aipass.ai_mail.apps')))"
+        )
+
+        assert _clean_probe(probe) == "[]"
+
+    @pytest.mark.parametrize(
+        "name, unloaded",
+        [
+            ("is_verified_admin_caller", ("dispatch.wake", "dispatch.session_pointer", "dispatch.grant")),
+            ("write_pointer", ("dispatch.wake", "dispatch.grant", "users.verified_caller")),
+            ("granted", ("dispatch.wake", "dispatch.session_pointer", "users.verified_caller")),
+        ],
+    )
+    def test_a_gate_name_loads_its_home_and_not_its_neighbours(self, name, unloaded):
+        """Hooks' gates take these on every tool call: the door must not widen what one name costs."""
+        probe = (
+            f"import sys, aipass.ai_mail as m; m.{name}; "
+            f"print([k for k in {[f'{_H}.{u}' for u in unloaded]!r} if k in sys.modules], "
+            f"int({DOOR_HOMES[name]!r} in sys.modules), int('aipass.ai_mail.apps.modules' in sys.modules))"
+        )
+
+        assert _clean_probe(probe) == "[] 1 0"

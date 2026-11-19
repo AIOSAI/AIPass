@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delete_ops.py
 # Description: Delete handler — branch deletion by name or path, and whole-project retirement
-# Version: 1.3.2
+# Version: 1.4.1
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """Delete handler implementation for branch lifecycle management."""
@@ -13,18 +13,19 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
-from aipass.aipass.shared.registry_discovery import registries_in
-from aipass.ai_mail.apps.modules.door_verified_caller import is_verified_admin_caller, resolve_verified_caller
-from aipass.hooks.apps.modules.door_trust_registry import read_registry as read_trust, registry_path as trust_path
-from aipass.hooks.apps.modules.door_trust_registry import revoke as revoke_trust
+from aipass.ai_mail import is_verified_admin_caller, resolve_verified_caller
+from aipass.hooks import read_registry as read_trust, registry_path as trust_path
+from aipass.hooks import revoke as revoke_trust
 from aipass.spawn.apps.handlers.deletion_receipts import build_receipt, measure, receipt_problem, write_receipts
 from aipass.spawn.apps.handlers.passport_migration import repo_root
 from aipass.spawn.apps.handlers.registry import (
+    ADMIN_BRANCH,
     find_registry,
     is_protected,
     load_registry,
+    registry_files_in,
     registry_lock,
     save_registry,
     branches_as_list,
@@ -139,6 +140,7 @@ def delete_branch(
 ) -> dict:
     """Archive and deregister a branch; the archive is always written before removal.
 
+    The real run is the verified admin seat's; a dry run previews from any seat.
     retire=True lets an active citizen through and archives its passport with registered false;
     the floor and the registry owner stay refused. registry_path=None reads the cwd's registry.
     """
@@ -177,6 +179,20 @@ def delete_branch(
         logger.error(f"[delete] {msg}")
         return _error_result(branch_name, msg)
 
+    caller = resolve_verified_caller() or "unknown"
+    admin = _admin_seat()
+    if not dry_run and not admin:
+        msg = (
+            f"Cannot delete '{branch_name}' - a real delete or retire runs from the verified admin seat only; "
+            f"mail @{ADMIN_BRANCH} the branch and why"
+        )
+        logger.warning("[delete] %s (caller %s, requested %s)", msg, caller, requested or branch_name)
+        json_handler.log_operation(
+            "delete_refused",
+            data={"branch": branch_name, "requested": requested or branch_name, "caller": caller, "retire": retire},
+        )
+        return _error_result(branch_name, msg)
+
     if confirm and not dry_run:
         try:
             answer = input("Are you sure? (y/N): ").strip().lower()
@@ -192,7 +208,6 @@ def delete_branch(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     archive_dir = project_root / ".archive" / "deleted_branches" / f"{branch_name}_{timestamp}"
 
-    caller = resolve_verified_caller() or "unknown"
     receipt = build_receipt(
         lane="spawn_delete",
         caller=caller,
@@ -212,12 +227,21 @@ def delete_branch(
             "registry_updated": False,
             "dry_run": True,
             "retired": retire,
+            "note": ""
+            if admin
+            else f"The real run is the verified admin seat's: mail @{ADMIN_BRANCH} the branch and why",
         }
 
     problem = receipt_problem([receipt])
     if problem:
         logger.error(f"[delete] {problem}")
         return _error_result(branch_name, problem)
+
+    # Resolved before anything moves: an unknown home must refuse here, not after the tree is gone.
+    try:
+        home = repo_root()
+    except RuntimeError as exc:
+        return _error_result(branch_name, f"Cannot delete '{branch_name}' - {exc}")
 
     archive_error = _archive_branch(branch_dir, archive_dir)
     if archive_error:
@@ -244,10 +268,10 @@ def delete_branch(
     except Exception as exc:
         msg = f"Archive created but failed to remove directory: {exc}"
         logger.error(f"[delete] {msg}")
-        write_receipts([receipt], "failed", repo_root())
+        write_receipts([receipt], "failed", home)
         return _error_result(branch_name, msg, str(archive_dir), True)
 
-    write_receipts([receipt], "retired" if retire else "deleted", repo_root())
+    write_receipts([receipt], "retired" if retire else "deleted", home)
 
     # The archive is now the only copy, so whether .trinity went with it is logged here.
     archived_trinity = (
@@ -284,7 +308,7 @@ def _admin_seat() -> bool:
     try:
         return bool(is_verified_admin_caller())
     except Exception as exc:
-        logger.warning("[retire] admin verification raised, refusing: %s", exc)
+        logger.warning("[spawn] admin verification raised, refusing: %s", exc)
         return False
 
 
@@ -336,12 +360,15 @@ def retire_project(requested: str, dry_run: bool = False) -> dict:
     Every receipt row is built and validated before anything is written; dry_run reports them and writes nothing.
     """
     root = Path(requested).expanduser().resolve()
-    aipass_root = repo_root().resolve()
+    try:
+        aipass_root = repo_root()
+    except RuntimeError as exc:
+        return _refused(requested, str(exc))
     if aipass_root.is_relative_to(root):
         return _refused(requested, f"{root} is or holds the AIPass root - retire-project never removes it")
     if not root.is_dir():
         return _refused(requested, f"{root} is not a directory")
-    sealing = registries_in(root)
+    sealing = registry_files_in(root)
     if not sealing:
         return _refused(requested, f"No *_REGISTRY.json in {root} - not a project root")
     admin = _admin_seat()

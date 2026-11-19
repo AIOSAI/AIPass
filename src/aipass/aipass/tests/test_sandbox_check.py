@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_sandbox_check.py
 # Description: Tests for sandbox prerequisite checker and doctor integration
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-10
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/sandbox_check/sandbox_checker.py and the doctor integration it drives."""
@@ -11,11 +11,9 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
-import os
 import shutil
 import socket
 import subprocess
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -29,7 +27,6 @@ from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     check_rg_present,
     check_sandbox_flag,
     check_srt_resolvable,
-    is_linux,
 )
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 from aipass.aipass.apps.modules.doctor import run_doctor
@@ -41,17 +38,12 @@ from aipass.aipass.apps.modules.doctor import run_doctor
 
 
 def _path_with(monkeypatch, tmp_path: Path, *names: str) -> dict[str, str]:
-    """PATH holds only a tmp bin dir with these executables; returns name -> the path planted.
-
-    shutil.which answers in the host's spelling: on Windows the extension comes from
-    PATHEXT (bwrap.EXE for a planted bwrap.exe), so a path is compared through
-    os.path.normcase on both sides, which is the identity on POSIX.
-    """
+    """PATH holds only a tmp bin dir with these executables; returns name -> the path planted."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     found = {}
     for name in names:
-        exe = bin_dir / (name + (".exe" if os.name == "nt" else ""))
+        exe = bin_dir / name
         exe.write_text("", encoding="utf-8")
         exe.chmod(0o755)
         found[name] = str(exe)
@@ -116,7 +108,7 @@ class TestCheckBwrapPresent:
         bins = _path_with(monkeypatch, tmp_path, "bwrap")
         result = check_bwrap_present()
         assert result["found"] is True
-        assert os.path.normcase(result["path"]) == os.path.normcase(bins["bwrap"])
+        assert result["path"] == bins["bwrap"]
 
     def test_bwrap_not_found(self, monkeypatch, tmp_path):
         _path_with(monkeypatch, tmp_path, "node")
@@ -154,7 +146,7 @@ class TestCheckBwrapFunctional:
             result = check_bwrap_functional()
         assert result["ok"] is True
         argv = mock_run.call_args[0][0]
-        assert os.path.normcase(argv[0]) == os.path.normcase(bins["bwrap"])
+        assert argv[0] == bins["bwrap"]
         assert "--ro-bind" in argv
         assert "true" in argv
 
@@ -209,7 +201,7 @@ class TestCheckNodePresent:
         bins = _path_with(monkeypatch, tmp_path, "node")
         result = check_node_present()
         assert result["found"] is True
-        assert os.path.normcase(result["path"]) == os.path.normcase(bins["node"])
+        assert result["path"] == bins["node"]
 
     def test_node_not_found(self, monkeypatch, tmp_path):
         _path_with(monkeypatch, tmp_path, "bwrap")
@@ -257,7 +249,7 @@ class TestCheckSrtResolvable:
         assert "sandbox-runtime" in result["path"]
         assert result["install_hint"] == ""
         argv = mock_run.call_args[0][0]
-        assert os.path.normcase(argv[0]) == os.path.normcase(bins["node"])
+        assert argv[0] == bins["node"]
         assert argv[1] == str(resolver)
         assert argv[2] == "--resolve"
 
@@ -282,7 +274,8 @@ class TestCheckSrtResolvable:
         assert result["found"] is False
         assert "npm install" in result["install_hint"]
 
-    def test_srt_timeout(self, monkeypatch, tmp_path):
+    def test_a_resolver_timeout_names_itself_not_a_missing_srt(self, monkeypatch, tmp_path):
+        """Mutant: the except logs and falls through to the npm install hint -> red."""
         resolver = tmp_path / "_srt_resolve.mjs"
         resolver.touch()
         _path_with(monkeypatch, tmp_path, "node")
@@ -296,18 +289,22 @@ class TestCheckSrtResolvable:
         ):
             result = check_srt_resolvable()
         assert result["found"] is False
+        assert "did not run" in result["install_hint"]
+        assert "timed out" in result["install_hint"]
+        assert "npm install" not in result["install_hint"]
 
-    def test_srt_resolver_missing_falls_back(self, monkeypatch, tmp_path):
-        """When aipass.hooks isn't importable / resolver file is absent, fail gracefully."""
+    def test_an_unimportable_hooks_branch_names_the_reason_and_setup_sh(self, monkeypatch, tmp_path):
+        """Mutants: the reason drops the exception -> red; the pre-cure npm hint -> red."""
         _path_with(monkeypatch, tmp_path, "node")
-        monkeypatch.setattr(
-            "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker._find_srt_resolver",
-            lambda find_spec: None,
-        )
-        result = check_srt_resolvable()
+
+        def _broken(name):
+            raise ImportError("no aipass")
+
+        result = check_srt_resolvable(_broken)
         assert result["found"] is False
         assert result["path"] is None
-        assert "npm install" in result["install_hint"]
+        assert "aipass.hooks not importable (no aipass)" in result["install_hint"]
+        assert "setup.sh" in result["install_hint"]
 
 
 # =============================================================================
@@ -339,21 +336,23 @@ class TestFindSrtResolver:
         assert resolver.name == "_srt_resolve.mjs"
         assert resolver.is_file()
 
-    def test_missing_spec_returns_none(self, monkeypatch, tmp_path):
+    def test_missing_spec_names_the_missing_hooks_package(self, monkeypatch, tmp_path):
         """Mutant: `if spec is None or not spec.submodule_search_locations:` -> `if False:` reddens this test."""
         _path_with(monkeypatch, tmp_path, "node")
         with patch("aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run") as mock_run:
             result = check_srt_resolvable(_hooks_package_at(None))
         assert mock_run.call_count == 0
         assert result["found"] is False
+        assert result["install_hint"] == "aipass.hooks package not found: re-run setup.sh in AIPASS_HOME"
 
-    def test_missing_file_returns_none(self, monkeypatch, tmp_path):
+    def test_missing_file_names_the_missing_script(self, monkeypatch, tmp_path):
         """Mutant: `if not resolver.is_file():` -> `if False:` reddens this test."""
         _path_with(monkeypatch, tmp_path, "node")
         with patch("aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run") as mock_run:
             result = check_srt_resolvable(_hooks_package_at(tmp_path))
         assert mock_run.call_count == 0
         assert result["found"] is False
+        assert "srt resolver script missing" in result["install_hint"]
 
 
 # =============================================================================
@@ -361,10 +360,22 @@ class TestFindSrtResolver:
 # =============================================================================
 
 
+def _resolver_finds_no_srt(tmp_path: Path):
+    """A find_spec whose hooks package holds the resolver script; the resolver run itself is mocked."""
+    script = tmp_path / "hooks" / "apps" / "modules" / "_srt_resolve.mjs"
+    script.parent.mkdir(parents=True)
+    script.touch()
+    return _hooks_package_at(tmp_path / "hooks")
+
+
+_NO_SRT = MagicMock(returncode=1, stdout="", stderr="")
+
+
 class TestSrtInstallHint:
     def test_no_npm_falls_back_to_plain(self, monkeypatch, tmp_path):
         _path_with(monkeypatch, tmp_path, "node")
-        hint = check_srt_resolvable(_hooks_package_at(None))["install_hint"]
+        with patch("aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run", return_value=_NO_SRT):
+            hint = check_srt_resolvable(_resolver_finds_no_srt(tmp_path))["install_hint"]
         assert hint == "npm install -g @anthropic-ai/sandbox-runtime"
 
     def test_npm_root_success_names_prefix(self, monkeypatch, tmp_path):
@@ -373,11 +384,11 @@ class TestSrtInstallHint:
         mock_proc = MagicMock(returncode=0, stdout="/usr/local/lib/node_modules\n", stderr="")
         with patch(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run",
-            return_value=mock_proc,
+            side_effect=[_NO_SRT, mock_proc],
         ) as mock_run:
-            hint = check_srt_resolvable(_hooks_package_at(None))["install_hint"]
+            hint = check_srt_resolvable(_resolver_finds_no_srt(tmp_path))["install_hint"]
         npm, *rest = mock_run.call_args[0][0]
-        assert os.path.normcase(npm) == os.path.normcase(bins["npm"])
+        assert npm == bins["npm"]
         assert rest == ["root", "-g"]
         assert "/usr/local/lib/node_modules" in hint
         assert "npm install -g @anthropic-ai/sandbox-runtime" in hint
@@ -386,9 +397,9 @@ class TestSrtInstallHint:
         _path_with(monkeypatch, tmp_path, "node", "npm")
         with patch(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd="npm", timeout=5),
+            side_effect=[_NO_SRT, subprocess.TimeoutExpired(cmd="npm", timeout=5)],
         ):
-            hint = check_srt_resolvable(_hooks_package_at(None))["install_hint"]
+            hint = check_srt_resolvable(_resolver_finds_no_srt(tmp_path))["install_hint"]
         assert hint == "npm install -g @anthropic-ai/sandbox-runtime"
 
 
@@ -403,7 +414,7 @@ class TestCheckRgPresent:
         bins = _path_with(monkeypatch, tmp_path, "rg")
         result = check_rg_present()
         assert result["found"] is True
-        assert os.path.normcase(result["path"]) == os.path.normcase(bins["rg"])
+        assert result["path"] == bins["rg"]
 
     def test_rg_not_on_path_but_in_local_bin(self, monkeypatch, tmp_path):
         _path_with(monkeypatch, tmp_path)
@@ -411,7 +422,6 @@ class TestCheckRgPresent:
         fake_rg.parent.mkdir(parents=True)
         fake_rg.touch()
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         result = check_rg_present()
         assert result["found"] is True
         assert str(fake_rg) == result["path"]
@@ -419,7 +429,6 @@ class TestCheckRgPresent:
     def test_rg_not_found(self, monkeypatch, tmp_path):
         _path_with(monkeypatch, tmp_path)
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         result = check_rg_present()
         assert result["found"] is False
 
@@ -448,7 +457,6 @@ class TestCheckBrokerAlive:
         assert result["alive"] is False
         assert "missing" in result["detail"]
 
-    @pytest.mark.skipif(sys.platform != "linux", reason="AF_UNIX broker sockets are Linux-only")
     def test_socket_connect_success(self, tmp_path):
         ai_central = tmp_path / ".ai_central"
         ai_central.mkdir()
@@ -464,7 +472,6 @@ class TestCheckBrokerAlive:
         finally:
             server.close()
 
-    @pytest.mark.skipif(sys.platform != "linux", reason="AF_UNIX broker sockets are Linux-only")
     def test_socket_connect_refused(self, tmp_path):
         ai_central = tmp_path / ".ai_central"
         ai_central.mkdir()
@@ -481,30 +488,6 @@ class TestCheckBrokerAlive:
         result = check_broker_alive(repo_root=None)
         assert result["alive"] is False
         assert "missing" in result["detail"]
-
-
-# =============================================================================
-# is_linux
-# =============================================================================
-
-
-class TestIsLinux:
-    """The platform is handed in (fleet green leg 4); sys.platform is never replaced."""
-
-    def test_linux(self):
-        """Mutant: `.startswith("linux")` -> `.startswith("darwin")` -> red."""
-        assert is_linux("linux") is True
-
-    def test_darwin(self):
-        """Mutant: `return True` for every platform -> red."""
-        assert is_linux("darwin") is False
-
-    def test_win32(self):
-        assert is_linux("win32") is False
-
-    def test_no_platform_reads_this_process(self):
-        """Nothing handed in (doctor's call) reads sys.platform itself."""
-        assert is_linux() is sys.platform.startswith("linux")
 
 
 # =============================================================================
@@ -555,18 +538,6 @@ def _sandbox_via_doctor() -> list:
     return printed["Sandbox"]
 
 
-def _platform_is_linux(monkeypatch, answer: bool) -> list[str]:
-    """doctor's is_linux answers *answer*; the returned list records each time doctor asked."""
-    asked: list[str] = []
-
-    def is_linux() -> bool:
-        asked.append("is_linux")
-        return answer
-
-    monkeypatch.setattr("aipass.aipass.apps.modules.doctor.is_linux", is_linux)
-    return asked
-
-
 def _prereqs_recorded(monkeypatch) -> list[str]:
     """Every prerequisite check doctor could run, replaced by a recorder that answers 'absent'."""
     called: list[str] = []
@@ -594,22 +565,9 @@ def _prereqs_recorded(monkeypatch) -> list[str]:
 
 
 class TestCheckSandboxDoctor:
-    """Mutants: doctor `if not is_linux():` -> `if not (is_linux() and is_linux()):` reddens the 5 Linux tests;
-    -> `if not is_linux() and not is_linux():` reddens test_non_linux_one_info_line."""
-
-    def test_non_linux_one_info_line(self, monkeypatch):
-        asked = _platform_is_linux(monkeypatch, False)
-        monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_sandbox_flag", lambda: {"enabled": True, "raw_value": "1"}
-        )
-        results = _sandbox_via_doctor()
-        assert asked == ["is_linux"]
-        assert len(results) == 1
-        assert "Linux-only" in results[0].detail
-        assert results[0].glyph == GLYPH_PASS
+    """The Sandbox group as doctor runs it."""
 
     def test_flag_set_but_off_names_its_value_and_checks_nothing(self, monkeypatch):
-        asked = _platform_is_linux(monkeypatch, True)
         monkeypatch.setattr(f"{_DOCTOR}.check_sandbox_flag", lambda: {"enabled": False, "raw_value": "false"})
         called = _prereqs_recorded(monkeypatch)
 
@@ -619,11 +577,9 @@ class TestCheckSandboxDoctor:
             ("sandbox", GLYPH_PASS, "off (AIPASS_SANDBOX_ENABLED=false); prerequisites not checked")
         ]
         assert called == []
-        assert asked == []
 
     def test_flag_on_missing_prereq_is_fail(self, monkeypatch):
         monkeypatch.setenv("AIPASS_SANDBOX_ENABLED", "1")
-        asked = _platform_is_linux(monkeypatch, True)
         monkeypatch.setattr(
             "aipass.aipass.apps.modules.doctor.check_sandbox_flag", lambda: {"enabled": True, "raw_value": "1"}
         )
@@ -647,13 +603,11 @@ class TestCheckSandboxDoctor:
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: None)
 
         results = _sandbox_via_doctor()
-        assert asked == ["is_linux"]
         fail_results = [r for r in results if r.glyph == GLYPH_FAIL]
         assert len(fail_results) >= 4, f"Flag ON + missing prereqs should produce FAILs, got {len(fail_results)}"
 
     def test_flag_on_all_present_is_pass(self, monkeypatch, tmp_path):
         monkeypatch.setenv("AIPASS_SANDBOX_ENABLED", "1")
-        asked = _platform_is_linux(monkeypatch, True)
         monkeypatch.setattr(
             "aipass.aipass.apps.modules.doctor.check_sandbox_flag", lambda: {"enabled": True, "raw_value": "1"}
         )
@@ -681,7 +635,6 @@ class TestCheckSandboxDoctor:
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: tmp_path / "fake")
 
         results = _sandbox_via_doctor()
-        assert asked == ["is_linux"]
         # THE FLOOR (v5 unentered_assert, 2026-09-08). Seven rows measured from
         # the shell the same day with every prereq stubbed present - one more
         # than the flag-off shape, because bwrap functional is only probed when
@@ -691,7 +644,6 @@ class TestCheckSandboxDoctor:
             assert r.glyph == GLYPH_PASS, f"All present should be PASS, got {r.glyph} for {r.label}"
 
     def test_bwrap_functional_skipped_when_not_present(self, monkeypatch):
-        asked = _platform_is_linux(monkeypatch, True)
         monkeypatch.setattr(
             "aipass.aipass.apps.modules.doctor.check_sandbox_flag", lambda: {"enabled": True, "raw_value": "1"}
         )
@@ -715,12 +667,10 @@ class TestCheckSandboxDoctor:
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: None)
 
         results = _sandbox_via_doctor()
-        assert asked == ["is_linux"]
         labels = [r.label for r in results]
         assert "bwrap functional" not in labels
 
     def test_bwrap_functional_included_when_present(self, monkeypatch):
-        asked = _platform_is_linux(monkeypatch, True)
         monkeypatch.setattr(
             "aipass.aipass.apps.modules.doctor.check_sandbox_flag", lambda: {"enabled": True, "raw_value": "1"}
         )
@@ -748,12 +698,10 @@ class TestCheckSandboxDoctor:
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: None)
 
         results = _sandbox_via_doctor()
-        assert asked == ["is_linux"]
         labels = [r.label for r in results]
         assert "bwrap functional" in labels
 
     def test_sysctl_in_detail_on_functional_fail(self, monkeypatch):
-        asked = _platform_is_linux(monkeypatch, True)
         monkeypatch.setattr(
             "aipass.aipass.apps.modules.doctor.check_sandbox_flag", lambda: {"enabled": True, "raw_value": "1"}
         )
@@ -781,13 +729,11 @@ class TestCheckSandboxDoctor:
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: None)
 
         results = _sandbox_via_doctor()
-        assert asked == ["is_linux"]
         func_result = [r for r in results if r.label == "bwrap functional"][0]
         assert "apparmor_restrict_unprivileged_userns=1" in func_result.detail
 
     def test_flag_off_is_one_pass_row_with_no_warn_and_no_prereq_check(self, monkeypatch):
         """Off, the hook gates contain: five inert WARN rows (bwrap, node, srt, rg, broker) were noise."""
-        asked = _platform_is_linux(monkeypatch, True)
         monkeypatch.setattr(f"{_DOCTOR}.check_sandbox_flag", lambda: {"enabled": False, "raw_value": ""})
         called = _prereqs_recorded(monkeypatch)
 
@@ -798,4 +744,3 @@ class TestCheckSandboxDoctor:
         ]
         assert [r for r in results if r.glyph == GLYPH_WARN] == []
         assert called == []
-        assert asked == []

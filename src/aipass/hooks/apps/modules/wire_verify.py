@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.7.0
+# Version: 1.11.0
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-09
-# Modified: 2026-11-04
+# Modified: 2026-11-17
 # =============================================
 
 """Wire verification — catches silent hook-wiring breaks.
@@ -13,6 +13,7 @@
 Cross-checks ~/.claude/settings.json (provider hooks) against .aipass/hooks.json (project hook config).
 A handler wired only in Codex's user-level hooks.json, or only in the manifest's cli.opencode rows that
 OpenCode's plugin runs, counts as wired; that file or plugin missing (or the plugin stale) is an ERROR.
+A provider CLI that is not installed is not checked (INFO), by the test setup.sh wires it by.
 A Seed head's hooks.json is checked for one seed.py row per event Seed fires; `seed install` writes them.
 Detects: empty provider hook arrays; enabled handlers with no bridge entry; duplicate and orphaned
 entries; a tool a gate guards that the provider's PreToolUse bridge never sees (R7: NotebookEdit).
@@ -23,19 +24,21 @@ import json
 import os
 import re
 import shlex
+import shutil
 import sys
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config import gates
 from aipass.hooks.apps.handlers.config.opencode_paths import opencode_plugin_path
 from aipass.hooks.apps.handlers.config.loader import aipass_home, config_unavailable_reason, find_project_config
+from aipass.hooks.apps.handlers.config import codex_trust
 from aipass.hooks.apps.modules.context_window import codex_hooks_path
 from aipass.hooks.apps.modules.engine import PROJECT_ROW, own_hooks
 from aipass.hooks.apps.handlers.json import files as json_files
-from aipass.hooks.apps.handlers.module_root import module_file
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 CONSOLE = err_console
 
@@ -47,32 +50,36 @@ HELP_COMMANDS = [
 _BRIDGE_MARKER = "bridges/claude.py"
 _CODEX_MARKER = "bridges/codex.py"
 _OPENCODE_MARKER = "bridges/opencode.py"
-OPENCODE_PLUGIN_SOURCE = module_file(__file__).parents[1] / "handlers" / "bridges" / "opencode_plugin.ts"
+OPENCODE_PLUGIN_SOURCE = Path(__file__).resolve().parents[1] / "handlers" / "bridges" / "opencode_plugin.ts"
 _META_KEYS = frozenset({"_comment", "hooks_enabled"})
 
 _SEED_MARKER = "bridges/seed.py"
-SEED_BRIDGE = module_file(__file__).parents[1] / "handlers" / "bridges" / "seed.py"
+SEED_BRIDGE = Path(__file__).resolve().parents[1] / "handlers" / "bridges" / "seed.py"
 #: The events a Seed head fires (its src/hooks/hooks.md); the manifest has no cli.seed section to name them.
 SEED_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostCompact", "Stop")
+#: Seed events Claude is not wired for: its PostCompact output never reaches the model; PostToolUse re-grounds.
+SEED_ONLY_EVENTS = frozenset({"PostCompact"})
 #: One row runs every handler of its event in turn; Seed's 60 s default would break a slow UserPromptSubmit.
 SEED_TIMEOUT = 120
 
 
-def _read_provider_hooks(path=None):
-    """Read hook events from provider settings. Returns {event: [entries]}."""
+def _read_provider_hooks(errors, path=None):
+    """Read hook events from provider settings. Returns {event: [entries]}; an unreadable file is an ERROR."""
     settings_path = Path(path) if path else Path.home() / ".claude" / "settings.json"
     try:
         data = json_files.read_json_file(settings_path)
         return data.get("hooks", {})
     except (OSError, json.JSONDecodeError) as exc:
         logger.info("[WIRE_VERIFY] cannot read provider settings: %s", exc)
+        errors.append(f"Cannot read {settings_path}: {exc}")
         return {}
 
 
 def _extract_bridge_arg(entry, marker=_BRIDGE_MARKER):
     """Extract the bridge event arg from a provider entry's command string.
 
-    Returns e.g. 'UserPromptSubmit:tier0_kernel' or 'Stop', or None if not a bridge entry.
+    Returns e.g. 'UserPromptSubmit:tier0_kernel' or 'Stop', or None if not a bridge entry. A shell
+    guard after the event (`PreToolUse; c=$?` or `PreToolUse|| printf`) ends the word with or without a space.
     """
     for hook in entry.get("hooks", []):
         cmd = hook.get("command", "")
@@ -81,8 +88,8 @@ def _extract_bridge_arg(entry, marker=_BRIDGE_MARKER):
         parts = cmd.split()
         for i, part in enumerate(parts):
             if part.endswith(marker.rsplit("/", 1)[-1]) or marker in part:
-                if i + 1 < len(parts):
-                    return parts[i + 1]
+                event = re.match(r"[\w:.-]+", parts[i + 1]) if i + 1 < len(parts) else None
+                return event.group() if event else None
     return None
 
 
@@ -114,6 +121,34 @@ def _build_provider_index(provider_hooks, errors):
     return index
 
 
+def _codex_rows(codex_hooks):
+    """(event, group index, handler index, group, handler) for every row of a Codex hooks.json."""
+    for event, groups in codex_hooks.items():
+        for gi, group in enumerate(groups):
+            for hi, handler in enumerate(group.get("hooks", [])):
+                yield event, gi, hi, group, handler
+
+
+def _check_codex_trust(codex_path, codex_hooks, errors) -> None:
+    """ERROR for every Codex row it will skip without a word: changed since approval, never approved, or disabled."""
+    config = Path(codex_path).with_name("config.toml")
+    try:
+        state = codex_trust.hook_state(config)
+    except (OSError, ValueError) as exc:
+        logger.info("[WIRE_VERIFY] cannot read Codex config: %s", exc)
+        errors.append(f"Cannot read {config}: {exc}, so no Codex hook's approval can be checked")
+        return
+    fix = "Fix: the owner opens /hooks in an interactive codex session and trusts it, then proves it with codex exec"
+    for event, gi, hi, group, handler in _codex_rows(codex_hooks):
+        row = state.get(f"{codex_path}:{codex_trust.event_label(event)}:{gi}:{hi}", {})
+        gates = " and no gate runs" if event == "PreToolUse" else ""
+        if row.get("enabled") is False:
+            errors.append(f"{event} (Codex) row {gi}: disabled in Codex, so it never runs{gates}. {fix}")
+        elif row.get("trusted_hash") != codex_trust.hook_hash(event, group, handler):
+            status = "changed since the owner approved it" if row.get("trusted_hash") else "never approved"
+            errors.append(f"{event} (Codex) row {gi}: {status}, so Codex skips it without a word{gates}. {fix}")
+
+
 def _codex_wired(codex_path, errors) -> frozenset[str]:
     """Every ``Event:hook`` a Codex hooks.json sends through the Codex bridge; none when there is no file.
 
@@ -127,8 +162,9 @@ def _codex_wired(codex_path, errors) -> frozenset[str]:
             "Fix: aipass doctor --fix, then run codex once and choose 'Trust all and continue'"
         )
         return frozenset()
-    codex_hooks = _read_provider_hooks(codex_path)
+    codex_hooks = _read_provider_hooks(errors, codex_path)
     _check_guarded_tools(codex_hooks, errors, _CODEX_MARKER, _CODEX_GUARDED_TOOLS, " (Codex)")
+    _check_codex_trust(codex_path, codex_hooks, errors)
     wired: set[str] = set()
     for entries in codex_hooks.values():
         for entry in entries:
@@ -158,6 +194,7 @@ def _opencode_wired(plugin, manifest, errors) -> frozenset[str]:
         data = json_files.read_json_file(Path(manifest)) if manifest is not None else {}
     except (OSError, json.JSONDecodeError) as exc:
         logger.info("[WIRE_VERIFY] cannot read the provider manifest: %s", exc)
+        errors.append(f"Cannot read the provider manifest {manifest}: {exc}")
         data = {}
     opencode = data.get("cli", {}).get("opencode", {}) if isinstance(data, dict) else {}
     rows = [row for row in opencode.get("hooks", []) if isinstance(row, dict)] if isinstance(opencode, dict) else []
@@ -257,7 +294,9 @@ def _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info, e
         return
 
     if pidx is None:
-        if enabled_hooks:
+        if event_type in SEED_ONLY_EVENTS:
+            info.append(f"{event_type}: {len(enabled_hooks)} enabled handler(s) for Seed only, not wired for Claude")
+        elif enabled_hooks:
             errors.append(
                 f"{event_type}: {len(enabled_hooks)} enabled handler(s) in project config"
                 f" but NO provider event entry — handlers never fire"
@@ -339,7 +378,7 @@ def verify_wiring(
     Returns dict with keys: errors (list), warnings (list), info (list), ok (bool).
     """
     errors, warnings, info = [], [], []
-    provider_hooks = _read_provider_hooks(provider_path)
+    provider_hooks = _read_provider_hooks(errors, provider_path)
     if not provider_hooks:
         errors.append("No provider hooks found in ~/.claude/settings.json")
         return {"errors": errors, "warnings": warnings, "info": info, "ok": False}
@@ -394,6 +433,13 @@ def _render_results(results):
     CONSOLE.print(f"[bold]{len(results['errors'])} errors, {len(results['warnings'])} warnings[/bold]")
 
 
+def _installed(cli: str) -> bool:
+    """Whether *cli* is installed, by setup.sh's own test: on PATH, or OpenCode in ~/.opencode/bin."""
+    if shutil.which(cli) is not None:
+        return True
+    return cli == "opencode" and os.access(Path.home() / ".opencode" / "bin" / "opencode", os.X_OK)
+
+
 def print_introspection():
     """Print module structure for drone routing."""
     CONSOLE.print("[bold cyan]wire_verify[/bold cyan] — Provider ↔ project hook wiring checker")
@@ -401,6 +447,8 @@ def print_introspection():
 
 def _handle_seed(args) -> bool:
     """`drone @hooks seed install|remove`: the bridge rows in the Seed home's hooks.json."""
+    if args and (len(args) != 1 or args[0] not in ("install", "remove")) and not wants_help(args):
+        return False
     if len(args) != 1 or args[0] not in ("install", "remove"):
         CONSOLE.print("[bold cyan]seed[/bold cyan] — the AIPass rows in a Seed head's hooks.json")
         CONSOLE.print("  drone @hooks seed install   one seed.py row per Seed event; a re-run replaces them")
@@ -427,12 +475,17 @@ def handle_command(command, args) -> bool:
 
     if not args:
         print_introspection()
+        codex, opencode = _installed("codex"), _installed("opencode")
         results = verify_wiring(
-            codex_path=codex_hooks_path(),
-            opencode_plugin=opencode_plugin_path(),
+            codex_path=codex_hooks_path() if codex else None,
+            opencode_plugin=opencode_plugin_path() if opencode else None,
             manifest_path=_manifest_path(),
             seed_path=seed_hooks_path(),
         )
+        for name, there in (("Codex", codex), ("OpenCode", opencode)):
+            if not there:
+                results["info"].append(f"{name}: not installed, no seat to gate: its wiring is not checked")
+        json_handler.log_operation("verify", {"ok": results["ok"], "errors": len(results["errors"])})
         _render_results(results)
         if not results["ok"]:
             # Returning True would become exit 0: a wiring break must fail anything reading the exit code.
@@ -446,9 +499,14 @@ def handle_command(command, args) -> bool:
         CONSOLE.print()
         CONSOLE.print("Reads ~/.claude/settings.json, .aipass/hooks.json and Codex's user-level hooks.json")
         CONSOLE.print("($CODEX_HOME, else ~/.codex) and OpenCode's plugin with the manifest's cli.opencode rows;")
-        CONSOLE.print("a missing Codex file or OpenCode plugin is an ERROR. It also reads a Seed head's")
+        CONSOLE.print("a missing Codex file or OpenCode plugin is an ERROR when that CLI is installed (on PATH;")
+        CONSOLE.print(
+            "OpenCode also in ~/.opencode/bin); a CLI not installed is not checked. It also reads a Seed head's"
+        )
         CONSOLE.print("hooks.json ($SEED_HOME, else ~/.config/seed) for one seed.py row per Seed event. It")
-        CONSOLE.print("verifies every enabled handler has a working provider bridge entry.")
+        CONSOLE.print("verifies every enabled handler has a working provider bridge entry. A Codex row that Codex")
+        CONSOLE.print("will skip (changed since approval, never approved, or disabled, per the config.toml beside")
+        CONSOLE.print("its hooks.json) is an ERROR: approve it in /hooks in an interactive codex session.")
         CONSOLE.print("Exits non-zero on any ERROR finding.")
         return True
 

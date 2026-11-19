@@ -3,7 +3,7 @@
 # Description: Unit tests for ruff_check and clear_text_secret_logging checker handlers (batch 5)
 # Version: 1.6.1
 # Created: 2026-04-16
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/ruff_check.py and clear_text_secret_logging_check.py."""
@@ -93,12 +93,9 @@ def _put_ruff_on_path(tmp_path: Path, monkeypatch) -> None:
     """PATH holds only a stand-in ruff; subprocess.run is sealed, so it never runs."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    # Windows finds ruff.exe through PATHEXT and ignores the bit; POSIX needs the bit.
-    for name in ("ruff", "ruff.exe"):
-        stub = bin_dir / name
-        stub.write_text("", encoding="utf-8")
-        if sys.platform != "win32":
-            os.chmod(stub, 0o755)
+    stub = bin_dir / "ruff"
+    stub.write_text("", encoding="utf-8")
+    os.chmod(stub, 0o755)
     monkeypatch.setenv("PATH", str(bin_dir))
 
 
@@ -500,17 +497,17 @@ class TestTheSecretLoggingVerdict:
 # 5. clear_text_secret_logging arm 2 widened (dispatch 39bfe173, CodeQL round nine)
 # =============================================
 
-#: @skills lib/telegram/apps/handlers/config.py BEFORE its cure (2026-10-10), cut:
+#: @skills config.py BEFORE its cure (2026-10-10), cut:
 #: load_bot_config's secret = _get_secret(bot_id) (:365) handed to non_secret_keys
 #: (:147), whose sorted generator over the document comes back as strays, logged at :376.
-TELEGRAM_CONFIG_SPECIMEN = """from aipass.prax import logger
+BOT_CONFIG_SPECIMEN = """from aipass.prax import logger
 from aipass.api.apps.modules.secrets import get_secret as _api_get_secret
 
 SECRET_FIELDS = ("bot_token", "api_id", "api_hash")
 
 
 def _get_secret(bot_id):
-    return _api_get_secret("telegram", bot_id, as_json=True)
+    return _api_get_secret("chat", bot_id, as_json=True)
 
 
 def non_secret_keys(document):
@@ -524,7 +521,7 @@ def load_bot_config(bot_id):
     strays = non_secret_keys(secret)
     if strays:
         logger.warning(
-            "Legacy secret document telegram/%s carries %d non-secret key(s) %s",
+            "Legacy secret document chat/%s carries %d non-secret key(s) %s",
             bot_id,
             len(strays),
             strays,
@@ -533,7 +530,7 @@ def load_bot_config(bot_id):
 """
 
 #: The cure @skills shipped: the count stays on the line, the key names leave it.
-TELEGRAM_CONFIG_CURED = TELEGRAM_CONFIG_SPECIMEN.replace(" non-secret key(s) %s", " non-secret key(s)").replace(
+BOT_CONFIG_CURED = BOT_CONFIG_SPECIMEN.replace(" non-secret key(s) %s", " non-secret key(s)").replace(
     "            len(strays),\n            strays,\n", "            len(strays),\n"
 )
 
@@ -561,14 +558,14 @@ def _one_call_rows(call: str) -> list:
 
 
 class TestASecretNamedCallsResultSeedsArmTwo:
-    def test_the_telegram_config_strays_line_is_convicted(self, tmp_path: Path) -> None:
+    def test_the_bot_config_strays_line_is_convicted(self, tmp_path: Path) -> None:
         path = tmp_path / "apps" / "config.py"
-        _write_file(path, TELEGRAM_CONFIG_SPECIMEN)
+        _write_file(path, BOT_CONFIG_SPECIMEN)
         message = secret_logging.check_module(str(path))["checks"][0]["message"]
         assert message.startswith("config.py:21 logs strays (built from ") and len(message.splitlines()) == 1
 
     def test_the_cured_count_only_line_is_acquitted(self) -> None:
-        assert _secret_rows(TELEGRAM_CONFIG_CURED) == []
+        assert _secret_rows(BOT_CONFIG_CURED) == []
 
     @pytest.mark.parametrize(
         "call",
@@ -960,10 +957,8 @@ class TestCheckModule:
         target = tmp_path / "x.py"
         _write_file(target, "x = 1\n")
         venv_bin = _hide_ruff(tmp_path, monkeypatch)
-        for name in ("ruff", "ruff.exe"):
-            (venv_bin / name).write_text("", encoding="utf-8")
-            if sys.platform != "win32":
-                os.chmod(venv_bin / name, 0o755)
+        (venv_bin / "ruff").write_text("", encoding="utf-8")
+        os.chmod(venv_bin / "ruff", 0o755)
         with patch(_RUN, side_effect=[_ruff_proc([], returncode=0), _fmt_proc()]) as run:
             result = check_module(str(target))
         assert Path(run.call_args_list[0].args[0][0]).parent == venv_bin

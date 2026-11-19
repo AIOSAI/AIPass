@@ -3,7 +3,7 @@
 # Description: Unit tests for skills loader
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # Category: skills/tests
 # =============================================
 
@@ -14,7 +14,10 @@
 # sentry: no-test-needed(constant) — the "skill_loaded" log-operation name json_handler records
 
 import sys
+from unittest.mock import patch
 
+from aipass.skills.apps.handlers import switch_handler
+from aipass.skills.apps.modules import loader, runner
 from aipass.skills.apps.modules.loader import load_skill
 
 
@@ -97,3 +100,73 @@ class TestBrokenHandler:
         assert "RuntimeError: probe import crash" in result["error"]
         assert "handler.py" in result["error"]
         assert "skills_handler_broken_handler_probe" not in sys.modules
+
+
+_OFF = "Skill 'marked_probe' is switched OFF. Turn it back on with: drone @skills on marked_probe"
+
+
+class TestInfoOnAnOffSkill:
+    def test_off_info_imports_nothing_and_shows_the_text_and_the_notice(self, marked_probe, capsys):
+        switch_handler.set_enabled("marked_probe", False)
+
+        assert loader.handle_command("info", ["marked_probe"]) is True
+
+        out, err = capsys.readouterr()
+        assert not (marked_probe / "IMPORTED").exists()
+        assert "Skill: marked_probe" in out and "# Probe body" in out
+        assert _OFF in err
+        assert "Handler: not imported while the skill is OFF" in out
+
+    def test_a_deliberate_off_logs_info_never_an_error(self, marked_probe):
+        switch_handler.set_enabled("marked_probe", False)
+
+        with patch.object(loader.logger, "info") as info, patch.object(loader.logger, "error") as logged:
+            loader.load_skill("marked_probe")
+
+        assert any("switched off" in str(logged_call) for logged_call in info.call_args_list), info.call_args_list
+        logged.assert_not_called()
+
+    def test_on_info_imports_the_handler_as_before(self, marked_probe, capsys):
+        assert loader.handle_command("info", ["marked_probe"]) is True
+
+        out, err = capsys.readouterr()
+        assert (marked_probe / "IMPORTED").exists()
+        assert "switched OFF" not in out + err
+
+    def test_an_unreadable_switch_state_counts_as_off_and_fails(self, marked_probe, capsys):
+        switch_handler.get_state_path().write_text("{not json", encoding="utf-8")
+
+        assert loader.handle_command("info", ["marked_probe"]) is False
+
+        out, err = capsys.readouterr()
+        assert not (marked_probe / "IMPORTED").exists()
+        assert "switch_state.json" in err and "# Probe body" in out
+
+
+class TestTheRunnerOnAnOffLoad:
+    def test_a_load_that_answers_off_is_refused_even_past_the_runner_s_own_gate(self, marked_probe, monkeypatch):
+        """The switch can flip between the runner's read and load_skill's: the second read only refuses."""
+        asked = []
+
+        def stale_on_read(name):
+            asked.append(name)
+            return True
+
+        monkeypatch.setattr(runner, "is_enabled", stale_on_read)
+        switch_handler.set_enabled("marked_probe", False)
+
+        result = runner.run_skill("marked_probe", "go")
+
+        assert asked == ["marked_probe"]
+        assert (result["success"], result["output"], result["error"]) == (False, "", _OFF)
+        assert not (marked_probe / "IMPORTED").exists()
+
+    def test_the_runner_refusing_a_deliberate_off_logs_info_never_an_error(self, marked_probe):
+        switch_handler.set_enabled("marked_probe", False)
+
+        with patch.object(runner.logger, "info") as info, patch.object(runner.logger, "error") as logged:
+            result = runner.run_skill("marked_probe", "go")
+
+        assert result["success"] is False
+        assert any("switched off" in str(logged_call) for logged_call in info.call_args_list), info.call_args_list
+        logged.assert_not_called()

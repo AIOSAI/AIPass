@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: runner.py
 # Description: Execute skills
-# Version: 1.3.0
+# Version: 1.3.3
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """Skill runner module."""
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.skills.apps.modules.loader import load_skill, print_skill_info
 from aipass.skills.apps.handlers.runner_handler import run_handler, run_markdown
 from aipass.skills.apps.handlers.switch_handler import SwitchStateUnreadable, is_enabled, off_reason
@@ -25,7 +25,7 @@ def handle_command(command: str, args: list) -> bool:
         error("Error: skill name required. Usage: skills run <name> [action] [args...]")
         return False
     if args[0] in ("--help", "-h", "help"):
-        print_introspection()
+        print_run_help()
         return True
 
     name = args[0]
@@ -72,6 +72,7 @@ def run_skill(name, action=None, args=None, config=None):
         if not is_enabled(name):
             reason = off_reason(name)
             why = f" ({reason})" if reason else ""
+            logger.info("Refusing to run '%s' - the skill is switched off%s", name, why)
             return {
                 "success": False,
                 "output": "",
@@ -92,6 +93,9 @@ def run_skill(name, action=None, args=None, config=None):
             "output": "",
             "error": loaded["error"],
         }
+    # load_skill reads the switch again; flipped off since the read above, it imported nothing.
+    if loaded["off"] is not None:
+        return {"success": False, "output": "", "error": loaded["off"]["notice"]}
 
     handler = loaded["handler"]
     metadata = loaded["metadata"]
@@ -111,6 +115,15 @@ def run_skill(name, action=None, args=None, config=None):
         },
     )
     return result
+
+
+def print_run_help():
+    """Print the usage page for this verb."""
+    console.print("Skills Run - Execute a skill")
+    console.print()
+    console.print("Usage:")
+    console.print("  drone @skills run <name> \\[action] \\[args]    Run a handler action, or render a markdown skill")
+    console.print("  drone @skills run <name> --help             Show the skill's SKILL.md instead of running it")
 
 
 def print_introspection():

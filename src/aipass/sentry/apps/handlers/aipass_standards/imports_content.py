@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: imports_content.py
 # Description: Import Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -33,11 +33,11 @@ def get_imports_standards() -> str:
         "   • Grouped by category, alphabetical",
         "   • json, datetime, typing, pathlib, etc.",
         "",
-        "[bold]3. Prax logger (nearly always)[/bold]",
-        "   • [dim]from aipass.prax.apps.modules.logger import system_logger as logger[/dim]",
+        "[bold]3. Prax logger (when the file logs; stdlib logging fails)[/bold]",
+        "   • [dim]from aipass.prax import logger[/dim]",
         "",
-        "[bold]4. Services (CLI, etc.)[/bold]",
-        "   • [dim]from aipass.cli.apps.modules import console, header, success[/dim]",
+        "[bold]4. Services (CLI, etc.) - through the front door[/bold]",
+        "   • [dim]from aipass.cli import console, header, success[/dim]",
         "",
         "[bold]5. Internal handlers[/bold]",
         "   • [dim]from aipass.sentry.apps.handlers.json import json_handler[/dim]",
@@ -52,9 +52,20 @@ def get_imports_standards() -> str:
         "  [dim]from datetime import datetime[/dim]",
         "  [dim]from typing import Dict, List, Optional[/dim]",
         "",
-        "  [dim]from aipass.prax.apps.modules.logger import system_logger as logger[/dim]",
-        "  [dim]from aipass.cli.apps.modules import console, header[/dim]",
+        "  [dim]from aipass.prax import logger[/dim]",
+        "  [dim]from aipass.cli import console, header[/dim]",
         "  [dim]from aipass.sentry.apps.handlers.json import json_handler[/dim]",
+        "",
+        "[bold cyan]FRONT DOOR (cross-branch, front_door row):[/bold cyan]",
+        "  [yellow]✓[/yellow] Another branch: [dim]from aipass.<branch> import <name>[/dim] only",
+        "  [red]✗[/red] Never a path under its apps/ [dim](modules as much as handlers)[/dim]",
+        "  • src/aipass/<branch>/__init__.py is the one door: _HOMES read by __getattr__",
+        "    on each access, nothing cached; an unknown name raises AttributeError",
+        "  [red]✗[/red] Second doors: door_* under apps/modules, pure re-export modules,",
+        "    a module whose __all__ hands out handler names",
+        '  • Tests: patch("aipass.<branch>.<name>"), the caller\'s bound name, or the',
+        "    name's own home module -- NEVER monkeypatch.setattr on aipass.<branch>",
+        '  • Event bus: [dim]patch.object(Trigger, "fire")[/dim], Trigger from aipass.trigger',
         "",
         "[bold cyan]CRITICAL RULES:[/bold cyan]",
         "  [yellow]✓[/yellow] Path(__file__).resolve().parents[N] - NEVER hardcode paths",
@@ -110,8 +121,8 @@ def get_imports_standards() -> str:
         "     [dim]from the branch dir and red from the repo root, on import-order luck.[/dim]",
         "  [yellow]![/yellow]  MOCKING A RE-EXPORTED OBJECT: patch the CONSUMING module's name",
         '     [dim]-- patch("<consumer module>.logger"). Patching upstream of a binding[/dim]',
-        "     [dim]never reaches past it, and aipass/prax/__init__ re-exports by[/dim]",
-        "     [dim]binding, so the copy is taken twice. Five fleet techniques measured[/dim]",
+        "     [dim]never reaches past it: from aipass.prax import logger copies the[/dim]",
+        "     [dim]object into the consumer at import. Five fleet techniques measured[/dim]",
         "     [dim]against a real consumer by object identity: all five reach nothing.[/dim]",
         "",
         "[bold cyan]REFERENCE:[/bold cyan]",

@@ -23,7 +23,9 @@ never falls through to a real backup.
 point, so its process CWD is its own branch directory. Drone exports
 `AIPASS_CALLER_CWD`; `handlers/path/caller.py` re-anchors every user-supplied
 relative path to it, so `drone @backup share docs/notes.md` means the caller's
-`docs/notes.md`. Absolute paths are untouched.
+`docs/notes.md`. Absolute paths are untouched. Without `AIPASS_CALLER_CWD`
+(a direct run outside drone) a relative path is refused with an error; it is
+never resolved against backup's own directory.
 
 ## Flags, by verb
 
@@ -33,8 +35,8 @@ reference lists verbs and this page lists their options.
 | Verb | Flag | Effect |
 |---|---|---|
 | `register` | `--name <name>` | Register under a short name, so `@name` resolves to the path |
-| `register` | `--remove <name>` | Drop a registered project from the registry; its `.backup/` store and files stay where they are |
-| `all` | `--quiet` | Suppress the Rich panels; the run itself is unchanged |
+| `register` | `--remove <name>` | Drop a registered project from the registry; its `.backup/` store and files stay where they are; its scheduled backup job is removed first, and a schedule file that cannot be written keeps the project registered |
+| `snapshot`, `all` | `--quiet` | Suppress the Rich panels; the run itself is unchanged |
 | `all` | `--registered` | Run the cycle for every registered project, in registry order (below) |
 | `drive_sync` | `--force` | Re-upload files the tracker already recorded |
 | `drive_sync` | `--project <name>` | Sync a registered project by name |
@@ -42,15 +44,16 @@ reference lists verbs and this page lists their options.
 | `drive_clear` | `--force` | Required — the verb refuses to clear the tracker without it |
 | `share` | `--public` | Share the uploaded file with anyone holding the link |
 | `status` | `--json` | Print one JSON object on stdout and nothing else: the backup door's status contract (below) |
-| `status` | `--sizes` | With `--json` only: add `store.snapshots_bytes` and `store.versioned_bytes` (walks both stores) |
+| `status` | `--sizes` | With `--json` only: add `store.snapshots_bytes` (walks the snapshot store) |
 | `prune` | `--apply` | Delete what the listing names; without it nothing is deleted |
 
-`restore` takes subcommands rather than flags: `list <file>` and `file <file>
-<output>`. See [restore](restore.md).
+`snapshot`, `all` and `drive_sync` take one project and only the flags above:
+any other word, or a valued flag with no value, is named on stderr with the
+usage, the exit is 2, and nothing runs.
 
 ## `all` and the Drive step
 
-`all <project>` runs snapshot, then versioned over the same scan, then
+`all <project>` runs snapshot, then
 `drive_sync` -- but the Drive step only when the project's `drive_sync` setting
 is on. Off (the default), it prints `Drive sync off for this project` and moves
 on. The bare `drive_sync` verb ignores the setting: naming the verb is the
@@ -61,12 +64,13 @@ in registry order. A project that refuses or raises is recorded and the next one
 still runs. After the last project it prints one line each:
 
 ```
-<name> ok|FAILED snapshot=<files> versioned=<files> drive=uploaded|skipped|failed <seconds>s
+<name> ok|FAILED snapshot=<files> drive=uploaded|skipped|failed <seconds>s
 ```
 
 and exits non-zero when any project failed, naming them on stderr. A project
 path or `@name` given together with `--registered` is refused and nothing runs;
-so is an empty registry. This is the line the nightly daemon job runs.
+so is an empty registry. Scheduled runs are per project, `all @name --quiet`;
+see [schedule](schedule.md).
 
 ## `settings`
 
@@ -84,7 +88,7 @@ with no `.backup/` store is refused on stderr with a non-zero exit. Any other
 `status <project_path|@name> --json [--sizes]` prints the object the backup door
 reads and passes through unchanged (drive_sync.md, "On the host API's backup
 door"), as one JSON object on stdout with nothing else there.
-`store` is present only with `--sizes`, which walks both stores. `running`
+`store` is present only with `--sizes`, which walks the snapshot store. `running`
 lists the lanes in flight, `[]` when none; see
 [Running lanes and `stop`](#running-lanes-and-stop) below. Each lane's
 `last` and `files` come from the project's changelog: the last entry of that
@@ -101,7 +105,7 @@ stderr. `--sizes` without `--json` is refused.
 
 ## Running lanes and `stop`
 
-Every lane that does work (snapshot, versioned, drive_sync) announces itself in
+Every lane that does work (snapshot, drive_sync) announces itself in
 `<project>/.backup/running/<lane>.json` for as long as it runs, whoever started
 it. The document is the `running` entry the door reports: `verb`, `lane`, `pid`, `started_at` and
 `progress` (`done`, `total`, `failed`, `bytes_done`, `bytes_total`, `current`,
@@ -109,14 +113,14 @@ it. The document is the `running` entry the door reports: `verb`, `lane`, `pid`,
 rewritten from the lane's per-file callback at most once a second, atomically,
 and removed when the run ends, however it ends. Under `all` each sub-lane
 writes its own file in turn with `verb: "all"` and the one pid; the shared scan
-counts as the snapshot lane's. `current` is project-relative for snapshot and
-versioned, store-relative for drive_sync; `bytes_total` is known only to
+counts as the snapshot lane's. `current` is project-relative for snapshot,
+store-relative for drive_sync; `bytes_total` is known only to
 drive_sync. A reader (status, stop) drops and removes a file whose pid is gone,
 a zombie, or younger than the lane's `started_at` (a recycled pid). The handler
 is `apps/handlers/state/progress.py`.
 
 `stop <project_path|@name> [lane]` ends them. The lane word is `snapshot`,
-`versioned`, `drive_sync`, or `all` (whatever sub-lane an `all` run is in);
+`drive_sync`, or `all` (whatever sub-lane an `all` run is in);
 without one, every running lane of the project. Each chosen lane's process gets
 SIGTERM, up to 30 s to go, then SIGKILL; stdout says `stopped <lane> (pid N)`
 per lane and the verb exits 0. Nothing running prints one line, `nothing running
@@ -126,9 +130,7 @@ else the root's directory name. A pid is signalled only when, through psutil,
 its process started no later than the lane and its command line is backup's
 entry point running that verb for that root (`@name` and `all --registered`
 resolve through the registry); anything else is refused on stderr, nothing is
-signalled, exit 2. psutil reads the process table on Linux, macOS and Windows
-alike; on Windows its terminate is TerminateProcess, so a Windows lane gets no
-chance to save and its running file is cleared by the next reader.
+signalled, exit 2.
 
 The stopped lane, in the main thread, turns SIGTERM into a flag. The copy loops
 read it between files, so the file in flight finishes; `upload_batch` cancels
@@ -149,8 +151,8 @@ default way.
 
 ## `prune`
 
-`prune <project_path|@name>` lists, per store and per top-level directory, the
-`snapshots/` files and `versioned/` file-folders whose project path the ignore
+`prune <project_path|@name>` lists, per top-level directory, the
+`snapshots/` files whose project path the ignore
 spec now matches (`.backupignore` plus the built-in floor, minus the whitelist),
 with counts, bytes and a grand total. It deletes nothing, and its last line says
 so. `--apply` deletes them, one `prune_removed` row per path in the audit trail,
@@ -161,10 +163,11 @@ and prints what it removed. See [store cleanup](store_cleanup.md).
 The documented form is `<verb> <project>`: the verb first, the project second.
 
 There is also a legacy form, `backup <project|@name>`, which runs `snapshot` by
-default and accepts `--versioned` or `--all` to pick another lane
+default and accepts `--all` to pick another lane
 (`apps/backup.py`, in `main()`). It resolves registered names the same way the
-verbs do. Nothing in the tree calls it, and no test exercises it — it is documented here because it is live, not because
-it is recommended. Use the verbs.
+verbs do, and passes the rest to the verb, which refuses a stray word as above.
+Nothing in the tree calls the legacy form; it is documented here because it is
+live, not because it is recommended. Use the verbs.
 
 `--version` and `-V` both print the entry point's version; `help` on its own
 behaves like `--help`.

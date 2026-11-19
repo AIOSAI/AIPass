@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_email.py
-# Version: 1.3.3
+# Version: 1.4.0
 # Description: Tests for email notification handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/notification/email.py."""
@@ -230,13 +230,14 @@ class TestCountNewEmails:
     def test_returns_zero_when_no_inbox(self, tmp_path):
         assert _new_count(tmp_path) == 0
 
-    def test_returns_zero_on_corrupt_json(self, tmp_path):
+    def test_a_corrupt_inbox_raises_to_the_engine_never_reads_as_no_mail(self, tmp_path):
         inbox_dir = tmp_path / ".ai_mail.local"
         inbox_dir.mkdir()
         inbox_file = inbox_dir / "inbox.json"
         inbox_file.write_text("not valid json{{{", encoding="utf-8")
 
-        assert _new_count(tmp_path) == 0
+        with pytest.raises(json.JSONDecodeError):
+            _new_count(tmp_path)
 
 
 class TestFindBranchRoot:
@@ -244,7 +245,7 @@ class TestFindBranchRoot:
 
     # The walk reads the real cwd: each test stands in its directory with monkeypatch.chdir
     # (fleet green leg 7, no Path.cwd patch). Paths are compared resolved, because the
-    # real cwd comes back resolved and a temp dir can sit behind a symlink (macOS /var).
+    # real cwd comes back resolved and a temp dir can sit behind a symlink.
 
     # Read through handle() (fleet green leg 8): a found root is the one whose inbox the banner
     # counts; no root is the logged "no branch root found" and a silent banner.
@@ -263,7 +264,7 @@ class TestFindBranchRoot:
         ):
             result = handle({})
 
-        assert "You have 1 new email -" in result["stdout"]
+        assert "You have 1 new email: 1 mail -" in result["stdout"]
 
     def test_returns_none_when_no_markers(self, tmp_path, monkeypatch):
         bare = tmp_path.resolve() / "bare"
@@ -339,7 +340,7 @@ class TestEmailCadenceGate:
         assert "3 new emails" in result["stdout"]
 
     def test_message_format_unchanged(self, tmp_path):
-        """The owner's spec keeps the wording: count + the three commands."""
+        """The owner's spec: count, each kind present, the three commands."""
         self._inbox(tmp_path, 1)
         with patch(
             "aipass.hooks.apps.handlers.notification.email._find_branch_root",
@@ -348,7 +349,7 @@ class TestEmailCadenceGate:
             result = handle({})
 
         assert result["stdout"] == (
-            "You have 1 new email - check with: drone @ai_mail inbox"
+            "You have 1 new email: 1 mail - check with: drone @ai_mail inbox"
             " | then: drone @ai_mail view <id> | close with: drone @ai_mail close <id>"
         )
 
@@ -411,3 +412,45 @@ class TestEmailCadenceGate:
             result = handle({})
 
         assert result["stdout"] == ""
+
+
+class TestMailKinds:
+    """The line names each unread kind with its count; notices are neither counted nor named."""
+
+    def _line(self, tmp_path, messages):
+        inbox_dir = tmp_path / ".ai_mail.local"
+        inbox_dir.mkdir()
+        (inbox_dir / "inbox.json").write_text(json.dumps({"messages": messages}), encoding="utf-8")
+        with patch("aipass.hooks.apps.handlers.notification.email._find_branch_root", return_value=tmp_path):
+            return handle({})["stdout"]
+
+    def test_mixed_kinds_are_named_with_counts_and_notices_left_out(self, tmp_path):
+        line = self._line(
+            tmp_path,
+            [
+                {"status": "new", "kind": "medic"},
+                {"status": "new", "kind": "notice", "subject": "Dispatch complete: x"},
+                {"status": "new", "kind": "rounds"},
+                {"status": "new", "kind": "mail"},
+                {"status": "new", "kind": "mail"},
+                {"status": "read", "kind": "job_failed"},
+            ],
+        )
+
+        assert line.startswith("You have 4 new emails: 1 medic, 1 rounds, 2 mail - check with: drone @ai_mail inbox")
+
+    def test_an_inbox_of_only_notices_prints_no_line(self, tmp_path):
+        assert self._line(tmp_path, [{"status": "new", "kind": "notice"}, {"status": "new", "kind": "notice"}]) == ""
+
+    def test_a_row_with_no_kind_is_read_by_the_contract(self, tmp_path):
+        line = self._line(
+            tmp_path,
+            [{"status": "new", "subject": "Dispatch complete: old"}, {"status": "new", "subject": "a question"}],
+        )
+
+        assert line.startswith("You have 1 new email: 1 mail -")
+
+    def test_an_unknown_kind_is_named_as_it_is(self, tmp_path):
+        line = self._line(tmp_path, [{"status": "new", "kind": "pager"}, {"status": "new", "kind": "mail"}])
+
+        assert line.startswith("You have 2 new emails: 1 pager, 1 mail -")

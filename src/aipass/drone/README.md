@@ -29,8 +29,9 @@ drone @git status                 # Read-only git, available to every branch
   merged in, so the same command works from a repo that is not this one.
 - **Owns git.** Read verbs for every branch, write verbs for the project's registry-declared owner,
   a door for repositories that are not AIPass, and one audit line per use of it.
-- **Deletes, and records it.** `drone rm` is the only sanctioned delete path in the fleet, and
-  every delete and every refusal lands in an audit store and in the logs.
+- **Deletes, and records it.** `drone rm` is the only sanctioned delete path in the fleet. Inside
+  the project it moves the target to the `.archive` beside it; every move, delete and refusal
+  lands in an audit store and in the logs.
 - **Discovers.** Commands are read from the branches themselves, so the inventory is generated
   rather than written down.
 
@@ -78,10 +79,9 @@ then `@target` resolution, then the module lane. `apps/modules/` holds one orche
 concern — `resolver` and `config` for addressing, `router` for dispatch, `registry` and
 `module_registry` for what exists, `discovery` and `scan` for what a branch can do, `commands` for
 shortcuts, `git_module` for the whole git surface, `rm` for contained deletes and `broker` for the
-daemon that performs them on request. Beside them, the doors are the modules files a foreign
-branch may import: `door_broker` re-exports the broker client's identified connection and the
-daemon, which ai_mail's dispatch monitor reaches the broker through, and `door_deletion_log`
-exports `record_deletion`, through which @spawn writes its removals into the deletion record. `apps/handlers/` holds the implementation, grouped one
+daemon that performs them on request. Another branch imports none of them: it takes every name
+from the package door, `aipass.drone` (`__init__.py`), which hands each one out from its home.
+`apps/handlers/` holds the implementation, grouped one
 directory per concern: `git/` (a handler per verb), `broker/` (socket daemon, client, protocol and
 the server-side path resolver), `scanning/`, `command_registry/` and the json shim every branch
 shares. `apps/plugins/devpulse_ops/` sits outside the three layers on purpose: auth-gated
@@ -104,8 +104,8 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/git_access.md](docs/git_access.md) | The three tiers, how owner and ci-cure are earned per repo, the session fence, the upstream issue lane, the two refusal species, the dev branch model, the plugins |
 | [docs/git_interface.md](docs/git_interface.md) | What each verb does: scoping, the `--json` machine surface, remote redaction, the commit subject cap, the pre-commit lane, tag lanes, gh passthrough |
 | [docs/external_repo_door.md](docs/external_repo_door.md) | `--repo <path>`: the admin-seat door into a repository that is not AIPass, and its ledger |
-| [docs/rm_and_the_record.md](docs/rm_and_the_record.md) | The delete record, the sibling-branch guard, the contains-a-citizen fence, and stale mode |
-| [docs/broker.md](docs/broker.md) | The broker delete lane and its server-side path verification on every host |
+| [docs/rm_and_the_record.md](docs/rm_and_the_record.md) | The delete record, the sibling-branch guard, the contains-a-citizen fence, dot names, and stale mode |
+| [docs/broker.md](docs/broker.md) | The broker removal lane, its one decision with drone rm, and its server-side path verification |
 | [docs/testing.md](docs/testing.md) | How the suite is run and judged, the standards lanes, the mutation bar |
 
 ---

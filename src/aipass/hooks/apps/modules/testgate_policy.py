@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: testgate_policy.py
-# Version: 1.0.3
+# Version: 1.1.0
 # Description: Reads .aipass/test_write_policy.json — the switch behind the test-write gate
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Reads the test-write policy: may agents create new test files here?
@@ -18,10 +18,11 @@ import json
 from pathlib import Path
 from typing import NamedTuple
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.json import files as json_files
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 CONSOLE = err_console
 
@@ -126,8 +127,15 @@ def _read_allow(raw: object) -> frozenset[str] | str:
 def load(start: str | Path) -> Policy:
     """Read the test-write policy in force for a session standing at *start*.
 
-    Never raises: every failure becomes a Policy carrying ``error``.
+    Never raises: every failure becomes a Policy carrying ``error``. Each call leaves one json trail entry.
     """
+    policy = _load(start)
+    json_handler.log_operation("load", {"writing_enabled": policy.writing_enabled, "error": policy.error is not None})
+    return policy
+
+
+def _load(start: str | Path) -> Policy:
+    """load's reading, untrailed."""
     path = find_policy_file(start)
     if path is None:
         return _missing(start)
@@ -202,5 +210,4 @@ def handle_command(command: str, args: list) -> bool:
         CONSOLE.print("[dim]Read-only on purpose: flipping an owner-level ruling is a human edit,[/dim]")
         CONSOLE.print("[dim]not something an agent can do to the gate that constrains it.[/dim]")
         return True
-    print_introspection()
-    return True
+    return False

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_visibility_check.py
 # Description: Log Visibility Standards Checker Handler
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -18,6 +18,7 @@ from typing import Dict, List
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.aipass_standards.applicability import is_test_path
+from aipass.sentry.apps.handlers.aipass_standards.logging_allowed import prax_logging_allowed, tail_in
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
@@ -29,13 +30,17 @@ AUDIT_SCOPE = "all_files"
 _GETLOGGER_PAT = r"logging" + r"\.getLogger\s*\("
 _FILEHANDLER_PAT = r"logging" + r"\.FileHandler\s*\("
 
+#: prax's logger imported: the door (`from aipass.prax import logger`, parenthesised or not) or the long module path.
+_PRAX_LOGGER_IMPORT = re.compile(
+    r"from\s+aipass\.prax(?:\.apps\.modules\.logger\s+import|\s+import\s+\(?[\w\s,]*\blogger\b)"
+)
+
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """Check if module's logging is visible to Prax monitor (system_logs/)."""
     checks = []
     path = Path(module_path)
 
-    # Normalize to forward slashes so string matching works on Windows too
     module_path = Path(module_path).as_posix()
 
     if is_bypassed(module_path, "log_visibility", bypass_rules=bypass_rules):
@@ -122,25 +127,17 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
 
 def _is_prax_logging_infra(file_path: str) -> bool:
-    """Check if file is part of prax logging infrastructure"""
-    if "prax" not in file_path:
-        return False
-    if "/logging/" in file_path or "/logger" in file_path:
-        return True
-    if "logger.py" in file_path:
-        return True
-    return False
+    """Whether prax publishes this file as one that builds door one on stdlib logging."""
+    return tail_in(file_path, prax_logging_allowed())
 
 
 def _check_prax_import(lines: List[str], content: str, file_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check 1: Files using stdlib getLogger must also import prax system_logger."""
-    has_prax_import = bool(re.search(r"from\s+aipass\.prax\.apps\.modules\.logger\s+import", content))
-
-    if has_prax_import:
+    """Check 1: Files using stdlib getLogger must also import prax's logger (either spelling: front_door judges it)."""
+    if _PRAX_LOGGER_IMPORT.search(content):
         return {
             "name": "Prax logger imported",
             "passed": True,
-            "message": "File imports prax system_logger alongside stdlib getLogger",
+            "message": "File imports prax's logger alongside stdlib getLogger",
         }
 
     violation_lines = _find_pattern_lines(lines, _GETLOGGER_PAT, file_path, bypass_rules)
@@ -149,7 +146,10 @@ def _check_prax_import(lines: List[str], content: str, file_path: str, bypass_ru
         return {
             "name": "Prax logger imported",
             "passed": False,
-            "message": f"stdlib getLogger() on lines {violation_lines[:5]} without prax system_logger import",
+            "message": (
+                f"stdlib getLogger() on lines {violation_lines[:5]} "
+                "without prax's logger (from aipass.prax import logger)"
+            ),
         }
 
     return {"name": "Prax logger imported", "passed": True, "message": "No stdlib getLogger() violations"}

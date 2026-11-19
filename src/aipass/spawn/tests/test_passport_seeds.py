@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_passport_seeds.py
 # Description: TDPLAN-0017 — passport seeds: export, validation, mint-from-seed
-# Version: 1.1.0
+# Version: 1.4.0
 # Created: 2026-08-28
-# Modified: 2026-11-09
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/seed_ops.py and apps/modules/core.py's mint-from-seed path."""
@@ -12,9 +12,13 @@
 # sentry: no-test-needed(ruff) — that every file in apps/handlers/ and apps/modules/ parses and imports
 # sentry: no-test-needed(documentation) — that seed_ops' public functions carry docstrings
 
+import copy
 import hashlib
 import json
+import os
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -36,6 +40,7 @@ from aipass.spawn.apps.handlers.seed_ops import (
     validate_passport,
     validate_seed,
 )
+from aipass.spawn import render_bootstrap_trinity, restore_citizen
 from aipass.spawn.apps.modules.core import spawn_agent
 from aipass.spawn.tests.conftest import MACHINE_CITIZEN_ID, MACHINE_REGISTRY_ID, make_passport, write_registry
 
@@ -369,6 +374,342 @@ class TestMintFromSeed:
         assert json.dumps(seed, sort_keys=True) == before
 
 
+class TestBootstrapRender:
+    """setup.sh's one call: the seed births the passport, the template fills what is missing, nothing is overwritten."""
+
+    @pytest.fixture
+    def seeded_home(self, tmp_path, monkeypatch):
+        root = tmp_path
+        write_registry(root / "AIPASS_REGISTRY.json", {"wanderer": "src/aipass/wanderer"})
+        target = branch_dir(root)
+        seed_file = seed_path_for(target)
+        seed_file.parent.mkdir(parents=True)
+        seed_file.write_text(canonical_text(build_seed(make_passport())), encoding="utf-8")
+        home = SimpleNamespace(path=root, source="test", tried=())
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            yield root, target
+
+    def _render(self, root, target):
+        return render_bootstrap_trinity("wanderer", target, "specialist", "wanderer", root / "AIPASS_REGISTRY.json")
+
+    def test_the_seed_births_the_passport_and_the_template_fills_the_rest(self, seeded_home):
+        """Mutant: the seed branch is skipped -> the passport comes from the template, unstamped -> red."""
+        root, target = seeded_home
+
+        written = self._render(root, target)
+
+        assert written == ["passport.json(seed)", "local.json", "observations.json"]
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert passport["citizenship"]["registry_id"] == "pid-test"
+        assert STAMP_KEY in passport["citizenship"]
+        local = (target / ".trinity" / "local.json").read_text(encoding="utf-8")
+        assert "{{" not in local
+
+    def test_a_rendered_file_gets_a_plain_writes_mode(self, seeded_home):
+        """An install's files read as a plain open() made them. Mutant: the writer keeps mkstemp's 0600 -> red."""
+        root, target = seeded_home
+        umask = os.umask(0)
+        os.umask(umask)
+
+        self._render(root, target)
+
+        assert (target / ".trinity" / "local.json").stat().st_mode & 0o777 == 0o666 & ~umask
+
+    def test_an_existing_file_is_never_overwritten(self, seeded_home):
+        """Mutant: the exists() skip is dropped -> the hand-kept local.json is replaced -> red."""
+        root, target = seeded_home
+        kept = target / ".trinity" / "local.json"
+        kept.parent.mkdir(parents=True)
+        kept.write_text('{"mine": true}', encoding="utf-8")
+
+        assert "local.json" not in self._render(root, target)
+        assert kept.read_text(encoding="utf-8") == '{"mine": true}'
+
+    def test_a_project_citizen_renders_its_bare_module(self, tmp_path):
+        """Only a core branch imports as aipass.<name>. Mutant: MODULE forced to aipass.<name> -> red."""
+        project = tmp_path / "projects" / "finch"
+        write_registry(project / "FINCH_REGISTRY.json", {"finch": "src/finch/finch"})
+        target = project / "src" / "finch" / "finch"
+        target.mkdir(parents=True)
+        home = SimpleNamespace(path=tmp_path, source="test", tried=())
+
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            render_bootstrap_trinity("finch", target, "manager", "canary", project / "FINCH_REGISTRY.json")
+
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert passport["branch_info"]["module"] == "finch"
+        assert passport["citizenship"]["residency"] == "resident"
+
+    def test_a_core_citizen_renders_its_package_module(self, seeded_home):
+        """Mutant: MODULE left bare for core too -> red."""
+        root, target = seeded_home
+        seed_path_for(target).unlink()
+
+        self._render(root, target)
+
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert passport["branch_info"]["module"] == "aipass.wanderer"
+
+    def test_an_unreadable_registry_stops_the_install_with_nothing_written(self, seeded_home):
+        """State document: never guessed. Mutant: the registry error is swallowed -> red."""
+        root, target = seeded_home
+        (root / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
+
+        with pytest.raises(json.JSONDecodeError):
+            self._render(root, target)
+        assert not (target / ".trinity").exists()
+
+
+class TestRestoreCitizen:
+    """Another branch's restore: one registered citizen, from its registry row and its seed, missing files only."""
+
+    def test_restores_only_the_missing_files_from_the_seed(self, tmp_path):
+        """Mutant: restore renders over files that exist -> the kept local.json changes -> red."""
+        root = write_repo(tmp_path)
+        target = branch_dir(root)
+        seed_file = seed_path_for(target)
+        seed_file.parent.mkdir(parents=True)
+        seed_file.write_text(canonical_text(build_seed(make_passport())), encoding="utf-8")
+        (target / ".trinity" / "passport.json").unlink()
+        kept = target / ".trinity" / "local.json"
+        kept.write_text('{"mine": true}', encoding="utf-8")
+        home = SimpleNamespace(path=root, source="test", tried=())
+
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            written = restore_citizen("WANDERER", root / "AIPASS_REGISTRY.json")
+
+        assert written == ["passport.json(seed)", "observations.json"]
+        assert kept.read_text(encoding="utf-8") == '{"mine": true}'
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert passport["identity"]["citizen_class"] == "specialist"
+        assert passport["citizenship"]["registry_id"] == "pid-test"
+
+    def test_a_corrupt_passport_is_set_aside_and_restored(self, tmp_path):
+        """A passport that is present but not JSON is damage too; its bytes are kept beside the new one.
+
+        Mutant: only a missing passport is restored -> the corrupt file stays -> red."""
+        root = write_repo(tmp_path)
+        target = branch_dir(root)
+        seed_file = seed_path_for(target)
+        seed_file.parent.mkdir(parents=True)
+        seed_file.write_text(canonical_text(build_seed(make_passport())), encoding="utf-8")
+        passport_file = target / ".trinity" / "passport.json"
+        passport_file.write_text("{not json", encoding="utf-8")
+        home = SimpleNamespace(path=root, source="test", tried=())
+
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            written = restore_citizen("WANDERER", root / "AIPASS_REGISTRY.json")
+
+        assert "passport.json(seed)" in written
+        assert json.loads(passport_file.read_text(encoding="utf-8"))["identity"]["citizen_class"] == "specialist"
+        [aside] = list(passport_file.parent.glob("passport.json.corrupt-*"))
+        assert aside.read_text(encoding="utf-8") == "{not json"
+
+    def test_an_unregistered_name_is_refused_with_nothing_written(self, tmp_path):
+        root = write_repo(tmp_path)
+
+        with pytest.raises(LookupError, match="stranger"):
+            restore_citizen("stranger", root / "AIPASS_REGISTRY.json")
+
+    def test_a_citizen_without_a_seed_is_refused(self, tmp_path):
+        """No seed, no class and role: restore never guesses them. Mutant: a default class -> red."""
+        root = write_repo(tmp_path)
+        (branch_dir(root) / ".trinity" / "passport.json").unlink()
+
+        with pytest.raises(FileNotFoundError, match="seed"):
+            restore_citizen("wanderer", root / "AIPASS_REGISTRY.json")
+        assert not (branch_dir(root) / ".trinity" / "passport.json").exists()
+
+
+def project_citizen(tmp_path, branch: str = "finch"):
+    """A project-shaped citizen in tmp_path: home/projects/<branch>, its own registry, a resident passport."""
+    project = tmp_path / "projects" / branch
+    registry = write_registry(project / f"{branch.upper()}_REGISTRY.json", {branch: f"src/{branch}/{branch}"})
+    target = project / "src" / branch / branch
+    trinity = target / ".trinity"
+    trinity.mkdir(parents=True)
+    passport = make_passport(branch)
+    passport["citizenship"]["residency"] = "resident"
+    passport["branch_info"]["module"] = branch
+    passport["identity"]["traits"] = ["canary", "projects tier"]
+    (trinity / "passport.json").write_text(canonical_text(passport), encoding="utf-8")
+    return project, registry, target, passport
+
+
+class TestEveryCitizenCarriesASeed:
+    """A seed is written at birth for every residency, and a project's own export reaches its citizens."""
+
+    def test_a_newborn_carries_its_own_seed(self, tmp_path):
+        """Mutant: mint_citizen skips the seed -> red."""
+        target = tmp_path / "newborn"
+        result = spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"), role="scout")
+        assert result["success"] is True, result.get("error")
+
+        seed = load_seed(seed_path_for(target))
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert seed == build_seed(passport)
+        assert seed["identity"]["role"] == "scout"
+
+    def test_a_seed_that_cannot_be_written_fails_the_birth(self, tmp_path):
+        """Mutant: the seed write's failure is ignored and the citizen registers -> red."""
+        target = tmp_path / "halfborn"
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+
+        with patch("aipass.spawn.apps.handlers.seed_ops.atomic_write_text", side_effect=OSError("disk full")):
+            result = spawn_agent(str(target), registry_path=str(registry))
+
+        assert result["success"] is False
+        assert "seed" in result["error"] and "disk full" in result["error"]
+        assert not registry.exists() or "HALFBORN" not in registry.read_text(encoding="utf-8")
+
+    def test_export_run_in_a_project_seeds_that_projects_citizens(self, tmp_path):
+        """Mutant: export keeps the core-only filter in a project -> scanned 0 -> red."""
+        project, _, target, passport = project_citizen(tmp_path)
+
+        receipt = export_seeds(project, confirm=True)
+
+        assert (receipt["scope"], receipt["scanned"], receipt["written"]) == ("project", 1, 1)
+        assert load_seed(seed_path_for(target)) == build_seed(passport)
+
+    def test_export_in_the_aipass_tree_still_never_reaches_a_project(self, tmp_path):
+        """Mutant: the tree lane drops its core filter -> the resident gets a seed -> red."""
+        root = write_repo(tmp_path, residents=("visitor",))
+
+        receipt = export_seeds(root, confirm=True)
+
+        assert (receipt["scope"], receipt["scanned"], receipt["skipped_resident"]) == ("core", 1, 1)
+        resident = root / "projects" / "somewhere" / "src" / "pkg" / "visitor"
+        assert not seed_path_for(resident).exists()
+
+    def test_a_resident_seed_validates_like_a_core_one(self, tmp_path):
+        """Already true before this build; the guard against a core-only validator."""
+        _, _, _, passport = project_citizen(tmp_path)
+
+        assert validate_seed(build_seed(passport)) == []
+
+    def test_a_project_citizen_with_a_seed_is_restored_from_it(self, tmp_path):
+        """restore_citizen is unchanged; this pins its seed route for a project citizen."""
+        project, registry, target, passport = project_citizen(tmp_path)
+        export_seeds(project, confirm=True)
+        (target / ".trinity" / "passport.json").unlink()
+        keep = [target / ".trinity" / "local.json", target / ".trinity" / "observations.json", registry]
+        keep[0].write_text('{"mine": 1}', encoding="utf-8")
+        keep[1].write_text('{"seen": 1}', encoding="utf-8")
+        certificate = target / "artifacts" / "birth_certificate.json"
+        certificate.parent.mkdir()
+        certificate.write_text('{"id": "1"}', encoding="utf-8")
+        keep.append(certificate)
+        before = [p.read_bytes() for p in keep]
+        home = SimpleNamespace(path=tmp_path, source="test", tried=())
+
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            written = restore_citizen("FINCH", registry)
+
+        assert written == ["passport.json(seed)"]
+        restored = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert restored["identity"] == passport["identity"]
+        assert restored["branch_info"]["module"] == "finch"
+        assert restored["citizenship"]["residency"] == "resident"
+        assert [p.read_bytes() for p in keep] == before
+
+    def test_a_seedless_citizen_is_refused_with_the_cure_named(self, tmp_path):
+        """Mutant: the refusal drops the cure -> red."""
+        project, registry, target, _ = project_citizen(tmp_path)
+        (target / ".trinity" / "passport.json").unlink()
+
+        with pytest.raises(FileNotFoundError, match="export-seeds --confirm"):
+            restore_citizen("finch", registry)
+
+
+def off_schema_citizen(tmp_path, branch: str = "wren"):
+    """A project citizen shaped like real external passports: 2.0 gaps and fields 2.0 has no place for."""
+    project, registry, target, passport = project_citizen(tmp_path, branch)
+    passport["citizenship"]["residency"] = "external"
+    del passport["citizenship"]["citizen_id"], passport["citizenship"]["registry_path"]
+    passport["branch_info"]["project"] = "Studio"
+    passport["identity"]["home"] = {"room": "north"}
+    passport["identity"]["personality"] = {"tone": "dry"}
+    passport["identity"]["anti_traits"] = ["hurry"]
+    passport["doctrine"] = ["read before you write"]
+    passport["pipeline"] = {"upstream": "research", "downstream": "verify"}
+    (target / ".trinity" / "passport.json").write_text(canonical_text(passport), encoding="utf-8")
+    return project, registry, target, passport
+
+
+def without_machine_ids(passport: dict) -> dict:
+    """The passport as a user owns it: the per-install citizenship facts removed."""
+    kept = copy.deepcopy(passport)
+    for key in MACHINE_LOCAL_CITIZENSHIP:
+        kept["citizenship"].pop(key, None)
+    return kept
+
+
+class TestAProjectPassportIsSeededAsItStands:
+    """A project citizen's seed is its own passport minus the machine ids; a core seed keeps strict 2.0."""
+
+    def test_an_off_schema_project_passport_is_seeded_with_everything_kept(self, tmp_path):
+        """Mutant: the project lane validates against the core schema -> refused -> red."""
+        project, _, target, passport = off_schema_citizen(tmp_path)
+
+        receipt = export_seeds(project, confirm=True)
+
+        assert (receipt["written"], receipt["errors"]) == (1, [])
+        assert load_seed(seed_path_for(target)) == without_machine_ids(passport)
+
+    def test_an_off_schema_project_citizen_is_restored_with_everything_the_user_wrote(self, tmp_path):
+        """Mutant: the rendered passport is checked against the core schema -> restore raises -> red."""
+        project, registry, target, passport = off_schema_citizen(tmp_path)
+        export_seeds(project, confirm=True)
+        (target / ".trinity" / "passport.json").unlink()
+        home = SimpleNamespace(path=tmp_path, source="test", tried=())
+
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            restore_citizen("wren", registry)
+
+        restored = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert without_machine_ids(restored) == without_machine_ids(passport)
+        assert restored["citizenship"]["citizen_id"]
+
+    def test_a_core_seed_keeps_the_strict_check(self):
+        """Mutant: every seed takes the project check -> the core seed's stray block passes -> red."""
+        seed = build_seed(make_passport("drone"))
+        seed["doctrine"] = ["stray"]
+
+        assert any("'doctrine' is not a block" in problem for problem in validate_seed(seed))
+
+    def test_a_project_seed_still_never_carries_a_machine_id(self, tmp_path):
+        """Mutant: the project check drops the machine-local guard -> a citizen_id ships -> red."""
+        _, _, _, passport = off_schema_citizen(tmp_path)
+        leaked = without_machine_ids(passport)
+        leaked["citizenship"]["registry_id"] = "this-machine"
+
+        assert any("machine-local" in problem for problem in validate_seed(leaked))
+
+    def test_a_nameless_project_passport_is_refused_naming_the_cure(self, tmp_path):
+        """Mutant: the project check stops asking for the name restore keys on -> exported -> red."""
+        project, _, target, passport = off_schema_citizen(tmp_path)
+        del passport["branch_info"]["branch_name"]
+        (target / ".trinity" / "passport.json").write_text(canonical_text(passport), encoding="utf-8")
+
+        receipt = export_seeds(project, confirm=True)
+
+        assert receipt["written"] == 0
+        assert "branch_info.branch_name" in receipt["errors"][0]["error"]
+        assert "re-run export-seeds" in receipt["errors"][0]["error"]
+
+    def test_a_core_passport_off_2_0_is_refused_naming_the_migration(self, tmp_path):
+        """Mutant: the core refusal drops its cure -> red."""
+        root = write_repo(tmp_path)
+        passport_file = branch_dir(root) / ".trinity" / "passport.json"
+        passport = json.loads(passport_file.read_text(encoding="utf-8"))
+        passport["doctrine"] = ["stray"]
+        passport_file.write_text(canonical_text(passport), encoding="utf-8")
+
+        receipt = export_seeds(root, confirm=True)
+
+        assert "migrate-passports" in receipt["errors"][0]["error"]
+
+
 class TestExportSeeds:
     """Dry run is the default; --confirm is the only thing that writes."""
 
@@ -461,9 +802,13 @@ class TestExportSeeds:
         passport["identity"]["role"] = "explorer"
         (branch_dir(root) / ".trinity" / "passport.json").write_text(canonical_text(passport), encoding="utf-8")
 
+        before = seed_path_for(branch_dir(root)).read_text(encoding="utf-8")
         receipt = export_seeds(root, confirm=True)
         assert receipt["updated"] == 1
         assert json.loads(seed_path_for(branch_dir(root)).read_text(encoding="utf-8"))["identity"]["role"] == "explorer"
+        # Mutant: the refresh overwrites with no copy kept -> no backup in the recovery folder -> red.
+        [kept] = list((branch_dir(root) / ".spawn" / ".recovery").glob("passport.seed.json.*.backup"))
+        assert kept.read_text(encoding="utf-8") == before
 
     def test_residents_are_counted_but_never_exported(self, tmp_path):
         root = write_repo(tmp_path, branches=("wanderer",), residents=("lodger",))

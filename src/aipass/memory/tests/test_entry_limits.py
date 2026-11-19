@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: test_entry_limits.py
-# Description: entry_limits config reader and the apps/modules/limits.py gateway over it
+# Description: entry_limits config reader and the apps/modules/limits.py introspection module
 # Version: 1.2.0
 # Created: 2026-06-13
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # Category: memory/tests
 # =============================================
 
-"""Tests for apps/handlers/json/entry_limits.py and its gateway apps/modules/limits.py."""
+"""Tests for apps/handlers/json/entry_limits.py and the introspection module apps/modules/limits.py."""
 
 # entry_limits reads through config_loader, so tests patch config_loader._CONFIG_PATH.
 
@@ -17,12 +17,14 @@
 # sentry: no-test-needed(covered_elsewhere) — resolve_entry_types() merge, pinned in tests/test_trinity_standard.py
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from aipass.cli.apps.modules import reset_command_state, resolve_exit
+import aipass.memory as door
+from aipass.cli import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.json import entry_limits as _entry_limits
 from aipass.memory.apps.modules import limits as _limits
 
@@ -251,9 +253,9 @@ class TestMissingConfig:
 
 
 class TestMalformedJson:
-    """Malformed JSON returns safe defaults and logs an error."""
+    """Malformed JSON raises ConfigUnreadable naming the file, logs an error, and leaves the bytes alone."""
 
-    def test_malformed_json_returns_defaults(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_malformed_json_raises_naming_the_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = tmp_path / "config"
         config_dir.mkdir(parents=True, exist_ok=True)
         bad_config = config_dir / "memory.config.json"
@@ -263,12 +265,10 @@ class TestMalformedJson:
         mod, loader = _get_modules()
         monkeypatch.setattr(loader, "_CONFIG_PATH", bad_config)
 
-        result = mod.load_entry_limits("any_branch")
+        with pytest.raises(loader.ConfigUnreadable, match=re.escape(str(bad_config))):
+            mod.load_entry_limits("any_branch")
 
-        assert result["enabled"] is True
-        assert result["enforce"] is True
-        assert len(result["entry_types"]) == 4
-        # Defaults are served in memory only — the operator's file is theirs
+        # Never healed over: the operator's file is theirs
         assert bad_config.read_text(encoding="utf-8") == original
 
     def test_malformed_json_logs_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -282,7 +282,8 @@ class TestMalformedJson:
         monkeypatch.setattr(loader, "_CONFIG_PATH", bad_config)
 
         mock_logger = loader.logger
-        mod.load_entry_limits("any_branch")
+        with pytest.raises(loader.ConfigUnreadable):
+            mod.load_entry_limits("any_branch")
 
         mock_logger.error.assert_called()
         error_msg = mock_logger.error.call_args[0][0]
@@ -345,15 +346,27 @@ class TestTheDraftPercentComesFromTheConfig:
         assert not hasattr(mod, "DRAFT_PERCENT"), "DRAFT_PERCENT is back — the config key is no longer the only source"
 
     @pytest.mark.parametrize("bad", [0, -5, 101, "80", True, None, [80]])
-    def test_an_unusable_percent_serves_the_seed_rather_than_removing_the_target(
+    def test_an_unusable_percent_raises_naming_the_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: object
     ) -> None:
-        """Narrow the draft target, never delete it: a bad config still leaves a line below the cap."""
+        """A wrong-shape value is corruption: raised with the file and the key, never swapped for the seed."""
         config_path = _write_config(tmp_path, _full_config(draft_percent=bad))
         mod, loader = _get_modules()
         monkeypatch.setattr(loader, "_CONFIG_PATH", config_path)
 
-        assert mod.draft_percent() == 80
+        with pytest.raises(loader.ConfigUnreadable, match=r"draft_percent in .*memory\.config\.json"):
+            mod.draft_percent()
+
+    def test_a_wrong_shape_section_or_budget_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An entry_limits section or file_budgets that is not an object raises; absent ones merge from the seed."""
+        mod, loader = _get_modules()
+        monkeypatch.setattr(loader, "_CONFIG_PATH", _write_config(tmp_path, {"entry_limits": ["not", "a", "dict"]}))
+        with pytest.raises(loader.ConfigUnreadable, match="entry_limits in memory.config.json is list"):
+            mod.load_entry_limits("any_branch")
+
+        monkeypatch.setattr(loader, "_CONFIG_PATH", _write_config(tmp_path, _full_config(file_budgets=7)))
+        with pytest.raises(loader.ConfigUnreadable, match="file_budgets"):
+            loader.get_file_budgets()
 
     def test_a_config_with_no_draft_percent_at_all_still_answers(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -370,9 +383,9 @@ class TestTheDraftPercentComesFromTheConfig:
 def _gate_hits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config: dict, session: dict) -> list:
     """Run one authored session through the gate's own route: the door's load_entry_limits + changed_entries."""
     monkeypatch.setattr(_entry_limits.config_loader, "_CONFIG_PATH", _write_config(tmp_path, config))
-    limits = _limits.load_entry_limits("any")
+    limits = door.load_entry_limits("any")
     entry = {"number": 1, "date": "2026-10-23", "summary": "ok", "status": "done", **session}
-    return _limits.changed_entries({}, {"sessions": [entry]}, limits)
+    return door.changed_entries({}, {"sessions": [entry]}, limits)
 
 
 def _banded_config(**overrides) -> dict:
@@ -461,27 +474,20 @@ def _get_gateway():
     return _limits, _entry_limits
 
 
-class TestTheLimitsGatewayIsADoorNotACopy:
-    """``apps/handlers/`` is private implementation; ``apps/modules/`` is the door other branches use."""
+class TestTheLimitsModuleIsNotASecondDoor:
+    """``apps/handlers/`` is private implementation; the package top file is the one door other branches use."""
 
-    @pytest.mark.parametrize("name", _GATEWAY_CONTRACT)
-    def test_every_contract_name_is_the_same_object_as_the_handler_s(self, name: str) -> None:
-        """Identity, not equality. A wrapper that merely AGREES today is the defect this ends."""
-        limits, entry_limits = _get_gateway()
-
-        assert getattr(limits, name) is getattr(entry_limits, name)
-
-    def test_dunder_all_is_exactly_the_contract(self) -> None:
+    def test_dunder_all_lists_only_what_limits_defines(self) -> None:
         limits, _ = _get_gateway()
 
-        assert tuple(limits.__all__) == _GATEWAY_CONTRACT
+        assert limits.__all__ == ["print_introspection", "handle_command"]
 
-    @pytest.mark.parametrize("name", _GATEWAY_INTERNAL)
-    def test_the_internals_stay_behind_the_door(self, name: str) -> None:
-        """Named one by one: a later re-export would silently widen what I must not break."""
+    @pytest.mark.parametrize("name", tuple(n for n in _GATEWAY_CONTRACT if n != "draft_percent") + _GATEWAY_INTERNAL)
+    def test_no_entry_limits_name_is_handed_out_here(self, name: str) -> None:
+        """Named one by one: a re-export here would reopen the second door sentry's front_door convicts."""
         limits, _ = _get_gateway()
 
-        assert not hasattr(limits, name), f"{name} is internal and must not be part of the public gateway"
+        assert not hasattr(limits, name), f"{name} is on limits.py; it belongs to the package door or its handler"
 
     def test_it_answers_only_its_own_command(self) -> None:
         """A module that claims a command it does not own swallows another module's work."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: reload_sentinel.py
 # Description: Restarts the log watcher when its own handler code changes on disk
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-12
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Reload sentinel — keeps the running watcher on the shipped code.
@@ -16,10 +16,9 @@ import time
 from pathlib import Path
 from typing import Callable, Dict, List, Tuple
 
-from aipass.trigger.apps.config import TRIGGER_ROOT, trail_logger
+from aipass.prax import logger
+from aipass.trigger.apps.config import TRIGGER_ROOT
 from aipass.trigger.apps.handlers.json import json_handler
-
-logger = trail_logger(TRIGGER_ROOT / "logs" / "reload_sentinel.jsonl")
 
 WATCHED_ROOTS: Tuple[Path, ...] = (
     TRIGGER_ROOT / "apps" / "handlers",

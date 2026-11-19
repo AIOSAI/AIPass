@@ -3,7 +3,7 @@
 # Description: Helpers shared by the session_boot test files: patch target, env redirects, transcripts, pointers
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Helpers for the session_boot tests (no test_ prefix: never collected)."""
@@ -14,7 +14,7 @@
 import os
 from pathlib import Path
 
-from aipass.ai_mail.apps.modules import door_session_pointer as sp
+from aipass import ai_mail as sp
 
 _MOD = "aipass.hooks.apps.handlers.lifecycle.session_boot"
 
@@ -44,11 +44,8 @@ def make_transcript(projects_root, cwd, session_id, title, messages, age_seconds
 
 
 def home_env(home) -> dict[str, str]:
-    """The environment that redirects home resolution on BOTH platforms.
-
-    POSIX reads HOME, Windows USERPROFILE; under clear=True HOME alone leaves Windows with no home.
-    """
-    return {**_kept_redirect(), "HOME": str(home), "USERPROFILE": str(home)}
+    """The environment that redirects home resolution."""
+    return {**_kept_redirect(), "HOME": str(home)}
 
 
 def set_home(monkeypatch, home) -> str:

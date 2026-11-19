@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor: the command, the run and the provider checks
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-04-16
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""
@@ -64,7 +64,7 @@ def _seat_home(tmp_path, monkeypatch, *, venv: bool = True, via: str = "settings
     """
     home = tmp_path / "home"
     home.mkdir()
-    venv_python = home / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    venv_python = home / ".venv" / "bin" / "python"
     if venv:
         venv_python.parent.mkdir(parents=True)
         venv_python.write_text("", encoding="utf-8")
@@ -304,7 +304,7 @@ class TestClaudeCodeRow:
         monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
         # git sits beside claude so the System group carries no FAIL row and doctor exits 0.
         for name in ("git", "claude") if stdout is not None else ("git",):
-            stub = tmp_path / (f"{name}.exe" if os.name == "nt" else name)
+            stub = tmp_path / name
             stub.write_text("", encoding="utf-8")
             stub.chmod(0o755)
         monkeypatch.setenv("PATH", str(tmp_path))
@@ -437,6 +437,18 @@ class TestProviderManifest:
         assert results[0].glyph == GLYPH_WARN
         assert "unreadable" in results[0].detail
 
+    def test_corrupt_provider_settings_fail_the_hooks_row_not_read_as_empty(self, tmp_path) -> None:
+        """Mutant: the read error falls back to {} again (every hook reads as missing) -> red."""
+        manifest = tmp_path / "provider_manifest.json"
+        manifest.write_text(json.dumps({"cli": {"claude": {"hooks": []}}}), encoding="utf-8")
+        settings = tmp_path / "settings.json"
+        settings.write_text("{not json", encoding="utf-8")
+        with patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest):
+            results = check_provider_manifest(settings_path=settings)
+        assert [(r.label, r.glyph) for r in results] == [("hooks", GLYPH_FAIL)]
+        assert "unreadable" in results[0].detail
+        assert settings.read_text(encoding="utf-8") == "{not json"
+
     def test_manifest_no_claude_section(self, tmp_path) -> None:
         """Manifest with no cli.claude → WARN."""
         manifest = tmp_path / ".claude" / "provider_manifest.json"
@@ -518,30 +530,6 @@ class TestProviderManifest:
         hooks_result = [r for r in results if r.label == "hooks"][0]
         assert hooks_result.glyph == GLYPH_WARN
         assert "Stop" in hooks_result.detail
-
-    def test_windows_scripts_path_command_recognized_as_wired(self, tmp_path) -> None:
-        """A Scripts-path (Windows-transformed) hook entry must not be flagged missing against
-        the POSIX-canonical manifest — write (platform_bridge_command) and verify must agree
-        (DPLAN-0234 Strand C)."""
-        posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
-        manifest = tmp_path / ".claude" / "provider_manifest.json"
-        manifest.parent.mkdir(parents=True)
-        manifest.write_text(
-            json.dumps({"cli": {"claude": {"hooks": [{"command": posix_cmd, "event": "Stop"}]}}}),
-            encoding="utf-8",
-        )
-        windows_cmd = "$AIPASS_HOME/.venv/Scripts/python.exe $AIPASS_HOME/bridges/claude.py Stop"
-        provider_settings = tmp_path / ".claude" / "settings.json"
-        provider_settings.write_text(
-            json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": windows_cmd}]}]}}),
-            encoding="utf-8",
-        )
-        with patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest):
-            results = check_provider_manifest(settings_path=provider_settings, os_name="nt")
-        hooks_result = [r for r in results if r.label == "hooks"][0]
-        assert hooks_result.glyph == GLYPH_PASS
-        assert "1" in hooks_result.detail
-        assert "missing" not in hooks_result.detail
 
     def test_missing_hook_label_not_double_prefixed(self, tmp_path) -> None:
         """Command already shaped like 'event:label' must not get the event prefixed twice."""
@@ -663,7 +651,6 @@ class TestProviderManifest:
         Mutant: the walk-up reads the start directory only (no parents) -> red at the row assert.
         """
         monkeypatch.setenv("HOME", str(tmp_path / "home"))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
         manifest = tmp_path / ".claude" / "provider_manifest.json"
         manifest.parent.mkdir(parents=True)
         manifest.write_text("{}", encoding="utf-8")
@@ -760,20 +747,18 @@ class TestProviderSettingsScalars:
         assert rows == []
         assert written["includeGitInstructions"] is False
 
-    def test_the_pass_after_a_wire_reads_the_handed_file_on_the_handed_platform(self, tmp_path) -> None:
-        """After a wire, the re-read keeps settings_path and os_name: it never falls back to the home.
+    def test_the_pass_after_a_wire_reads_the_handed_file(self, tmp_path) -> None:
+        """After a wire, the re-read keeps settings_path: it never falls back to the home.
 
         The settings file lives outside HOME and HOME is an empty scratch dir, so a
-        re-read that drops either seam finds no key and no Windows hook, and says so.
+        re-read that drops the seam finds no key and no hook, and says so.
         Both wires are stubbed where doctor resolves them; the stub writes what a wire
         would into the handed file, and is asserted called before the re-read is read.
-        Red first (leg 6): the re-read handed on neither -> row WARN, not PASS.
+        Red first (leg 6): the re-read handed on nothing -> row WARN, not PASS.
         Mutant: the re-read drops settings_path -> red at the rows assert.
-        Mutant: the re-read drops os_name -> red at the rows assert.
         Mutant: check_settings_scalars not handed settings_path -> red at the rows assert.
         """
         posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
-        windows_cmd = "$AIPASS_HOME/.venv/Scripts/python.exe $AIPASS_HOME/bridges/claude.py Stop"
         manifest = tmp_path / "project" / ".claude" / "provider_manifest.json"
         manifest.parent.mkdir(parents=True)
         manifest.write_text(
@@ -791,7 +776,7 @@ class TestProviderSettingsScalars:
         )
         settings = tmp_path / "handed" / "settings.json"
         settings.parent.mkdir()
-        wired = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": windows_cmd}]}]}}
+        wired = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": posix_cmd}]}]}}
         settings.write_text(json.dumps(wired), encoding="utf-8")
         empty_home = tmp_path / "home"
         empty_home.mkdir()
@@ -805,7 +790,7 @@ class TestProviderSettingsScalars:
             patch("aipass.aipass.apps.modules.doctor.prompt_auto_wire", side_effect=_wire) as prompt_wire,
             _home_at(empty_home),
         ):
-            results = check_provider_manifest(interactive=True, settings_path=settings, os_name="nt")
+            results = check_provider_manifest(interactive=True, settings_path=settings)
 
         assert prompt_wire.call_count == 1
         assert prompt_wire.call_args.kwargs["settings_path"] == settings
@@ -1254,14 +1239,28 @@ class TestCheckWireVerify:
         assert results[0].label == "wire verify"
         assert results[0].glyph == "[green]✓[/green]"
 
-    def test_fail_on_nonzero_exit(self) -> None:
-        """Non-zero exit from drone @hooks verify produces a FAIL row."""
-        fake = MagicMock(returncode=1, stdout="ERROR empty array\n2 errors, 0 warnings\n")
-        with patch("aipass.aipass.apps.modules._doctor_wire.subprocess.run", return_value=fake):
+    def test_a_failed_verify_names_each_error_hooks_wrote_to_stderr(self) -> None:
+        """The row names what failed, never a bare 'errors detected': hooks reports on stderr.
+
+        Mutant: stderr not read -> red. Mutant: COLUMNS not widened -> red at the env assert.
+        """
+        report = (
+            "✗ Wire check FAILED\n\n"
+            "  ERROR  PostCompact: 1 enabled handler(s) in project config but NO provider event entry\n"
+            "  OK     Stop: unfiltered bridge, 4 enabled hooks OK\n"
+            "  ERROR  Codex: no hooks file\n\n"
+            "2 errors, 0 warnings\n"
+        )
+        fake = MagicMock(returncode=1, stdout="", stderr=report)
+        with patch("aipass.aipass.apps.modules._doctor_wire.subprocess.run", return_value=fake) as run:
             results = check_wire_verify()
         assert len(results) == 1
         assert results[0].glyph == "[red]✗[/red]"
-        assert "errors" in results[0].detail
+        assert results[0].detail == (
+            "PostCompact: 1 enabled handler(s) in project config but NO provider event entry; Codex: no hooks file"
+        )
+        assert "drone @hooks verify" in results[0].remediation
+        assert run.call_args.kwargs["env"]["COLUMNS"] == "1000"
 
     def test_warn_on_drone_not_found(self) -> None:
         """FileNotFoundError (drone missing) produces a WARN row."""
@@ -1382,7 +1381,7 @@ class TestPreflightWireDoor:
         (tmp_path / ".claude" / "settings.json").write_text(json.dumps({"env": {}}), encoding="utf-8")
         monkeypatch.setattr(f"{mod}._find_manifest", lambda: manifest)
 
-        with _home_at(tmp_path):
+        with patch("sys.stdin", _Stdin("y\n", tty=True)), _home_at(tmp_path):
             run_doctor_preflight()
 
         folder = tmp_path / ".claude" / ".backup" / "settings"
@@ -1397,7 +1396,7 @@ class TestPreflightWireDoor:
 
 
 class TestDoctorFixAsks:
-    """doctor --fix shows the settings plan and asks once; --yes and install never ask (FPLAN-0646)."""
+    """doctor --fix shows the settings plan and asks once; --yes never asks, unattended never writes (FPLAN-0646)."""
 
     @staticmethod
     def _world(tmp_path, monkeypatch) -> "tuple":
@@ -1495,16 +1494,23 @@ class TestDoctorFixAsks:
         assert any(re.match(r'-\s+"Bash\(rm -r \*\)"', line) for line in lines)
         assert any(re.match(r'\+\s+"Edit\(~/\.claude/\*\*\)"', line) for line in lines)
 
-    def test_f_the_install_preflight_never_asks(self, tmp_path, monkeypatch, capsys) -> None:
-        """Install with no tty writes without the question; the receipts carry the install consent.
-        Mutant: ask inside the install door -> no tty means nothing written, red."""
-        settings, original, folder = self._world(tmp_path, monkeypatch)
-        with patch("sys.stdin", _Stdin("", tty=False)), _home_at(tmp_path):
-            run_doctor_preflight()
+    @pytest.mark.parametrize(
+        ("tty", "non_interactive", "why"),
+        [(False, False, _doctor_wire.NOT_APPLIED_NO_TTY), (True, True, _doctor_wire.NOT_APPLIED_NON_INTERACTIVE)],
+    )
+    def test_f_an_unattended_install_writes_nothing_and_its_row_names_why(
+        self, tmp_path, monkeypatch, tty, non_interactive, why
+    ) -> None:
+        """Mutant: the install door's auto-consent -> written, red. Mutant: non_interactive ignored -> y read, red."""
+        settings, original, _folder = self._world(tmp_path, monkeypatch)
+        stdin = _Stdin("y\n", tty=tty)
+        with patch("sys.stdin", stdin), _home_at(tmp_path):
+            groups, _counts = run_doctor_preflight(non_interactive=non_interactive)
 
-        assert settings.read_bytes() != original
-        assert "Apply these" not in capsys.readouterr().out
-        assert self._consents(folder) == ["consent: install", "consent: install"]
+        (row,) = [r for r in groups["Services"] if r.label == _doctor_wire.SETTINGS_FIX_LABEL]
+        assert (row.glyph, row.detail, row.remediation) == (GLYPH_WARN, why, "aipass doctor --fix --yes")
+        assert settings.read_bytes() == original
+        assert stdin.read() == "y\n"
 
     def test_g_an_unparseable_settings_file_is_a_fail_row_and_stays_byte_identical(self, tmp_path, monkeypatch) -> None:
         """A JSON typo in the settings file refuses the plan; the row FAILs and nothing is written."""

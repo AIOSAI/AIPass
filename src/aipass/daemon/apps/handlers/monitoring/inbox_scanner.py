@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_scanner.py
 # Description: Cheap cross-branch scan for unread mail sitting past a staleness threshold
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-11
-# Modified: 2026-10-24
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -20,6 +20,7 @@ from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.schedule.discovery import (
     MANAGER_CLASS,
+    PassportUnreadable,
     active_citizens,
     citizen_class_for,
 )
@@ -27,7 +28,6 @@ from aipass.daemon.apps.handlers.schedule.discovery import (
 DEFAULT_STALE_HOURS = 24
 
 UNREAD_STATUS = "new"
-TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # Skip reason — a branch can be stale but ineligible for a wake.
 SKIP_MANAGER = "manager"
@@ -36,35 +36,25 @@ SKIP_PASSPORT_UNREADABLE = "passport_unreadable"
 
 def _parse_timestamp(raw: str) -> Optional[datetime]:
     """Parse an ai_mail message timestamp. Returns None if unparseable.
-    None means the message is not aged: a sweep that cannot tell its age must not wake over it."""
+    None means the message is not aged: a sweep that cannot tell its age must not wake over it.
+    fromisoformat reads ai_mail's "YYYY-MM-DD HH:MM:SS" and the ISO "T" form alike (3.7+)."""
     if not raw:
         return None
 
     try:
-        return datetime.strptime(raw, TIMESTAMP_FORMAT)
-    except (ValueError, TypeError) as e:
-        logger.info("[inbox_scanner] Timestamp %r not in mail format (%s) — trying ISO", raw, e)
-
-    try:
         return datetime.fromisoformat(raw)
     except (ValueError, TypeError) as e:
-        logger.info("[inbox_scanner] Unparseable timestamp %r (%s) — message skipped", raw, e)
+        logger.warning("[inbox_scanner] Unparseable timestamp %r (%s) — message skipped", raw, e)
         return None
 
 
-def _load_inbox(inbox_file: Path) -> Optional[dict]:
-    """Read an inbox.json. Returns parsed dict or None on any failure.
-    None skips the branch: a woken agent could not read that inbox either."""
-    try:
-        with open(inbox_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("[inbox_scanner] Failed to read %s: %s", inbox_file, e)
-        return None
+def _load_inbox(inbox_file: Path) -> dict:
+    """Read an inbox.json. Raises OSError or ValueError (JSONDecodeError is one) when unreadable or malformed."""
+    with open(inbox_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
 
     if not isinstance(data, dict) or not isinstance(data.get("messages"), list):
-        logger.warning("[inbox_scanner] Malformed inbox structure in %s", inbox_file)
-        return None
+        raise ValueError(f"malformed inbox structure in {inbox_file}: no 'messages' list")
 
     return data
 
@@ -73,10 +63,11 @@ def _skip_reason(branch_path: Path, owner: str) -> Optional[str]:
     """Return why this branch must not be woken, or None if it is wakeable.
     The @daemon sender bypasses ai_mail's manager gate, so managers are refused here.
     Passport-local reasons only: ai_mail's wake blocklist is applied by inbox_sweep."""
-    citizen_class = citizen_class_for(branch_path)
-    if citizen_class is None:
+    try:
+        citizen_class = citizen_class_for(branch_path)
+    except PassportUnreadable as e:
         # A passport that exists but cannot be read may be a manager's: not woken.
-        logger.warning("[inbox_scanner] %s passport unreadable — not wakeable", owner)
+        logger.warning("[inbox_scanner] %s not wakeable: %s", owner, e)
         return SKIP_PASSPORT_UNREADABLE
     if citizen_class == MANAGER_CLASS:
         logger.info("[inbox_scanner] %s is manager-class — not wakeable", owner)
@@ -92,7 +83,8 @@ def scan_branch_inbox(
     stale_hours: int = DEFAULT_STALE_HOURS,
 ) -> Optional[dict]:
     """Scan one branch mailbox for unread mail older than `stale_hours`.
-    Returns an entry dict when the branch has stale unread mail, else None."""
+    Returns an entry dict when the branch has stale unread mail, else None.
+    Raises OSError or ValueError when the inbox is there but cannot be read."""
     if now is None:
         now = datetime.now()
 
@@ -101,9 +93,6 @@ def scan_branch_inbox(
         return None
 
     data = _load_inbox(inbox_file)
-    if data is None:
-        return None
-
     unread = [m for m in data["messages"] if isinstance(m, dict) and m.get("status") == UNREAD_STATUS]
     if not unread:
         return None
@@ -150,7 +139,12 @@ def find_stale_inboxes(
 
     entries = []
     for citizen in citizens:
-        entry = scan_branch_inbox(Path(citizen["path"]), citizen["email"], now=now, stale_hours=stale_hours)
+        try:
+            entry = scan_branch_inbox(Path(citizen["path"]), citizen["email"], now=now, stale_hours=stale_hours)
+        except (OSError, ValueError) as e:
+            # A woken agent could not read that inbox either: skip it, the next citizen still counts.
+            logger.warning("[inbox_scanner] %s inbox unreadable, skipped: %s", citizen["email"], e)
+            continue
         if entry is not None:
             entries.append(entry)
 

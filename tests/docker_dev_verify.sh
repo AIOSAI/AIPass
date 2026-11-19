@@ -36,8 +36,8 @@ cd AIPass
 echo "  HEAD: $(git log -1 --oneline)"
 
 # --- Phase 2: one-command install ---
-echo "--- Phase 2: ./aipass install ---"
-if ./aipass install 2>&1 | tail -15; then
+echo "--- Phase 2: ./aipass install --yes ---"
+if ./aipass install --yes 2>&1 | tail -15; then
     ok "installer exit 0"
 else
     bad "installer exited non-zero"

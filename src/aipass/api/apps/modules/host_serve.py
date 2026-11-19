@@ -16,7 +16,7 @@ Reference: docs/host_autostart.md
 import sys
 from typing import List, Optional
 
-from aipass.cli.apps.modules import console, header, success, error, warning
+from aipass.cli import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.prax import logger
 from aipass.api.apps.handlers.host import config as host_config

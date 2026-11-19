@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: backup.py
 # Description: BACKUP Branch — main orchestrator with auto-discovery
-# Version: 1.3.1
+# Version: 1.4.1
 # Created: 2026-04-16
-# Modified: 2026-10-21
+# Modified: 2026-11-17
 # =============================================
 
 """BACKUP Branch - Main Orchestrator"""
@@ -14,17 +14,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 os.environ.setdefault("AIPASS_BRANCH_NAME", "backup")
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, header, reset_command_state, resolve_exit
+from aipass.cli import console, error, header, reset_command_state, resolve_exit
 
 VERSION = "1.3.0"
 MODULE_NAME = "backup"
@@ -52,7 +45,7 @@ def print_help() -> None:
     console.print()
     header("BACKUP — project backup & drive sync")
     console.print()
-    console.print("[dim]Snapshot, version, and sync project backups to a local store or remote drive.[/dim]")
+    console.print("[dim]Snapshot and sync project backups to a local store or remote drive.[/dim]")
     console.print()
     console.print("-" * 70)
     console.print()
@@ -62,20 +55,21 @@ def print_help() -> None:
     console.print("  [dim]drone @backup --help[/dim]")
     console.print()
     console.print("  [dim]Legacy form, still live: drone @backup backup <project_path|@name>[/dim]")
-    console.print("  [dim]runs snapshot; add --versioned or --all to pick another lane.[/dim]")
+    console.print("  [dim]runs snapshot; add --all to run the full cycle.[/dim]")
     console.print()
     console.print("-" * 70)
     console.print()
     console.print("[bold cyan]COMMANDS:[/bold cyan]")
     console.print()
     console.print("  [green]snapshot[/green]     Full mirror backup of a project")
-    console.print("  [green]versioned[/green]    Incremental timestamped backup")
-    console.print("  [green]all[/green]          Run snapshot, versioned, then drive_sync when the project has it on")
+    console.print("  [green]all[/green]          Run snapshot, then drive_sync when the project has it on")
     console.print("  [green]register[/green]     Register a project + scaffold its .backup/")
     console.print("  [green]status[/green]       Show backup info and recent history")
     console.print("  [green]prune[/green]        List stored copies the ignore spec now matches; --apply deletes them")
-    console.print("  [green]restore[/green]      List a file's versions, or restore its current version")
     console.print("  [green]settings[/green]     Turn a project's drive_sync on or off (the one live setting)")
+    console.print(
+        "  [green]schedule[/green]     Read or set a project's scheduled backup (daily, weekly, monthly; on/off)"
+    )
     console.print("  [green]drive_sync[/green]   Upload the snapshot store to the remote drive, whatever the setting")
     console.print("  [green]drive_check[/green]  Test the remote drive connection")
     console.print("  [green]drive_stats[/green]  Drive usage statistics")
@@ -89,19 +83,19 @@ def print_help() -> None:
     console.print()
     console.print("  [green]--name <name>[/green]     register: register under a short name, so @name resolves")
     console.print("  [green]--remove <name>[/green]   register: drop a project from the registry; its .backup/ stays")
-    console.print("  [green]--quiet[/green]           all: suppress the panels, the run itself is unchanged")
+    console.print("  [green]--quiet[/green]           snapshot, all: suppress the panels, the run itself is unchanged")
     console.print("  [green]--registered[/green]      all: every registered project in turn, a summary line each")
     console.print("  [green]--force[/green]           drive_sync: re-upload tracked files · drive_clear: required")
     console.print("  [green]--project <name>[/green]  drive_sync: sync a registered project by name")
     console.print("  [green]--note <text>[/green]     drive_sync: attach a note to the sync record")
     console.print("  [green]--public[/green]          share: anyone with the link may read the uploaded file")
     console.print("  [green]--json[/green]            status: one JSON object on stdout, nothing else")
-    console.print("  [green]--sizes[/green]           status --json: add both store sizes (walks the store)")
+    console.print("  [green]--sizes[/green]           status --json: add the snapshot store size (walks the store)")
     console.print("  [green]--apply[/green]           prune: delete what the listing names (without it, nothing goes)")
     console.print()
-    console.print("  [dim]restore takes subcommands, not flags: list <file> and file <file> <out>.[/dim]")
     console.print("  [dim]settings takes one key: drive_sync on|off <project_path|@name>.[/dim]")
-    console.print("  [dim]stop takes an optional lane word: snapshot, versioned, drive_sync or all.[/dim]")
+    console.print("  [dim]schedule takes words: on, off, daily HH:MM, weekly WEEKDAY HH:MM, monthly DAY HH:MM.[/dim]")
+    console.print("  [dim]stop takes an optional lane word: snapshot, drive_sync or all.[/dim]")
     console.print()
     console.print("-" * 70)
     console.print()
@@ -110,17 +104,16 @@ def print_help() -> None:
     console.print("  [bold dim]Register & back up:[/bold dim]")
     console.print("    [dim]drone @backup register /path/to/project --name myapp[/dim]")
     console.print("    [dim]drone @backup snapshot @myapp[/dim]")
-    console.print("    [dim]drone @backup versioned @myapp[/dim]")
     console.print("    [dim]drone @backup all @myapp[/dim]")
     console.print("    [dim]drone @backup all --registered --quiet[/dim]")
     console.print()
-    console.print("  [bold dim]Status & restore:[/bold dim]")
+    console.print("  [bold dim]Status & stop:[/bold dim]")
     console.print("    [dim]drone @backup status @myapp[/dim]")
     console.print("    [dim]drone @backup status @myapp --json --sizes[/dim]")
     console.print("    [dim]drone @backup stop @myapp[/dim]")
     console.print("    [dim]drone @backup stop @myapp drive_sync[/dim]")
-    console.print("    [dim]drone @backup restore @myapp list src/main.py[/dim]")
-    console.print("    [dim]drone @backup restore @myapp file src/main.py ./restored.py[/dim]")
+    console.print("    [dim]drone @backup schedule @myapp --json[/dim]")
+    console.print("    [dim]drone @backup schedule @myapp daily 05:00[/dim]")
     console.print()
     console.print("  [bold dim]Store cleanup:[/bold dim]")
     console.print("    [dim]drone @backup prune @myapp[/dim]")
@@ -179,13 +172,13 @@ def main():
     """Main entry point - routes commands or shows help.
 
     reset_command_state() clears a previous command's failure mark; a handled command returns
-    resolve_exit(True) (0 or 2), or STOPPED_EXIT (130) after a stop. A return, never SystemExit,
+    resolve_exit(True) (0 or 2), or stop's exit_code turns it to 130 after a stop. A return, never SystemExit,
     so drone gets the child's code as is and every finally runs.
     """
-    from aipass.backup.apps.modules.stop import STOPPED_EXIT, reset_stop_state, run_was_stopped
+    from aipass.backup.apps.modules.stop import begin_run, exit_code
 
     reset_command_state()
-    reset_stop_state()
+    begin_run()
     args = sys.argv[1:]
 
     if args and args[0] in ("--version", "-V"):
@@ -223,16 +216,13 @@ def main():
             return 1
         remaining = [project_root] + args[2:]
         mode = "snapshot"
-        if "--versioned" in args:
-            mode = "versioned"
-            remaining = [r for r in remaining if r != "--versioned"]
-        elif "--all" in args:
+        if "--all" in args:
             mode = "all"
             remaining = [r for r in remaining if r != "--all"]
 
         handled, failure = route_command(mode, remaining, modules)
         if handled:
-            return STOPPED_EXIT if run_was_stopped() else resolve_exit(True)
+            return exit_code(resolve_exit(True))
         if failure:
             error(f"{mode} failed -- {failure}")
             return 1
@@ -252,7 +242,7 @@ def main():
 
     handled, failure = route_command(command, remaining, modules)
     if handled:
-        return STOPPED_EXIT if run_was_stopped() else resolve_exit(True)
+        return exit_code(resolve_exit(True))
 
     if failure:
         error(f"{command} failed -- {failure}")

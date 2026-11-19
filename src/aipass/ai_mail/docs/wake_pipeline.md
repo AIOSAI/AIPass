@@ -21,16 +21,18 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
      drone did not deliver logs one `BOUNCE NOT DELIVERED` warning and ends the
      completion status with `, bounce NOT delivered to @sender` (report, register, feed)
    - **Lock cleanup** — removes `.dispatch.lock` when agent exits
+   - **Transcripts** — `dispatch_stdout.out`, `dispatch_stderr.out` and
+     `dispatch_stdout.attempt-N.out` (N 1-3) in the target's `logs/`, rotated
+     to `.out.1`; never `.log`, which trigger's watcher reads.
+     Names: `dispatch_monitor.TRANSCRIPT_NAMES`
    - **Wake-back** — on agent exit, the original sender is notified. A
      builder-class sender is **woken**; a **manager sender is MAILED, never
      woken** (`_mail_wake_back()`): the manager gate stays, and the mail is the
      wake-back, so a manager always hears that its dispatch finished.
-     `dispatch` announces which of the two will happen, by reading
-     `is_manager(sender)` up front rather than guessing.
-     Wake-back sessions carry an empty sender, so chains terminate at the
-     original dispatcher, and `AIPASS_WAKE_DEPTH` caps the chain at
-     `MAX_WAKE_DEPTH = 3` regardless. `wake_sender()` returns one of nine
-     result tags into `dispatch_wake.log` — `success`, `mailed_manager`,
+     `dispatch` announces which, reading
+     `is_manager(sender)` up front.
+     `wake_sender()` returns one of nine
+     result tags into the report's `wake_result` — `success`, `mailed_manager`,
      `failed_manager_mail`, `blocked_occupied`, `blocked_locked`,
      `blocked_depth`, `skipped_sender`, `skipped_self`, `failed` — so "notified"
      is never inferred from a bare boolean (the manager gate returns `True`
@@ -38,7 +40,7 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
      Library callers such as @daemon's scheduled nudges may pass
      `wake_back=False` to `wake_branch()` (carried to the monitor as the
      `--no-wake-back` argv flag, logged and recorded as `declined` in
-     `dispatch_wake.log`); the `dispatch` and `dispatch wake` CLI verbs always
+     the report); the `dispatch` and `dispatch wake` CLI verbs always
      arm the wake-back
 
 ## Safety Limits
@@ -46,9 +48,9 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
 - PID-based locking prevents concurrent agents per branch (`.dispatch.lock`)
 - Max turns per wake, max dispatches per branch per day
 - `WAKE_BLOCKLIST` protects `@devpulse` from cross-branch manual wakes
-- **Manager structural block** — branches with `citizen_class: "manager"` in their passport (e.g. `@devpulse`) are unwakeable on the dispatch and manual paths. Mail delivers, wake skips. The three exceptions (scheduled, admin, @daemon self-wake) are named below
+- **Manager structural block** — managers (`citizen_class: "manager"`, e.g. `@devpulse`) are unwakeable on the dispatch and manual paths. Mail delivers, wake skips. The three exceptions (scheduled, admin, @daemon self-wake) are named below
 - **Self-wake guard** — if sender equals target, wake-back is skipped (prevents self-loops)
-- **Chain termination** — wake-back sessions carry an empty sender, so the chain always stops at the original dispatcher; `MAX_WAKE_DEPTH = 3` on `AIPASS_WAKE_DEPTH` bounds it even if that were bypassed
+- **Chain termination** — wake-back sessions carry an empty sender, so a chain stops at the original dispatcher; `MAX_WAKE_DEPTH = 3` on `AIPASS_WAKE_DEPTH` caps it regardless
 - `dispatch_monitor.py` strips `AIPASS_CALLER_*` env vars to prevent parent context leaking into agent identity
 - `AIPASS_BRANCH_NAME` env var set in spawn_env for CWD-independent identity
 

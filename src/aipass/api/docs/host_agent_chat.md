@@ -23,7 +23,7 @@ before any lookup. The agent is looked up in @baud's roster (`baud-cli --roster`
 
 | Route | Scope | Request | Answer | Refusals |
 |---|---|---|---|---|
-| `GET /v1/agent/{project}/{name}/feed?since=<n>` | read | `since` optional, a line's `n` | `{lines: [{n, role, text, time, model?}], busy, waiting: {tool} or null, session}` | 400 `agent_refused`, `agent_feed_refused` (since not a whole number, any other parameter); 404 `agent_not_live`, `transcript_unavailable`; 503 `fleet_unavailable` |
+| `GET /v1/agent/{project}/{name}/feed?since=<n>` | read | `since` optional, a line's `n` | `{lines: [{n, role, text, time, model?, change?, kind?, mail_id?}], busy, waiting: {tool} or null, session}` | 400 `agent_refused`, `agent_feed_refused` (since not a whole number, any other parameter); 404 `agent_not_live`, `transcript_unavailable`; 503 `fleet_unavailable` |
 | `POST /v1/agent/{project}/{name}/send` | operate | `{text}` | `{ok: true}` | 400 `agent_refused`, `agent_body_refused` (not JSON), `agent_text_refused` (no text, or nothing left after cleaning); 404 `agent_not_live`; 409 `agent_no_room`; 503 `fleet_unavailable` (no baud binary), `agent_send_failed` |
 | `POST /v1/agent/{project}/{name}/interrupt` | operate | `{}` | `{ok: true}` | as send, less the text refusals |
 | `POST /v1/agent/{project}/{name}/allow` | operate | `{}` | `{ok: true}` | as interrupt |
@@ -57,12 +57,64 @@ and Codex transcripts are read. A Codex rollout not yet written, or a session fi
   (`edited server.py`, `ran: pytest -q`). A Codex exec script gives one line per call in it (`ran:` for
   commands, `edited` for patches), its stdin polls left out.
 
+**What a change is.** A Claude Code `Edit` or `Write` tool line carries `change` once its result row is in the
+transcript, read from that row's `toolUseResult` and the call's input only, never from the file on disk:
+
+```
+change: {path, added, removed, large?, start?, old?, new?, before?, after?}
+```
+
+- `path` is the file as the tool was given it; `added` and `removed` count the lines of Claude Code's own line diff
+  (`structuredPatch`), so a new file counts every line of its content as added.
+- An Edit has `start`, the 1-based line the old text began on, with `old` and `new`, the replaced text and its
+  replacement. `start` is the one placement of the old text on the first hunk's old side that agrees with every
+  line it overlaps and covers the hunk's first removed line; no such single placement, no `change`.
+- A Write has `before` (`null` for a new file) and `after`, the whole file each side.
+- Past 400 diff lines or 40 000 bytes of body, `large: true` replaces the body: only path and counts are kept.
+- A poller that read the line before its result row gets it again, under the same `n` and now with `change`, on
+  every read whose `since` is before that result row: a client replaces a line it holds by `n`.
+- No `change`: a call still running, refused, or failed (`is_error`), a result row answering several calls, a
+  `Write` row from a Claude Code that writes no `type`, any other tool, and every Codex line.
+- A poller holds a tool line it read before the result arrived without its `change`: the line's `n` never
+  repeats, so the change shows on a later full read only.
+
 **What `n` is.** A line's `n` is the byte offset of its row in the transcript file plus the line's index
 within that row. It never changes while the file grows, and it rises through the file, so a client that
 polls every 2 s with `since=<last n it holds>` gets only the new lines and keeps its reading position.
 Without `since` the answer is the last 80 lines; with it, the last 80 of the lines after `n`.
 `n` starts again near 0 in a new session's file: `session` names the file read, and a client that sees it
 change drops its `since`.
+
+**What a notice is.** The seat's delivered mail rides in the feed as `notice` lines, read from @ai_mail's
+notification feed (`aipass.ai_mail.feed_path()`, contract in @ai_mail's `dispatch_register_and_feed.md` and
+`mail_kinds.md`). One line per `kind: "mail"` line whose `recipient` and `project` are the seat's (case-blind: the
+roster says `AIPASS`, the feed `aipass`), except the routine kind `notice`; a `mail_kind` the contract does not
+name is passed through as written. Read-only: nothing is written, marked read or woken.
+
+```
+{"n": 1, "role": "notice", "kind": "medic", "text": "@api: m1 landed", "time": "2026-11-04T10:02:00+00:00", "mail_id": "m1"}
+```
+
+`text` is `@<source>: <subject>` (the body's first line), cut at 120 characters; `kind` is the `mail_kind`.
+
+- **Where it goes.** Transcript rows are stamped when made, not when written (a reply carries its start), so
+  file order and stamp order differ. Each row carries the latest stamp so far; a notice goes before the first
+  row whose carried stamp passes the notice's by 2 s, a row that was certainly written after it.
+- **Its `n`.** The gap after the row before that one: the row's offset plus the lines it made, then +1 for each
+  further notice in the gap, in feed order. Every row is longer than its lines, so a notice's `n` sits between
+  the row's last line and the next row's first: a reader that knows nothing of notices keeps `since=<last n>`
+  and gets each line once, and a gap holds as many notices as its row has bytes (past that one is left out, logged).
+- **At the tail.** With no later row yet, a notice waits while the agent is working (a reply stamped before it
+  may still land) and comes once the agent is waiting or idle and the mail is 2 s old. A working agent's notice
+  comes with its next row.
+- **Limits.** A mail written to the feed more than 2 s after its own stamp, behind a row already served, is not
+  shown. A row stamped before a notice but written after the notice went out while the agent read idle moves it,
+  and it comes again under a new `n`. A trim of the notification feed (past 400 lines it keeps 200) that removes
+  an older notice from a gap still at the tail lowers the `n` of the next notice there, so it can be missed.
+- **Cost.** The notification feed is parsed again only when its inode, size or mtime changed; a 2 s poll of a
+  quiet fleet costs one `stat`. A notice older than the transcript's 4 MB window is not shown.
+- **No feed.** A missing or unreadable notification file logs one error through prax per new failure and the
+  feed is served without notices; it is never read as empty without that log.
 
 **busy and waiting.** From the AIPass hooks engine log (`<aipass package>/hooks/logs/engine.jsonl`, its last
 256 KB, resolved from the installed `aipass` package), the session's last events decide: a

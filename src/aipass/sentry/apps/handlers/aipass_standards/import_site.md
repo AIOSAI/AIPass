@@ -70,7 +70,7 @@ A `sys.modules` write counts wherever it sits — at module level it poisons eve
 
 ```python
 try:
-    from aipass.memory.apps.handlers.monitor.registry_scope import fleet_branches
+    from aipass.memory import fleet_branches
 except Exception:                      # only where @memory is absent
     fleet_branches = None
 ```

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: startup_budget_check.py
 # Description: Startup Budget Standards Checker — the greeting cost of one citizen
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-15
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Startup Budget Standards Checker — what a greeting costs, in characters.
@@ -15,29 +15,12 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from aipass import hooks as hooks_door
+from aipass import prax as prax_door
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.module_root import module_file
 
-# Guarded: discover_checkers() drops a pack module that raises on exec, so a
-# bare import failure would delete the standard instead of printing the error row.
-# Caps are read off the module at call time; a `from ... import` binding is a copy.
-
-try:
-    from aipass.hooks.apps.modules import grounding_content as hooks_grounding
-except Exception as exc:  # an unimportable owner is a row, not a dead pack
-    hooks_grounding = None
-    _HOOKS_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
-else:
-    _HOOKS_IMPORT_ERROR = ""
-
-try:
-    from aipass.prax.apps.modules import dashboard as prax_dashboard
-except Exception as exc:
-    prax_dashboard = None
-    _PRAX_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
-else:
-    _PRAX_IMPORT_ERROR = ""
+# Caps are read off the owner's door at call time; a `from ... import` binding is a copy.
 
 AUDIT_SCOPE = "branch_level"
 
@@ -98,11 +81,8 @@ _STATE_ERROR = "error"
 
 
 def _repo_root() -> Path | None:
-    """Walk up from this file to the repo root — the dir holding src/aipass.
-
-    module_file(), not Path.resolve(): resolve() reads the cwd on Windows.
-    """
-    for parent in module_file(__file__).parents:
+    """Walk up from this file to the repo root — the dir holding src/aipass."""
+    for parent in Path(__file__).resolve().parents:
         if (parent / "src" / "aipass").is_dir():
             return parent
     logger.warning("startup_budget: cannot locate repo root from %s", __file__)
@@ -122,7 +102,7 @@ def memory_config_path() -> Path | None:
 
 def pack_manifest_path() -> Path:
     """This pack's own ``pack.json`` — where sentry keeps the README cap."""
-    return module_file(__file__).parent / "pack.json"
+    return Path(__file__).resolve().parent / "pack.json"
 
 
 def external_inputs() -> List[Path]:
@@ -181,36 +161,27 @@ def _pack_cap(key: str) -> Tuple[int | None, str]:
     return cap, ""
 
 
-def _cap_from_module(module: Any, name: str, owner: str, import_error: str, dotted: str) -> Tuple[int | None, str]:
-    """One borrowed cap, read off the owner's live module by name at call time."""
-    if module is None:
-        return None, f"{owner}: cannot import {dotted} ({import_error}) — cap not measured"
-    cap = _as_cap(getattr(module, name, None))
+def _cap_from_door(door: Any, name: str, owner: str) -> Tuple[int | None, str]:
+    """One borrowed cap, read off the owner's door by name at call time."""
+    try:
+        value = getattr(door, name)
+    except Exception as exc:  # an owner whose home cannot load is an error row, not a dead pack
+        logger.warning("startup_budget: cannot read %s from aipass.%s: %s", name, owner, exc)
+        return None, f"{owner}: cannot read aipass.{owner}.{name} ({type(exc).__name__}: {exc}) — cap not measured"
+    cap = _as_cap(value)
     if cap is None:
-        return None, f"{owner}: {dotted}.{name} is missing or not a positive int — cap not measured"
+        return None, f"{owner}: aipass.{owner}.{name} is not a positive int — cap not measured"
     return cap, ""
 
 
 def prompt_cap() -> Tuple[int | None, str]:
     """The branch-prompt cap, read from @hooks — the branch that enforces it."""
-    return _cap_from_module(
-        hooks_grounding,
-        "BRANCH_CHAR_BUDGET",
-        "hooks",
-        _HOOKS_IMPORT_ERROR,
-        "aipass.hooks.apps.modules.grounding_content",
-    )
+    return _cap_from_door(hooks_door, "BRANCH_CHAR_BUDGET", "hooks")
 
 
 def dashboard_cap() -> Tuple[int | None, str]:
-    """The dashboard cap, read from @prax's exported name."""
-    return _cap_from_module(
-        prax_dashboard,
-        "DASHBOARD_CHAR_BUDGET",
-        "prax",
-        _PRAX_IMPORT_ERROR,
-        "aipass.prax.apps.modules.dashboard",
-    )
+    """The dashboard cap, read from @prax's door."""
+    return _cap_from_door(prax_door, "DASHBOARD_CHAR_BUDGET", "prax")
 
 
 def trinity_budgets() -> Tuple[Dict[str, Any] | None, str]:

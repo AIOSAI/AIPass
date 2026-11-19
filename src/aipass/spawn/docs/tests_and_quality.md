@@ -34,7 +34,7 @@ comments. One number, one method, produced live.
 | `test_lifecycle.py` | End-to-end spawn lifecycle workflows |
 | `test_json_handler.py` | The shim's wiring to the fleet json service — the seam, the binding, the bool contract |
 | `test_handlers.py` | Handler function behaviour and integration |
-| `test_modules_gateway.py` | The modules-package gateway other branches import through |
+| `test_modules_gateway.py` | The package door (`__init__.py`): each name from its home, lazy, uncached; `apps/modules` re-exports nothing |
 | `test_passport_migration.py` | Passport 1.x → 2.0 fleet migration: order, drops, renames, idempotency |
 | `test_passport_birth_schema.py` | The 2.0 block and key order on a newly minted passport |
 | `test_regenerate_registry_ops.py` | Template registry regeneration |
@@ -57,8 +57,7 @@ comments. One number, one method, produced live.
 | `test_json_durability.py` | Torn-write durability — atomic writes across every JSON and text path |
 | `test_birth_receipt.py` | The birth receipt lane, the seed-vs-gold drift pins, the newborn budget contract, and that retirement carries the memories |
 | `test_passport_seeds.py` | Passport seeds — the tracked identity that ships with the repository |
-| `test_template_import_guard.py` | The template's fence before any mint: foreign and outside seats refused by name, kin and the modules door allowed, a dead cwd survived |
-| `test_template_import_guard_hosts.py` | The worlds those pins run in: the realpath denial arms on every interpreter, the harness survives hosts this box is not; `support_template_import_guard.py` holds the worlds both files read (never collected) |
+| `test_template_import_guard.py` | The template's fence before any mint: foreign and outside seats refused by name, kin allowed, the newborn's empty package door lazy and refusing, a dead cwd survived; `support_template_import_guard.py` holds its worlds (never collected) |
 | `test_handlers_fence.py` | Spawn's own handlers fence, a fresh interpreter per case; `support_fence.py` is its probe (never collected) |
 | `test_conftest_fixtures.py` | Pins that this branch's own mocking fixtures reach the code they claim to mock |
 | `conftest.py` | Fixtures: mock templates, registry protection |

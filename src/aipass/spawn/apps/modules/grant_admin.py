@@ -13,7 +13,7 @@ Each flag is one leg of a lane drone verifies; spawn owns only the write.
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 
 from aipass.spawn.apps.handlers.registry import (
     ADMIN_BRANCH,

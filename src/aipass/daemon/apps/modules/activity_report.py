@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: activity_report.py
 # Description: Branch Activity Report Generator Module
-# Version: 0.5.0
+# Version: 0.5.1
 # Created: 2026-01-30
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -12,20 +12,11 @@ Branch Activity Report Generator Module
 Reference: docs/monitoring.md
 """
 
-import os
-import sys
 from typing import List, NoReturn
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate, refuse
 
@@ -156,7 +147,7 @@ def _render_entry_health(branch_name: str) -> str:
     lines: List[str] = ["", "=" * 60, f"MEMORY ENTRY HEALTH: {branch_name} (via @memory)", "=" * 60]
 
     try:
-        from aipass.memory.apps.modules.health import get_branch_health
+        from aipass.memory import get_branch_health
     # OSError too: a cross-branch import can fail on the filesystem, not only on absence.
     except (ImportError, OSError) as e:
         logger.warning("[DAEMON] activity_report: @memory health API unavailable: %s", e)
@@ -267,7 +258,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             import json
 
             data = get_json_report(hours)
-            console.print(json.dumps(data, indent=2))
+            console.print(json.dumps(data, indent=2), soft_wrap=True, markup=False, highlight=False)
         else:
             report = generate_activity_report(since_hours=hours, verbosity="detailed")
             console.print(report)
@@ -363,7 +354,7 @@ def main() -> None:
         import json
 
         data = get_json_report(args.hours)
-        console.print(json.dumps(data, indent=2))
+        console.print(json.dumps(data, indent=2), soft_wrap=True, markup=False, highlight=False)
     elif args.branch:
         report = generate_branch_report(args.branch, args.hours)
         console.print(report)

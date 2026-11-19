@@ -3,7 +3,7 @@
 # Description: Pins the refusal-exit contract on the owner-gated modules (FPLAN-0455)
 # Version: 1.0.0
 # Created: 2026-08-28
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/feedback.py and apps/modules/admin_grant.py: a guard refusal marks the command failed."""
@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.cli.apps.modules import display as cli_display
+from aipass.cli import display as cli_display
 from aipass.devpulse.apps.handlers.owner import guard as owner_guard
 from aipass.devpulse.apps.modules import admin_grant as admin_grant_module
 from aipass.devpulse.apps.modules import feedback as feedback_module

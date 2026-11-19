@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: release_notice.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Manager-only "AIPass release available" notice builder (DPLAN-0335 leg 2)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-09
-# Modified: 2026-10-31
+# Modified: 2026-11-17
 # =============================================
 
 """Builds the manager-only notice that a project's scaffold is behind AIPass.
@@ -16,8 +16,9 @@ SessionStart and the post-compact regroup share it, so both doors emit one ident
 import json
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 CONSOLE = err_console
 
@@ -27,7 +28,7 @@ MANAGER_CLASS = "manager"
 #: The same project marker edit_gate and @ai_mail's find_project_root use, identical on purpose.
 _PROJECT_MARKER = "*_REGISTRY.json"
 
-#: Written by @aipass's init run / adopt / init update; only aipass_version and stamped_at are read.
+#: Written by @aipass's init scaffold, adopt and init update; only aipass_version and stamped_at are read.
 MANIFEST_REL = Path(".aipass") / "scaffold_manifest.json"
 
 
@@ -139,7 +140,7 @@ def _read_manifest(root: Path) -> dict | None:
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as exc:
-        logger.info("[HOOKS] release_notice: manifest unreadable at %s: %s", path, exc)
+        logger.warning("[HOOKS] release_notice: manifest unreadable at %s: %s", path, exc)
         return None
     return data if isinstance(data, dict) else None
 
@@ -175,8 +176,15 @@ def build_notice(hook_data: dict) -> str:
     """Return the notice block, or "" when this seat should hear nothing.
 
     Silent for a non-manager, no passport, no project, the AIPass source repo, or a current scaffold;
-    an absent or unparseable manifest counts as behind."""
+    an absent or unparseable manifest counts as behind. Each call leaves one json trail entry."""
     start = Path(hook_data.get("cwd", "") or Path.cwd())
+    notice = _build_notice(start)
+    json_handler.log_operation("build_notice", {"seat": str(start), "notice": bool(notice)})
+    return notice
+
+
+def _build_notice(start: Path) -> str:
+    """build_notice's reading for the seat at *start*, untrailed."""
 
     if not is_manager_seat(start):
         return ""

@@ -3,7 +3,7 @@
 # Description: Tests for the PID cache handler
 # Version: 1.2.1
 # Created: 2026-07-10
-# Modified: 2026-11-08
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/monitoring/pid_cache.py"""
@@ -60,7 +60,6 @@ class TestParseLockPid:
 
         real_exists = Path.exists
         with (
-            patch("sys.platform", "linux"),
             patch(
                 "pathlib.Path.exists",
                 autospec=True,
@@ -111,7 +110,6 @@ class TestParseLockPid:
         entry = {"path": str(branch_dir), "name": ""}
 
         with (
-            patch("sys.platform", "linux"),
             patch("pathlib.Path.exists", return_value=True),
         ):
             mod.parse_lock_pid(entry, new_cache, tmp_path)
@@ -243,7 +241,6 @@ class TestDefaultRoot:
         )
         real_exists = Path.exists
         with (
-            patch("sys.platform", "linux"),
             patch(
                 "pathlib.Path.exists",
                 autospec=True,

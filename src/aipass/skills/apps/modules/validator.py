@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: validator.py
 # Description: Skill validation module
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """Skill validator module."""
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, escape
+from aipass.cli import console, error, escape
 from aipass.skills.apps.modules.loader import load_skill
 from aipass.skills.apps.handlers.validator import validate_skill as _handler_validate
 from aipass.skills.apps.handlers.json import json_handler
@@ -24,13 +24,18 @@ def handle_command(command: str, args: list) -> bool:
         error("Error: skill name required. Usage: skills validate <name>")
         return False
     if any(arg in ("--help", "-h", "help") for arg in args):
-        print_introspection()
+        print_validate_help()
         return True
 
     name = args[0]
     loaded = load_skill(name)
     if not loaded["success"]:
         error(f"Error: {loaded['error']}")
+        return False
+
+    if loaded["off"] is not None:
+        # Neither valid nor invalid: exit 1 so `validate x && next` never reads an unchecked skill as checked.
+        error(f"Error: {loaded['off']['notice']} The skill was not validated.")
         return False
 
     result = validate_skill(loaded["metadata"])
@@ -63,6 +68,14 @@ def validate_skill(skill_metadata):
         },
     )
     return result
+
+
+def print_validate_help():
+    """Print the usage page for this verb."""
+    console.print("Skills Validate - Check a skill's requirements")
+    console.print()
+    console.print("Usage:")
+    console.print("  drone @skills validate <name>    Report whether the skill's requirements are met")
 
 
 def print_introspection():

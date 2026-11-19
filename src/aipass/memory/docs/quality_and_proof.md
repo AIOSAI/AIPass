@@ -2,7 +2,7 @@
 
 # Quality and proof
 
-**Branch** memory · **Code** `tests/`, `tests/parked/`
+**Branch** memory · **Code** `tests/`
 
 How this branch's suite is run and judged. No test count is written down in this document on
 purpose: the number is one `python -m pytest` away and a written one rots within the day.
@@ -23,9 +23,7 @@ only miss it allows is the `todos_meta` byte-match, and it xfails; once sentry's
 renders the pad tab, it asserts strictly on its own
 ([todos_v2_shape_contract.md](todos_v2_shape_contract.md)).
 
-**Every skip names its reason.** What skips at import is the parked symbolic-fragments tier:
-`test_symbolic_extras.py` and its embedder `test_vector.py`, see `tests/parked/symbolic_20260814/`.
-One further skip appears only on a fresh clone: the health test that reads this branch's real
+**Every skip names its reason.** One skip appears only on a fresh clone: the health test that reads this branch's real
 `.trinity/` files, which are gitignored (`tests/test_health.py`, "no live .trinity files in this
 checkout"). A skip that names its reason is honest; a pass that needed this machine is not.
 
@@ -62,23 +60,12 @@ file that is in the tree; a bypass for an absent file suppresses nothing and wou
 
 ---
 
-## A park in the disposal zone is not a park
+## Retired code leaves the tree
 
-`.archive/` is always ignored, fleet-wide, and is the owner's disposal zone, cleaned without
-warning. Parked code therefore lives in `tests/parked/`, tracked. **Asserting a file exists cannot
-tell a tracked home from a local one**, so the park's pin asserts the *home* instead: no component
-of the park's path may be `.archive` (`test_symbolic_parked.py`).
-
-- **`(disabled)` does not stop pytest.** The suffix is the house convention for code that is present
-  but must not run, and it does disable dotted-path import (`test_storage(disabled)` is not a valid
-  identifier). But `test_storage(disabled).py` still matches pytest's default `test_*.py` glob. The
-  barrier is a `conftest.py` in `tests/parked/` (`collect_ignore_glob = ["*"]`), deliberately *not*
-  a `norecursedirs` line in this branch's `pytest.ini`, because CI runs the whole repo from its root
-  where the root config is in force and this branch's ini is never read. A conftest is loaded from
-  its own directory whatever the rootdir. Pinned by a real collection run in a subprocess
-  (`TestParkIsNeverCollected`); emptying the conftest turns it red.
-
-The `recovery_*` snapshots stay in `.archive/`. They are not parks and are meant to be disposable.
+Code no lane runs leaves the tree for the owner's local archive; git history keeps it. No live
+file reads, imports, prints or documents it. A retired tier a caller may still reach keeps only a
+refusal stub that names the ruling and the live replacement: `apps/modules/symbolic.py` and
+`apps/handlers/symbolic/__init__.py`, pinned by `test_symbolic_parked.py`.
 
 ---
 
@@ -113,23 +100,20 @@ files, and it says so out loud.
 
 ---
 
-## Dead code, archived not deleted
+## Dead code leaves with its tests
 
-Handler files with no caller are parked, not deleted: `learnings/manager.py` (superseded by the
-rollover extractor), `search/vector_search.py` and `storage/chroma.py` (both in-process ChromaDB
-paths, superseded by `chroma_subprocess.py`) sit in `tests/parked/unwired_handlers_20260813/`
-together with the tests that covered them. Tests over unreachable code report coverage that does not
-exist.
+A handler file with no caller leaves the tree together with the tests that covered it: tests over
+unreachable code report coverage that does not exist. The in-process ChromaDB paths went this way,
+superseded by `chroma_subprocess.py`.
 
 Files that look unreferenced can be load-bearing: `handlers/storage/chroma_subprocess.py` and
 `handlers/vector/embed_subprocess.py` are executed as *scripts* by path in memory's `.venv`, never
 imported. Disposition is per-file and measured (repo-wide grep, dynamic `importlib` check, and a
-path-invocation check), never "the checker said unreferenced". See that directory's README for the
-full method.
+path-invocation check), never "the checker said unreferenced".
 
 ---
 
 ## Related
 
-- [vector_search.md](vector_search.md) — the subprocess tier that replaces the parked in-process paths
+- [vector_search.md](vector_search.md) — the subprocess tier that replaced the in-process paths
 - [trinity_push.md](trinity_push.md) — the lane whose proof-before-prune law the push tests pin

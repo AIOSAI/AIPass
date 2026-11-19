@@ -3,7 +3,7 @@
 # Description: Unit tests for trigger event bus core module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/core.py, the Trigger event bus."""
@@ -11,12 +11,18 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(behaviour) — handlers wired by registry.setup_handlers; each has its own test file
 
+import json
+import os
+import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from unittest.mock import MagicMock, call
 
-from aipass.trigger.apps.config import trail_logger
+import aipass.trigger as trigger_door
+from aipass.trigger import Trigger as DoorTrigger, trigger as door_bus
+from aipass.trigger.apps.handlers import failure_report, medic_state
 from aipass.trigger.apps.handlers.events import error_detected, registry, runaway_handler
 from aipass.trigger.apps.modules import core
 
@@ -51,8 +57,6 @@ def trigger_cls(monkeypatch):
     monkeypatch.setattr(Trigger, "_deferred_queue", [])
     monkeypatch.setattr(Trigger, "_draining_deferred", False)
     monkeypatch.setattr(Trigger, "_log_watcher_started", False)
-    monkeypatch.setattr(Trigger, "_handler_failures", {})
-    monkeypatch.setattr(Trigger, "_disabled_handlers", set())
     monkeypatch.setattr(Trigger, "_alias_warned", set())
     return Trigger
 
@@ -294,6 +298,16 @@ def test_a_second_wiring_pass_does_not_double_fire(trigger_cls):
     assert calls == ["a", "b"]
 
 
+def test_a_handler_registry_that_cannot_import_fails_the_fire(trigger_cls, monkeypatch):
+    """Pins the default: a failed handler import logged a warning and the bus ran with no handlers."""
+    monkeypatch.setattr(registry, "setup_handlers", MagicMock(side_effect=ImportError("no ai_mail")))
+
+    with pytest.raises(ImportError, match="no ai_mail"):
+        trigger_cls.fire("error_detected")
+
+    assert trigger_cls._initialized is False
+
+
 def test_a_header_event_reaches_no_handler_on_the_real_wiring(trigger_cls, monkeypatch, tmp_path, mock_infrastructure):
     """cli's header fire runs nothing in trigger and writes no operation line.
 
@@ -304,7 +318,6 @@ def test_a_header_event_reaches_no_handler_on_the_real_wiring(trigger_cls, monke
         assert sys.modules[handler_module.__name__] is handler_module, "not the module setup_handlers imports"
     monkeypatch.setattr(error_detected, "_send_email", None)
     monkeypatch.setattr(runaway_handler, "_send_email", None)
-    monkeypatch.setattr(registry, "logger", trail_logger(tmp_path / "registry_handler.jsonl"))
     wire_the_real_handlers()
 
     result = trigger_cls.fire("cli_header_displayed", title="probe")
@@ -492,81 +505,117 @@ def test_fire_event_kwarg_always_overwritten(trigger_cls):
     assert getattr(callback, "__qualname__", "") == "Trigger.fire"
 
 
-def test_handler_disabled_after_threshold_failures(trigger_cls):
-    """A handler that fails 5 times for the same branch gets disabled for that branch."""
-    fail_handler = MagicMock(side_effect=RuntimeError("boom"))
+def test_a_failing_handler_is_never_disabled_and_runs_on_every_event(trigger_cls):
+    """Pins the silent auto-disable: after 5 failures the bus stopped calling the handler for that branch."""
+    fail_handler = MagicMock(side_effect=RuntimeError("boom"), __name__="fail_handler")
     trigger_cls.on("error_detected", fail_handler)
 
-    for _ in range(trigger_cls._HANDLER_FAILURE_THRESHOLD):
+    for _ in range(7):
         trigger_cls.fire("error_detected", branch="DRONE")
 
-    assert (fail_handler, "DRONE") in trigger_cls._disabled_handlers
+    assert fail_handler.call_count == 7
 
-    fail_handler.reset_mock()
+
+def _failure_lines(tmp_path):
+    """The ERROR lines the failure route wrote to its trail."""
+    trail_file = tmp_path / "logs" / "failures.jsonl"
+    return (
+        [json.loads(line) for line in trail_file.read_text(encoding="utf-8").splitlines()]
+        if trail_file.exists()
+        else []
+    )
+
+
+def test_a_failing_handler_logs_to_the_trail_once_per_interval(trigger_cls, monkeypatch, tmp_path):
+    """The bus failure line is a loop on a watched log: it goes to the failures trail, never door one."""
+    clock = [1000.0]
+    monkeypatch.setattr(failure_report, "monotonic", lambda: clock[0])
+    log = MagicMock()
+    monkeypatch.setattr(core, "logger", log)
+    trigger_cls.on("error_detected", MagicMock(side_effect=RuntimeError("boom"), __name__="fail_handler"))
+
+    for _ in range(4):
+        trigger_cls.fire("error_detected", branch="DRONE")
+    assert len(_failure_lines(tmp_path)) == 1
+
+    clock[0] += failure_report.LOG_INTERVAL_SECONDS
     trigger_cls.fire("error_detected", branch="DRONE")
-    fail_handler.assert_not_called()
+
+    lines = _failure_lines(tmp_path)
+    assert [line["level"] for line in lines] == ["ERROR", "ERROR"]
+    assert "5 in a row" in lines[-1]["msg"]
+    assert log.error.call_count == 0
 
 
-def test_handler_disabled_for_one_branch_still_fires_for_another(trigger_cls):
-    """Disabling a handler for branch A does not disable it for branch B."""
-    call_count = 0
+def test_a_failing_handler_shows_in_medic_state_and_the_manager_is_told_once(
+    trigger_cls, bus_alerts_off_the_live_state
+):
+    """Two branches failing one handler: two rows in medic state, one mail to the manager; success clears each row."""
+    failing = {"DRONE", "MEMORY"}
 
     def flaky_handler(**kwargs):
-        """Raise only when branch is DRONE."""
-        nonlocal call_count
-        call_count += 1
-        if kwargs.get("branch") == "DRONE":
-            raise RuntimeError("noisy branch")
+        if kwargs.get("branch") in failing:
+            raise RuntimeError("registry gone")
 
     trigger_cls.on("error_detected", flaky_handler)
-
-    for _ in range(trigger_cls._HANDLER_FAILURE_THRESHOLD):
+    for _ in range(3):
         trigger_cls.fire("error_detected", branch="DRONE")
+        trigger_cls.fire("error_detected", branch="MEMORY")
 
-    assert (flaky_handler, "DRONE") in trigger_cls._disabled_handlers
+    rows = medic_state.get_failing_handlers()
+    assert sorted(row["branch"] for row in rows) == ["DRONE", "MEMORY"]
+    assert all(row["handler"] == "flaky_handler" and "registry gone" in row["error"] for row in rows)
+    assert [mail["to_branch"] for mail in bus_alerts_off_the_live_state] == ["@devpulse"]
+    assert "flaky_handler" in bus_alerts_off_the_live_state[0]["subject"]
 
-    call_count = 0
+    failing.clear()
+    trigger_cls.fire("error_detected", branch="DRONE")
+    assert [row["branch"] for row in medic_state.get_failing_handlers()] == ["MEMORY"]
     trigger_cls.fire("error_detected", branch="MEMORY")
-
-    assert call_count == 1
-    assert (flaky_handler, "MEMORY") not in trigger_cls._disabled_handlers
+    assert medic_state.get_failing_handlers() == []
 
 
-def test_handler_failure_count_resets_on_success(trigger_cls):
+def _counts_in_a_row(tmp_path):
+    """(handler, branch, count) of every failure line; set the interval to zero so each failure writes one."""
+    lines = _failure_lines(tmp_path)
+    return [(line["handler"], line["branch"], line["count"]) for line in lines if line["level"] == "ERROR"]
+
+
+def test_handler_failure_count_resets_on_success(trigger_cls, monkeypatch, tmp_path):
     """A successful call resets the failure counter for that (handler, branch)."""
+    monkeypatch.setattr(failure_report, "LOG_INTERVAL_SECONDS", 0.0)
     attempt = 0
 
     def sometimes_fails(**kwargs):
-        """Raise on the first 3 attempts, succeed on the 4th."""
+        """Raise on attempts 1-3 and 5, succeed on the 4th."""
         nonlocal attempt
         attempt += 1
-        if attempt <= 3:
+        if attempt != 4:
             raise RuntimeError("transient")
 
     trigger_cls.on("check", sometimes_fails)
 
-    for _ in range(3):
+    for _ in range(5):
         trigger_cls.fire("check", branch="API")
 
-    assert trigger_cls._handler_failures.get((sometimes_fails, "API")) == 3
-
-    trigger_cls.fire("check", branch="API")
-    assert (sometimes_fails, "API") not in trigger_cls._handler_failures
+    counts = [count for _, _, count in _counts_in_a_row(tmp_path)]
+    assert counts == [1, 2, 3, 1]
 
 
 def test_handler_failure_uses_global_when_no_branch(trigger_cls):
     """When no branch is in data, the key uses '__global__' as the branch."""
-    fail_handler = MagicMock(side_effect=RuntimeError("boom"))
+    fail_handler = MagicMock(side_effect=RuntimeError("boom"), __name__="fail_handler")
     trigger_cls.on("some_event", fail_handler)
 
     trigger_cls.fire("some_event")
 
-    assert (fail_handler, "__global__") in trigger_cls._handler_failures
+    assert [row["branch"] for row in medic_state.get_failing_handlers()] == ["__global__"]
 
 
-def test_different_branches_have_independent_failure_counts(trigger_cls):
+def test_different_branches_have_independent_failure_counts(trigger_cls, monkeypatch, tmp_path):
     """Failure counts are tracked independently per branch."""
-    fail_handler = MagicMock(side_effect=RuntimeError("boom"))
+    monkeypatch.setattr(failure_report, "LOG_INTERVAL_SECONDS", 0.0)
+    fail_handler = MagicMock(side_effect=RuntimeError("boom"), __name__="fail_handler")
     trigger_cls.on("error_detected", fail_handler)
 
     for _ in range(3):
@@ -575,11 +624,9 @@ def test_different_branches_have_independent_failure_counts(trigger_cls):
     for _ in range(2):
         trigger_cls.fire("error_detected", branch="MEMORY")
 
-    assert trigger_cls._handler_failures[(fail_handler, "DRONE")] == 3
-    assert trigger_cls._handler_failures[(fail_handler, "MEMORY")] == 2
-
-    assert (fail_handler, "DRONE") not in trigger_cls._disabled_handlers
-    assert (fail_handler, "MEMORY") not in trigger_cls._disabled_handlers
+    lines = _counts_in_a_row(tmp_path)
+    assert max(c for _, b, c in lines if b == "DRONE") == 3
+    assert max(c for _, b, c in lines if b == "MEMORY") == 2
 
 
 def _fire_value(trigger_cls, monkeypatch, token):
@@ -857,3 +904,61 @@ def test_a_handler_registered_here_is_visible_through_a_fresh_import(trigger_cls
     reimported.fire("identity_probe")
 
     assert handler.call_args_list == [call(fire_event=reimported.fire)]
+
+
+_DOOR_PROBE = """
+import json, sys
+import aipass.trigger
+cold = sorted(n for n in sys.modules if n.startswith("aipass."))
+from aipass.trigger import trigger
+print(json.dumps([cold, type(trigger).__name__]))
+"""
+
+
+class TestFrontDoor:
+    """aipass/trigger/__init__.py hands out the bus and its class, lazily, as the very objects core holds."""
+
+    def test_the_door_hands_out_the_core_bus_and_class_themselves_never_copies(self):
+        assert door_bus is core.trigger
+        assert DoorTrigger is core.Trigger
+        assert not {"trigger", "Trigger"} & set(vars(trigger_door)), "a handed-out name was stored on the package"
+
+    def test_a_patch_on_the_home_reaches_the_next_door_read(self, monkeypatch):
+        stand_in = object()
+        monkeypatch.setattr(core, "trigger", stand_in)
+        assert trigger_door.trigger is stand_in
+
+    def test_fire_patched_on_the_door_class_records_import_bound_and_call_time_callers(self, monkeypatch):
+        recorder = MagicMock()
+        monkeypatch.setattr(trigger_door.Trigger, "fire", recorder)
+
+        door_bus.fire("bound_at_import", n=1)
+        trigger_door.trigger.fire("read_at_call_time", n=2)
+        trigger_door.Trigger.fire("class_form", n=3)
+
+        assert recorder.call_args_list == [
+            call("bound_at_import", n=1),
+            call("read_at_call_time", n=2),
+            call("class_form", n=3),
+        ]
+
+    def test_a_name_off_the_public_list_raises_attribute_error_never_a_stand_in(self):
+        for name in ("core", "report_error", "handle_command"):
+            with pytest.raises(AttributeError, match=name):
+                getattr(trigger_door, name)
+
+    def test_a_bare_import_loads_nothing_under_apps_and_the_name_trigger_is_the_bus(self):
+        result = subprocess.run(
+            [sys.executable, "-c", _DOOR_PROBE],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=str(Path(__file__).resolve().parents[3]),
+            env={**os.environ},
+            timeout=120,
+        )
+        assert result.returncode == 0, f"probe failed: {result.stderr}"
+        cold, bus_type = json.loads(result.stdout.strip().splitlines()[-1])
+
+        assert cold == ["aipass.trigger"]
+        assert bus_type == "Trigger"

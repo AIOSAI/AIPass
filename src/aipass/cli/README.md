@@ -63,12 +63,12 @@ the help flag prints the reference with every verb, alias and flag it accepts.
 
 ## Architecture
 
-Two tiers, and the boundary is the whole design. `apps/modules/` is the public
-API: `display.py` owns the message functions and the exit-code seam,
+Two tiers, and the boundary is the whole design. `apps/modules/` holds the public
+API, handed out through the package door (`from aipass.cli import <name>`): `display.py` owns the message functions and the exit-code seam,
 `templates.py` owns the operation templates. Anything in `apps/handlers/` is
 internal — `help_flags.py` detects a help flag anywhere in an argument sequence,
 and the json handler is a thin shim over the one fleet json service. Callers
-import from `apps/modules/`; nothing outside this branch should reach into
+import from `aipass.cli`; nothing outside this branch should reach into
 `apps/handlers/`.
 
 The entry point (`apps/cli.py`) discovers modules at run time rather than from a

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: event_queue.py
 # Description: Thread-Safe Event Queue
-# Version: 0.2.0
+# Version: 0.3.0
 # Created: 2025-11-23
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Thread-safe event coordination for monitoring system"""
@@ -16,9 +16,10 @@ import itertools
 import threading
 import time
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.trail import PraxTrail
 
-logger = get_direct_logger()
+# Health reporting on the trail: a line in a watched .log would feed the monitor it reports on.
+logger = PraxTrail("event_queue")
 
 _arrival = itertools.count()
 
@@ -93,8 +94,7 @@ class MonitoringQueue:
                 if len(self.recent_events) > 100:
                     self.recent_events.pop(0)
             except Exception as e:
-                # Rate-limited: this warning lands in a log prax watches, so
-                # per-event logging turns a full queue into a self-feeding firehose.
+                # Rate-limited: per-event reporting of a full queue is a firehose.
                 self._dropped += 1
                 now = time.monotonic()
                 if now - self._last_drop_warning >= 30.0:

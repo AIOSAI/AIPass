@@ -23,7 +23,26 @@ One pass produces seven groups, in this order:
   pytest collection, the provider manifest rows (hooks, env vars, permission
   rules, the settings scalars), the wire verification and stale deny rules.
 - **Community** — the mailbox is readable and `dropbox/` is writable.
-- **Structure** — agent placement, stray-file detection, and the instruction
+- **Structure** — agent placement, stray-file detection, the registry's paths
+  (a registered citizen whose folder exists but whose `.trinity/passport.json`
+  is missing or unreadable is one FAIL row, `registry: <name>`,
+  `no readable passport`, `Run 'aipass doctor --fix'`; a citizen with a
+  readable passport and no `.aipass/passport.seed.json` is one FAIL row,
+  `no passport seed`, `Run 'aipass doctor --fix'`, because a lost passport is
+  restored from its seed only. The AIPass tree's own registry expects seeds
+  from its core citizens only, a project's registry from every citizen it
+  lists: the scope of `drone @spawn export-seeds`. `--fix` runs in this order:
+  it writes each missing seed through
+  `drone @spawn export-seeds --confirm --root <project> --only <citizen>`
+  and re-reads the check (the row names the seed written, or FAILs with
+  spawn's refusal verbatim); it restores each lost passport through
+  `from aipass.spawn import restore_citizen`, which writes only the missing
+  `.trinity` files, and re-reads the check (the row names the files written,
+  or FAILs with spawn's reason); then the owner repair runs. A failed restore
+  names `./aipass install`, which rebuilds the environment and keeps personal
+  files, only for a citizen of the AIPass tree; the installer cannot rebuild a
+  project's citizen, so a project citizen with no seed is told to restore
+  `.trinity/passport.json` from a backup), and the instruction
   fence: every nested `projects/<name>` excludes the host's `AGENTS.md` and
   `CLAUDE.md` pairs through `claudeMdExcludes`; and the instruction shadow:
   Claude Code reads `AGENTS.md` only when no `CLAUDE.md` or `CLAUDE.local.md`
@@ -66,9 +85,6 @@ It observes presence only and never errors —
 | `doctor --fix --json` | That report as JSON, with the planned settings change under `provider_settings`; written only with `--yes`. `--json` alone falls through to the normal report |
 | `doctor --smoke` | Adds one Services row per provider from one live model turn each, through `drone @hooks smoke`: pass shows the time, skip the reason (not installed, no login, a spent quota), both ✓; fail is ✗ with hooks' reason. Spends one turn per installed provider; never runs with `--fix` |
 | `doctor --smoke --json` | hooks' result objects as given (`provider`, `status`, `why`, `session_id`, `elapsed_ms`), no other check. `--model provider=model,...` picks a model, either form |
-| `doctor --cross-os` | Cross-OS pre-flight — OS-gap cross-reference plus routing, versions and hook status |
-| `doctor --cross-os --e2e` | ...also runs the real e2e wiring suite. Heavy, opt-in |
-| `doctor --cross-os --record [PATH]` | Write a machine-filled Run Record for the human acceptance pass |
 | `doctor --info` | Module introspection, no checks |
 
 A non-zero exit means at least one row failed. Measure it with output
@@ -83,7 +99,7 @@ of the personal `~/.claude/settings.json`. It reads what AIPass wants from
 `settings` scalar slot — and merges additively: a key that is absent is set, a
 key that already carries your value is reported and **never** overwritten. The
 same merge, all four parts, runs from the installer's `refresh_provider_hooks`,
-so both doors agree; under Git Bash on Windows both also set `PYTHONUTF8=1`.
+so both doors agree.
 The one difference: install re-points `AIPASS_HOME` to the tree being installed,
 and says so; `doctor --fix` never does, so a fix from a second checkout cannot
 take the home from the first (the home-agreement row flags that split). The
@@ -129,18 +145,27 @@ config folder, or says OpenCode picks its own default. Doctor never runs
 Nothing is written before you see it. `doctor --fix` and plain `doctor` print
 the planned changes, one line each, then a unified diff per file, and ask
 once: `Apply these N changes to the provider settings? [y/N]`. Anything but
-`y` writes nothing. With no terminal to ask on, `doctor --fix` writes nothing
-and its row says `not applied: no tty — aipass doctor --fix --yes`; `--yes`
-writes without the question. The install tail never asks: it runs inside the
-one Enter you already gave the installer. Each receipt records the consent:
-`y (tty)`, `--yes` or `install`. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
+`y` writes nothing. Under `--fix` a no also warns what will not work: Claude Code, Codex and
+OpenCode run without AIPass's hooks, so no memory or prompt injection, no
+safety gates on git, edits and rm, no standards checks on edits; it names
+`aipass doctor --fix` to wire them later, and the row says
+`not applied: declined`. With no terminal to ask on, `doctor --fix` writes
+nothing and its row says `not applied: no tty — aipass doctor --fix --yes`;
+`--yes` writes without the question. The install's Health check runs the same
+step, its wire receipt naming the door `install`: it asks on a terminal, `aipass install --yes`
+writes without the question, and with no terminal or under `--non-interactive` without `--yes` it writes nothing and its row says
+`not applied: no tty` or `not applied: --non-interactive`, each naming
+`aipass doctor --fix --yes`. Each receipt records the door and the consent,
+`y (tty)` or `--yes`. The install runs it as `aipass doctor --fix --rows-json PATH`
+in the home: the same run, then every non-pass row and the counts written to PATH
+as JSON for the install report; `--non-interactive` there writes no settings. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
 [`apps/handlers/provider_reconcile.py`](../apps/handlers/provider_reconcile.py)
 and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 
 ## Every write to your provider settings backs up first
 
 Before any of these doors writes the personal settings file (`doctor --fix`,
-the install tail's doctor run, setup.sh's settings refresh, the stale-deny cleanup),
+the install's Health check, setup.sh's settings refresh, the stale-deny cleanup),
 it copies the file into `~/.claude/.backup/settings/` as
 `settings.json.<date>T<time>.<door>`. A write to Codex's `hooks.json`, or of
 the OpenCode plugin, backs up to `.backup/settings/` beside that file the same way. Then, after the write, it adds one line to
@@ -169,8 +194,8 @@ the project holds every switch file: `.claude/commands/codex.md` (`/codex`) and
 and the cure is `aipass init update`, which writes them and records their hash.
 `doctor --fix` makes a missing link and renames an unedited legacy `prep.md` to
 `prep(disabled).md`, one `skills fix` row per change; it writes no switch file,
-and a copy, a foreign link and an edited `prep.md` are left for you. On Windows the link needs `git config core.symlinks true` and the
-right to make links; without them `--fix` writes a copy that will not follow
+and a copy, a foreign link and an edited `prep.md` are left for you. Where the
+filesystem refuses links, `--fix` writes a copy that will not follow
 `.agents/skills`, and the row says so.
 
 ## What it will not do
@@ -184,8 +209,7 @@ update: neither overwrites a file.
 Code: [`apps/modules/doctor.py`](../apps/modules/doctor.py), with the
 remediation report in [`apps/modules/_doctor_fix.py`](../apps/modules/_doctor_fix.py),
 the wiring rows in [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py),
-the live smoke rows in [`apps/modules/_doctor_smoke.py`](../apps/modules/_doctor_smoke.py),
-the cross-OS lane in [`apps/handlers/cross_os/`](../apps/handlers/cross_os) and
+the live smoke rows in [`apps/modules/_doctor_smoke.py`](../apps/modules/_doctor_smoke.py) and
 the admin-lane reader in [`apps/handlers/admin_lane.py`](../apps/handlers/admin_lane.py).
 
 ---

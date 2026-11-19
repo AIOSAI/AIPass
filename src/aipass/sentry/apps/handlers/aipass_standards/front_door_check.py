@@ -1,0 +1,170 @@
+# =================== AIPass ====================
+# Name: front_door_check.py
+# Description: Front Door Standards Checker - a cross-branch import goes through the branch's package top file
+# Version: 1.4.0
+# Created: 2026-11-16
+# Modified: 2026-11-17
+# =============================================
+
+"""Front Door Standards Checker
+
+Reference: front_door.md. One finding per site (line, enclosing function): an import of another
+branch that names any path beneath its top file, under ``apps/`` or not. Detection is
+``front_door_count.scan_source``, the same reading the ``front-door`` verb counts with.
+A lines, functions or whole-file bypass row waives.
+A second door (``modules_check.is_second_door``) is one more finding, line 1, that no row waives; so is a
+module whose ``__all__`` hands out its own handlers' names (``handed_out_handler_names``), at the ``__all__`` line.
+A package top file with a ``__getattr__`` is a door, and each broken fact of the door model
+(``door_model.findings``: a cache, an answered unknown name, ``__all__``, ``__dir__``) is a finding no row waives.
+"""
+
+import ast
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+from aipass.prax import logger
+from aipass.sentry.apps.handlers.aipass_standards.check_support import read_text, result
+from aipass.sentry.apps.handlers.aipass_standards.door_model import findings as door_findings
+from aipass.sentry.apps.handlers.aipass_standards.door_model import is_package_top
+from aipass.sentry.apps.handlers.aipass_standards.front_door_count import (
+    APPS_KINDS,
+    FINDING_KINDS,
+    Reading,
+    owner_of_path,
+    scan_source,
+)
+from aipass.sentry.apps.handlers.aipass_standards.modules_check import handed_out_handler_names, is_second_door
+from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.json import json_handler
+
+AUDIT_SCOPE = "all_files"
+APPLIES_TO = "everywhere"
+# An import hides in a package marker as easily as anywhere: the door file itself is judged too.
+INCLUDE_INIT_FILES = True
+
+STANDARD = "FRONT_DOOR"
+STANDARD_KEY = "front_door"
+MODULE_LEVEL = "<module>"
+
+
+def _enclosing(tree: ast.AST) -> List[ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Every function in source order, so the innermost def holding a line is the last match."""
+    found = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    return sorted(found, key=lambda n: n.lineno)
+
+
+def _function_at(functions: List[ast.FunctionDef | ast.AsyncFunctionDef], line: int) -> str:
+    """The innermost def holding the line, else ``<module>``."""
+    name = MODULE_LEVEL
+    for node in functions:
+        if node.lineno <= line <= (node.end_lineno or node.lineno):
+            name = node.name
+    return name
+
+
+def _message(file_name: str, reading: Reading) -> str:
+    """One site's finding, with the door spelling that cures it."""
+    how = {"statement": "import", "type_only": "TYPE_CHECKING import", "string": "string import"}[reading.via]
+    where = "apps/" if reading.kind in APPS_KINDS else "top file"
+    return (
+        f"{file_name}:{reading.line} {how} of {reading.target} reaches beneath {reading.branch}'s {where} "
+        f"- import it from the door: from aipass.{reading.branch} import <name>"
+    )
+
+
+def _second_door(path: Path) -> Dict:
+    """The finding for a module under apps/modules that hands its branch's handler names outward."""
+    branch = owner_of_path(str(path))
+    return {
+        "name": "Front door",
+        "passed": False,
+        "line": 1,
+        "function": MODULE_LEVEL,
+        "message": (
+            f"{path.name} is a second door (retired pattern): it hands {branch}'s handler names out from apps/modules. "
+            f"A branch has one door, its package top file: from aipass.{branch} import <name>; "
+            f"retire this module once no other branch imports it"
+        ),
+    }
+
+
+def _handed_out(path: Path, line: int, names: List[Tuple[str, str]]) -> Dict:
+    """The finding for a real module whose __all__ also hands its branch's handler names outward."""
+    branch = owner_of_path(str(path))
+    listed = ", ".join(f"{name} ({home})" for name, home in names)
+    return {
+        "name": "Front door",
+        "passed": False,
+        "line": line,
+        "function": MODULE_LEVEL,
+        "message": (
+            f"{path.name}:{line} __all__ hands out {len(names)} handler name(s) of {branch}: {listed}; "
+            f"that makes it a second door, and a branch has one, its package top file: "
+            f"from aipass.{branch} import <name>. Cure: the package door hands these names out from their "
+            f"homes, and this module drops them from __all__ once no other branch imports them from here; "
+            f"it keeps the names it defines"
+        ),
+    }
+
+
+def _door_finding(line: int, message: str, functions: List[ast.FunctionDef | ast.AsyncFunctionDef]) -> Dict:
+    """One broken fact of the door model, at the line that breaks it."""
+    return {
+        "name": "Front door",
+        "passed": False,
+        "line": line,
+        "function": _function_at(functions, line),
+        "message": message,
+    }
+
+
+def _one_check(passed: bool, message: str) -> List[Dict]:
+    """A single-entry checks list."""
+    return [{"name": "Front door", "passed": passed, "message": message}]
+
+
+def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
+    """Convict every unwaived cross-branch import that names a path beneath another branch's top file."""
+    path = Path(module_path)
+    if not path.exists():
+        return result(False, _one_check(False, f"File not found: {module_path}"), 0, STANDARD)
+    source = read_text(path, tag=STANDARD_KEY)
+    if source is None:
+        return result(False, _one_check(False, f"Error reading file: {module_path}"), 0, STANDARD)
+    try:
+        readings = scan_source(source, owner_of_path(module_path))
+        functions = _enclosing(ast.parse(source))
+    except (SyntaxError, ValueError) as exc:
+        logger.warning("[front_door] Unparseable %s: %s", module_path, exc)
+        return result(False, _one_check(False, f"Cannot be read as Python, imports unjudged: {exc}"), 0, STANDARD)
+
+    # Never waived: the owner ruled a second door, either kind, a retired pattern with no exception.
+    if is_second_door(module_path, source):
+        checks = [_second_door(path)]
+    else:
+        handed = handed_out_handler_names(module_path, source)
+        checks = [_handed_out(path, *handed)] if handed else []
+    # Never waived either: the door model is the one shape every branch's door takes.
+    if is_package_top(path):
+        checks += [_door_finding(line, message, functions) for line, message in door_findings(source)]
+    for reading in readings:
+        if reading.kind not in FINDING_KINDS:
+            continue
+        function = _function_at(functions, reading.line)
+        if is_bypassed(module_path, STANDARD_KEY, reading.line, bypass_rules, function):
+            continue
+        checks.append(
+            {
+                "name": "Front door",
+                "passed": False,
+                "line": reading.line,
+                "function": function,
+                "message": _message(path.name, reading),
+            }
+        )
+    if not checks:
+        return result(True, _one_check(True, "Every cross-branch import goes through a front door"), 100, STANDARD)
+    json_handler.log_operation(
+        "check_completed", {"file": str(module_path), "score": 0, "standard": STANDARD_KEY, "sites": len(checks)}
+    )
+    return result(False, checks, 0, STANDARD)

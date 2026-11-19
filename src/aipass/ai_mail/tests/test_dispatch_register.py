@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch register append-only log
 # Version: 1.2.0
 # Created: 2026-08-22
-# Modified: 2026-11-04
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/dispatch/register.py: the append-only dispatch register, and the grant its rows carry."""
@@ -11,7 +11,6 @@
 # An entry past expected_by with no completion is a fact about a file; these pin append-only and honest parsing.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(windows_compat) — monitor_alive()'s Windows OpenProcess leg (_monitor_alive_windows)
 
 import json
 import os
@@ -20,7 +19,6 @@ import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -28,7 +26,7 @@ from aipass.ai_mail.apps.handlers.dispatch import grant as grant_mod
 from aipass.ai_mail.apps.handlers.dispatch import register, report
 from aipass.ai_mail.apps.handlers.notify import jsonl_records
 from aipass.ai_mail.apps.modules import grants as grants_module
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 
 @pytest.fixture
@@ -248,51 +246,6 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
     @pytest.mark.parametrize("bad", [0, -1, None, "1234"])
     def test_monitor_alive_cannot_be_told_for_a_non_pid(self, bad):
         assert register.monitor_alive(bad) is None
-
-    # Win32 codes as documented (STILL_ACTIVE 259, ERROR_INVALID_PARAMETER 87, ERROR_ACCESS_DENIED 5,
-    # PROCESS_QUERY_LIMITED_INFORMATION 0x1000), not read from the module: an echo cannot catch a wrong one.
-    @pytest.mark.parametrize(
-        ("handle", "exit_code", "last_error", "expected"),
-        [
-            (1, 259, 0, True),
-            (1, 0, 0, False),
-            (0, None, 87, False),
-            (0, None, 5, True),
-            (0, None, 6, None),
-        ],
-        ids=["opened-and-running", "opened-but-exited", "no-such-pid", "exists-not-ours", "other-error-unknown"],
-    )
-    def test_the_windows_leg_maps_win32_answers_onto_the_tri_state(
-        self, monkeypatch, handle, exit_code, last_error, expected
-    ):
-        closed: list[int] = []
-        opened_with: list[tuple] = []
-
-        def _exit_code_into(_h, out):
-            out.contents.value = exit_code
-            return 1
-
-        fake_kernel32 = SimpleNamespace(
-            OpenProcess=lambda access, inherit, pid: opened_with.append((access, inherit, pid)) or handle,
-            GetExitCodeProcess=_exit_code_into,
-            CloseHandle=lambda h: closed.append(h) or 1,
-        )
-        monkeypatch.setattr(register, "_kernel32", lambda: fake_kernel32)
-        monkeypatch.setattr(register, "_last_win32_error", lambda: last_error)
-        monkeypatch.setattr(sys, "platform", "win32")
-        monkeypatch.setattr(register.os, "kill", lambda *a: pytest.fail("os.kill must never be reached on win32"))
-
-        assert register.monitor_alive(4242) is expected
-        assert opened_with == [(0x1000, False, 4242)]
-        assert closed == ([handle] if handle else []), "an opened handle is closed exactly once, an unopened one never"
-
-    def test_on_win32_monitor_alive_asks_the_windows_leg_and_never_signals(self, monkeypatch):
-        """Signal 0 is TerminateProcess on Windows — the router must not reach os.kill."""
-        monkeypatch.setattr(sys, "platform", "win32")
-        monkeypatch.setattr(register, "_monitor_alive_windows", lambda pid: "windows-leg")
-        monkeypatch.setattr(register.os, "kill", lambda *a: pytest.fail("os.kill must never be reached on win32"))
-
-        assert register.monitor_alive(4242) == "windows-leg"
 
 
 class TestAReplyClosesTheRow:
@@ -810,7 +763,6 @@ class TestAGrantIsValidatedBeforeTheSend:
         with pytest.raises(grant_mod.GrantRefused, match="must be relative"):
             _grant_on(seed, str((seed / "src").resolve()))
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="creating a symlink needs privilege on Windows")
     def test_a_symlink_escaping_the_root_is_refused(self, seed, tmp_path):
         (tmp_path / "elsewhere").mkdir()
         (seed / "src" / "out").symlink_to(tmp_path / "elsewhere")

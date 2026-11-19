@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: feed_ops.py
 # Description: Feed display and query operations
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -12,7 +12,7 @@ Feed Operations Handler
 
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
@@ -65,19 +65,22 @@ def display_feed(args: List[str]) -> dict:
             try:
                 limit = int(args[i + 1])
             except ValueError:
-                logger.warning("[feed_ops] Invalid --limit value, using default")
+                logger.warning("[feed_ops] Refused a non-integer --limit: %r", args[i + 1])
+                return {"success": False, "error": f"--limit takes an integer, got {args[i + 1]!r}"}
             i += 2
         elif arg == "--offset" and i + 1 < len(args):
             try:
                 offset = int(args[i + 1])
             except ValueError:
-                logger.warning("[feed_ops] Invalid --offset value, using default")
+                logger.warning("[feed_ops] Refused a non-integer --offset: %r", args[i + 1])
+                return {"success": False, "error": f"--offset takes an integer, got {args[i + 1]!r}"}
             i += 2
         elif arg == "--page" and i + 1 < len(args):
             try:
                 page = int(args[i + 1])
             except ValueError:
-                logger.warning("[feed_ops] Invalid --page value, using default")
+                logger.warning("[feed_ops] Refused a non-integer --page: %r", args[i + 1])
+                return {"success": False, "error": f"--page takes an integer, got {args[i + 1]!r}"}
             i += 2
         else:
             i += 1

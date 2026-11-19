@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_handler_check.py
 # Description: Log Handler Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.3
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -30,7 +30,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks = []
     path = Path(module_path)
 
-    # Normalize to forward slashes so string matching works on Windows too
     module_path = Path(module_path).as_posix()
 
     if is_bypassed(module_path, "log_handler", bypass_rules=bypass_rules):
@@ -82,17 +81,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "LOG_HANDLER",
         }
 
-    # Exempt prax logging infrastructure (it IS the RotatingFileHandler implementation)
-    if "prax" in module_path and ("logging" in module_path or "setup.py" in module_path or "terminal" in module_path):
-        return {
-            "passed": True,
-            "checks": [
-                {"name": "Log handler check", "passed": True, "message": "Prax logging infrastructure (exempt)"}
-            ],
-            "score": 100,
-            "standard": "LOG_HANDLER",
-        }
-
     file_handler_check = check_no_raw_file_handler(lines, module_path, bypass_rules=bypass_rules)
     checks.append(file_handler_check)
 
@@ -135,7 +123,9 @@ def check_no_raw_file_handler(lines: List[str], file_path: str, bypass_rules: li
         return {
             "name": "No raw FileHandler",
             "passed": False,
-            "message": f"Raw logging.FileHandler on lines {violations[:5]} - use RotatingFileHandler via prax system_logger",
+            "message": (
+                f"Raw logging.FileHandler on lines {violations[:5]} - log through prax: from aipass.prax import logger"
+            ),
         }
 
     return {"name": "No raw FileHandler", "passed": True, "message": "No raw logging.FileHandler found"}
@@ -176,7 +166,10 @@ def check_no_raw_stream_handler(
         return {
             "name": "No raw StreamHandler with file logging",
             "passed": False,
-            "message": f"Raw logging.StreamHandler with file logging on lines {violations[:5]} - use prax system_logger instead",
+            "message": (
+                f"Raw logging.StreamHandler with file logging on lines {violations[:5]} - "
+                "log through prax: from aipass.prax import logger"
+            ),
         }
 
     return {

@@ -4,7 +4,7 @@
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-11-09
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/cc_sessions.py, the CC-native session file reader."""
@@ -87,7 +87,6 @@ class TestProcessReaders:
             child.terminate()
             child.wait()
         assert args
-        # Not sys.executable itself: a macOS framework build execs .../MacOS/Python.
         assert "python" in Path(args[0]).name.lower()
 
     def test_an_absent_process_answers_none(self):
@@ -143,20 +142,14 @@ class TestHasSessionFile:
 
 
 class TestGetPpidPortable:
-    # Windows has no `ps`, so None IS the contract there, not a miss: pinned per platform.
     @staticmethod
     def _resolved_with_parent_file(tmp_path):
         (tmp_path / f"{os.getppid()}.json").write_text(json.dumps({"pid": os.getppid()}), encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             return cc_sessions.resolve_session_pid()
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="ps-based; Linux + macOS only by contract")
     def test_reports_our_real_parent(self, tmp_path):
         assert self._resolved_with_parent_file(tmp_path) == os.getppid()
-
-    @pytest.mark.skipif(sys.platform != "win32", reason="the documented Windows answer")
-    def test_windows_answers_none_by_contract(self, tmp_path):
-        assert self._resolved_with_parent_file(tmp_path) is None
 
     def test_a_failed_ps_ends_the_walk_with_none_not_a_raise(self, tmp_path):
         with (
@@ -164,7 +157,6 @@ class TestGetPpidPortable:
             patch("subprocess.run", side_effect=OSError("no ps")) as ps,
         ):
             assert cc_sessions.resolve_session_pid() is None
-        # Only the ppid lookups count: on macOS the codex check's args read is a ps too, after the walk.
         ppid_lookups = [c for c in ps.call_args_list if "ppid=" in c.args[0]]
         assert len(ppid_lookups) == 1
 
@@ -194,17 +186,11 @@ class TestIsPidAlive:
         assert self._status(tmp_path, capsys, 1) == "stale"
 
     def test_permission_error_treated_as_alive(self, tmp_path, capsys):
-        with (
-            patch.object(cc_sessions, "_PLATFORM", "linux"),
-            patch.object(cc_sessions, "_kill", side_effect=PermissionError("denied")),
-        ):
+        with patch.object(cc_sessions, "_kill", side_effect=PermissionError("denied")):
             assert self._status(tmp_path, capsys, 42) == "live"
 
     def test_oserror_treated_as_dead(self, tmp_path, capsys):
-        with (
-            patch.object(cc_sessions, "_PLATFORM", "linux"),
-            patch.object(cc_sessions, "_kill", side_effect=OSError("unknown")),
-        ):
+        with patch.object(cc_sessions, "_kill", side_effect=OSError("unknown")):
             assert self._status(tmp_path, capsys, 42) == "stale"
 
 
@@ -219,31 +205,20 @@ class TestProcStartTicks:
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             return [r["sessionId"] for r in cc_sessions.find_live_for_cwd(str(tmp_path / "hooks"))] == ["own"]
 
-    @pytest.mark.skipif(sys.platform != "linux", reason="reads the real /proc filesystem")
     def test_current_process_returns_value_on_linux(self, tmp_path):
         # A value was read: an unreadable start would fall back to keeping it.
         assert self._kept(tmp_path, "not-a-tick") is False
 
-    @pytest.mark.skipif(sys.platform != "linux", reason="reads the real /proc filesystem")
     def test_matches_raw_proc_stat_field(self, tmp_path):
         raw = (cc_sessions.Path("/proc") / str(os.getpid()) / "stat").read_text(encoding="utf-8")
         expected = raw.rsplit(")", 1)[1].split()[19]
         assert self._kept(tmp_path, expected) is True
-
-    def test_non_linux_returns_none(self, tmp_path):
-        # No start read means liveness only: the mismatched procStart no longer drops it.
-        with (
-            patch.object(cc_sessions, "_PLATFORM", "win32"),
-            patch.object(cc_sessions, "_pid_alive_windows", return_value=True),
-        ):
-            assert self._kept(tmp_path, "not-a-tick") is True
 
     def test_an_unreadable_proc_stat_keeps_the_session_on_liveness(self, tmp_path):
         s = {"pid": 999999999, "sessionId": "gone", "cwd": str(tmp_path / "hooks"), "procStart": "not-a-tick"}
         (tmp_path / "999999999.json").write_text(json.dumps(s), encoding="utf-8")
         with (
             patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path),
-            patch.object(cc_sessions, "_PLATFORM", "linux"),
             patch.object(cc_sessions, "_kill", return_value=None),
         ):
             assert [r["sessionId"] for r in cc_sessions.find_live_for_cwd(str(tmp_path / "hooks"))] == ["gone"]

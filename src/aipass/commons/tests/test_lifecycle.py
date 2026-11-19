@@ -3,7 +3,7 @@
 # Description: The Commons lifecycle integration tests — full social platform flow
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-11-09
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/database/db.py and the full posts/comments/votes lifecycle it drives."""
@@ -24,7 +24,7 @@ from aipass.commons.apps.handlers.search.search_queries import (
     search_posts,
     sync_post_to_fts,
 )
-from aipass.memory.apps.modules.door_registry_scope import fleet_branches
+from aipass.memory import fleet_branches
 
 
 @pytest.fixture

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_bootstrap.py
 # Description: Helpers shared by test_bootstrap.py and test_bootstrap_update.py (no test_ prefix: never collected)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Helpers shared by the bootstrap test files: the AIPASS_HOME the detector must find."""
@@ -17,11 +17,10 @@ import aipass
 
 
 def _expected_aipass_home() -> str:
-    """The AIPASS_HOME the detector must find, derived independently of it.
+    """The AIPASS_HOME the detector must find in a source checkout, derived independently of it.
 
-    project_home._detect_aipass_home walks up from the installed ``aipass``
-    package to the repo root. This reads the same fact off the package itself
-    rather than calling the detector, so the pin is a second derivation and not
-    a restatement of the code under test.
+    project_home._detect_aipass_home asks drone's resolver, which names the repo root here (AIPASS_HOME,
+    or the venv's parent holding AIPASS_REGISTRY.json). This reads the repo root off the package itself,
+    so the pin is a second derivation and not a restatement of the code under test.
     """
     return str(Path(aipass.__file__).resolve().parent.parent.parent)

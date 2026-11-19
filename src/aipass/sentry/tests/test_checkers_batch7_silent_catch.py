@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_silent_catch.py
 # Description: silent_catch_check: classify, report, guard, hand on, empty answer (split from test_checkers_batch7.py)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/silent_catch_check.py and silent_catch_content.py."""
@@ -338,3 +338,24 @@ class TestTheEmptyAnswerIsAConstantWhateverItsType:
         assert "EMPTY ANSWER" in content
         assert "return set()" in content
         assert "return set(c)" in content
+
+
+class TestAWaiverNamesItsSite:
+    """prax apps/handlers/logging/setup.py:65 was waived file-wide only because this checker read no line."""
+
+    SOURCE = "\n\n".join(
+        f"def f{n}(c):\n    try:\n        return c()\n    except Exception:\n        return None\n" for n in range(4)
+    )
+
+    def _message(self, tmp_path, rules):
+        target = tmp_path / "apps" / "setup.py"
+        target.parent.mkdir()
+        target.write_text(self.SOURCE, encoding="utf-8")
+        return silent_catch_check.check_module(str(target), bypass_rules=rules)["checks"][0]["message"]
+
+    def test_a_row_pinned_to_one_line_waives_that_site_and_keeps_the_other(self, tmp_path):
+        rules = [{"file": "apps/setup.py", "standard": "silent_catch", "lines": [4], "reason": "r"}]
+        assert self._message(tmp_path, rules).startswith("3 silent catch(es) on lines 11, 18, 25 ")
+
+    def test_every_site_is_named_so_each_can_get_its_row(self, tmp_path):
+        assert self._message(tmp_path, []).startswith("4 silent catch(es) on lines 4, 11, 18, 25 ")

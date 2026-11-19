@@ -3,7 +3,7 @@
 # The update engine
 
 **Branch** spawn · **Code** `apps/handlers/update_ops.py`, `apps/handlers/update_ignore.py`,
-`aipass.aipass.shared.json_ops`, `apps/modules/update.py`
+`apps/handlers/json_merge.py`, `apps/modules/update.py`
 
 Update is **preview-only by default**; `--apply` is what executes. The verbs and flags live
 in `drone @spawn update --help`. Everything below is what the engine decides once it runs.

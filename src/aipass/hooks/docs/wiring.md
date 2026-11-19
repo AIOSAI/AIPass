@@ -34,20 +34,24 @@ Provider settings are protected files (`modules/protected_paths.py`, enforced by
 
 | Event | Hooks | Description |
 |---|---|---|
-| UserPromptSubmit | presence_gate, persistent_alert, identity, email, branch_loader, tier0_kernel, navmap, compass_recall, feedback_pulse, context_gauge, temporal, auto_process, user_message_relay | Presence gate + alerts + prompt injection + inbox + governance recall + feedback + context gauge + temporal + auto-process + TG mirror |
-| PreToolUse | tool_sound, edit_gate, git_gate, rm_gate, testwrite_gate, registry_gate | Security gates + guardrails + sound. `edit_gate` reads Bash too (the scripted cross-project lane — see [bash_writes.md](bash_writes.md)) |
-| PostToolUse | auto_fix, post_compact_regrounding | Diagnostics + post-compaction re-ground backstop |
+| UserPromptSubmit | presence_gate, persistent_alert, identity, email, branch_loader, tier0_kernel, navmap, compass_recall, feedback_pulse, context_gauge, temporal, auto_process | Presence gate + alerts + prompt injection + inbox + governance recall + feedback + context gauge + temporal + auto-process |
+| PreToolUse | tool_sound, edit_gate, git_gate, rm_gate, testwrite_gate, registry_gate, trinity_tripwire_snapshot, settings_gate, settings_backup | Security gates + guardrails + settings accept and backup + sound. `edit_gate` reads Bash too (the scripted cross-project lane — see [bash_writes.md](bash_writes.md)) |
+| PostToolUse | trinity_tripwire, auto_fix, navmap_cap, comment_budget, test_template_pointer, post_compact_regrounding | .trinity tripwire + diagnostics + navmap cap + comment budget + test template pointer + post-compaction re-ground backstop |
+| PostCompact | post_compact_regrounding | Re-ground after a compact |
 | SubagentStop | subagent_gate | Sentry validation |
-| Stop | stop_sound, telegram_response, presence_release | Bell + Telegram delivery + presence release |
+| Stop | grounding_receipt, stop_sound, presence_release, watchdog_wire_gate | Grounding receipt + stop sound + presence release + watchdog wire gate |
 | Notification | announce | Announcement tone |
-| SessionStart | cadence_reset | Cadence reset on new chat / clear |
+| SessionStart | cadence_reset, release_notice, culture, session_pointer | Cadence reset + release notice + culture + resume pointer |
 | PreCompact | compact, rollover, pre_compact_prep, auto_process | Memory archival + rollover + mechanical snapshot stamp + inbox/task processing |
 
-That table mixes handler filenames with `hooks.json` entry names, because three of the names are not
-handler files in this branch. `user_message_relay` belongs to @skills
-(`skills/lib/telegram/apps/handlers/user_message_relay.py`) and rides the engine as a guest.
-`presence_release` is a hooks.json entry name pointing at `security/presence_gate.py:handle_stop`.
+That table mixes handler filenames with `hooks.json` entry names, because several of the names are
+not handler files in this branch. `presence_release` is a hooks.json entry name pointing at `security/presence_gate.py:handle_stop`.
 `cadence_reset` is likewise an entry name — the handler file is `lifecycle/session_start.py`.
+So are `trinity_tripwire` and `trinity_tripwire_snapshot` (`security/edit_gate.py:tripwire`,
+`:tripwire_snapshot`), `test_template_pointer` (`security/testwrite_gate.py:template_pointer`),
+`grounding_receipt` (`prompt/context_gauge.py:handle_stop`), `culture` and `session_pointer`
+(`lifecycle/session_start.py:handle_culture`, `:handle_session_pointer`). `watchdog_wire_gate` is
+@devpulse's handler (`aipass.devpulse.apps.modules.watchdog.hook_stop`), dispatched by this engine.
 `feedback_pulse` is wired but `enabled: false` in this repo, so it is listed and does not fire.
 
 Entry name and filename diverge for others too (`pre_edit_gate` → `security/edit_gate.py`,
@@ -72,11 +76,10 @@ per handler, so the name is reserved.
 nearest `.trinity/passport.json` and recalls nothing unless the passport declares `citizen_class: manager`.
 Compass is the managers' decision store, so a builder seat, or a directory with no passport, hears nothing.
 
-**Sound is off by default.** `apps/sound.py`'s `speak()` and `play()` check `is_muted()`, which is True
+**Sound is off by default.** `apps/sound.py`'s `speak()` checks `is_muted()`, which is True
 unless `~/.aipass/aipass-hooks-sound-on` exists (outside the temp dir, so a reboot or `TMPDIR` cannot move it).
-`hooksound on` creates it, `off` removes it, `--json` prints `{"active": bool}` on stdout; a fresh install is silent. An old mute flag
-(`~/.aipass/aipass-hooks-muted`, `<temp dir>/aipass-hooks-muted`) is redundant: `is_muted()` removes it.
-`tests/conftest.py` points all three at a temp dir.
+`hooksound on` creates it, `off` removes it, `--json` prints `{"active": bool}` on stdout; a fresh install is silent.
+`tests/conftest.py` points it at a temp dir.
 
 ---
 
@@ -93,7 +96,7 @@ Codex speaks Claude Code's hook protocol (same event names, `tool_input`, `addit
 
 `codex.py` also names itself in every payload (`"provider": "codex"`; a payload without the key is Claude's). `SessionStart:session_pointer` (`lifecycle/session_start.handle_session_pointer`) writes that provider and the session id into the branch's `.ai_mail.local/session.json` through ai_mail's `door_session_pointer`, so a resume reopens the CLI that last ran. It writes only for a session a person runs: a Codex session whose rollout (`transcript_path`) opens with a `session_meta` `source` other than `exec`, or a Claude session whose nearest `claude` ancestor process has no `-p`/`--print` (`cc_sessions.cli_ancestor`). It skips a headless run, an unreadable rollout, a compact, a cwd without `.trinity/passport.json`, and a missing session id.
 
-Codex has no Notification event and no `manual`/`auto` PreCompact matcher, so a Codex PreCompact row is one per handler. Codex reads the repo-root `AGENTS.md` natively but not `.claude/AGENTS.md`; `SessionStart:culture` (`lifecycle/session_start.handle_culture`) injects that file from `$AIPASS_HOME`. Claude Code reads it natively only inside `AIPASS_HOME`: its `SessionStart:culture` row is silent there and injects the host's file in an external project. `drone @hooks verify` reads the project's `.codex/hooks.json` too: a per-handler row wired only through `codex.py` reports `wired for Codex only`, never `handler never fires`. A Codex hook runs only once trusted: `~/.codex/config.toml` `[hooks.state]` keeps one entry per hook, keyed by file, event and position, with its hash; `codex exec --dangerously-bypass-hook-trust` skips that for automation.
+Codex has no Notification event and no `manual`/`auto` PreCompact matcher, so a Codex PreCompact row is one per handler. Codex reads the repo-root `AGENTS.md` natively but not `.claude/AGENTS.md`; `SessionStart:culture` (`lifecycle/session_start.handle_culture`) injects that file from `$AIPASS_HOME`. Claude Code reads it natively only inside `AIPASS_HOME`: its `SessionStart:culture` row is silent there and injects the host's file in an external project. `drone @hooks verify` reads the project's `.codex/hooks.json` too: a per-handler row wired only through `codex.py` reports `wired for Codex only`, never `handler never fires`. With `codex` on PATH (setup.sh's test) a missing hooks file is an ERROR; with no Codex installed there is no seat to gate, and verify reports it at INFO and checks nothing. A Codex hook runs only once trusted: `~/.codex/config.toml` `[hooks.state]` keeps one entry per hook, keyed by file, event and position, with its hash; `codex exec --dangerously-bypass-hook-trust` skips that for automation.
 
 ---
 
@@ -113,9 +116,41 @@ A Seed head (the Seed repo's `src/hooks/hooks.md`) fires Claude Code's events it
 | an engine answer in JSON, exit 0 | stdout as is | the document: `decision`, `hookSpecificOutput`, `systemMessage` |
 | plain text, exit 0 | `additionalContext` on SessionStart and UserPromptSubmit, `systemMessage` elsewhere | the document |
 | a block, exit 2 | stdout as is, the reason on stderr, exit 2 | stderr as the reason |
-| an engine that cannot load or raises | `HOOKS BROKEN` on stderr and in `logs/bridge.log`; exit 2 on PreToolUse, else exit 0 and no stdout | a block, or no answer |
+| a payload, mount or engine that cannot load or raises | `HOOKS BROKEN` on stderr, exit 2 on PreToolUse, else exit 0 and no stdout; then the line in `logs/bridge.log` | a block, or no answer |
 
-`seed.py` runs from the source tree and mounts the promoted copy, as every bridge does. The engine resolves its config from the working directory, which Seed sets to the agent's directory: an agent outside an AIPass project gets the gate set only, so no grounding and no identity. Seed's `transcript.jsonl` is its own shape (`who`, `text`, `time`, `compaction`), not Claude's. On `provider: "seed"` the context gauge and the PreCompact snapshot read no fill, `context_window` answers no usage and no model without parsing a line, the session pointer is not written (Seed has no resume), the culture file is injected (Seed reads no AGENTS.md), and cadence counts turns by the file's size, as on every CLI. `drone @hooks verify` reads the Seed file too: no file or no AIPass row is a head not wired (INFO), a missing event row an ERROR naming the cure, a duplicate a WARN, a file Seed would refuse at start an ERROR.
+`seed.py` runs from the source tree and mounts the promoted copy, as every bridge does. The engine resolves its config from the working directory, which Seed sets to the agent's directory: an agent outside an AIPass project gets the gate set only, so no grounding and no identity. Seed's `transcript.jsonl` is its own shape (`who`, `text`, `time`, `compaction`), not Claude's. On `provider: "seed"` the context gauge and the PreCompact snapshot read no fill, `context_window` answers no usage and no model without parsing a line, the session pointer is not written (Seed has no resume), the culture file is injected (Seed reads no AGENTS.md), and cadence counts turns by the file's size, as on every CLI. `drone @hooks verify` reads the Seed file too: no file or no AIPass row is a head not wired (INFO), a missing event row an ERROR naming the cure, a duplicate a WARN, a file Seed would refuse at start an ERROR. A `PostCompact` section with no Claude row is INFO, not an ERROR (`wire_verify.SEED_ONLY_EVENTS`): Claude Code fires PostCompact, but its output never reaches the model, so Claude re-grounds through PostToolUse and the section is wired for Seed only.
+
+---
+
+## When a bridge breaks
+
+A bridge that cannot read its payload, mount, import the engine, or finish a dispatch (any exception, `SystemExit` and `KeyboardInterrupt` included) answers PreToolUse with a refusal and every other event with nothing. The refusal leaves first: Claude and Seed write the reason and exit 2 from a `finally`; Codex and OpenCode write their deny document and flush it. Only then is the break recorded: one ERROR line in prax's format, appended to `logs/bridge.log` with a single `os.write` on an `O_APPEND | O_NONBLOCK` descriptor, no lock and no prax, guarded against any exception. A record that fails says so in one stderr line and changes nothing about the answer. Text that is not UTF-8 (a path the filesystem holds as bytes) is written with backslash escapes, never raised on. The OpenCode plugin (`opencode_plugin.ts`) writes the same file; with `AIPASS_HOME` unset it refuses every tool and puts its line on stderr, since a relative path would land where nothing reads it.
+
+What each CLI does when a PreToolUse hook exits with no answer, and what the AIPass row does when the bridge process dies before it answers (a `SyntaxError` in the bridge file itself, which runs from the source tree; a kill; a missing interpreter). Cells marked *run* come from a real session whose bridge processes were made to exit at start (a `sitecustomize.py` on `PYTHONPATH`, in that session's processes only); the rest are the CLI's contract or code:
+
+| CLI | Hook exits 1, nothing on stdout | Exits 2, nothing on stdout | Exits 0 with a deny document | Bridge dies, AIPass row |
+|---|---|---|---|---|
+| Claude Code | runs the tool (*run*) | refuses (hook contract) | refuses (hook contract) | refuses, shows `HOOKS BROKEN: claude.py exited 1 without an answer` (*run*) |
+| Codex 0.164 | runs the tool, "PreToolUse Failed" (*run*) | runs the tool (*run*) | refuses, "PreToolUse Blocked" (*run*) | refuses, "PreToolUse Blocked" with `HOOKS BROKEN: codex.py exited without an answer` (*run*) |
+| OpenCode | refuses: the plugin reads any non-zero exit as broken (`opencode_plugin.ts`, its Node test) | refuses | refuses | refuses, no guard needed |
+| Seed | refuses, "is broken: exited 1" (*run*, Seed's own runner) | refuses (*run*) | refuses | refuses, no guard needed |
+
+The bridge code refuses every break it lives to see; a shell guard on the PreToolUse row in `.claude/provider_manifest.json` refuses the rest:
+
+- Claude Code: `claude.py PreToolUse ; c=$?; [ $c -eq 0 ] || [ $c -eq 2 ] || { echo "HOOKS BROKEN: claude.py exited $c ..." >&2; exit 2; }; exit $c`. Exits 0 and 2 pass through untouched, so a normal refusal is never stamped broken; any other exit becomes exit 2 with the HOOKS BROKEN line.
+- Codex: `codex.py PreToolUse || printf '%s' '<deny document>'`: any non-zero exit prints the deny document, the one answer Codex refuses on.
+
+## Changing a hook row
+
+Codex runs a hook row only while the owner's approval matches it. Each approval is a `trusted_hash` in the `config.toml` beside `hooks.json`, under `[hooks.state."<hooks.json path>:<event_snake>:<group>:<handler>"]`. It is the sha256 of the sorted, compact JSON of `{event_name, matcher, hooks: [handler]}`, the handler normalized with `async` (false) and `timeout` (600 when unset). A row whose command, matcher or timeout changed, a row never approved, and a row marked `enabled = false` are skipped without a word: `codex exec` prints nothing about them, and every other row still fires, so a skipped PreToolUse row leaves Codex with no gate while nothing looks wrong. The order for any Codex row change is:
+
+1. Edit the row (manifest and `~/.codex/hooks.json`, the owner's seat).
+2. Approve it: the owner opens `/hooks` in an interactive `codex` session and trusts it.
+3. Prove it: `drone @hooks verify` has no `(Codex) row` ERROR, and a `codex exec` that runs one shell command lists `hook: PreToolUse`.
+
+`drone @hooks verify` (`wire_verify.codex_hook_hash`) recomputes the hash for every Codex row and reports one that will not run as an ERROR naming the event, the row and why: `changed since the owner approved it`, `never approved`, or `disabled in Codex`. It reads `config.toml` and nothing else in the Codex home; an unreadable `config.toml` is an ERROR.
+
+Claude Code and OpenCode have no approval step, and neither skips a changed hook (*run*, headless: `claude -p --settings`, `opencode run`, both shared server and `--standalone`). A session keeps the hook it loaded at start for its whole life, silently; the next session runs the changed one. A row edit reaches a live seat only when that seat restarts.
 
 ---
 

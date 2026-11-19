@@ -3,24 +3,16 @@
 # Description: Rich output formatting for scan results
 # Version: 1.0.1
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Rich output formatting for scan results."""
 
 from __future__ import annotations
 
-try:
-    from aipass.cli.apps.modules import console
-except ImportError:
-    from aipass.prax import logger
-
-    logger.warning("formatters: aipass.cli.apps.modules.console unavailable, using fallback Rich Console")
-    from rich.console import Console
-
-    console = Console()
-
 from rich.table import Table
+
+from aipass.cli import console
 
 from aipass.drone.apps.handlers.json import json_handler
 
@@ -75,7 +67,7 @@ def format_help_scan_failure(branch_name: str, help_errors: list[str]) -> None:
     """
     if not help_errors:
         return
-    from aipass.cli.apps.modules import err_console
+    from aipass.cli import err_console
 
     err_console.print(
         f"scan: @{branch_name}: the --help scan failed ({help_errors[0]}); showing module files only",

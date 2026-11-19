@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_activity_report.py
 # Description: Tests for the activity_report CLI module
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-03
-# Modified: 2026-11-09
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/activity_report.py — activity, activity-report, branch-health."""
@@ -14,21 +14,24 @@
 
 import json
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.cli.apps.modules import console as cli_console
+from aipass.cli import console as cli_console
 from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
-from aipass.daemon.apps.handlers.monitoring.activity_collector import scan_branch_activity
+from aipass.daemon.apps.handlers.monitoring.activity_collector import get_branch_paths, scan_branch_activity
 from aipass.daemon.apps.modules import activity_report
 from aipass.daemon.apps.modules.activity_report import handle_command
-from aipass.memory.apps.modules import fleet
-from aipass.memory.apps.modules import health as memory_health
+import aipass.memory
+from aipass.memory import fleet_branches
 
 MODULE = "aipass.daemon.apps.modules.activity_report"
+# get_branch_health's home module, reached through the door rather than by an apps path.
+MEMORY_HEALTH = sys.modules[aipass.memory.get_branch_health.__module__]
 
 
 class TestHandleCommandRouting:
@@ -90,6 +93,16 @@ class TestActivityReportCommand:
         mock_json.assert_called_once_with(24.0)
         assert '"branches": []' in capsys.readouterr().out
 
+    def test_activity_report_json_parses_in_a_colour_terminal_with_no_escapes_or_wraps(self, colour_terminal, capsys):
+        """Shipped defect: Rich highlighted the JSON and hard-wrapped long strings, so json.loads failed."""
+        data = {"branches": ["x" * 300]}
+        with patch(f"{MODULE}.get_json_report", return_value=data):
+            handle_command("activity-report", ["--json"])
+
+        out = capsys.readouterr().out
+        assert "\x1b" not in out
+        assert json.loads(out) == data
+
     def test_activity_report_json_short_flag(self):
         with patch(f"{MODULE}.get_json_report", return_value={}) as mock_json:
             result = handle_command("activity-report", ["-j"])
@@ -115,6 +128,23 @@ class TestActivityReportAlias:
 
 
 COLLECTOR = "aipass.daemon.apps.handlers.monitoring.activity_collector"
+
+
+class TestFleetRootIsTheResolvedHome:
+    def test_branch_paths_read_the_home_the_resolver_names(self, tmp_path):
+        """A fixed-depth climb reads the registry from inside an installed package; it must ask the resolver."""
+        with (
+            patch(f"{COLLECTOR}.resolve_aipass_home", return_value=MagicMock(path=tmp_path)),
+            patch(f"{COLLECTOR}.fleet_branches", return_value=[]) as fleet,
+        ):
+            assert get_branch_paths() == []
+        fleet.assert_called_once_with(tmp_path, name_from="registry")
+
+    def test_no_resolved_home_is_loud(self, caplog):
+        with patch(f"{COLLECTOR}.resolve_aipass_home", return_value=MagicMock(path=None)):
+            with pytest.raises(RuntimeError, match="No AIPass home"):
+                get_branch_paths()
+        assert "No AIPass home resolved" in caplog.text
 
 
 @pytest.fixture
@@ -149,7 +179,7 @@ class TestFleetScope:
         mock_br.assert_called_once_with("GROW", since_hours=24.0)
 
     def test_the_report_and_its_red_flags_carry_the_declared_root_citizen_on_one_fleet_read(self, seed_fleet, capsys):
-        with patch.object(fleet, "fleet_branches", wraps=fleet.fleet_branches) as reads:
+        with patch(f"{COLLECTOR}.fleet_branches", wraps=fleet_branches) as reads:
             assert handle_command("activity-report", ["--json"]) is True
         report = json.loads(capsys.readouterr().out)
         assert sorted(report["branches"]) == ["GROW", "TESTBRANCH"]
@@ -261,7 +291,7 @@ class TestExtractBranchName:
         assert exc.value.token == "-t 12"
 
 
-HEALTH_TARGET = "aipass.memory.apps.modules.health.get_branch_health"
+HEALTH_TARGET = "aipass.memory.get_branch_health"
 
 # SGR codes, colour AND attributes: Rich's ReprHighlighter wraps brackets and numbers on a terminal.
 ANSI_SGR = re.compile(r"\x1b\[[0-9;]*m")
@@ -371,7 +401,7 @@ class TestRenderEntryHealthDegradation:
     def test_memory_branch_unavailable_is_visible(self, monkeypatch):
         """Mutant killed: the ImportError branch returns "" instead of the UNAVAILABLE line."""
         # Deleting the name makes the from-import raise ImportError, as if @memory were absent.
-        monkeypatch.delattr(memory_health, "get_branch_health")
+        monkeypatch.delattr(MEMORY_HEALTH, "get_branch_health")
         out = _render()
 
         assert "unavailable" in out.lower()

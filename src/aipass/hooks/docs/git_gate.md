@@ -68,7 +68,7 @@ nested command. A plain program's operands are data, so `grep -rn rm .` and `ech
 One refusal per command: the twin named is the first git invocation's.
 
 **One program, many spellings.** `git.exe`, `GIT`, `Git`, `git.cmd`, `/usr/bin/git.exe` and `gh.exe`
-all run the program on Windows, so all are read as git or gh (`bash_writes.verb_name()`, the one
+all run the program through WSL interop, so all are read as git or gh (`bash_writes.verb_name()`, the one
 executable-extension list). A file merely NAMED for a program (`git.py`) is nobody's invocation.
 
 **git and gh from inside a program.** For every seat, an interpreter whose program text
@@ -143,7 +143,9 @@ redirect into it is refused whatever the program. git and gh answer to this gate
 Who may write them is the admin grant alone; there is no name list. Paths are matched with `\` read
 as `/` and case-insensitively, and by FILE as well as by name: an existing file with more than one
 link is compared by (device, inode) against every protected file, so a hard link in a seat's own
-directory is protected under its second name too. An external project's own `hooks.json` is not listed: trust decides
+directory is protected under its second name too. A target or protected file that is absent has no second
+name; one whose stat fails for any other cause (a path through a plain file, an unreadable directory) is
+refused, because the gate cannot tell which file it is. An external project's own `hooks.json` is not listed: trust decides
 whether it runs.
 
 **Why it is on:** agents reflexively reach for raw git, which causes state chaos in a multi-agent
@@ -158,8 +160,20 @@ agent how to switch a gate off.
 `git_gate`.
 
 - **Raw `rm`**, recursive or not, is refused for every seat, the admin seat included — `find -exec rm`
-  and `xargs rm` are raw rm. The admin seat is taught `drone rm <path>`.
-- **`drone rm`** is refused off the verified admin seat.
+  and `xargs rm` are raw rm. Every seat is taught `drone rm <path>`.
+- **`drone rm`** moves an in-tree target into the `.archive/` beside it; files in the system temp
+  dir and Python bytecode (`__pycache__`, `*.pyc`) are truly deleted. The admin seat runs it on any
+  path, inside any branch. Off that seat it runs
+  only when every target resolves strictly inside the caller's own branch (the directory of the
+  nearest passport above the session cwd, so a `cd` in the command does not change whose branch it
+  is) or the system temp dir. Targets resolve the way drone resolves them: against the directory the
+  command runs in, symlinks resolved, a link judged where it lives. Refused, naming the path: a
+  target elsewhere (repo root files, `.github`, another branch, a project), the temp dir itself, the
+  branch root (a branch is retired by @spawn), a path that does not exist, a word the shell still
+  expands (`$ * ? [ ] { } ~` or a backtick), a relative path after a `cd` the reader could not
+  follow, no target, any option (`--stale`, `-rf`; a file whose name starts with a dash is written
+  `./-name`), or a command that also runs what the reader cannot read. `drone rm --help` or
+  `drone rm -h`, alone, passes for every seat: drone answers it with help and acts on nothing.
 - **Every other delete** is refused off the admin seat with the same text: `rmdir`, `unlink`,
   `shred` and their kin wherever a program runs (shell_reader names it, however it is spelled),
   `find -delete`, and an interpreter's delete (`os.remove`, `shutil.rmtree`, `Path.unlink`; node
@@ -170,24 +184,37 @@ agent how to switch a gate off.
   check — is named in `bash_writes.NOT_CAUGHT`.
 - `mv`, renaming and `mkdir` are never deletes. `git rm` answers to `git_gate`.
 
-Every refusal off the admin seat ends with `_DONT_DELETE`, verbatim:
+A refused `drone rm` names the path and why in one sentence, and points to @devpulse. No rm gate refusal cites a plan id: each states its rule. Every other refusal off the
+admin seat (raw `rm` and every other delete lane) ends with `_DONT_DELETE`, which teaches `drone rm`,
+verbatim:
 
 ```
-Don't delete. Move or rename instead — that is the safety feature: the owner sees the files and decides.
-  rename it    name(disabled).ext       e.g. mv old.py 'old(disabled).py'
-  archive it   move it into a .archive/ folder beside it
-               (create the folder if it isn't there: mkdir -p .archive && mv old.py .archive/)
-  or both.     Archived files can stay forever.
+You do not delete. To have a file gone, use drone rm inside your own branch:
+  drone rm <path>     # moves it into the .archive/ beside it
+drone rm puts the file there for the user; you never put anything there yourself. That .archive/ is the user's folder: not your concern, and it can be emptied at any moment.
 
-It must truly go? Mail @devpulse with the path and why:
+Outside your own branch? Mail @devpulse with the path and why:
   drone @ai_mail email @devpulse "Delete request" "<path>: <why>"
 
-This refused attempt is recorded.
+This refused attempt is recorded in .ai_central/deletions.jsonl.
 ```
 
-Every refused attempt is one INFO line per deleting clause
-(`DELETE refused | lane=… | branch=… | cwd=… | cmd=…`). Service code that runs `drone rm` as a
+Every refused attempt is one INFO line per deleting clause in `logs/rm_gate.log`:
+`DELETE refused | lane=… | branch=… | cwd=… | cmd=…` for a delete, and for a refused `drone rm`, a move
+refused before drone ran, `MOVE refused | lane=drone rm | branch=… | cwd=… | target=<resolved> |
+reason=… | cmd=…` (`target=-` when the target could not be resolved). Service code that runs `drone rm` as a
 subprocess never passes through a hook.
+
+Every refusal, the admin seat's raw `rm` included, is also one row in the project's deletions ledger
+(`.ai_central/deletions.jsonl`), written through @drone's door `aipass.drone.record_gate_refusal`:
+lane `rm_gate`, outcome `refused`, the caller (`unknown` with no passport), the session cwd, the command
+as typed in `requested` (the whole Bash command line: the evidence), the resolved target in `path`, and a
+one-sentence reason. There is one row per resolved target: the refused `drone rm` target when that is
+the refusal, else every operand of `rm`, `rmdir`, `unlink` and `drone rm` in the command (a link is
+recorded as the link). A word the shell still expands, and every other delete (whose options can take
+values), give one row with `path` null. The refusal's last line says so. A row that cannot be written leaves
+the refusal standing: its last line then says the recording failed, and an ERROR line
+(`rm_gate: ledger write failed, the refusal stands`) goes through prax. A crashed gate writes no row.
 
 ---
 

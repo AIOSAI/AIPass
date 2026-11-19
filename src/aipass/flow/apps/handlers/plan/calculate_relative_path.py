@@ -10,7 +10,7 @@
 
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.flow.apps.handlers.json import json_handler
 
 

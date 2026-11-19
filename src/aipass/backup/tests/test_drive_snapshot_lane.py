@@ -3,7 +3,7 @@
 # Description: Tests for the Drive lane's source store, tracker lane stamp, never-leaves floor, Drive headroom and network loss
 # Version: 1.3.0
 # Created: 2026-10-16
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/drive_sync.py: the snapshot store it uploads, the tracker lane, the floor and the headroom."""
@@ -32,7 +32,7 @@ from aipass.backup.apps.handlers.drive import upload as drive_upload
 from aipass.backup.apps.handlers.json import json_handler
 from aipass.backup.apps.handlers.state.changelog import load_changelog
 from aipass.backup.apps.modules import display, drive_sync, status
-from aipass.cli.apps.modules import command_failed
+from aipass.cli import command_failed
 
 # conftest's autouse sealed_google_edge seals both doors to the real account;
 # the DriveClient below is a MagicMock that talks to nobody.

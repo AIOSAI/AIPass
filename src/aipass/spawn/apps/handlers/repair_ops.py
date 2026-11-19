@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repair_ops.py
 # Description: Repair handler — move branches, update registry paths, clean pollution
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-05-15
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Repair handler implementation for project structure fixes.
@@ -15,12 +15,13 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.spawn.apps.handlers.registry import (
     find_registry,
     is_protected,
     load_registry,
+    registry_files_in,
     registry_lock,
     save_registry,
     branches_as_list,
@@ -30,28 +31,6 @@ from aipass.spawn.apps.handlers.json import json_handler
 
 # Rebuildable noise only: .git history and .chroma vectors go into the archive, since the original is removed.
 ARCHIVE_EXCLUDE = {".venv", "__pycache__", "node_modules", ".pytest_cache"}
-
-
-REGISTRY_SUFFIX = "_REGISTRY.json"
-
-
-def _list_registry_candidates(root):
-    """Return what the filesystem lists for ``*_REGISTRY.json`` inside ``root`` — a test seam for the glob."""
-    return root.glob("*" + REGISTRY_SUFFIX)
-
-
-def _registry_in(root):
-    """Return the fleet registry directly inside ``root``, or None.
-
-    The suffix is re-checked case-SENSITIVELY: on case-insensitive volumes the glob also returns dotted
-    lowercase ``*_registry.json`` files (``.template_registry.json``), which sort first. Never check the
-    stem: external projects name their registry after themselves.
-    """
-    root = Path(root)
-    for candidate in sorted(_list_registry_candidates(root)):
-        if candidate.name.endswith(REGISTRY_SUFFIX):
-            return candidate
-    return None
 
 
 def update_registry_path(registry_path, branch_name, new_path):
@@ -409,7 +388,8 @@ def _registry_holding(name):
     if root_registry is None:
         return None
     projects = root_registry.parent / "projects"
-    found = [_registry_in(d) for d in sorted(projects.iterdir()) if d.is_dir()] if projects.is_dir() else []
+    dirs = sorted(d for d in projects.iterdir() if d.is_dir()) if projects.is_dir() else []
+    found = [(registry_files_in(d) or [None])[0] for d in dirs]
     for candidate in [root_registry, *[f for f in found if f is not None]]:
         rows = branches_as_list(load_registry(candidate).get("branches", []))
         if any(b.get("name", "").lower() == name for b in rows):
@@ -469,7 +449,7 @@ def detect_pollution(project_root):
     issues = []
     project_name = project_root.name
 
-    registry_path = _registry_in(project_root)
+    registry_path = (registry_files_in(project_root) or [None])[0]
 
     nested = project_root / project_name
     if nested.is_dir():
@@ -565,7 +545,7 @@ def repair_project(project_path, dry_run=False):
     if not project_path.is_dir():
         return {"success": False, "error": f"Project path does not exist: {project_path}"}
 
-    registry_path = _registry_in(project_path)
+    registry_path = (registry_files_in(project_path) or [None])[0]
 
     if registry_path is None:
         return {"success": False, "error": f"No *_REGISTRY.json found in {project_path}"}

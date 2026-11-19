@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: modules_check.py
 # Description: Modules Standards Checker Handler
-# Version: 1.5.2
+# Version: 1.7.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -17,10 +17,10 @@ import re
 import ast
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
 
 AUDIT_SCOPE = "all_files"
@@ -34,7 +34,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks = []
     path = Path(module_path)
 
-    # Normalize to forward slashes so string matching works on Windows too
     module_path = Path(module_path).as_posix()
 
     if is_bypassed(module_path, "modules", bypass_rules=bypass_rules):
@@ -77,22 +76,34 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "MODULES",
         }
 
-    # A door is a re-export with no CLI: its own row replaces handle_command; the size and logic rows still stand
-    if path.name.startswith("door_"):
-        checks.append(check_door(content, module_path))
-    elif not path.name == "__init__.py":
+    # One defect, one report: front_door convicts a second door, so this row does not judge it again.
+    if is_second_door(module_path, content):
+        return {
+            "passed": True,
+            "checks": [
+                {
+                    "name": "Module check",
+                    "passed": True,
+                    "message": "A second door: front_door convicts it (retired pattern), not judged here",
+                    "declined": True,
+                }
+            ],
+            "score": 100,
+            "standard": "MODULES",
+        }
+    if not path.name == "__init__.py":
         handle_cmd_check = check_handle_command(content)
         if handle_cmd_check:
-            checks.append(handle_cmd_check)
+            checks.append(_waive_file_level(handle_cmd_check, module_path, bypass_rules))
 
     size_check = check_file_size(lines, module_path)
-    checks.append(size_check)
+    checks.append(_waive_file_level(size_check, module_path, bypass_rules))
 
-    file_ops_check = check_no_direct_file_ops(lines)
+    file_ops_check = check_no_direct_file_ops(lines, module_path, bypass_rules)
     if file_ops_check:
         checks.append(file_ops_check)
 
-    business_logic_check = check_no_business_logic(content, lines, module_path)
+    business_logic_check = check_no_business_logic(content, lines, module_path, bypass_rules)
     if business_logic_check:
         checks.append(business_logic_check)
 
@@ -106,13 +117,34 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     overall_passed = score >= 75
 
-    # A door's verdict is its shape: a failing Door shape row fails the file even when the aggregate passes
-    door_fault = [check for check in checks if check["name"] == "Door shape" and not check["passed"]]
-    if door_fault:
-        score, overall_passed = 0, False
-
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "modules"})
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "MODULES"}
+
+
+def _waive_file_level(check: Dict, module_path: str, bypass_rules: list | None) -> Dict:
+    """A failing file-level check, passed when a row names FILE_SCOPE under functions; a line row never reaches it."""
+    if check["passed"] or not is_bypassed(module_path, "modules", bypass_rules=bypass_rules, name=FILE_SCOPE):
+        return check
+    return {**check, "passed": True, "message": f"Waived by a {FILE_SCOPE} bypass row: {check['message']}"}
+
+
+def _open_sites(sites: List[tuple], module_path: str, bypass_rules: list | None) -> List[tuple]:
+    """The (line, function, text) sites no bypass row covers, each asked by its own line and function."""
+    return [
+        site
+        for site in sites
+        if not is_bypassed(module_path, "modules", line=site[0], bypass_rules=bypass_rules, name=site[1])
+    ]
+
+
+def _enclosing_function(tree: ast.AST, line: int) -> str:
+    """The innermost function holding ``line``, or FILE_SCOPE for module-level code."""
+    holders = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.lineno <= line <= (node.end_lineno or 0)
+    ]
+    return min(holders, key=lambda n: (n.end_lineno or n.lineno) - n.lineno).name if holders else FILE_SCOPE
 
 
 def _own_branch(module_path: str) -> str:
@@ -151,10 +183,11 @@ def _door_statement_problem(node: ast.stmt, own_handlers: "re.Pattern[str]", imp
 
 
 def check_door(content: str, module_path: str) -> Dict:
-    """Check that ``apps/modules/door_<subject>.py`` is a door and nothing else.
+    """Whether a source has the second-door shape, a pattern retired by the front_door standard.
 
-    A door imports only from its OWN branch's ``apps.handlers`` (and the stdlib), defines no function or
-    class, and carries an ``__all__`` of names it imported. Foreign handlers may import it: modules are the gateway.
+    The shape: imports only from its OWN branch's ``apps.handlers`` (and the stdlib), defines no function or
+    class, and carries an ``__all__`` of names it imported. A branch has one door, its package top file;
+    ``is_second_door`` reads this shape and front_door convicts it.
     """
     try:
         tree = ast.parse(content)
@@ -178,8 +211,53 @@ def check_door(content: str, module_path: str) -> Dict:
     return {
         "name": "Door shape",
         "passed": True,
-        "message": f"Door re-exports only its own handlers ({len(exported)} names)",
+        "message": f"Second-door shape: re-exports only its own handlers ({len(exported)} names)",
+        "names": len(exported),
     }
+
+
+def is_second_door(module_path: str, content: str) -> bool:
+    """A file under ``apps/modules`` that hands its branch's handler names outward: named ``door_*`` or door-shaped.
+
+    A package marker is skipped by shape: an ``apps/modules/__init__.py`` re-export is as often the branch's own
+    plumbing, and front_door already convicts each foreign import of it.
+    """
+    path = Path(module_path)
+    if path.parent.name != "modules" or path.parent.parent.name != "apps":
+        return False
+    if path.name.startswith("door_"):
+        return True
+    if path.name == "__init__.py":
+        return False
+    verdict = check_door(content, module_path)
+    return verdict["passed"] and verdict["names"] > 0
+
+
+def handed_out_handler_names(module_path: str, content: str) -> Optional[Tuple[int, List[Tuple[str, str]]]]:
+    """The ``__all__`` line and each (name, handler module) a module under ``apps/modules`` hands outward.
+
+    A module's own API is what it defines; a name it imported from its own branch's handlers and lists in
+    ``__all__`` is handed to other branches. None when the file is not such a module or hands nothing out.
+    A package marker is not read: its re-export is as often the branch's own plumbing.
+    """
+    path = Path(module_path)
+    if path.parent.name != "modules" or path.parent.parent.name != "apps" or path.name == "__init__.py":
+        return None
+    tree = ast.parse(content)  # unparseable raises: the caller has already judged such a file
+    own_handlers = re.compile(rf"aipass\.{re.escape(_own_branch(module_path))}\.(?:\w+\.)*?apps\.handlers(?:\.|$)")
+    homes = {
+        alias.asname or alias.name: node.module or ""
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and own_handlers.match(node.module or "")
+        for alias in node.names
+    }
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and [getattr(t, "id", "") for t in node.targets] == ["__all__"]:
+            if not isinstance(node.value, (ast.List, ast.Tuple)):
+                return None
+            names = [e.value for e in node.value.elts if isinstance(e, ast.Constant) and e.value in homes]
+            return (node.lineno, [(name, homes[name]) for name in names]) if names else None
+    return None
 
 
 def check_handle_command(content: str) -> Optional[Dict]:
@@ -256,13 +334,16 @@ def _file_op_hint(func: ast.expr) -> Optional[str]:
     return None
 
 
-def check_no_direct_file_ops(lines: List[str]) -> Optional[Dict]:
-    """Check that module doesn't do direct file operations"""
+def check_no_direct_file_ops(
+    lines: List[str], module_path: str = "", bypass_rules: list | None = None
+) -> Optional[Dict]:
+    """Check that module doesn't do direct file operations; each one is a site a row can waive by line or function."""
     try:
         tree = ast.parse("\n".join(lines))
     except (SyntaxError, ValueError) as exc:
         logger.info("modules: unparseable, file ops not judged: %s", exc)
-        return {"name": "No direct file operations", "passed": False, "message": f"File does not parse: {exc}"}
+        failed = {"name": "No direct file operations", "passed": False, "message": f"File does not parse: {exc}"}
+        return _waive_file_level(failed, module_path, bypass_rules)
 
     # Calls, not text: a string or comment naming .read_text( is no file operation.
     found = []
@@ -272,13 +353,23 @@ def check_no_direct_file_ops(lines: List[str]) -> Optional[Dict]:
         hint = _file_op_hint(node.func)
         if hint:
             found.append((node.lineno, node.col_offset, hint))
-    file_operations = [f"line {ln}: {lines[ln - 1].strip()} ({hint})" for ln, _col, hint in sorted(found)]
+    sites = [
+        (ln, _enclosing_function(tree, ln), f"line {ln}: {lines[ln - 1].strip()} ({hint})")
+        for ln, _col, hint in sorted(found)
+    ]
+    open_sites = _open_sites(sites, module_path, bypass_rules)
 
-    if file_operations:
+    if open_sites:
         return {
             "name": "No direct file operations",
             "passed": False,
-            "message": f"Module has direct file operations: {file_operations[0]}",
+            "message": "Module has direct file operations: " + "; ".join(text for _ln, _fn, text in open_sites),
+        }
+    if sites:
+        return {
+            "name": "No direct file operations",
+            "passed": True,
+            "message": f"Every direct file operation ({len(sites)}) is waived by a scoped bypass row",
         }
 
     return {
@@ -318,7 +409,9 @@ def _scan_candidates(lines: List[str], list_pattern, dict_pattern) -> dict:
     return candidates
 
 
-def check_no_business_logic(content: str, lines: List[str], module_path: str) -> Optional[Dict]:
+def check_no_business_logic(
+    content: str, lines: List[str], module_path: str, bypass_rules: list | None = None
+) -> Optional[Dict]:
     """Check that module doesn't contain hardcoded business logic data"""
     list_pattern = re.compile(r"^([a-z][a-z0-9_]*)\s*=\s*\[")
     dict_pattern = re.compile(r"^([a-z][a-z0-9_]*)\s*=\s*\{")
@@ -376,10 +469,20 @@ def check_no_business_logic(content: str, lines: List[str], module_path: str) ->
         logger.info("Skipped business logic check: parse error in %s", module_path)
         return None
 
-    if violations:
-        v = violations[0]
-        msg = f"Line {v['line']}: '{v['var']}' has hardcoded {v['type']} with {v['count']} elements (move to config)"
+    sites = [
+        (v["line"], FILE_SCOPE, f"Line {v['line']}: '{v['var']}' has hardcoded {v['type']} with {v['count']} elements")
+        for v in violations
+    ]
+    open_sites = _open_sites(sites, module_path, bypass_rules)
+    if open_sites:
+        msg = "; ".join(text for _ln, _fn, text in open_sites) + " (move to config)"
         return {"name": "No business logic", "passed": False, "message": msg}
+    if sites:
+        return {
+            "name": "No business logic",
+            "passed": True,
+            "message": f"Every hardcoded structure ({len(sites)}) is waived",
+        }
 
     return {"name": "No business logic", "passed": True, "message": "No hardcoded data structures detected"}
 
@@ -447,16 +550,19 @@ def check_thin_orchestration(content: str, module_path: str, bypass_rules: list 
 
             non_standard_functions.append({"name": func_name, "line": node.lineno, "lines": func_lines})
 
+    sites = [(f["line"], f["name"], f["name"]) for f in non_standard_functions]
+    open_names = {name for _ln, name, _text in _open_sites(sites, module_path, bypass_rules)}
+    non_standard_functions = [f for f in non_standard_functions if f["name"] in open_names]
+
     if non_standard_functions:
-        func_list = [f"{f['name']} (line {f['line']})" for f in non_standard_functions[:5]]
-        extra = f" +{len(non_standard_functions) - 5} more" if len(non_standard_functions) > 5 else ""
+        func_list = [f"{f['name']} (line {f['line']})" for f in non_standard_functions]
 
         return {
             "name": "Thin orchestration",
             "passed": False,
             "message": (
                 f"Module has {len(non_standard_functions)} implementation function(s) "
-                f"that belong in handlers: {', '.join(func_list)}{extra}"
+                f"that belong in handlers: {', '.join(func_list)}"
             ),
         }
 

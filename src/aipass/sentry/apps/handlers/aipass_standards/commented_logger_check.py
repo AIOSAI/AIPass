@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commented_logger_check.py
 # Description: Commented Logger Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-22
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -12,13 +12,14 @@ Commented Logger Standards Checker Handler
 Reference: commented_logger.md
 """
 
+import ast
 import re
 from pathlib import Path
 from typing import Dict
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
 
 # APPLIES_TO: a commented-out logger call is dead weight in any file.
@@ -76,10 +77,12 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         }
 
     violation_lines: list[int] = []
+    tree: ast.Module | None = None
     # Comments are this checker's target, so only docstrings and string bodies are skipped.
     try:
         kinds = classify(source)
         skipped = kinds.docstrings | kinds.string_bodies
+        tree = ast.parse(source)
     except UnparseableSource as exc:
         logger.info("commented_logger: unparseable, every line read: %s", exc)
         skipped = frozenset()
@@ -91,12 +94,21 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         if _COMMENTED_LOGGER_RE.search(line):
             violation_lines.append(lineno)
 
+    found = len(violation_lines)
+    # Each line is a site: a row waives it by its line or by the def holding it (FILE_SCOPE at module level).
+    violation_lines = [ln for ln in violation_lines if not _waived(module_path, ln, tree, bypass_rules)]
+
     checks = []
     violation_count = len(violation_lines)
 
     if violation_count == 0:
+        message = f"All {found} commented-out logger call(s) waived by scoped bypass rows" if found else ""
         checks.append(
-            {"name": "Commented logger calls", "passed": True, "message": "No commented-out logger calls found"}
+            {
+                "name": "Commented logger calls",
+                "passed": True,
+                "message": message or "No commented-out logger calls found",
+            }
         )
     else:
         first_three = violation_lines[:3]
@@ -106,7 +118,10 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             {
                 "name": "Commented logger calls",
                 "passed": False,
-                "message": f"{violation_count} commented-out logger call(s) on lines {line_preview}{suffix} -- restore or remove",
+                "message": (
+                    f"{violation_count} commented-out logger call(s) on lines {line_preview}{suffix}"
+                    " -- restore or remove"
+                ),
             }
         )
 
@@ -120,3 +135,24 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         "check_completed", {"file": str(module_path), "score": score, "standard": "commented_logger"}
     )
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "COMMENTED_LOGGER"}
+
+
+def _waived(module_path: str, line: int, tree: ast.Module | None, bypass_rules: list | None) -> bool:
+    """Whether a row waives the site on ``line``: by that line, or by the def holding it (FILE_SCOPE at module level).
+
+    A comment is no AST node, so the holder is the innermost def whose span (def line to last statement) holds the
+    line; a comment below a def's last statement reads as outside it. An unparseable file names no function (None),
+    so only a line row can reach its sites.
+    """
+    if not bypass_rules:
+        return False
+    name = None
+    if tree is not None:
+        holders = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.lineno <= line <= (node.end_lineno or node.lineno)
+        ]
+        name = max(holders, key=lambda node: node.lineno).name if holders else FILE_SCOPE
+    return is_bypassed(module_path, "commented_logger", line=line, bypass_rules=bypass_rules, name=name)

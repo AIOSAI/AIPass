@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_search_extras.py
 # Description: Tests for search query_executor subprocess encoding and vector search
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # Category: memory/tests
 # =============================================
 
@@ -242,8 +242,8 @@ class TestAFailedPlanFetchIsSaidNotReadAsNoMatch:
 
         assert result["results"] == []
         assert said[-1] == (
-            "[search] Plan metadata fetch failed for DPLAN-0012: store failed (exit 3): no reason given"
-            " — exact-ID pin skipped"
+            "[search] Plan metadata fetch failed for DPLAN-0012: store failed (exit 3):"
+            " no JSON reply on stdout (it was empty); stderr: empty — exact-ID pin skipped"
         )
 
     def test_a_store_that_answers_no_match_says_nothing(self, monkeypatch, tmp_path):

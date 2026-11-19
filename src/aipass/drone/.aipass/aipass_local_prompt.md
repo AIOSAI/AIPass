@@ -32,7 +32,6 @@ apps/
 │   ├── generic_adapter.py       # StringIO capture for external modules
 │   ├── help_flags.py            # wants_help() — help anywhere means explain
 │   ├── json_flags.py            # wants_json() / strip_json_flag() — --json in any slot
-│   ├── module_root.py           # Resolve __file__ without an import-time cwd read
 │   ├── rm_handler.py            # Containment guards, delete, stale sweep
 │   ├── deletion_log.py          # Deletion + door ledgers in .ai_central/
 │   ├── exceptions.py            # Exception hierarchy

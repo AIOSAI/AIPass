@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_repo_root.py
 # Description: Repo-Root Resolution Pins
-# Version: 1.2.2
+# Version: 1.5.0
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -24,15 +24,15 @@
 # registry-less cwd crashed or misrouted almost every import. A ninth private copy is caught by an AST sweep.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(error_handling) — resolved_file answering the unresolved path on OSError, covered by that row
 # sentry: no-test-needed(error_handling) — find_repo_root walking past an unreadable directory, covered by that row
 
 import ast
+import json
 import os
 import subprocess
 import sys
 import textwrap
-from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePath
 from unittest.mock import MagicMock
 
 import pytest
@@ -53,8 +53,8 @@ APPS_DIR = Path(repo_root_mod.__file__).resolve().parents[1]
 REPO_SRC = str(Path(repo_root_mod.__file__).resolve().parents[5])
 
 
-# The pinned condition is "os.getcwd() raises", injected rather than built by deleting the directory:
-# Windows locks a process's cwd (WinError 32). TestBothConstructionsAgree licenses the substitution.
+# The pinned condition is "os.getcwd() raises", injected rather than built by deleting the directory.
+# TestBothConstructionsAgree licenses the substitution.
 _INJECT_DEAD_CWD = """
 import os as _os
 
@@ -71,75 +71,6 @@ try:
 except FileNotFoundError:
     pass
 """
-
-# ntpath.realpath calls os.getcwd() first and inspect's getmodule() calls realpath outside a try, so denying
-# realpath is the denial Windows meets. It convicts a module-level resolve(), not inspect.stack().
-_DENY_REALPATH = (
-    _INJECT_DEAD_CWD
-    + """
-import os.path as _ospath
-
-
-def _no_realpath(*_args, **_kwargs):
-    raise FileNotFoundError(2, "No such file or directory")
-
-
-_ospath.realpath = _no_realpath
-"""
-)
-
-# realpath raises, getcwd answers: Windows' shape (ntpath.abspath asks the OS, not os.getcwd). Only this world
-# lets inspect.stack() reach its unguarded realpath; a getcwd denial makes inspect bail early and hides it.
-_NTPATH_SHAPED = """
-import os.path as _ospath
-
-
-def _no_realpath(*_args, **_kwargs):
-    raise FileNotFoundError(2, "No such file or directory")
-
-
-_ospath.realpath = _no_realpath
-"""
-
-# Windows on Linux: ntpath.abspath never calls os.getcwd and realpath does; posixpath routes both through it.
-# It reproduces the Windows runner's table, the only way prax can check it (no Windows box here).
-_WINDOWS_EMULATED = """
-import os as _os
-import os.path as _ospath
-
-_OS_LEVEL_CWD = _os.getcwd()
-_real_realpath = _ospath.realpath
-_real_join = _ospath.join
-_real_normpath = _ospath.normpath
-
-
-def _no_working_directory(*_args, **_kwargs):
-    raise FileNotFoundError(2, "No such file or directory")
-
-
-def _win_abspath(path):
-    path = _os.fspath(path)
-    if not _ospath.isabs(path):
-        path = _real_join(_OS_LEVEL_CWD, path)
-    return _real_normpath(path)
-
-
-def _win_realpath(path, *_args, **_kwargs):
-    _os.getcwd()
-    return _real_realpath(path, *_args, **_kwargs)
-
-
-_ospath.abspath = _win_abspath
-_ospath.realpath = _win_realpath
-_os.getcwd = _no_working_directory
-"""
-
-# Measured per platform: one OS's reading is not a property of the interpreter.
-EXPECTED_WORLD_VERDICTS = (
-    {"getcwd-denied": "DIED", "realpath-denied": "DIED", "ntpath-shaped": "DIED"}
-    if os.name == "nt"
-    else {"getcwd-denied": "SURVIVED", "realpath-denied": "SURVIVED", "ntpath-shaped": "DIED"}
-)
 
 _DELETE_CWD = """
 import os as _os, shutil as _shutil, tempfile as _tempfile
@@ -182,11 +113,14 @@ def _run_without_a_working_directory(body: str, world: str = _INJECT_DEAD_CWD, m
     )
 
 
-class TestSourceRoot:
-    """The fallback is derived from the FILE, and nothing else.
+def _trail(log_root: Path) -> list:
+    """The records on repo_root's trail under the test log root."""
+    trail_file = log_root / "prax" / "logs" / "repo_root.jsonl"
+    return [json.loads(line) for line in trail_file.read_text(encoding="utf-8").splitlines()]
 
-    Starts are built from tmp_path: a POSIX literal is rooted-but-driveless, so not absolute on Windows.
-    """
+
+class TestSourceRoot:
+    """The fallback is derived from the FILE, and nothing else."""
 
     def test_the_directory_containing_src_is_the_checkout(self, tmp_path):
         start = tmp_path / "checkout" / "src" / "aipass" / "prax" / "a.py"
@@ -196,11 +130,6 @@ class TestSourceRoot:
         """Defined, incapable of raising, and absurd enough to fail loudly."""
         start = tmp_path / "nowhere" / "at" / "all" / "a.py"
         assert repo_root_mod.source_root(start) == Path(start.anchor)
-
-    def test_a_drive_qualified_windows_path_walks_to_its_own_checkout(self):
-        """The spelling a real Windows caller actually produces."""
-        start = PureWindowsPath(r"D:\a\AIPass\AIPass\src\aipass\prax\a.py")
-        assert repo_root_mod._walk_to_source_root(start) == PureWindowsPath(r"D:\a\AIPass\AIPass")
 
     def test_the_src_match_is_exact_case_not_folded(self, tmp_path):
         """A deliberate semantic, pinned because a mutation folding it survived.
@@ -214,14 +143,6 @@ class TestSourceRoot:
         """Resolving it would read the working directory this module exists to avoid."""
         assert repo_root_mod.source_root(Path("relative/a.py")) == repo_root_mod.source_root()
 
-    def test_a_rooted_driveless_start_is_refused_on_windows_spelling(self):
-        """The exact shape that made the CI leg red, now stated as the rule.
-
-        A rooted driveless path is not absolute on Windows; pinned so nobody 'fixes' the guard to accept it.
-        """
-        assert not PureWindowsPath("/x/checkout/src/aipass/prax/a.py").is_absolute()
-        assert PurePosixPath("/x/checkout/src/aipass/prax/a.py").is_absolute()
-
 
 class TestFindRepoRoot:
     """Marker first, source root second, working directory never."""
@@ -231,6 +152,21 @@ class TestFindRepoRoot:
         (root / "src" / "aipass" / "prax").mkdir(parents=True)
         (root / repo_root_mod.REGISTRY_MARKER).write_text("{}", encoding="utf-8")
         assert repo_root_mod.find_repo_root(root / "src" / "aipass" / "prax" / "a.py") == root
+
+    def test_the_marker_is_matched_by_its_exact_name_on_a_case_blind_disk(self, tmp_path, monkeypatch):
+        """WSL's /mnt/c answers exists() for aipass_registry.json: that folder is not the repo, the real one is."""
+        outer = tmp_path / "outer"
+        inner = outer / "inner"
+        (inner / "src" / "aipass" / "prax").mkdir(parents=True)
+        (outer / repo_root_mod.REGISTRY_MARKER).write_text("{}", encoding="utf-8")
+        (inner / repo_root_mod.REGISTRY_MARKER.lower()).write_text("{}", encoding="utf-8")
+
+        def case_blind(path):
+            return any((path.parent / name).exists() for name in (path.name, path.name.lower()))
+
+        monkeypatch.setattr(repo_root_mod, "_disk_has", case_blind)
+
+        assert repo_root_mod.find_repo_root(inner / "src" / "aipass" / "prax" / "a.py") == outer
 
     def test_a_registry_less_checkout_resolves_to_the_checkout(self, tmp_path):
         """Every clean CI clone: the marker is gitignored, so it is never there."""
@@ -254,39 +190,40 @@ class TestFindRepoRoot:
         )
         assert resolved == repo_root_mod.find_repo_root()
 
-    def test_the_fallback_is_announced(self, tmp_path, caplog, monkeypatch):
+    def test_the_fallback_is_announced(self, tmp_path, mock_prax_infrastructure, monkeypatch):
         """A fallback nobody can see is how the next one survives."""
         monkeypatch.setattr(repo_root_mod, "_ANNOUNCED", set())
         start = tmp_path / "checkout" / "src" / "aipass" / "prax" / "a.py"
         start.parent.mkdir(parents=True)
-        with caplog.at_level("WARNING", logger=repo_root_mod.__name__):
-            repo_root_mod.find_repo_root(start)
-        assert repo_root_mod.REGISTRY_MARKER in caplog.text
+        repo_root_mod.find_repo_root(start)
+        [record] = _trail(mock_prax_infrastructure)
+        assert record["level"] == "WARNING" and repo_root_mod.REGISTRY_MARKER in record["msg"]
 
-    def test_the_announcement_is_once_per_process_not_once_per_call(self, tmp_path, caplog, monkeypatch):
+    def test_the_announcement_is_once_per_process_not_once_per_call(
+        self, tmp_path, mock_prax_infrastructure, monkeypatch
+    ):
         """A per-call warning would bury CI output: every module reaches this during import."""
         monkeypatch.setattr(repo_root_mod, "_ANNOUNCED", set())
         start = tmp_path / "checkout" / "src" / "aipass" / "prax" / "a.py"
         start.parent.mkdir(parents=True)
-        with caplog.at_level("WARNING", logger=repo_root_mod.__name__):
-            for _ in range(5):
-                repo_root_mod.find_repo_root(start)
-        assert caplog.text.count("[repo_root]") == 1
+        for _ in range(5):
+            repo_root_mod.find_repo_root(start)
+        assert len(_trail(mock_prax_infrastructure)) == 1
 
-    def test_an_installed_package_falls_back_to_the_anchor_root_without_a_warning(self, tmp_path, caplog, monkeypatch):
+    def test_an_installed_package_falls_back_to_the_anchor_root_without_a_warning(
+        self, tmp_path, mock_prax_infrastructure, monkeypatch
+    ):
         """site-packages has no registry and no src/: the anchor root is the designed answer, logged as a note."""
         monkeypatch.setattr(repo_root_mod, "_ANNOUNCED", set())
         start = tmp_path / "site-packages" / "aipass" / "prax" / "a.py"
         start.parent.mkdir(parents=True)
-        with caplog.at_level("INFO", logger=repo_root_mod.__name__):
-            resolved = repo_root_mod.find_repo_root(start)
+        resolved = repo_root_mod.find_repo_root(start)
         assert resolved == Path(start.anchor)
-        levels = [record.levelname for record in caplog.records if "[repo_root]" in record.getMessage()]
-        assert levels == ["INFO"], levels
-        assert "installed package" in caplog.text
+        [record] = _trail(mock_prax_infrastructure)
+        assert record["level"] == "INFO" and "installed package" in record["msg"]
 
-    def test_this_module_imports_nothing_from_prax(self):
-        """Imports nothing from aipass: it runs inside the construction of prax's own logger."""
+    def test_this_module_imports_only_the_trail_from_prax(self):
+        """It runs inside the construction of prax's own logger: door one is out of reach, door two is all."""
         tree = ast.parse(Path(repo_root_mod.__file__).read_text(encoding="utf-8"))
         imported = []
         for node in ast.walk(tree):
@@ -294,24 +231,17 @@ class TestFindRepoRoot:
                 imported += [alias.name for alias in node.names]
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imported.append(node.module)
-        assert not [name for name in imported if name.startswith("aipass")], imported
+        assert [name for name in imported if name.startswith("aipass")] == ["aipass.prax.apps.handlers.logging.trail"]
 
 
 WORLDS = [
     pytest.param(_INJECT_DEAD_CWD, id="getcwd-denied"),
-    pytest.param(_DENY_REALPATH, id="realpath-denied"),
 ]
-
-# Kept apart from WORLDS: the import pins must never widen onto a world where getcwd works.
-ATTRIBUTION_WORLDS = WORLDS + [pytest.param(_NTPATH_SHAPED, id="ntpath-shaped")]
 
 
 @pytest.mark.parametrize("world", WORLDS)
 class TestDeadCwd:
-    """The working directory cannot be read and something imports.
-
-    realpath-denied is the same denial reaching the call Windows makes; it is red on Linux pre-cure.
-    """
+    """The working directory cannot be read and something imports."""
 
     def test_the_resolver_answers_without_a_working_directory(self, world):
         result = _run_without_a_working_directory(
@@ -407,23 +337,11 @@ class TestCallerPathResolution:
         assert found is not None
         assert found[1] == real.resolve().parent
 
-    def test_an_unresolvable_absolute_path_is_an_answer_not_a_crash(self, monkeypatch, tmp_path):
-        """Branch detection is a routing hint: not knowing the caller must never break its import."""
-        _a_project_around(tmp_path, monkeypatch)
-
-        def boom(self, *_args, **_kwargs):
-            raise OSError("no cwd")
-
-        monkeypatch.setattr(Path, "resolve", boom)
-        unresolvable = str(tmp_path / "unresolvable.py")
-        assert introspection.detect_external_project(unresolvable) is None
-
 
 class TestBothConstructionsAgree:
     """The licence for substituting the injected world for the deleted one.
 
-    On POSIX both worlds are buildable and must give the identical answer; Windows locks the cwd, so the
-    deletion world cannot be built there.
+    Both worlds are buildable and must give the identical answer.
     """
 
     PROBE = """
@@ -432,10 +350,6 @@ class TestBothConstructionsAgree:
         print("ANSWER", repo_root.find_repo_root(Path("/no/such/src/aipass/x/a.py")))
         """
 
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="the deleted-cwd world is unbuildable on Windows — WinError 32, the OS locks it",
-    )
     def test_the_injected_world_and_the_deleted_world_give_the_same_answer(self):
         injected = _run_without_a_working_directory(self.PROBE, world=_INJECT_DEAD_CWD)
         deleted = _run_without_a_working_directory(self.PROBE, world=_DELETE_CWD)
@@ -446,10 +360,6 @@ class TestBothConstructionsAgree:
             f"injected={_answer(injected)!r} deleted={_answer(deleted)!r} — the stand-in no longer stands in"
         )
 
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="the deleted-cwd world is unbuildable on Windows — WinError 32, the OS locks it",
-    )
     def test_both_worlds_really_do_break_the_working_directory(self):
         """Positive control on the WORLDS: a world that broke nothing cannot pass as dead-cwd."""
         probe = """
@@ -471,10 +381,7 @@ CWD_ALLOWLIST = {"apps/modules/dashboard.py"}
 
 
 def _module_key(relative: PurePath) -> str:
-    """The one spelling a module is named by, on every platform.
-
-    Normalised at the boundary: relative_to gives OS separators, which missed the forward-slash allowlist.
-    """
+    """The one spelling a module is named by."""
     return relative.as_posix()
 
 
@@ -543,11 +450,6 @@ class TestNoPrivateCwdFallback:
             planted.write_text(body, encoding="utf-8")
         assert set(_modules_reading_the_cwd(root)) == {_module_key(PurePath("apps", "live.py"))}
 
-    def test_the_allowlist_matches_a_windows_spelled_key(self):
-        """The allowlist matches a Windows-spelled key (relative_to gives backslash separators there)."""
-        assert _module_key(PureWindowsPath(r"apps\modules\dashboard.py")) in CWD_ALLOWLIST
-        assert _module_key(PurePosixPath("apps/modules/dashboard.py")) in CWD_ALLOWLIST
-
     def test_the_allowlist_names_only_files_that_exist(self):
         """An allowlist entry for a deleted file is a hole nobody can see."""
         assert len(CWD_ALLOWLIST) == 1, (
@@ -613,8 +515,13 @@ class TestEveryLaneUsesTheSharedResolver:
     def test_the_lanes_agree_with_the_shared_answer(self):
         """Behavioural, not just structural: same question, one answer."""
         expected = repo_root_mod.find_repo_root()
-        # load is asked by name: its one public reader mkdirs in the live system_logs outside pytest.
-        assert load_mod._find_repo_root() == expected
+        # load answers from its walk only outside pytest: a fresh interpreter, asked through the door.
+        env = {k: v for k, v in os.environ.items() if k not in ("AIPASS_TEST_LOG_DIR", "PYTEST_CURRENT_TEST")}
+        probe = "from aipass.prax import get_system_logs_dir\nprint(get_system_logs_dir())"
+        result = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8", env=env, timeout=120
+        )
+        assert Path(_answer(result)) == load_mod.system_logs_home(expected), result.stderr
         assert refresh_mod.AIPASS_REGISTRY == expected / "AIPASS_REGISTRY.json"
         assert status_mod.AIPASS_REGISTRY == expected / "AIPASS_REGISTRY.json"
 
@@ -653,8 +560,8 @@ def _tree_modules() -> list:
 class TestNothingCallsInspectStack:
     """`inspect.stack()` is banned across apps/, and the ban is a CALL match.
 
-    Structural because no import-shaped pin reaches the guard's `caller_file is None` branch. On Windows
-    inspect.stack() reaches getmodule()'s unguarded os.path.realpath, which calls os.getcwd() first.
+    Structural because no import-shaped pin reaches the guard's `caller_file is None` branch.
+    inspect.stack() reaches getmodule()'s unguarded os.path.realpath.
     inspect.currentframe() stays legal: it touches no filesystem.
     """
 
@@ -666,7 +573,7 @@ class TestNothingCallsInspectStack:
             if lines:
                 offenders[_module_key(path.relative_to(APPS_DIR.parent))] = lines
         assert offenders == {}, (
-            "inspect.stack() needs a readable working directory on Windows and dies at import "
+            "inspect.stack() needs a readable working directory and dies at import "
             f"in a process that has none. Use sys._getframe(n).f_code.co_filename: {offenders}"
         )
 
@@ -728,47 +635,7 @@ class TestNothingCallsInspectStack:
 class TestCallerAttributionWithoutAWorkingDirectory:
     """The two `inspect.stack()` sites cured, pinned by BEHAVIOUR: neither crashed on Linux."""
 
-    def test_the_ntpath_shaped_world_actually_kills_a_stack_walk(self):
-        """Negative control FOR the positive controls: is each world hostile?
-
-        On POSIX only the ntpath-shaped world kills a bare inspect.stack(); without this control the pins
-        below would pass in two of three worlds for a reason unrelated to their claim.
-        """
-        verdicts = {}
-        for world, name in (
-            (_INJECT_DEAD_CWD, "getcwd-denied"),
-            (_DENY_REALPATH, "realpath-denied"),
-            (_NTPATH_SHAPED, "ntpath-shaped"),
-        ):
-            probe = subprocess.run(
-                [sys.executable, "-"],
-                input=world
-                + textwrap.dedent(
-                    """
-                    import inspect
-
-                    try:
-                        inspect.stack()
-                        print("SURVIVED")
-                    except BaseException:
-                        print("DIED")
-                    """
-                ),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=120,
-            )
-            verdicts[name] = probe.stdout.strip()
-
-        assert verdicts == EXPECTED_WORLD_VERDICTS, (
-            f"the worlds no longer bite the way {os.name} was measured to bite. Expected "
-            f"{EXPECTED_WORLD_VERDICTS}, got {verdicts}. If the new reading is real, re-derive the "
-            "table from measurement rather than relaxing the assertion — this control exists to "
-            "refuse a platform's expectation being carried onto a platform where it is false."
-        )
-
-    @pytest.mark.parametrize("world", ATTRIBUTION_WORLDS)
+    @pytest.mark.parametrize("world", WORLDS)
     def test_the_log_dir_resolver_names_its_caller_without_a_cwd(self, world):
         """config/load.py's `get_module_logs_dir()` with no module_name.
 
@@ -793,7 +660,7 @@ class TestCallerAttributionWithoutAWorkingDirectory:
         # The point is that a name was derived at all, from a frame rather than from the filesystem.
         assert "LOGDIR " in result.stdout, f"no directory came back: {result.stdout}"
 
-    @pytest.mark.parametrize("world", ATTRIBUTION_WORLDS)
+    @pytest.mark.parametrize("world", WORLDS)
     def test_the_operations_log_still_attributes_its_caller(self, world):
         """json_handler's `_get_caller_module_name`.
 
@@ -844,19 +711,18 @@ class TestCallerAttributionWithoutAWorkingDirectory:
 class TestTheFenceSurvivesADeadWorkingDirectory:
     """The v2 fence, from its kin seat, in a process whose cwd was removed.
 
-    The fence resolves frame paths through realpath, which reads os.getcwd first on Windows. The cwd is
-    denied by injection: Windows holds a process's cwd open, so deleting it fails there.
+    The fence resolves frame paths with the cwd denied by injection.
     """
 
-    def test_the_kin_probe_is_allowed_with_its_cwd_gone_and_realpath_denied(self):
+    def test_the_kin_probe_is_allowed_with_its_cwd_gone(self):
         """Arming probe first: the denial bites in this child, so the claim is about it."""
         probe = Path(__file__).resolve().parent / "support_fence.py"
-        script = _DENY_REALPATH + textwrap.dedent(
+        script = _INJECT_DEAD_CWD + textwrap.dedent(
             f"""
                 import os, runpy, sys
                 sys.path.insert(0, {REPO_SRC!r})
                 try:
-                    os.path.realpath("x")
+                    os.getcwd()
                     print("ARM INERT")
                 except OSError:
                     print("ARM BITES")
@@ -871,19 +737,18 @@ class TestTheFenceSurvivesADeadWorkingDirectory:
         assert result.stdout.strip().splitlines()[-1] == "ALLOWED", f"stdout: {result.stdout}\nstderr: {result.stderr}"
 
 
-# Windows-reserved in a path component, checked everywhere: Linux happily creates a `<stdin>` directory.
-_WINDOWS_RESERVED_CHARS = set('<>:"|?*')
+# Never in a module name: Linux happily creates a `<stdin>` directory.
+_RESERVED_CHARS = set('<>:"|?*')
 
 
 class TestACallerNameIsNotAlwaysAModuleName:
     """A frame's co_filename is not always a file, and never automatically a name.
 
-    get_module_logs_dir() mkdirs its caller's module name; from a pseudo-frame (`<stdin>`) that name holds
-    characters Windows reserves. A pseudo-frame gets the same answer as no caller at all.
+    get_module_logs_dir() mkdirs its caller's module name; from a pseudo-frame (`<stdin>`) that name is a
+    junk directory. A pseudo-frame gets the same answer as no caller at all.
     """
 
     def test_the_log_dir_from_a_pseudo_frame_is_creatable_on_every_platform(self):
-        """The claim the Windows runner actually made, checkable here."""
         result = _run_without_a_working_directory(
             """
             import os
@@ -894,15 +759,13 @@ class TestACallerNameIsNotAlwaysAModuleName:
 
             print("LOGDIR", get_module_logs_dir().name)
             """,
-            world=_NTPATH_SHAPED,
         )
         assert result.returncode == 0, f"probe died: {result.stdout}\n{result.stderr}"
         name = _answer(result).split("LOGDIR ", 1)[1]
-        offending = sorted(_WINDOWS_RESERVED_CHARS & set(name))
+        offending = sorted(_RESERVED_CHARS & set(name))
         assert not offending, (
             f"get_module_logs_dir() derived the directory name {name!r} from a pseudo-frame and "
-            f"created it. Windows refuses {offending} in a path component, so this raises there — "
-            "from the logging path. A frame with no file behind it has no module name to give."
+            f"created it, {offending} included. A frame with no file behind it has no module name to give."
         )
 
     def test_the_operations_log_does_not_attribute_to_a_pseudo_frame(self):
@@ -922,49 +785,10 @@ class TestACallerNameIsNotAlwaysAModuleName:
 
             print("CALLER", the_actual_caller())
             """,
-            world=_NTPATH_SHAPED,
         )
         assert result.returncode == 0, f"probe died: {result.stdout}\n{result.stderr}"
         name = _answer(result).split("CALLER ", 1)[1]
-        assert not (_WINDOWS_RESERVED_CHARS & set(name)), (
+        assert not (_RESERVED_CHARS & set(name)), (
             f"the operations log attributed an entry to {name!r} — a pseudo-frame is not a module, "
             "and 'unknown' is the honest answer where there is nobody to name"
         )
-
-    @pytest.mark.skipif(os.name == "nt", reason="on Windows this world IS the platform, not an emulation")
-    def test_the_windows_emulation_reproduces_the_measured_windows_table(self):
-        """The emulation is only worth having if it reads like the real Windows runner (all three die)."""
-        verdicts = {}
-        for world, name in (
-            (_INJECT_DEAD_CWD, "getcwd-denied"),
-            (_DENY_REALPATH, "realpath-denied"),
-            (_NTPATH_SHAPED, "ntpath-shaped"),
-        ):
-            # The emulation goes first: it captures the real cwd before any world takes getcwd away.
-            probe = subprocess.run(
-                [sys.executable, "-"],
-                input=_WINDOWS_EMULATED
-                + world
-                + textwrap.dedent(
-                    """
-                    import inspect
-
-                    try:
-                        inspect.stack()
-                        print("SURVIVED")
-                    except BaseException:
-                        print("DIED")
-                    """
-                ),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=120,
-            )
-            verdicts[name] = _answer(probe)
-
-        assert verdicts == {
-            "getcwd-denied": "DIED",
-            "realpath-denied": "DIED",
-            "ntpath-shaped": "DIED",
-        }, f"the Windows emulation does not read like the Windows runner did: {verdicts}"

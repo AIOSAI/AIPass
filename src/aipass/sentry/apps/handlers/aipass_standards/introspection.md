@@ -289,6 +289,20 @@ For execution order:
 
 ---
 
+## Bypass Rows
+
+Two findings are sites. Each `python3` reference in `print_introspection()` or `print_help()` is a
+site at its line, inside that function. Each wrong dispatch block in `main()` is a site at its line,
+inside `main` (inside `<file>` when the dispatch lives in an `if __name__ == "__main__":` block). A row
+with `"lines": [n]` or `"functions": ["print_help"]` waives those sites only.
+
+Every other finding is file-level: a missing or silent `print_introspection()`, hardcoded lists, Rich
+formatting, execution order, the `handle_command` no-args gate and `--help` interception. A row with
+`"functions": ["<file>"]` waives them and a line row does not. A row with no `lines` or `functions`
+waives the whole file.
+
+---
+
 ## Reference
 
 - **Architecture context:** `src/aipass/sentry/docs/aipass_code_standards/architecture.md` (Terminal Visibility section)

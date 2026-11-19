@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bypass.py
 # Description: Bypass Module — prune the bypass rules that can never match
-# Version: 1.1.0
+# Version: 1.2.1
 # Created: 2026-09-25
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Bypass Module
@@ -23,13 +23,12 @@ from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 
 from aipass.cli import console, header
-from aipass.cli.apps.modules import error as display_error, success, warning
+from aipass.cli import error as display_error, success, warning
 
-from aipass.sentry.apps.handlers.audit.branch_audit import discover_checkers
+from aipass.sentry.apps.handlers.audit.branch_audit import discover_checkers, files_handed
 from aipass.sentry.apps.handlers.audit.discovery import discover_branches
 from aipass.sentry.apps.handlers.bypass import dead_rules
 from aipass.sentry.apps.handlers.cli.help_flags import wants_help
-from aipass.sentry.apps.handlers.module_root import module_file
 from aipass.sentry.apps.modules import CommandRefused
 
 #: An argument nobody recognised (handlers/audit_tests/refusal.py's vocabulary).
@@ -87,7 +86,7 @@ def _refuse(token: str, code: int) -> None:
     console.print()
     display_error(f"Refused: '{token}'")
     console.print("[yellow]Usage:[/yellow] " + "; ".join(_SUBCOMMANDS.values()))
-    console.print(f"[dim]Module: {module_file(__file__)}[/dim]")
+    console.print(f"[dim]Module: {Path(__file__).resolve()}[/dim]")
     console.print()
     raise CommandRefused(code, token)
 
@@ -107,9 +106,12 @@ def _handle_prune(args: List[str]) -> None:
         _refuse(targets[0], EXIT_NO_TARGET)
         return
 
-    known = set(discover_checkers()) | {"diagnostics"}
+    checkers = discover_checkers()
+    known = set(checkers) | {"diagnostics"}
     try:
-        outcome = dead_rules.prune(Path(branch["path"]), known, dry_run=dry_run)
+        outcome = dead_rules.prune(
+            Path(branch["path"]), known, dry_run=dry_run, checkers=checkers, handed_by=files_handed(branch, checkers)
+        )
     except (OSError, json.JSONDecodeError) as exc:
         logger.error("[bypass] prune @%s could not run: %s", wanted, exc)
         _refuse(f"@{wanted}: {exc}", EXIT_LANE_FAILED)
@@ -120,6 +122,8 @@ def _handle_prune(args: List[str]) -> None:
         {"branch": wanted, "dry_run": dry_run, "dead": len(outcome["dead"]), "written": outcome["written"]},
     )
     _print_outcome(wanted, dry_run, outcome)
+    if outcome["refused"]:
+        raise CommandRefused(EXIT_LANE_FAILED, f"@{wanted}")
 
 
 def _print_outcome(branch: str, dry_run: bool, outcome: dict) -> None:
@@ -161,6 +165,8 @@ def print_help() -> None:
     console.print("  its file is a substring of no file on disk (the matcher's own semantics),")
     console.print("  its standard is not a checker, or every line it names is past the file's end.")
     console.print("  It matches nothing, so pruning it moves no score. The audit names each one.")
+    console.print("  Prune also removes a rule that COVERS NOTHING: its checker answers the same")
+    console.print("  with the rule removed (a drifted line pin, a cured finding). Prune only.")
     console.print()
     console.print("[yellow]NEVER REMOVED:[/yellow]")
     console.print("  a live rule. A rule with a blank file or standard is dead too (a rule needs")

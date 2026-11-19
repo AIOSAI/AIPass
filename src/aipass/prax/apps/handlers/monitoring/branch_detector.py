@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detector.py
 # Description: Branch Attribution Handler
-# Version: 0.3.0
+# Version: 0.3.1
 # Created: 2025-11-23
-# Modified: 2026-11-08
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -17,7 +17,7 @@ from typing import Optional, Dict, Set
 import json
 import re
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 from aipass.prax.apps.handlers.fleet import fleet_rows
@@ -92,7 +92,7 @@ class BranchDetector:
         # shortcut: a sibling whose name extends a branch's (grow vs grow-kit) prefix-matches; upgrade if one exists.
         best = None
         for registered_path, branch_name in self.branch_map.items():
-            encoded = re.sub(r"[^A-Za-z0-9]", "-", registered_path.rstrip("/\\"))
+            encoded = re.sub(r"[^A-Za-z0-9]", "-", registered_path.rstrip("/"))
             if project_folder == encoded or project_folder.startswith(encoded + "-"):
                 if best is None or len(encoded) > len(best[0]):
                     best = (encoded, branch_name)
@@ -198,8 +198,6 @@ class BranchDetector:
         try:
             path = Path(file_path).resolve()
             path_str = str(path)
-            # String matching needs '/' (Windows resolves to backslashes); branch_map keys stay native.
-            path_str_fwd = path_str.replace("\\", "/")
 
             if path_str in self.log_map:
                 return self.log_map[path_str]
@@ -216,8 +214,8 @@ class BranchDetector:
                     self.log_map[path_str] = result
                     return result
 
-            if ".claude/projects/" in path_str_fwd:
-                result = self._detect_from_claude_project(path_str_fwd)
+            if ".claude/projects/" in path_str:
+                result = self._detect_from_claude_project(path_str)
                 if result:
                     self.log_map[path_str] = result
                     return result
@@ -239,7 +237,7 @@ class BranchDetector:
                 self.log_map[path_str] = result
                 return result
 
-            path_parts = path_str_fwd.lower().split("/")
+            path_parts = path_str.lower().split("/")
             for part in path_parts:
                 branch_upper = part.upper()
                 if branch_upper in self.known_branches:

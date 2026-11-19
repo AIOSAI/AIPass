@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_bypass.py
 # Description: Unit tests for handlers/bypass/
-# Version: 1.3.2
+# Version: 1.7.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/bypass/bypass_handler.py, ignore_handler.py, utils.py and inert.py."""
@@ -13,11 +13,12 @@
 # sentry: no-test-needed(constant) — ADVISORY_CAVEAT's wording
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
-from aipass.sentry.apps.handlers.aipass_standards import trigger_check
-from aipass.sentry.apps.handlers.bypass import inert
+from aipass.sentry.apps.handlers.aipass_standards import skip_dirs, trigger_check
+from aipass.sentry.apps.handlers.bypass import dead_rules, inert
 from aipass.sentry.apps.handlers.bypass import bypass_handler
 from aipass.sentry.apps.handlers.bypass.bypass_handler import load_bypass_rules
 from aipass.sentry.apps.handlers.bypass.ignore_handler import (
@@ -429,13 +430,15 @@ def test_inert_scope_support_is_derived_not_hardcoded():
     """The map comes from the checker sources, so it cannot drift from them."""
     support = inert.scope_support()
 
-    # cli threads line= into is_bypassed; handlers gates once at the top of check_module.
+    # cli threads line= into is_bypassed, handlers and imports line= and name= per site; todo never passes a line.
     assert "lines" in support["cli"]
-    assert support["handlers"] == set()
+    assert support["handlers"] == {"lines", "functions"}
+    assert support["imports"] == {"lines", "functions"}
+    assert support["todo"] == set()
 
 
 def test_inert_lines_rule_on_line_blind_standard_is_reported():
-    assert inert.inert_scopes({"file": "a.py", "standard": "handlers", "lines": [10]}) == ("lines",)
+    assert inert.inert_scopes({"file": "a.py", "standard": "todo", "lines": [10]}) == ("lines",)
 
 
 def test_inert_lines_rule_on_line_passing_standard_is_not_reported():
@@ -457,7 +460,7 @@ def test_inert_branch_info_names_the_file_and_standard(tmp_path):
 
     (tmp_path / ".sentry").mkdir()
     (tmp_path / ".sentry" / "bypass.json").write_text(
-        json.dumps({"bypass": [{"file": "apps/x.py", "standard": "handlers", "lines": [7]}]}), encoding="utf-8"
+        json.dumps({"bypass": [{"file": "apps/x.py", "standard": "todo", "lines": [7]}]}), encoding="utf-8"
     )
 
     lines = inert.check_branch_info(str(tmp_path))
@@ -465,7 +468,7 @@ def test_inert_branch_info_names_the_file_and_standard(tmp_path):
     # Two caveat lines ride ahead of every conclusion (ADVISORY_CAVEAT), then the rule.
     conclusions = lines[len(inert.ADVISORY_CAVEAT) :]
     assert len(conclusions) == 1
-    assert "apps/x.py" in conclusions[0] and "handlers" in conclusions[0] and "inert" in conclusions[0]
+    assert "apps/x.py" in conclusions[0] and "todo" in conclusions[0] and "inert" in conclusions[0]
 
 
 def test_inert_branch_info_empty_without_a_bypass_file(tmp_path):
@@ -543,7 +546,7 @@ def test_inert_scope_support_reads_positional_line_argument():
     """is_bypassed(path, "debug_print", ln, rules) threads a line as much as line=ln does."""
     support = inert.scope_support()
 
-    for standard in ("debug_print", "help_text", "log_handler", "output_routing", "windows_compat"):
+    for standard in ("debug_print", "help_text", "log_handler", "output_routing"):
         assert "lines" in support[standard], f"{standard} passes line positionally and must count as live"
 
 
@@ -594,11 +597,18 @@ def test_inert_scope_support_reads_a_standard_passed_as_a_module_constant(tmp_pa
     assert support == {"blind_std": set(), "lined_std": {"lines"}}
 
 
-def test_a_lines_rule_on_sleep_in_test_is_named_inert():
-    """The spawn leg 8 case: sleep_in_test gates file-wide, so a lines rule closes nothing."""
+def test_a_lines_rule_on_sleep_in_test_is_live():
+    """sleep_in_test asks per sleep, at its line, so a lines rule waives that sleep and is not named inert."""
     rule = {"file": "tests/test_x.py", "standard": "sleep_in_test", "lines": [3], "reason": "r"}
 
-    assert inert.inert_notes("tests/test_x.py", "sleep_in_test", [rule]) == [
+    assert inert.inert_notes("tests/test_x.py", "sleep_in_test", [rule]) == []
+
+
+def test_a_lines_rule_on_a_line_blind_standard_is_named_inert():
+    """todo gates file-wide, so a lines rule closes nothing."""
+    rule = {"file": "apps/x.py", "standard": "todo", "lines": [3], "reason": "r"}
+
+    assert inert.inert_notes("apps/x.py", "todo", [rule]) == [
         "bypass rule 'lines' [3] closes nothing: this checker passes no line, so only a file-wide rule bypasses it"
     ]
 
@@ -606,12 +616,11 @@ def test_a_lines_rule_on_sleep_in_test_is_named_inert():
 # The trigger standard's third matcher, folded back into the shared one
 
 
-def test_trigger_standard_is_now_in_the_scope_map_as_line_blind():
-    """trigger_check carried its own matcher, so the map could not see the standard at all."""
+def test_trigger_standard_is_in_the_scope_map_with_its_per_site_scopes():
+    """trigger_check asks per site, at a line inside a function, so neither scope is inert."""
     support = inert.scope_support()
-    assert "trigger" in support, "trigger now routes through the shared matcher"
-    assert "lines" not in support["trigger"], "its one call site gates the whole file"
-    assert inert.inert_scopes({"file": "a.py", "standard": "trigger", "lines": [1]}) == ("lines",)
+    assert support["trigger"] == {"lines", "functions"}
+    assert inert.inert_scopes({"file": "a.py", "standard": "trigger", "lines": [1], "functions": ["f"]}) == ()
 
 
 def _trigger_bypass_message(tmp_path, rules):
@@ -673,7 +682,7 @@ def _advisory(tmp_path, rules):
     return inert.check_branch_info(str(tmp_path))
 
 
-_INERT_SCOPE_RULE = {"file": "apps/x.py", "standard": "handlers", "lines": [7]}
+_INERT_SCOPE_RULE = {"file": "apps/x.py", "standard": "todo", "lines": [7]}
 _OUT_OF_SCOPE_RULE = {"file": "tests/test_a.py", "standard": "architecture", "reason": "r"}
 
 
@@ -736,7 +745,7 @@ def test_the_advisory_survives_the_renderer_that_shows_it(tmp_path):
 
     assert "UNVERIFIED" in rendered, rendered
     assert "control" in rendered, rendered
-    assert "handlers" in rendered, "the standard name must survive rendering"
+    assert "todo" in rendered, "the standard name must survive rendering"
     assert "apps/x.py" in rendered, rendered
 
 
@@ -759,19 +768,34 @@ PRUNE_RULES = [
 ]
 
 
+def _planted_naming(path, bypass_rules=None):
+    """A naming checker with one finding, on live.py, that a rule can waive."""
+    waived = utils_is_bypassed(path, "naming", None, bypass_rules)
+    finding = path.endswith("live.py") and not waived
+    return {"passed": not finding, "score": 0 if finding else 100, "checks": [{"name": "n", "passed": not finding}]}
+
+
 @pytest.fixture
 def prune_branch(tmp_path, monkeypatch):
-    """A branch named 'planted': one live file, and a bypass.json of dead, live and blank rules."""
+    """A branch named 'planted': a file with a finding, a quiet one, and dead, live and blank rules."""
     branch = tmp_path / "planted"
     (branch / "apps").mkdir(parents=True)
     (branch / "apps" / "live.py").write_text("pass\n", encoding="utf-8")
+    (branch / "apps" / "quiet.py").write_text("pass\n", encoding="utf-8")
+    entry = branch / "apps" / "planted.py"
+    entry.write_text("pass\n", encoding="utf-8")
     (branch / ".sentry").mkdir()
+    # tmp_path sits under the system temp root, which the audit's corpus drops as throwaway.
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
     bypass_file = branch / ".sentry" / "bypass.json"
     bypass_file.write_text(json.dumps({"metadata": {}, "bypass": PRUNE_RULES, "notes": {}}, indent=2), encoding="utf-8")
     monkeypatch.setattr(
-        bypass_module, "discover_branches", lambda include_private=False: [{"name": "PLANTED", "path": str(branch)}]
+        bypass_module,
+        "discover_branches",
+        lambda include_private=False: [{"name": "PLANTED", "path": str(branch), "entry_file": str(entry)}],
     )
-    monkeypatch.setattr(bypass_module, "discover_checkers", lambda pack_path=None: {"naming": object()})
+    checkers = {"naming": SimpleNamespace(check_module=_planted_naming, AUDIT_SCOPE="all_files")}
+    monkeypatch.setattr(bypass_module, "discover_checkers", lambda pack_path=None: checkers)
     return bypass_module, bypass_file
 
 
@@ -801,14 +825,146 @@ def test_a_dry_run_names_the_dead_rule_and_writes_nothing(prune_branch, capsys):
     assert "would remove [0] apps/gone.py / naming" in _printed(capsys)
 
 
-def test_a_file_json_cannot_reproduce_is_refused_not_rewritten(prune_branch, capsys):
-    """A rewrite would reformat every line the owner wrote, so nothing is written."""
+#: One-line rule objects, which json.dumps never writes: the owner's layout, kept by a prune.
+_GONE_LINE = '{"file": "apps/gone.py", "standard": "naming", "reason": "the file was retired"}'
+_LIVE_LINE = '{"file": "apps/live.py", "standard": "naming", "reason": "a live exception"}'
+
+
+def _owner_layout(*rules):
+    return '{\n    "bypass": [\n        ' + ",\n        ".join(rules) + "\n    ]\n}\n"
+
+
+@pytest.mark.parametrize(
+    "layout", [(_GONE_LINE, _LIVE_LINE), (_LIVE_LINE, _GONE_LINE)], ids=["dead_first", "dead_last"]
+)
+def test_a_file_json_dumps_cannot_reproduce_is_pruned_with_its_own_layout_kept(prune_branch, layout):
+    """10 of 18 fleet bypass files hold inline lists; a round-trip guard refused every one and wrote nothing."""
     bypass_module, bypass_file = prune_branch
-    bypass_file.write_text(json.dumps({"bypass": PRUNE_RULES}, indent=4), encoding="utf-8")
-    before = bypass_file.read_bytes()
+    bypass_file.write_text(_owner_layout(*layout), encoding="utf-8")
     bypass_module.handle_command("bypass", ["prune", "@planted"])
-    assert bypass_file.read_bytes() == before
-    assert "Nothing written: the file does not round-trip" in _printed(capsys)
+    assert bypass_file.read_text(encoding="utf-8") == _owner_layout(_LIVE_LINE)
+
+
+def test_a_rewrite_that_does_not_read_back_as_the_kept_rules_is_refused_with_exit_2(prune_branch, capsys, monkeypatch):
+    """Nothing written must not exit 0 under an EXECUTE banner."""
+    bypass_module, bypass_file = prune_branch
+    monkeypatch.setattr(dead_rules, "without_rules", lambda text, gone: text)
+    before = bypass_file.read_bytes()
+    with pytest.raises(CommandRefused) as refused:
+        bypass_module.handle_command("bypass", ["prune", "@planted"])
+    assert (refused.value.code, bypass_file.read_bytes()) == (2, before)
+    assert "Nothing written: the rewrite did not read back as the kept rules" in _printed(capsys)
+
+
+def test_a_rule_whose_checker_answers_the_same_without_it_is_removed(prune_branch, capsys):
+    """Matches a file on disk and still waives nothing: dead. The rule that waives live.py's finding stays."""
+    bypass_module, bypass_file = prune_branch
+    quiet = {"file": "apps/quiet.py", "standard": "naming", "reason": "nothing to waive"}
+    bypass_file.write_text(json.dumps({"bypass": [PRUNE_RULES[1], quiet]}, indent=2), encoding="utf-8")
+    bypass_module.handle_command("bypass", ["prune", "@planted"])
+    assert json.loads(bypass_file.read_text(encoding="utf-8"))["bypass"] == [PRUNE_RULES[1]]
+    assert "removed [1] apps/quiet.py / naming: covers nothing" in _printed(capsys)
+
+
+def _planted_file_wide(path, bypass_rules=None):
+    """The real checkers' file-wide waiver: a matched rule answers with a 'bypassed' check, whatever the file."""
+    if utils_is_bypassed(path, "naming", None, bypass_rules):
+        return {"passed": True, "score": 100, "checks": [{"name": "Bypassed", "passed": True, "message": "bypassed"}]}
+    return _planted_naming(path)
+
+
+@pytest.mark.parametrize(
+    ("rule_file", "dead"), [("apps/quiet.py", True), ("apps/live.py", False)], ids=["clean_file", "failing_file"]
+)
+def test_a_file_wide_rule_is_dead_only_over_a_file_clean_without_it(prune_branch, capsys, monkeypatch, rule_file, dead):
+    """The 'bypassed' message differs from any answer without the rule, so equality alone never convicted one."""
+    bypass_module, bypass_file = prune_branch
+    monkeypatch.setattr(
+        bypass_module,
+        "discover_checkers",
+        lambda pack_path=None: {"naming": SimpleNamespace(check_module=_planted_file_wide, AUDIT_SCOPE="all_files")},
+    )
+    rule = {"file": rule_file, "standard": "naming", "reason": "whole file"}
+    bypass_file.write_text(json.dumps({"bypass": [rule]}, indent=2), encoding="utf-8")
+    bypass_module.handle_command("bypass", ["prune", "@planted"])
+    assert json.loads(bypass_file.read_text(encoding="utf-8"))["bypass"] == ([] if dead else [rule])
+    assert (f"removed [0] {rule_file} / naming: covers nothing" in _printed(capsys)) is dead
+
+
+def _planted_entry_only(path, bypass_rules=None):
+    """An entry_point checker that fails every file it is handed unless a rule waives it."""
+    waived = utils_is_bypassed(path, "cli_flags", None, bypass_rules)
+    return {"passed": waived, "score": 100 if waived else 0, "checks": [{"name": "c", "passed": waived}]}
+
+
+@pytest.mark.parametrize(
+    ("rule_file", "dead"), [("apps/live.py", True), ("apps/planted.py", False)], ids=["outside_scope", "entry_file"]
+)
+def test_a_rule_over_a_file_the_audit_never_hands_its_checker_covers_nothing(
+    prune_branch, capsys, monkeypatch, rule_file, dead
+):
+    """An entry_point checker sees only the entry file; prune handing it apps/live.py kept a rule waiving nothing."""
+    bypass_module, bypass_file = prune_branch
+    monkeypatch.setattr(
+        bypass_module,
+        "discover_checkers",
+        lambda pack_path=None: {
+            "cli_flags": SimpleNamespace(check_module=_planted_entry_only, AUDIT_SCOPE="entry_point")
+        },
+    )
+    rule = {"file": rule_file, "standard": "cli_flags", "reason": "whole file"}
+    bypass_file.write_text(json.dumps({"bypass": [rule]}, indent=2), encoding="utf-8")
+    bypass_module.handle_command("bypass", ["prune", "@planted"])
+    assert json.loads(bypass_file.read_text(encoding="utf-8"))["bypass"] == ([] if dead else [rule])
+    assert (f"removed [0] {rule_file} / cli_flags: covers nothing" in _printed(capsys)) is dead
+
+
+def _passing_with_findings(branch_path, bypass_rules=None):
+    """unused_function's shape: passed, score 99, findings listed in a passing check, unless a rule waives them."""
+    if utils_is_bypassed(f"{branch_path}/apps/live.py", "naming", None, bypass_rules):
+        return {"passed": True, "score": 100, "checks": [{"name": "u", "passed": True, "message": "0 with no caller"}]}
+    return {"passed": True, "score": 99, "checks": [{"name": "u", "passed": True, "message": "2 with no caller"}]}
+
+
+def test_a_rule_that_lifts_a_passing_score_to_100_is_live(prune_branch, capsys, monkeypatch):
+    """@aipass's json_ops and provider_wire unused_function rules were convicted: the bare answer passed at 99."""
+    bypass_module, bypass_file = prune_branch
+    monkeypatch.setattr(
+        bypass_module,
+        "discover_checkers",
+        lambda pack_path=None: {
+            "naming": SimpleNamespace(check_branch=_passing_with_findings, AUDIT_SCOPE="branch_level")
+        },
+    )
+    rule = {"file": "apps/live.py", "standard": "naming", "reason": "a cross-branch caller"}
+    bypass_file.write_text(json.dumps({"bypass": [rule]}, indent=2), encoding="utf-8")
+    bypass_module.handle_command("bypass", ["prune", "@planted"])
+    assert json.loads(bypass_file.read_text(encoding="utf-8"))["bypass"] == [rule]
+    assert "covers nothing" not in _printed(capsys)
+
+
+def _failing_package_marker(path, bypass_rules=None):
+    """A file-lane checker with one finding, on a package marker, that a rule can waive."""
+    finding = path.endswith("__init__.py") and not utils_is_bypassed(path, "naming", None, bypass_rules)
+    return {"passed": not finding, "score": 0 if finding else 100, "checks": [{"name": "n", "passed": not finding}]}
+
+
+def test_a_rule_live_only_in_the_checklist_lane_is_kept(prune_branch, capsys, monkeypatch):
+    """The audit never hands __init__.py; the checklist does. @aipass's readme_map fallback rule was convicted."""
+    bypass_module, bypass_file = prune_branch
+    (bypass_file.parent.parent / "apps" / "__init__.py").write_text("pass\n", encoding="utf-8")
+    monkeypatch.setattr(
+        bypass_module,
+        "discover_checkers",
+        lambda pack_path=None: {
+            "naming": SimpleNamespace(check_module=_failing_package_marker, AUDIT_SCOPE="all_files")
+        },
+    )
+    rule = {"file": "apps/__init__.py", "standard": "naming", "reason": "waived in the checklist lane"}
+    bypass_file.write_text(json.dumps({"bypass": [rule]}, indent=2), encoding="utf-8")
+    bypass_module.handle_command("bypass", ["prune", "@planted"])
+    assert json.loads(bypass_file.read_text(encoding="utf-8"))["bypass"] == [rule]
+    assert "covers nothing" not in _printed(capsys)
 
 
 def test_an_unknown_branch_is_refused_with_exit_3(prune_branch):
@@ -817,3 +973,46 @@ def test_an_unknown_branch_is_refused_with_exit_3(prune_branch):
     with pytest.raises(CommandRefused) as refused:
         bypass_module.handle_command("bypass", ["prune", "@nobody"])
     assert (refused.value.code, refused.value.token) == (3, "@nobody")
+
+
+def test_a_patterned_rule_and_a_diagnostics_rule_are_named_for_what_they_do(tmp_path):
+    """matching_rule never reads 'pattern', and diagnostics never reads rules: both are said, not hidden."""
+    (tmp_path / ".sentry").mkdir()
+    rules = [
+        {"file": "apps/a.py", "standard": "naming", "reason": "r", "pattern": "send_email"},
+        {"file": "apps/b.py", "standard": "diagnostics", "reason": "r"},
+        {"file": "apps/c.py", "standard": "naming", "reason": "r"},
+    ]
+    (tmp_path / ".sentry" / "bypass.json").write_text(json.dumps({"bypass": rules}), encoding="utf-8")
+    info = inert.check_branch_info(str(tmp_path))
+    assert (
+        "apps/a.py (naming): 'pattern' 'send_email' is ignored, matching_rule never reads it: this rule is file-wide"
+        in info
+    )
+    assert "apps/b.py (diagnostics): diagnostics never reads bypass rules, so this rule suppresses nothing" in info
+    assert not any("apps/c.py" in line for line in info)
+
+
+def test_a_whole_file_row_for_a_per_site_standard_is_named_outlawed(tmp_path):
+    (tmp_path / ".sentry").mkdir()
+    rules = [
+        {"file": "apps/a.py", "standard": "silent_catch", "reason": "r"},
+        {"file": "apps/b.py", "standard": "fallback", "reason": "r"},
+        {"file": "apps/c.py", "standard": "logged_fallback", "lines": [9], "reason": "r"},
+    ]
+    (tmp_path / ".sentry" / "bypass.json").write_text(json.dumps({"bypass": rules}), encoding="utf-8")
+    info = inert.check_branch_info(str(tmp_path))
+    outlawed = "a whole-file row is outlawed for this standard, pin it per site (lines/functions); it "
+    assert f"apps/a.py (silent_catch): {outlawed}still waives the whole file, for now" in info
+    assert f"apps/b.py (fallback): {outlawed}waives nothing" in info
+    assert not any("apps/c.py" in line for line in info)
+
+
+def test_waived_sites_counts_one_per_pinned_line_or_function_and_one_per_whole_file_row():
+    rules = [
+        {"file": "a.py", "standard": "naming", "lines": [1, 2]},
+        {"file": "b.py", "standard": "naming", "functions": ["f"]},
+        {"file": "c.py", "standard": "naming"},
+        {"file": "", "standard": "naming"},
+    ]
+    assert bypass_handler.waived_sites(rules) == 4

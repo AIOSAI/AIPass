@@ -31,7 +31,7 @@
   <a href="https://aipass.ai">aipass.ai</a>
 </p>
 
-> **AIPass is simplifying.** It is moving to Linux only: native, WSL2 on Windows, and a Docker image to come. Native macOS and Windows maintenance ends; a port is the community's to carry. AIPass stays open source and in daily development, the developer's lifetime project. If this changes how you use it, open a [discussion](https://github.com/AIOSAI/AIPass/discussions) or an [issue](https://github.com/AIOSAI/AIPass/issues) with `transition` in the title and tell us your setup. We will help you find your path: WSL2, Docker when it lands, or a fork.
+> **AIPass is Linux only.** It is built and tested on Ubuntu: native, WSL2, and a Docker image to come. AIPass stays open source and in daily development, the developer's lifetime project. If this changes how you use it, open a [discussion](https://github.com/AIOSAI/AIPass/discussions) or an [issue](https://github.com/AIOSAI/AIPass/issues) with `transition` in the title and tell us your setup. We will help you find your path: WSL2, Docker when it lands, or a fork.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/AIOSAI/AIPass/main/assets/demo.gif" alt="Terminal demo: the fleet listed, a memory an agent kept a month ago found by meaning, and an agent audited at 100%" width="760">
@@ -40,14 +40,14 @@
 
 ## Install
 
-**You need:** Python 3.10+, [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it, and Linux (Windows through WSL2). [Codex](https://github.com/openai/codex) and [OpenCode](https://opencode.ai) if you want them: with a binary on your PATH, install sets it up as another CLI for the same agents, and each agent runs on any of them, your choice per task.
+**You need:** Python 3.10+, [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it, and Ubuntu (native or WSL2). [Codex](https://github.com/openai/codex) and [OpenCode](https://opencode.ai) if you want them: with a binary on your PATH, install sets it up as another CLI for the same agents, and each agent runs on any of them, your choice per task.
 
 ```bash
 pipx install aipass
 aipass install
 ```
 
-The first line puts two commands on your PATH, `aipass` and `drone`. The second clones AIPass into `~/AIPass` (`--path` to choose), builds its environment, sets up the 18 agents, runs a health check, and ends with the AIPass concierge on screen, greeting you and saying what your machine still needs. It also starts a server on your machine for BAUD, the phone face; `--no-baud` skips that.
+The first line puts two commands on your PATH, `aipass` and `drone`. The second clones AIPass into `~/AIPass` (`--path` to choose), builds its environment, sets up the 18 agents, runs a health check, and ends on an install report: what still needs attention, and the command that wakes devpulse on it. It also starts a server on your machine for BAUD, the phone face; `--no-baud` skips that.
 
 To work on AIPass itself, install from a clone instead (this route skips the phone step):
 
@@ -59,21 +59,16 @@ Install adds AIPass hooks and deny rules to your user-level Claude Code settings
 
 ## Start here
 
-1. **Make a project, or adopt one you have.** `aipass new` builds a new project around a resident manager agent, makes the first commit, and ends in a conversation with that agent. `aipass init run`, run inside a directory you already have, does a guided setup and ends with the CLI you chose (`claude` by default, or `codex`) open in it; its `aipass_framework` template adds the first agent on the way.
+Talk to **devpulse**, the admin seat: run `claude` in `src/aipass/devpulse` in your AIPass folder. Hand it the install report first; after that, say what you want in plain words and it plans the work and dispatches it to the agent that owns the code. Talk to **aipass**, the machine concierge, about the host itself (Wi-Fi drops, a USB port not working, a CPU running hot): run `claude` in `src/aipass/aipass`, or its CLI, `aipass --help`.
 
-   ```bash
-   aipass new my-project --template python   # New project: scaffold, resident manager agent, first commit
-   aipass init run                           # A directory you already have: run inside it, guided setup
-   ```
-
-2. **Talk to your manager.** Run `claude` in the manager's directory and say what you want in plain words, such as "Add a CSV export to the report command." It writes a plan, sends the work to the agent that owns that code, and reports back when it lands. The same two steps by hand:
-
-   ```bash
-   drone @flow create . "Add CSV export"            # A work plan that carries the context
-   drone @ai_mail dispatch @agent "Subject" "Body"  # Send the task and wake the agent
-   ```
-
-3. **Grow it and check it.** Add an agent with `drone @spawn create src/my_project/analyst --role "Analyst" --purpose "Reports"`. Run `drone @sentry audit aipass` for the same standards checks AIPass's own agents pass in CI, and `aipass doctor` for the health of the install.
+```bash
+aipass new my-project --template python   # projects/my-project: own git repo, scaffold, resident manager agent
+aipass adopt <path>                       # an existing directory becomes a project
+aipass init [target]                      # scaffold only; add an agent with: aipass init agent <name>
+drone @flow create . "Add CSV export"     # a work plan that carries the context
+drone @ai_mail dispatch @agent "Subject" "Body"   # send a task and wake the agent
+drone @sentry audit aipass                # the standards checks AIPass's own agents pass in CI
+```
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/AIOSAI/AIPass/main/assets/baud-agent.png" alt="An agent's card in BAUD: what it is doing, its mail, plans and todos" width="240">
@@ -153,24 +148,24 @@ The boring stuff works. One human and these agents built it, and use it every da
 <details>
 <summary>The full list</summary>
 
-Install builds the environment, puts `aipass` and `drone` on your PATH, and sets up the 18 agents. It runs a health check that fixes what it can. In an interactive shell it ends in a conversation with the AIPass concierge, which greets you and walks you through what your machine still needs. On the way it may ask for your git identity (only if it is not set globally), your name, and whether the session should ask before system-changing commands. A non-interactive shell finishes with defaults and no prompts, and skips both the health check and the conversation; `--no-chat` skips them in any shell.
+Install builds the environment, puts `aipass` and `drone` on your PATH, and sets up the 18 agents. It ends on a health check that fixes what it can, an install report in devpulse's dropbox, and a final screen with what still needs attention. In a terminal it asks where AIPass should live (unless `--path`), your git identity (only if it is not set globally), one yes or no before the changes outside the repo listed below (on no it skips them, says what will not work, and `./setup.sh` makes them later), and Enter before the phone pairing code. Your name comes from git's `user.name`, else your login. A non-interactive shell asks nothing and makes the changes; on the clone route `--no-finish` skips the health check and the report.
 
-Install changes a few things outside the repo, and you should know what. It adds AIPass deny rules to your user-level Claude Code settings (no raw git writes: `commit`, `push`, `reset`, `rebase`, `merge`, `config` and the destructive `checkout`, `restore`, `stash` and `branch` forms; no reading `~/.secrets/`), and these apply to every Claude Code project on the machine. It merges its hooks with any you already have. It adds a `claude` shell function that, inside an agent directory, boots that agent's seat, attaching to it if one is already live. It sets `git config --global pull.rebase true` when it sets your git identity. On Linux it installs the `@anthropic-ai/sandbox-runtime` npm package if it is missing; macOS runs without the sandbox. On Linux, `sudo` may ask once to place the `/usr/local/bin` symlinks. Re-running install rebuilds `.venv`. The list below names every file it touches.
+Install changes a few things outside the repo, and you should know what. It adds AIPass deny rules to your user-level Claude Code settings (no raw git writes: `commit`, `push`, `reset`, `rebase`, `merge`, `config` and the destructive `checkout`, `restore`, `stash` and `branch` forms; no reading `~/.secrets/`), and these apply to every Claude Code project on the machine. It merges its hooks with any you already have. It adds a `claude` shell function that, inside an agent directory, boots that agent's seat, attaching to it if one is already live. It sets `git config --global pull.rebase true` when it sets your git identity. It installs the `@anthropic-ai/sandbox-runtime` npm package if it is missing. `sudo` may ask once to place the `/usr/local/bin` symlinks. Re-running install rebuilds `.venv`. The list below names every file it touches.
 
 The installer writes a layer outside the project. Remove all of it to erase AIPass completely:
 
 - `~/.claude/settings.json` — hook wiring, plus `env.AIPASS_HOME`, `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY`, `env.CLAUDE_CODE_DISABLE_AGENT_VIEW`, `includeGitInstructions: false`, the AIPass deny rules (git write verbs, `~/.secrets` reads) and one `ask` rule (edits under `~/.claude/`). Nothing of AIPass changes this file unseen: every write first drops a dated copy under `~/.claude/.backup/settings/` and a line in the `receipts.jsonl` beside it naming which door wrote; `aipass doctor --fix` lists the changes with a diff and asks once before writing (`--yes` for scripts), and the installer's own preflight writes once, with a receipt. Also `~/.claude/commands/memo.md`.
 - `~/.claude/.backup/settings/` — those dated copies and the receipts ledger.
 - `aipass`/`drone` symlinks in `/usr/local/bin` or `~/.local/bin`.
-- Your shell rc (`.bashrc`, `.zshrc` or `.bash_profile`) and, on Linux, `~/.profile`: an `AIPASS_HOME` export, a PATH line where the commands went to `~/.local/bin`, and the `claude()` boot-shim function between the `AIPass boot shim` markers in `.bashrc` and `.zshrc`.
-- `~/.aipass/` — cross-project state: the trust registry, commons database, admin key, skills, the BAUD phone face and `baud-cli` under `baud/`, the logs of the `aipass` CLI installed from PyPI under `system_logs/` (a clone logs under its own `system_logs/` instead), and any Telegram bot state an earlier version left (the Telegram skill is out of the tree).
-- Your login keyring: one entry per secret under the service `aipass` (API keys, Google credentials, the host API's token, pairings and config), in SecretService on Linux, the Keychain on macOS, the Credential Locker on Windows. `drone @api secrets migrate` imports the files an earlier version kept under `~/.secrets/aipass/` and shreds them; that directory keeps only the host API's write lock and pairing receipts.
+- Your shell rc (`.bashrc`, `.zshrc` or `.bash_profile`) and `~/.profile`: an `AIPASS_HOME` export, a PATH line where the commands went to `~/.local/bin`, and the `claude()` boot-shim function between the `AIPass boot shim` markers in `.bashrc` and `.zshrc`.
+- `~/.aipass/` — cross-project state: the trust registry, commons database, admin key, skills, the BAUD phone face and `baud-cli` under `baud/`, the logs of the `aipass` CLI installed from PyPI under `system_logs/` (a clone logs under its own `system_logs/` instead).
+- Your login keyring: one entry per secret under the service `aipass` (API keys, Google credentials, the host API's token, pairings and config) in SecretService. `drone @api secrets migrate` imports the files an earlier version kept under `~/.secrets/aipass/` and shreds them; that directory keeps only the host API's write lock and pairing receipts.
 - `git config --global pull.rebase true`, set only if install also set your identity.
 - Only if a `codex` binary was on PATH at install: the AIPass Codex hooks are merged into `~/.codex/hooks.json` (`$CODEX_HOME/hooks.json` when set) from `.claude/provider_manifest.json`, your own rows kept, and four pins (`memories`, `collaboration_modes`, `include_collaboration_mode_instructions`, `tools.experimental_request_user_input.enabled`, all `false`) are set in `~/.codex/config.toml` one line each, every other line kept, after a backup and with a receipt. Run `codex` once and choose 'Trust all and continue', or a headless run skips the hooks.
 - Only if an `opencode` binary was on PATH (or in `~/.opencode/bin`) at install: the AIPass plugin is copied to `~/.config/opencode/plugins/aipass.ts`, after a backup and with a receipt. It runs the same hooks and gates on OpenCode.
 - Only if you ran `drone @daemon install-timer`: a systemd user timer, with its `daemon-tick.log` under `~/.aipass/`, removed by `drone @daemon uninstall-timer`.
 - Unless you pass `--no-baud`, `aipass install` sets up the host API (the `./aipass install` clone route skips this step): its bind, token and pairings as keyring entries (pairing codes are stored as hashes once one is minted), its write lock and pairing receipts under `~/.secrets/aipass/`, and the `aipass-host-api.service` user unit under `~/.config/systemd/user/` (`systemctl --user disable --now aipass-host-api.service` removes it from boot).
-- macOS only, when no Python 3.10+ is found and an existing Homebrew cannot provide one: a `uv`-managed interpreter under `~/.local/`. Linux with no Python 3.10+ stops the install and says so.
+- Linux with no Python 3.10+ stops the install and says so; nothing is installed to provide one.
 
 No cloud accounts, no external services — everything to clean up is on your machine.
 
@@ -183,7 +178,7 @@ No cloud accounts, no external services — everything to clean up is on your ma
 >
 > **devpulse** is the admin seat. Run `claude` in `src/aipass/devpulse` in your AIPass folder (`~/AIPass` by default) to talk a project through before you create it, solve a problem, or get help with setup. It can dispatch any agent on your machine, your project managers included, and edit files and run git across projects.
 >
-> **aipass** is the concierge for the machine itself: setup, updates and installs, and machine problems like a wifi connection that keeps dropping or a fan that never stops. Run `claude` in `src/aipass/aipass`.
+> **aipass** is the machine concierge: host and OS diagnosis, the doctor, the installer, and host problems like a Wi-Fi connection that keeps dropping or a fan that never stops. Run `claude` in `src/aipass/aipass`.
 >
 > The other sixteen maintain AIPass, and your agents call their services (mail, plans, memory, gates) without you running them.
 
@@ -194,7 +189,7 @@ AIPass ships with 18 agents. Each has its own README and a `docs/` folder under 
 
 ```
 devpulse (orchestrator: the one you talk to)
-   ├── aipass   : concierge: setup, updates, machine problems (init, doctor)
+   ├── aipass   : machine concierge: host/OS diagnosis, doctor, installer
    ├── drone    : command routing and @agent resolution
    ├── sentry   : quality standards, checked across all agents
    ├── prax     : monitoring, logs, runaway-log detection
@@ -206,7 +201,7 @@ devpulse (orchestrator: the one you talk to)
    ├── api      : external APIs, keys and secrets, host server (optional)
    ├── trigger  : event bus, wakes the agent that owns an error
    ├── cli      : terminal formatting and output
-   ├── backup   : local snapshots and restore (optional Drive sync)
+   ├── backup   : local snapshots (optional Drive sync)
    ├── daemon   : scheduler for recurring jobs
    ├── skills   : capability units any agent can run
    ├── commons  : the social space where agents post and gather
@@ -231,7 +226,7 @@ curl -fsSL https://github.com/AIOSAI/baud/releases/latest/download/install.sh | 
 
 **Stable.** Built by one human and the AIPass agents, with a handful of outside contributions. From here the work is fine-tuning.
 
-Linux is the platform: the daily driver, the one CI proves. On Windows, AIPass runs inside WSL2. macOS ran the suite in CI until 2026-11 and is no longer maintained; the code keeps its macOS and Windows paths but nothing proves them.
+Ubuntu is the platform, native or WSL2: the daily driver, the one CI proves.
 
 **Version:** <a href="https://pypi.org/project/aipass/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/aipass?color=007ec6"></a> **Python:** <a href="https://pypi.org/project/aipass/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/aipass?color=007ec6"></a> **Agents:** 18 core + user-created.
 
@@ -252,9 +247,9 @@ Linux is the platform: the daily driver, the one CI proves. On Windows, AIPass r
 - [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it (Pro, Max, Team or Enterprise)
 - [Codex](https://github.com/openai/codex) optional: with its binary on PATH, install wires it as a second CLI for the same agents (`/codex` and `$claude` switch a seat between the two)
 - [OpenCode](https://opencode.ai) optional: with its binary on PATH, install adds the AIPass plugin so the same agents run on it (`/opencode` from Claude Code, `$opencode` from Codex, `/claude` and `/codex` back); signed out, it runs on OpenCode's free models
-- Linux (the only platform CI tests). On Windows, use [WSL2](https://learn.microsoft.com/windows/wsl/install) and install inside it: AIPass then runs as the Linux program CI tests. macOS, native Windows and Git Bash are not tested; the code keeps their paths but nothing proves them.
-- `sudo` access optional (Linux uses it for `/usr/local/bin` symlinks — falls back to `~/.local/bin` without it; macOS never asks)
-- Node.js + npm optional (on Linux, install uses them to add the `@anthropic-ai/sandbox-runtime` kernel sandbox; without them the sandbox is reported as optional and not set up, AIPass runs without it, and `aipass doctor` says how to add it later; macOS skips the sandbox)
+- Ubuntu, native or [WSL2](https://learn.microsoft.com/windows/wsl/install): the platform CI tests. Other Linux distributions are untested.
+- `sudo` access optional (used for `/usr/local/bin` symlinks — falls back to `~/.local/bin` without it)
+- Node.js + npm optional (install uses them to add the `@anthropic-ai/sandbox-runtime` kernel sandbox; without them the sandbox is reported as optional and not set up, AIPass runs without it, and `aipass doctor` says how to add it later)
 - API keys / OAuth optional (OpenRouter, Google — only for optional add-on integrations)
 
 </details>
@@ -272,7 +267,7 @@ Each agent keeps its own docs under `src/aipass/<agent>/docs/`. Start with these
 - **Gates:** [edit gate](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/edit_gate.md) · [git gate](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/git_gate.md) · [sandbox](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/sandbox.md)
 - **Standards:** [AIPass standards](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/sentry/docs/aipass_standards.md)
 - **Scheduler:** [daemon](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/daemon/docs/README.md)
-- **Backups:** [restore](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/backup/docs/restore.md)
+- **Backups:** [the store](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/backup/docs/store.md) · [drive sync](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/backup/docs/drive_sync.md)
 - **Project files:** [CONTRIBUTING](https://github.com/AIOSAI/AIPass/blob/main/CONTRIBUTING.md) · [SECURITY](https://github.com/AIOSAI/AIPass/blob/main/SECURITY.md) · [CHANGELOG](https://github.com/AIOSAI/AIPass/blob/main/CHANGELOG.md) · [LICENSE](https://github.com/AIOSAI/AIPass/blob/main/LICENSE)
 
 ## Contributing

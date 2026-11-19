@@ -19,7 +19,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 from aipass.devpulse.apps.handlers.json import json_handler
@@ -48,25 +48,22 @@ def _empty_store() -> dict:
 
 
 def _load_store(storage_path: Path) -> dict:
-    """Load the timer store, returning an empty structure on miss or corruption."""
+    """Load the timer store. A missing file is an empty store; an unreadable or wrong-shape one raises."""
     if not storage_path.exists():
         return _empty_store()
     try:
         data = json.loads(storage_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("[watchdog.timer] could not load %s: %s", storage_path, exc)
-        return _empty_store()
-
-    # Tolerate older/partial files rather than crashing a timer operation.
-    if not isinstance(data, dict):
-        return _empty_store()
+        raise _registry.RegistryUnreadable(f"timer store {storage_path} unreadable: {exc}") from exc
+    if (
+        not isinstance(data, dict)
+        or not isinstance(data.get("active", {}), dict)
+        or not isinstance(data.get("history", []), list)
+    ):
+        raise _registry.RegistryUnreadable(f"timer store {storage_path} is not a timer store object")
     data.setdefault("version", _STORAGE_VERSION)
     data.setdefault("active", {})
     data.setdefault("history", [])
-    if not isinstance(data["active"], dict):
-        data["active"] = {}
-    if not isinstance(data["history"], list):
-        data["history"] = []
     return data
 
 

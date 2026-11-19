@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: runner.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Provider parity: the same scripted prompts headless on Claude, Codex and OpenCode, hook by hook
 # Branch: hooks
 # Layer: apps/handlers/parity
 # Created: 2026-10-26
-# Modified: 2026-10-28
+# Modified: 2026-11-16
 # =============================================
 
 """Provider parity runner.
@@ -27,7 +27,7 @@ from pathlib import Path
 
 from aipass.hooks.apps.handlers.config import diagnostics
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 PROVIDERS = ("claude", "codex", "opencode")
 DEFAULT_PROVIDERS = ("claude", "codex")
@@ -244,7 +244,7 @@ def free_limited(stdout: str) -> bool:
 def _pointer_stamp(branch: Path) -> float:
     try:
         return (branch / ".ai_mail.local" / "session.json").stat().st_mtime
-    except OSError:
+    except FileNotFoundError:
         return 0.0
 
 

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for encapsulation_check sub-functions (the other checkers moved to test_checkers_batch7_*.py)
-# Version: 1.4.2
+# Version: 1.6.0
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/encapsulation_check.py and its sibling checkers (batch 7)."""
@@ -16,17 +16,13 @@
 # sentry: no-test-needed(ruff) — that each checker in handlers/aipass_standards/ parses and imports
 # sentry: no-test-needed(stdlib) — ast.parse's parsing; the checkers only walk the tree it returns
 
-from pathlib import Path
-
 import pytest
 
 from aipass.sentry.apps.handlers.aipass_standards import encapsulation_check
 from aipass.sentry.apps.handlers.aipass_standards.encapsulation_check import (
     check_cross_branch_imports,
-    check_cross_package_imports,
     check_direct_handler_imports,
     extract_branch_from_import,
-    extract_handler_package,
     get_file_handler_package,
 )
 from aipass.sentry.tests.support_checkers_batch7 import _lines
@@ -58,36 +54,14 @@ class TestExtractBranchFromImport:
         assert result == "sentry"
 
     def test_handlers_nested_under_a_branch_tree_are_that_branchs(self):
-        """daemon's telegram_notifier.py:28 imports skills' lib/telegram handlers (measured 10-08)."""
-        line = "from aipass.skills.lib.telegram.apps.handlers.notifier import ("
+        """A daemon file importing handlers nested in skills' lib/ imports skills."""
+        line = "from aipass.skills.lib.drone_commands.apps.handlers.notifier import ("
         violation = check_cross_branch_imports([line], "daemon/apps/handlers/schedule/notifier_use.py", "daemon")
 
         assert extract_branch_from_import(line) == "skills"
-        assert violation["message"] == "Line 1: skills.apps.handlers imported (use modules entry point)"
-
-
-class TestExtractHandlerPackage:
-    """Tests for extract_handler_package."""
-
-    def test_extracts_json(self):
-        """Extract 'json' from handler import path."""
-        result = extract_handler_package("from apps.handlers.json.json_handler import X")
-        assert result == "json"
-
-    def test_extracts_dashboard(self):
-        """Extract 'dashboard' from handler import path."""
-        result = extract_handler_package("from apps.handlers.dashboard.refresh import X")
-        assert result == "dashboard"
-
-    def test_cross_branch_handler(self):
-        """Extract package from cross-branch handler import."""
-        result = extract_handler_package("from flow.apps.handlers.plan.validator import X")
-        assert result == "plan"
-
-    def test_no_handlers_returns_none(self):
-        """Import without apps.handlers returns None."""
-        result = extract_handler_package("from apps.modules.audit import run")
-        assert result is None
+        assert violation["message"] == (
+            "Line 1: skills.apps.handlers imported (use its front door: from aipass.skills import <name>)"
+        )
 
 
 class TestGetFileHandlerPackage:
@@ -269,7 +243,8 @@ class TestCheckCrossBranchImports:
             "name": "Cross-branch handler imports",
             "passed": False,
             "message": (
-                "Line 2: memory.apps.handlers imported (string import) (use modules entry point): "
+                "Line 2: memory.apps.handlers imported (string import) "
+                "(use its front door: from aipass.memory import <name>): "
                 'mod = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")'
             ),
         }
@@ -292,14 +267,16 @@ class TestCheckCrossBranchImports:
 
 
 class TestEncapsulationReadsImportLinesOnly:
-    """The three import scans read code lines; docstrings, comments and string bodies hold no import."""
+    """The two import scans read code lines; docstrings, comments and string bodies hold no import."""
 
     _PATH = ("sentry", "apps", "modules", "a.py")
 
     def test_an_import_after_a_docstring_closing_mid_line_is_read(self, tmp_path):
         lines = _lines('"""Doc opens\nand closes here."""\nfrom flow.apps.handlers.plan.validator import X\n')
         result = check_cross_branch_imports(lines, tmp_path.joinpath(*self._PATH).as_posix(), "sentry")
-        assert result["message"] == "Line 3: flow.apps.handlers imported (use modules entry point)"
+        assert result["message"] == (
+            "Line 3: flow.apps.handlers imported (use its front door: from aipass.flow import <name>)"
+        )
 
     def test_an_import_named_in_a_docstring_past_the_other_delimiter_is_prose(self, tmp_path):
         lines = _lines('def f():\n    """Doc.\n    \'\'\'\n    from flow.apps.handlers.plan import X\n    """\n')
@@ -308,13 +285,16 @@ class TestEncapsulationReadsImportLinesOnly:
 
     def test_a_fixture_string_body_naming_an_import_is_not_one(self, tmp_path):
         lines = _lines('SOURCE = """\nfrom apps.handlers.other import X\n"""\n')
-        path = tmp_path.joinpath("sentry", "apps", "handlers", "mine", "a.py").as_posix()
-        assert check_cross_package_imports(lines, path, "mine")["passed"] is True
+        path = tmp_path.joinpath("sentry", "apps", "x.py").as_posix()
+        assert check_direct_handler_imports(lines, path)["passed"] is True
 
     def test_a_direct_import_after_a_docstring_closing_mid_line_is_read(self, tmp_path):
         lines = _lines('"""Doc opens\nand closes here."""\nfrom sentry.apps.handlers.plan.validator import X\n')
         result = check_direct_handler_imports(lines, tmp_path.joinpath("sentry", "apps", "x.py").as_posix())
-        assert result["message"] == "Line 3: Handler imported directly (use module entry point)"
+        assert result["message"] == (
+            "Line 3: Handler imported directly (inside its branch, through a module; "
+            "another branch's, through its front door: from aipass.<branch> import <name>)"
+        )
 
 
 class TestTestsAreKinToTheirOwnBranchOnly:
@@ -348,10 +328,10 @@ class TestTestsAreKinToTheirOwnBranchOnly:
         assert result["checks"][0]["message"].startswith("Line ")
 
     def test_a_nested_package_is_judged_by_the_branch_after_aipass(self, tmp_path):
-        """skills' own lib/telegram handlers are kin to skills' tests; the segment before apps is not the branch."""
+        """A branch's own nested lib/ handlers are kin to its tests; the segment before apps is not the branch."""
         body = (
-            "from aipass.hooks.lib.telegram.apps.handlers import notifier\n"
-            'patch("aipass.hooks.lib.telegram.apps.handlers.notifier.send")\n'
+            "from aipass.hooks.lib.chat.apps.handlers import notifier\n"
+            'patch("aipass.hooks.lib.chat.apps.handlers.notifier.send")\n'
         )
         result = encapsulation_check.check_module(self._test_file(tmp_path, body))
         assert result["score"] == 100
@@ -400,45 +380,38 @@ class TestTestsAreKinToTheirOwnBranchOnly:
         ]
 
 
-class TestCheckCrossPackageImports:
-    """Tests for check_cross_package_imports."""
+class TestHandlersImportAnyHandlerOfTheirOwnBranch:
+    """Inside a branch any handler imports any handler; across branches only the entry point is open."""
 
-    def test_same_package_passes(self, tmp_path):
-        """Importing from same handler package passes."""
-        lines = _lines("from apps.handlers.json.utils import helper\n")
-        result = check_cross_package_imports(
-            lines, (tmp_path / "branch" / "apps" / "handlers" / "json" / "handler.py").as_posix(), "json"
-        )
-        assert result["passed"] is True
+    @staticmethod
+    def _import_verdicts(tmp_path, body: str) -> dict:
+        """check_module on a handler in a tmp branch named demo: each import check's name to its verdict."""
+        handler = tmp_path / "aipass" / "demo" / "apps" / "handlers" / "audit" / "checker.py"
+        handler.parent.mkdir(parents=True)
+        handler.write_text(body, encoding="utf-8")
+        result = encapsulation_check.check_module(str(handler))
+        return {check["name"]: check for check in result["checks"] if "import" in check["name"].lower()}
 
-    def test_cross_package_fails(self, tmp_path):
-        """Importing from a different handler package fails."""
-        lines = _lines("from apps.handlers.error.error_handler import X\n")
-        result = check_cross_package_imports(
-            lines,
-            (tmp_path / "branch" / "apps" / "handlers" / "audit" / "checker.py").as_posix(),
-            "audit",
-        )
-        assert result["passed"] is False
-        assert "error" in result["message"]
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "from apps.handlers.error.error_handler import X\n",
+            "import apps.handlers.error.error_handler\n",
+            "from aipass.demo.apps.handlers.error.error_handler import X\n",
+            "from ..error.error_handler import X\n",
+        ],
+    )
+    def test_a_sibling_handler_package_of_the_same_branch_passes(self, tmp_path, body):
+        """Mutant: the cross-package check restored in check_module — killed."""
+        verdicts = self._import_verdicts(tmp_path, body)
+        assert sorted(verdicts) == ["Cross-branch handler imports"]
+        assert verdicts["Cross-branch handler imports"]["passed"] is True
 
-    def test_allowed_json_handler_passes(self, tmp_path):
-        """Importing json_handler (default allowed handler) passes."""
-        lines = _lines("from apps.handlers.json.json_handler import log_op\n")
-        result = check_cross_package_imports(
-            lines,
-            (tmp_path / "branch" / "apps" / "handlers" / "audit" / "checker.py").as_posix(),
-            "audit",
-        )
-        assert result["passed"] is True
-
-    def test_relative_import_passes(self, tmp_path):
-        """Relative imports within same package pass."""
-        lines = _lines("from .utils import helper\n")
-        result = check_cross_package_imports(
-            lines, (tmp_path / "branch" / "apps" / "handlers" / "json" / "handler.py").as_posix(), "json"
-        )
-        assert result["passed"] is True
+    def test_another_branchs_handler_still_convicts(self, tmp_path):
+        """Mutant: the cross-branch check dropped from check_module — killed."""
+        verdicts = self._import_verdicts(tmp_path, "from aipass.flow.apps.handlers.plan.validator import v\n")
+        assert verdicts["Cross-branch handler imports"]["passed"] is False
+        assert "flow.apps.handlers" in verdicts["Cross-branch handler imports"]["message"]
 
 
 class TestCheckDirectHandlerImports:
@@ -468,6 +441,48 @@ class TestCheckDirectHandlerImports:
         lines = _lines("from apps.handlers.users.profile_handler import load\n")
         result = check_direct_handler_imports(lines, (tmp_path / "branch" / "apps" / "branch.py").as_posix())
         assert result["passed"] is False
+
+
+#: A type-only block naming each door name from its own handler home; nothing runs at import.
+TYPED = (
+    "from typing import TYPE_CHECKING\n"
+    "if TYPE_CHECKING:\n"
+    "    from aipass.demo.apps.handlers.dash.ops import (\n"
+    "        cap as cap,\n"
+    "    )\n"
+)
+
+
+class TestTheDoorTypesItsNamesFromTheirHomes:
+    """A package top file's TYPE_CHECKING import of its own handler is the door's static view, not a breach."""
+
+    @pytest.mark.parametrize(
+        "rel, source, passed",
+        [
+            ("__init__.py", TYPED, True),
+            ("__init__.py", "from aipass.demo.apps.handlers.dash.ops import cap\n", False),
+            ("__init__.py", TYPED.replace("if TYPE_CHECKING:", "if FAST:"), False),
+            ("apps/demo.py", TYPED, False),
+        ],
+        ids=["door_type_only", "door_runtime", "door_runtime_if_block", "entry_point_type_only"],
+    )
+    def test_only_the_doors_type_only_own_handler_import_is_acquitted(self, tmp_path, rel, source, passed):
+        branch = tmp_path / "src" / "aipass" / "demo"
+        (branch / "apps").mkdir(parents=True)
+        target = branch / rel
+        target.write_text(source, encoding="utf-8")
+        assert check_direct_handler_imports(_lines(source), str(target))["passed"] is passed
+
+    def test_another_branchs_handler_in_the_doors_type_only_block_still_convicts(self, tmp_path):
+        branch = tmp_path / "src" / "aipass" / "demo"
+        (branch / "apps").mkdir(parents=True)
+        source = TYPED.replace("aipass.demo.apps", "aipass.flow.apps")
+        (branch / "__init__.py").write_text(source, encoding="utf-8")
+        checks = encapsulation_check.check_module(str(branch / "__init__.py"))["checks"]
+        assert {c["name"]: c["passed"] for c in checks if "import" in c["name"].lower()} == {
+            "Cross-branch handler imports": False,
+            "Direct handler imports": False,
+        }
 
 
 class TestEncapsulationDerivesItsInfrastructureAllowList:
@@ -563,44 +578,3 @@ class TestEncapsulationDerivesItsInfrastructureAllowList:
         handlers.mkdir(parents=True)
         (handlers / "module_root.py").write_text("def module_file(:\n", encoding="utf-8")
         assert self._allowed(branch, "module_root") is False
-
-
-class TestAWindowsPathIsReadLikeAPosixOne:
-    """Windows hands the checker C:\\...\\apps\\modules\\door.py, and the checker asked for "apps/modules/"."""
-
-    _DOOR = (
-        '"""Door: memory\'s entry limits, for other branches."""\n\n'
-        "from aipass.memory.apps.handlers.json.entry_limits import check_file_budget, load_entry_limits\n\n"
-        '__all__ = ["load_entry_limits", "check_file_budget"]\n'
-    )
-
-    def _windows_spelled(self, tmp_path, monkeypatch, *parts):
-        """Write the door at tmp_path\\aipass\\memory\\apps\\<parts>, spelled as Windows spells it; return it."""
-        door = "\\".join([str(tmp_path), "aipass", "memory", "apps", *parts])
-        Path(door).parent.mkdir(parents=True, exist_ok=True)
-        Path(door).write_text(self._DOOR, encoding="utf-8")
-        # Windows infers the branch from Path.parts; this pins it on every host.
-        monkeypatch.setattr(encapsulation_check, "get_branch_from_path", lambda fp: {"name": "memory", "path": "x"})
-        return door
-
-    def test_a_door_under_a_backslashed_modules_path_passes(self, tmp_path, monkeypatch):
-        """Mutant: the separator normalisation dropped from check_module's module test — killed."""
-        door = self._windows_spelled(tmp_path, monkeypatch, "modules", "door_entry_limits.py")
-        assert "\\apps\\modules\\" in door
-
-        result = encapsulation_check.check_module(door)
-
-        assert [c["name"] for c in result["checks"] if not c["passed"]] == []
-
-    def test_the_same_door_outside_modules_is_still_convicted(self, tmp_path, monkeypatch):
-        """Control: an entry point under a backslashed apps path keeps the direct-import rule."""
-        entry = self._windows_spelled(tmp_path, monkeypatch, "door_entry_limits.py")
-        assert "\\apps\\door_entry_limits.py" in entry
-
-        result = encapsulation_check.check_module(entry)
-
-        assert [c["name"] for c in result["checks"] if not c["passed"]] == ["Direct handler imports"]
-
-    def test_a_backslashed_handler_path_names_its_package(self):
-        """get_file_handler_package read the same slash; a Windows handler was no handler."""
-        assert get_file_handler_package("C:\\runner\\aipass\\memory\\apps\\handlers\\json\\entry_limits.py") == "json"

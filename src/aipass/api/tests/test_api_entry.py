@@ -1,25 +1,29 @@
 # =================== AIPass ====================
 # Name: test_api_entry.py
 # Description: Tests for api.py entry point CLI
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-05-12
-# Modified: 2026-11-06
+# Modified: 2026-11-17
 # =============================================
 
-"""Tests for apps/api.py, the entry point CLI for drone @api."""
+"""Tests for apps/api.py, the command door, and __init__.py, api's one import door."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(constant) — print_help's display text, beyond that it prints without error
-# sentry: no-test-needed(windows_compat) — the win32 PYTHONUTF8 and stream reconfigure at import, the Windows CI lane
 # sentry: no-test-needed(through_the_command) — each module's own commands, covered by that module's test file
 
+import importlib
+import json
+import subprocess
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+import aipass.api as door
 from aipass.api.apps.api import discover_modules, main, print_help, print_introspection, route_command
 from aipass.api.apps.handlers.auth.secrets import SecretsUnavailable
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 PATCH_CONSOLE = "aipass.api.apps.api.console"
 PATCH_HEADER = "aipass.api.apps.api.header"
@@ -28,6 +32,41 @@ PATCH_LOGGER = "aipass.api.apps.api.logger"
 PATCH_JSON_HANDLER = "aipass.api.apps.api.json_handler"
 PATCH_DISCOVER = "aipass.api.apps.api.discover_modules"
 PATCH_MODULES_DIR = "aipass.api.apps.api.MODULES_DIR"
+
+_HOST = "aipass.api.apps.handlers.host"
+# Written out by hand, not read from the door: the door's own table must agree with an independent list.
+DOOR_HOMES = {
+    f"{_HOST}.config": (
+        "load_config",
+        "face_dir",
+        "set_face_dir",
+        "baud_bin",
+        "set_baud_bin",
+        "set_bind",
+        "BindRefused",
+    ),
+    f"{_HOST}.lifetime": ("serve_detached", "LifetimeError"),
+    f"{_HOST}.autostart": ("AutostartUnsupported", "SupervisorUnreachable"),
+    f"{_HOST}.pairings": ("mint_pairing", "render_qr", "PairingError"),
+    "aipass.api.apps.modules.host_api": ("autostart", "install_unit", "enable_unit"),
+    "aipass.api.apps.modules.google_client": ("get_drive_service",),
+    "aipass.api.apps.handlers.google.retry": ("api_call_with_retry",),
+}
+DOOR_NAMES = [(home, name) for home, names in DOOR_HOMES.items() for name in names]
+_LOADED = "\nprint(json.dumps(sorted(m for m in sys.modules if m.startswith('aipass.api.apps'))))"
+
+
+def _fresh(body: str) -> list[str]:
+    """Run *body* in a clean interpreter; answer the api apps modules it left loaded."""
+    done = subprocess.run(
+        [sys.executable, "-c", "import importlib, json, sys\n" + body + _LOADED],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+    )
+    assert done.returncode == 0, done.stderr[-800:]
+    return json.loads(done.stdout.strip().splitlines()[-1])
 
 
 def _make_fake_module(name: str, *, has_handle_command: bool = True) -> MagicMock:
@@ -89,8 +128,8 @@ class TestDiscoverModules:
         mock_logger.warning.assert_any_call("  [!] nohandler - missing handle_command()")
 
     @patch(PATCH_LOGGER)
-    def test_handles_import_error(self, mock_logger, tmp_path):
-        """Logs error and skips modules that fail to import."""
+    def test_an_import_error_is_raised_not_skipped(self, mock_logger, tmp_path):
+        """A module that fails to import raises, so main prints why instead of "No modules found"."""
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir()
         (modules_dir / "broken.py").write_text("raise ImportError\n", encoding="utf-8")
@@ -98,11 +137,9 @@ class TestDiscoverModules:
         with (
             patch(PATCH_MODULES_DIR, modules_dir),
             patch("aipass.api.apps.api.importlib.import_module", side_effect=ImportError("bad import")),
+            pytest.raises(ImportError, match="bad import"),
         ):
-            result = discover_modules()
-
-        assert result == []
-        mock_logger.error.assert_called_once()
+            discover_modules()
 
     @patch(PATCH_LOGGER)
     def test_skips_underscore_files(self, mock_logger, tmp_path):
@@ -331,12 +368,13 @@ class TestMain:
     @patch(PATCH_CONSOLE)
     @patch(PATCH_DISCOVER, side_effect=RuntimeError("catastrophic"))
     def test_unhandled_exception(self, mock_discover, mock_console, mock_logger, mock_error, mock_jh):
-        """Unhandled exception returns 1 and logs error."""
+        """Unhandled exception (a module that cannot import, say) returns 1 and prints the real error."""
         with patch("sys.argv", ["api", "get-key"]):
             result = main()
 
         assert result == 1
         mock_logger.error.assert_called_once()
+        mock_error.assert_called_once_with("RuntimeError: catastrophic")
 
 
 class TestRouterNormalisesHelpFlag:
@@ -493,3 +531,38 @@ class TestTheExitSeamCarriesARefusal:
         assert display.command_failed() is True, "the precondition this test needs was not set up"
 
         assert self._run(["list-providers"], succeed) == 0
+
+
+class TestTheTopFileIsTheOneDoor:
+    """from aipass.api import <name>: each name from its real home, lazily, never cached."""
+
+    def test_the_public_list_is_exactly_the_hand_written_table(self):
+        assert sorted(door.__all__) == sorted(name for _, name in DOOR_NAMES)
+        assert set(door.__all__) <= set(dir(door))
+
+    @pytest.mark.parametrize(("home", "name"), DOOR_NAMES)
+    def test_every_name_is_the_same_object_as_its_home_s(self, home, name):
+        assert getattr(door, name) is getattr(importlib.import_module(home), name)
+
+    @pytest.mark.parametrize("name", ["host_api", "issue_token", "get_api_key", "_HOMES_MISSING"])
+    def test_an_unknown_name_raises_attribute_error_with_no_fallback(self, name):
+        with pytest.raises(AttributeError, match=name):
+            getattr(door, name)
+
+    @pytest.mark.parametrize(("home", "name"), DOOR_NAMES)
+    def test_a_patch_on_the_home_reaches_a_caller_that_read_the_door_before(self, monkeypatch, home, name):
+        """A door that caches the first answer hands later callers the unpatched name."""
+        getattr(door, name)
+        sentinel = object()
+        monkeypatch.setattr(importlib.import_module(home), name, sentinel)
+        assert getattr(door, name) is sentinel
+
+    def test_a_bare_import_loads_nothing_under_apps(self):
+        assert _fresh("import aipass.api") == []
+
+    @pytest.mark.parametrize("home", list(DOOR_HOMES))
+    def test_each_name_loads_no_more_than_its_home_alone(self, home):
+        """No second door: the door's reach equals a direct import of the home."""
+        names = DOOR_HOMES[home]
+        through_door = _fresh(f"import aipass.api as d\nfor n in {names!r}: getattr(d, n)")
+        assert through_door == _fresh(f"importlib.import_module({home!r})")

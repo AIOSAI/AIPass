@@ -13,8 +13,18 @@ what counts as a match. The verbs themselves are in `drone @memory --help`.
 ## Subprocess isolation
 
 All ML operations (fastembed, chromadb) run via subprocess. The main process never imports these
-libraries. Python interpreter resolved via `_get_memory_python()` (env var `AIPASS_MEMORY_PYTHON` →
-`memory/.venv/bin/python` → `sys.executable`).
+libraries. `handlers/storage/lane.py` owns the lane: `memory_python()` resolves the interpreter (env var
+`AIPASS_MEMORY_PYTHON` → `memory/.venv/bin/python` → `sys.executable`) and `run_json()` sends the
+JSON request on stdin and reads the JSON reply on stdout. Another branch reaches both, and
+`CHROMA_SUBPROCESS_SCRIPT`, through `apps/modules/door_subprocess_lane.py`.
+
+**Who says what when it fails.** The child (`chroma_subprocess.py`) logs nothing: every failure it
+sees coming is named in its JSON reply, including an embed run that left no JSON
+(`embedder_reason()` names the missing reply, its parse error and the embedder's stderr). The
+child's stderr is the crash record for a death before it could reply. `run_json()` logs that
+case through prax at WARNING — the label, the exit code and the stderr tail (last 20 lines, at most
+2000 characters) — and logs a reply that is not a JSON object. A non-zero exit that carries a JSON
+refusal is returned unlogged; the caller logs it.
 
 ---
 

@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_host_verbs.py
 # Description: Tests for the host API verb lane — wake, kill, lock (FPLAN-0411 Phase 3)
-# Version: 1.2.0
+# Version: 1.3.1
 # Created: 2026-08-14
-# Modified: 2026-11-05
+# Modified: 2026-11-17
 # =============================================
 
-"""Tests for apps/handlers/host/verbs.py and agent_route.py: wake, kill, lock, typing and model switches in a room."""
+"""Tests for apps/handlers/host/verbs.py and agent_route.py: wake, kill, lock, keys, model switches, feed notices."""
 
 # D0: every verb proxies the branch that owns the mechanism; the source-reading checks below are crude on purpose.
 
@@ -23,11 +23,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.api.apps.handlers.host import agent_chat as host_agent_chat
+from aipass.api.apps.handlers.host import agent_notices as host_agent_notices
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.handlers.host import verbs as host_verbs
 from aipass.api.tests.support_host_api import FakeBaud, agent_row
+from aipass.skills import SCREEN_LOCK_REASON_SWITCH_UNREADABLE, SCREEN_LOCK_REASON_SWITCHED_OFF
 
 PATCH_SECRETS_BASE = "aipass.api.apps.handlers.auth.secrets.SECRETS_BASE"
 PATCH_SECRETS_JSON = "aipass.api.apps.handlers.auth.secrets.json_handler"
@@ -45,15 +47,24 @@ PATCH_VERBS_FLEET = "aipass.api.apps.handlers.host.verbs.host_fleet"
 PATCH_RESOLVE = "aipass.api.apps.handlers.host.verbs.host_reads.resolve_branch_root"
 PATCH_SEATED = "aipass.api.apps.handlers.host.verbs.host_reads.seated_project"
 PATCH_HOST_FLEET = "aipass.api.apps.handlers.host.fleet"
+# The door name alone, so the served reason constants verbs.py compares against stay real.
+PATCH_SKILL_LOCK = "aipass.skills.lock_screen"
 
 # Mismatched case on purpose: @baud sends AIPASS, the directory says AIPass; a case-sensitive compare refuses all.
 PROJECT = "aipass"
+# @skills' published sentence for a switched-off skill, the detail both lock lanes must carry intact.
+SWITCHED_OFF = "Skill 'screen_lock' is switched OFF. Turn it back on with: drone @skills on screen_lock"
 PROJECT_AS_SENT = "AIPASS"
 
 fastapi_required = pytest.mark.skipif(
     not host_server.is_available(),
     reason="the [host] extra is not installed",
 )
+
+
+def _refusal(reason: Any, sentence: str) -> dict:
+    """lock_screen()'s not-locked answer in @skills' published shape, carrying *reason*."""
+    return {"locked": False, "method": None, "session": None, "error": sentence, "reason": reason}
 
 
 @pytest.fixture
@@ -451,12 +462,12 @@ class TestKillCarriesTheRoomsOwnProject:
             assert not resolve.called
 
 
-class TestLockIsNeverGated:
-    """@skills' doctrine: lock must work from anywhere, so this verb asks no questions before firing."""
+class TestTheLockVerbChecksNothingFirst:
+    """The only gate is @skills' off switch, so this verb asks no questions before firing."""
 
     def test_lock_calls_the_skill(self, quiet: Any) -> None:
         """The mechanism is @skills'. This is a proxy and nothing else."""
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {"locked": True, "method": "loginctl", "session": "3", "error": None}
 
             host_verbs.lock_screen()
@@ -465,7 +476,7 @@ class TestLockIsNeverGated:
 
     def test_lock_checks_no_precondition(self, quiet: Any) -> None:
         """Not screen state, not a desktop environment, not a session id."""
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {"locked": True, "method": "dbus", "session": None, "error": None}
 
             result = host_verbs.lock_screen()
@@ -482,7 +493,7 @@ class TestTheSkillOwnsTheFailureText:
 
         `ok: false` rather than a raise: the mechanism DID run and answered.
         """
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {
                 "locked": False,
                 "method": None,
@@ -495,14 +506,61 @@ class TestTheSkillOwnsTheFailureText:
     def test_the_skills_own_sentence_is_surfaced_verbatim(self, quiet: Any) -> None:
         """Rewriting another branch's error is how a diagnosis gets lost."""
         sentence = "the screen locker refused and no fallback is installed"
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {"locked": False, "method": None, "session": None, "error": sentence}
 
             assert host_verbs.lock_screen()["detail"] == sentence
 
+    def test_a_switched_off_skill_is_a_refusal_with_its_sentence_intact_logged_at_info_never_error(self) -> None:
+        answer = _refusal(SCREEN_LOCK_REASON_SWITCHED_OFF, SWITCHED_OFF)
+        with patch(PATCH_VERBS_JSON), patch(PATCH_VERBS_LOGGER) as log, patch(PATCH_SKILL_LOCK, return_value=answer):
+            result = host_verbs.lock_screen()
+
+        assert result == {"ok": False, "detail": SWITCHED_OFF, "method": None, "session": None}
+        assert SWITCHED_OFF in log.info.call_args.args[-1]
+        log.error.assert_not_called()
+        log.warning.assert_not_called()
+
+
+class TestTheLockVerbLogsByTheOwnersTable:
+    """On and worked: info. Off and refused: info. On and failed, an unreadable switch included: error."""
+
+    @pytest.mark.parametrize(
+        "reason",
+        [SCREEN_LOCK_REASON_SWITCH_UNREADABLE, None],
+        ids=["switch_unreadable", "lock_ran_and_failed"],
+    )
+    def test_a_refusal_that_is_not_a_deliberate_off_logs_an_error(self, reason: Any) -> None:
+        answer = _refusal(reason, "the screen locker refused and no fallback is installed")
+        with patch(PATCH_VERBS_JSON), patch(PATCH_VERBS_LOGGER) as log, patch(PATCH_SKILL_LOCK, return_value=answer):
+            assert host_verbs.lock_screen()["ok"] is False
+
+        assert "no fallback is installed" in log.error.call_args.args[-1]
+        log.info.assert_not_called()
+
+    def test_a_lock_that_ran_logs_info_and_no_error(self) -> None:
+        answer = {"locked": True, "method": "loginctl", "session": "3", "error": None}
+        with patch(PATCH_VERBS_JSON), patch(PATCH_VERBS_LOGGER) as log, patch(PATCH_SKILL_LOCK, return_value=answer):
+            assert host_verbs.lock_screen()["ok"] is True
+
+        assert log.info.call_args.args[-1] == "loginctl"
+        log.error.assert_not_called()
+        log.warning.assert_not_called()
+
+    def test_a_lock_that_ran_while_reported_off_logs_an_error_and_answers_the_same(self) -> None:
+        """Off and still worked is the switch failing: error, never info, and the answer is untouched."""
+        answer = {"locked": True, "method": "loginctl", "session": "3", "reason": SCREEN_LOCK_REASON_SWITCHED_OFF}
+        with patch(PATCH_VERBS_JSON), patch(PATCH_VERBS_LOGGER) as log, patch(PATCH_SKILL_LOCK, return_value=answer):
+            result = host_verbs.lock_screen()
+
+        assert result == {"ok": True, "detail": "Screen locked via loginctl", "method": "loginctl", "session": "3"}
+        assert log.error.call_args.args[-1] == "loginctl"
+        log.info.assert_not_called()
+        log.warning.assert_not_called()
+
     def test_a_lock_with_no_error_text_still_says_something(self, quiet: Any) -> None:
         """A falsy 'locked' with an empty error must not render as a blank chip."""
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {"locked": False, "method": None, "session": None, "error": None}
 
             result = host_verbs.lock_screen()
@@ -512,7 +570,7 @@ class TestTheSkillOwnsTheFailureText:
 
     def test_the_method_is_reported_so_the_fallback_is_visible(self, quiet: Any) -> None:
         """loginctl vs dbus tells an operator which path is carrying them."""
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {"locked": True, "method": "dbus", "session": None, "error": None}
 
             assert host_verbs.lock_screen()["method"] == "dbus"
@@ -553,8 +611,8 @@ class TestNoMechanismIsReimplementedHere:
             "import re",
             "from aipass.prax import logger",
             "import aipass.drone as drone",
-            "from aipass.skills.lib.screen_lock import handler as screen_lock",
-            "from aipass.aipass.apps.modules import new_project as project_door",
+            "import aipass.skills as skills",
+            "import aipass.aipass as project_door",
         ]
 
     def test_every_verb_names_the_branch_that_owns_it(self) -> None:
@@ -619,7 +677,7 @@ class TestTheScopeWallCarriesProductionWeight:
         """The wall stops the mechanism, not just the response."""
         _, raw = host_tokens.issue_token("pixel-8", scope="read")
 
-        with patch(PATCH_VERBS_DRONE) as door, patch.object(host_verbs, "screen_lock") as skill:
+        with patch(PATCH_VERBS_DRONE) as door, patch.object(host_verbs, "skills") as skill:
             client.post(f"/v1/verbs/{verb}", json=_body(), headers={"Authorization": f"Bearer {raw}"})
 
             assert not door.route_command.called
@@ -737,7 +795,7 @@ class TestTheVerbRoutesAnswer:
         """One proxy hop, no arguments, no preconditions."""
         _, raw = host_tokens.issue_token("operator", scope="operate")
 
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {"locked": True, "method": "loginctl", "session": "3", "error": None}
             response = client.post("/v1/verbs/lock", json={}, headers={"Authorization": f"Bearer {raw}"})
 
@@ -748,7 +806,7 @@ class TestTheVerbRoutesAnswer:
         """The mechanism ran and said no: an answer for @baud's chip, not a server fault."""
         _, raw = host_tokens.issue_token("operator", scope="operate")
 
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {"locked": False, "method": None, "session": None, "error": "no session"}
             response = client.post("/v1/verbs/lock", json={}, headers={"Authorization": f"Bearer {raw}"})
 
@@ -1063,7 +1121,6 @@ CODEX_MODELS = {
 def seat(room: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """The room fixture with HOME in tmp_path, holding a Codex model cache; the agent idle (no hook rows)."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     cache = tmp_path / ".codex" / "models_cache.json"
     cache.parent.mkdir(parents=True)
     cache.write_text(json.dumps(CODEX_MODELS), encoding="utf-8")
@@ -1177,3 +1234,142 @@ class TestTheModelSwitchRefusals:
         response = api.post(MODEL, json={"model": "opus"}, headers={"Authorization": f"Bearer {raw}"})
 
         assert (response.status_code, fake.sends) == (403, [])
+
+
+# =============================================
+# AGENT FEED NOTICES — handlers/host/agent_chat.py, agent_transcript.py, agent_notices.py
+# =============================================
+
+FEED = "/v1/agent/AIPASS/devpulse/feed"
+
+
+def _mail(feed: Path, mail_id: str, ts: str, **extra: Any) -> None:
+    """Append one @ai_mail feed line for a mail delivered to devpulse in aipass."""
+    line = {"mail_id": mail_id, "recipient": "devpulse", "project": "aipass", "mail_kind": "mail", "ts": ts}
+    line.update(kind="mail", title="API -> DEVPULSE", body=f"{mail_id} landed\npreview", source="api")
+    line.update(extra)
+    _append(feed, line)
+
+
+def _append(path: Path, *rows: dict) -> Path:
+    """Append transcript, engine-log or feed rows, one JSON object a line."""
+    with path.open("a", encoding="utf-8") as fh:
+        fh.writelines(json.dumps(row) + "\n" for row in rows)
+    return path
+
+
+def _at(stamp: str, kind: str, text: str) -> dict:
+    """One Claude Code session row with its own timestamp."""
+    return {"type": kind, "timestamp": stamp, "message": {"role": kind, "content": text}}
+
+
+@pytest.fixture
+def mailed_seat(room: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """devpulse's Claude transcript under a tmp HOME, and one feed read of it."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    api, token, _ = room
+    path = tmp_path / ".claude" / "projects" / "-srv-aipass-devpulse" / "s-1.jsonl"
+    path.parent.mkdir(parents=True)
+
+    def read(since: Any = None) -> Any:
+        return api.get(FEED, params={} if since is None else {"since": since}, headers=token)
+
+    return path, read
+
+
+def _texts(read: Any, since: Any = None) -> list:
+    """The feed's lines after *since*."""
+    return read(since).json()["lines"]
+
+
+@fastapi_required
+class TestTheFeedCarriesMailNotices:
+    """GET /v1/agent/<p>/<n>/feed: the seat's delivered mail from the notification feed, as notice lines."""
+
+    def test_the_seats_mail_lands_between_the_rows_around_it_and_no_one_elses_does(
+        self, mailed_seat: Any, notice_feed: Path
+    ) -> None:
+        path, read = mailed_seat
+        first = _at("2026-11-04T10:00:00Z", "user", "go")
+        _append(path, first, _at("2026-11-04T10:05:00Z", "assistant", "done"))
+        _mail(notice_feed, "m1", "2026-11-04T10:02:00+00:00", mail_kind="medic")
+        _mail(notice_feed, "m2", "2026-11-04T10:02:30+00:00", recipient="hooks")
+        _mail(notice_feed, "m3", "2026-11-04T10:02:40+00:00", project="baud")
+        _mail(notice_feed, "m4", "2026-11-04T10:02:50+00:00", mail_kind="notice")
+        _mail(notice_feed, "m5", "2026-11-04T10:02:55+00:00", kind="wake")
+        _mail(notice_feed, "m6", "2026-11-04T10:03:00+00:00", mail_kind="later_kind")
+
+        lines = _texts(read)
+
+        assert lines[1] == {
+            "n": 1,
+            "role": "notice",
+            "kind": "medic",
+            "text": "@api: m1 landed",
+            "time": "2026-11-04T10:02:00+00:00",
+            "mail_id": "m1",
+        }
+        assert [(line["role"], line.get("mail_id"), line.get("kind")) for line in lines] == [
+            ("user", None, None),
+            ("notice", "m1", "medic"),
+            ("notice", "m6", "later_kind"),
+            ("agent", None, None),
+        ]
+        assert lines[3]["n"] == len(json.dumps(first)) + 1
+
+    def test_a_tail_notice_waits_while_the_agent_works_and_comes_once_after_a_late_stamped_row(
+        self, mailed_seat: Any, notice_feed: Path
+    ) -> None:
+        path, read = mailed_seat
+        _append(path, _at("2026-11-04T10:00:00Z", "user", "go"))
+        _mail(notice_feed, "m1", "2026-11-04T10:01:00+00:00")
+        polls = [_texts(read)]
+        # A reply is stamped when it starts: this one began before the mail and was written after it.
+        _append(path, _at("2026-11-04T10:00:30Z", "assistant", "late"))
+        polls.append(_texts(read, polls[-1][-1]["n"]))
+        _append(path, _at("2026-11-04T10:02:00Z", "assistant", "after"))
+        polls.append(_texts(read, polls[-1][-1]["n"]))
+        polls.append(_texts(read, polls[-1][-1]["n"]))
+
+        assert [[line["text"] for line in poll] for poll in polls] == [
+            ["go"],
+            ["late"],
+            ["@api: m1 landed", "after"],
+            [],
+        ]
+
+    def test_a_quiet_agent_gets_each_tail_notice_once_in_order(
+        self, mailed_seat: Any, notice_feed: Path, engine_log: Path
+    ) -> None:
+        path, read = mailed_seat
+        _append(path, _at("2026-11-04T10:00:00Z", "user", "go"))
+        _append(engine_log, {"ts": 1.0, "event": "Stop", "session_id": "s-1"})
+        _mail(notice_feed, "m1", "2026-11-04T10:01:00+00:00")
+        polls = [_texts(read)]
+        _mail(notice_feed, "m2", "2026-11-04T10:02:00+00:00")
+        polls.append(_texts(read, polls[-1][-1]["n"]))
+        polls.append(_texts(read, polls[-1][-1]["n"]))
+        _append(path, _at("2026-11-04T10:03:00Z", "user", "next"))
+        polls.append(_texts(read, polls[-2][-1]["n"]))
+
+        assert [[line["text"] for line in poll] for poll in polls] == [
+            ["go", "@api: m1 landed"],
+            ["@api: m2 landed"],
+            [],
+            ["next"],
+        ]
+        assert polls[1][0]["n"] == polls[0][1]["n"] + 1
+
+    def test_a_missing_notification_feed_is_logged_once_and_the_feed_goes_on_without_notices(
+        self, mailed_seat: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path, read = mailed_seat
+        log = MagicMock()
+        monkeypatch.setattr(host_agent_notices, "logger", log)
+        monkeypatch.setattr(host_agent_notices, "feed_path", lambda: tmp_path / "absent.jsonl")
+        _append(path, _at("2026-11-04T10:00:00Z", "user", "go"))
+
+        bodies = [read(), read()]
+
+        assert [(r.status_code, [line["text"] for line in r.json()["lines"]]) for r in bodies] == [(200, ["go"])] * 2
+        assert log.error.call_count == 1

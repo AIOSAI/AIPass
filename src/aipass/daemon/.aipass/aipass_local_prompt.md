@@ -30,8 +30,7 @@ src/aipass/daemon/
 │   │   │                          # red_flag_detector, report_generator
 │   │   ├── cli/arg_gate.py        # Refuses unknown verbs and arguments by name
 │   │   ├── update/data_loader.py  # Data loading for the digest
-│   │   ├── json/json_handler.py   # The json shim every branch shares
-│   │   └── module_root.py         # Module paths that survive a dead cwd
+│   │   └── json/json_handler.py   # The json shim every branch shares
 │   └── extensions/                # Extension point (empty)
 ├── .daemon/schedule.json          # My own jobs, same contract as every citizen's
 ├── daemon_json/                   # Tracking data, including daemon_runstate.json
@@ -70,7 +69,7 @@ drone @daemon branch-health DAEMON  # One branch, deep
  - Prax names a log file after the nearest non-prax frame, so a line that must reach logs/run.log is logged from the module, not from a handler.
  - The suite must not move host state or write into another citizen's tree. Both rules have sentinels and both were learned the hard way — docs/testing.md.
  - A command job holds the tick lock for its whole run, so a heavy command needs a short timeout.
- - Telegram is retired fleet-wide: the daemon sends no notifications; `notify.email` on a command job is the only channel.
+ - The daemon sends no notifications of its own; `notify.email` on a command job is the only channel.
  - The catch-up recovery lane is built but off. Do not flip RECOVERY_LANE_LIVE without the owner's word.
  - Secrets path is `~/.secrets/aipass/` — never probe it, never read it here.
  - activity_report answers three verbs; the bare module name is an alias that also works.

@@ -3,7 +3,7 @@
 # Description: Registry CRUD operations for custom command shortcuts
 # Version: 1.0.3
 # Created: 2026-03-17
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Registry CRUD Operations for Custom Commands.
@@ -14,6 +14,7 @@ The registry maps shortcut names to full drone commands (``audit`` for
 
 from __future__ import annotations
 
+import fcntl
 import json
 from contextlib import contextmanager
 from datetime import datetime
@@ -21,20 +22,13 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from aipass.prax import logger
-
-try:
-    import fcntl
-except ImportError:
-    fcntl = None  # type: ignore[assignment]
-    logger.info("command registry: fcntl unavailable (Windows) — concurrent writers are not serialised")
 from aipass.drone.apps.handlers.exceptions import RegistryError
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.drone.apps.handlers.module_root import module_file
 
 MODULE_NAME = "command_registry"
 
 # ops.py -> command_registry/ -> handlers/ -> apps/ -> drone/
-_BRANCH_ROOT: Path = module_file(__file__).parents[3]
+_BRANCH_ROOT: Path = Path(__file__).resolve().parents[3]
 REGISTRY_FILE: Path = _BRANCH_ROOT / "drone_command_registry.json"
 
 
@@ -65,9 +59,6 @@ def _registry_path() -> Path:
 def _registry_lock() -> Iterator[None]:
     """Hold an exclusive lock on a sibling .lock file so load+modify+save is not interleaved."""
     path = _registry_path()
-    if fcntl is None:
-        yield
-        return
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path.with_name(path.name + ".lock"), "a", encoding="utf-8") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)

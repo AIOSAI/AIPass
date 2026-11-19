@@ -2,7 +2,7 @@
 #
 # Replaces `python -m pip install --upgrade pip` in ci.yml, security.yml and
 # e2e-wheel.yml. pip has no runtime dependencies, so this lock is inherently
-# portable across every OS and Python in the CI matrix (3.10-3.13).
+# portable across every Python in the CI matrix (3.10-3.13).
 #
 # 26.1.2 is deliberate, not merely "latest": security.yml's pip-audit scans the
 # whole environment and the runner's bundled pip (26.1.1) carries PYSEC-2026-196

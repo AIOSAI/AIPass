@@ -1,6 +1,6 @@
 """Trigger handlers package - the fence.
 
-Another branch reaches these handlers only through aipass.trigger.apps.modules; this refuses a foreign importer.
+Another branch reaches these only through the package door, aipass.trigger; this refuses a foreign importer.
 Frames are kin (this branch), transport (importlib, stdlib such as unittest.mock, site-packages) or foreign.
 The first foreign frame is refused unless kin code imported on its behalf and its line does not name the handlers.
 Fires only on a process's first import; the wall is drone @sentry audit (handlers, encapsulation).
@@ -18,26 +18,23 @@ _HANDLERS_SPELLINGS = (
 )
 _THIRD_PARTY_DIRS = ("/site-packages/", "/dist-packages/")
 
-try:
-    _THIS_FILE = str(Path(__file__).resolve()).replace("\\", "/")
-except OSError:
-    _THIS_FILE = str(__file__).replace("\\", "/")
+_THIS_FILE = str(Path(__file__).resolve())
 # Exact prefixes, never a substring: a directory that merely shares a branch's name is not that branch.
 _BRANCH_ROOT = _THIS_FILE.rsplit("/", 3)[0] + "/"
 _FLEET_ROOT = _THIS_FILE.rsplit("/", 4)[0] + "/"
 
 
 def _frame_path(frame) -> str:
-    """The frame's file as a forward-slash absolute path, or its raw spelling."""
+    """The frame's file as an absolute path, or its raw spelling."""
     raw = frame.f_code.co_filename
     # A pseudo filename resolved against a cwd inside this branch would make every bootstrap frame kin.
     if raw.startswith("<"):
         return raw
-    # resolve() reads os.getcwd (ntpath.realpath); a process whose cwd was deleted must not die here.
+    # resolve() reads os.getcwd for a relative path; a process whose cwd was deleted must not die here.
     try:
-        return str(Path(raw).resolve()).replace("\\", "/")
+        return str(Path(raw).resolve())
     except OSError:
-        return raw.replace("\\", "/")
+        return raw
 
 
 def _classify(frame, path: str) -> str:
@@ -91,10 +88,7 @@ def _guard_branch_access() -> None:
     if frame is None or caller_path is None:  # both None together; the second test narrows the type
         return
 
-    try:
-        import_line = linecache.getline(frame.f_code.co_filename, frame.f_lineno).strip()
-    except OSError:
-        import_line = ""
+    import_line = linecache.getline(frame.f_code.co_filename, frame.f_lineno).strip()
 
     names_handlers = any(spelling in import_line for spelling in _HANDLERS_SPELLINGS)
     if kin_seen and not names_handlers:
@@ -110,8 +104,8 @@ def _guard_branch_access() -> None:
         f"  Blocked:       {import_line or 'unknown'}\n"
         f"\n"
         f"  Handlers are internal to their branch.\n"
-        f"  Use the module API instead:\n"
-        f"    from aipass.{MY_BRANCH}.apps.modules.<module> import <function>\n"
+        f"  Use the package door instead:\n"
+        f"    from aipass.{MY_BRANCH} import <name>\n"
         f"\n"
         f"  For full standards guide:\n"
         f"    drone @sentry handlers\n"

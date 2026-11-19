@@ -1,29 +1,25 @@
 # =================== AIPass ====================
 # Name: dispatch_section.py
 # Description: Dispatch status section builder for devpulse dashboard
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-05-16
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """Dispatch section builder for devpulse dashboard plugin."""
 
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Dict, List
 
-from aipass.prax.apps.modules.dashboard import get_branch_paths, write_section
+from aipass.prax import get_branch_paths, write_section
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 
 def _pid_alive(pid: object) -> bool:
     """Whether the lock's holder still runs; unknown counts as alive so a live dispatch never vanishes."""
     if not isinstance(pid, int) or pid <= 0:
-        return True
-    # os.kill on Windows terminates instead of probing.
-    if sys.platform == "win32":
         return True
     try:
         os.kill(pid, 0)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_compass_store.py
 # Description: Tests for the compass SQLite/FTS5 storage core
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-06-16
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/compass/store.py through the compass package API, on a tmp_path db_path."""
@@ -582,3 +582,18 @@ class TestRecall:
         """A prompt made only of stopwords yields no candidates, no error."""
         compass.add_decision("some ctx", "some dec", "good", db_path=db)
         assert compass.recall_decisions("what is it and how do we", db_path=db) == []
+
+
+class TestDefaultDbFollowsTheStateRoot:
+    """The default database sits under prax's state root, not a folder count up from the file."""
+
+    def test_a_private_copy_under_the_override_lands_in_the_override(self, tmp_path, monkeypatch):
+        """A fresh load of the module answers the state root in force when it loads."""
+        import importlib.util
+
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        spec = importlib.util.spec_from_file_location("compass_store_probe", store_mod.__file__)
+        assert spec is not None and spec.loader is not None
+        probe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(probe)
+        assert probe.DEFAULT_DB_PATH == tmp_path / "devpulse" / "devpulse_json" / "compass" / "compass.db"

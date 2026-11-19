@@ -11,7 +11,23 @@ live registry and breaker state. This page is the model behind them.
 
 SHA1 fingerprinting for error deduplication. Tracks: fingerprint, branch, error type, message, count, first/last seen, dispatch history, source fix status.
 
-**Circuit breaker:** Trips after 10 errors within 60 seconds. Rejects all dispatch while open. Auto-resets after 300s cooldown. State lives in `trigger_cb_state.json`: every change reads, edits and writes it under its lock, so the daemon, a CLI `circuit-breaker reset` and a `ci poll` all see each other's writes, and it survives restarts. A reset closes the breaker and keeps per-fingerprint backoff.
+**The fault marker.** A message holding `fault[KEY]` names its own identity. The authority for what a marker is, the exact regex:
+
+    fault\[([^\s\]]+)\]
+
+KEY holds no whitespace and no closing bracket. A marked message normalizes to the marker text alone, so its fingerprint is `sha1(level:fault[KEY]:component)`: the free text after it rides in the mail and is never hashed. An unmarked message keeps the normalizer as it is (paths, `line N`, timestamps, UUIDs, hashes, `:NN` ports, 3+ digit ids). The hooks engine's handler-failure line carries a marker.
+
+**No phrase classifies a line.** A command that rejects bad input (an unknown command, a misspelling, a missing or wrong argument) worked: it tells whoever typed it and logs at INFO, so it never reaches the registry. A line at ERROR or WARNING is a fault, whatever words it holds, and dispatches like any other. A row an earlier phrase guess suppressed keeps `suppress_reason: user_error` as its record and stays suppressed, which the 30-day purge spares, until its next occurrence: that report sets it back to `new` and it dispatches. An operator's suppression is untouched.
+
+**Circuit breaker: counts would-be mails, never log lines.** One gate, `dispatch_gate(recipient, fingerprint, note)`, called by medic and by the CI red lane at the point a mail would go: after suppression, backoff and the recipient checks. A storm of one fault therefore reaches it once per backoff step; per-fingerprint backoff bounds that fault's mail. The rules:
+
+- Per recipient: at most 5 distinct fingerprints mailed in 10 minutes. Past that a mail is held and counted on the recipient's held list, and the list rides in that branch's next medic mail.
+- Fleet trip: 10 distinct (recipient, fingerprint) mails in 60 seconds. The cap sits below the trip, so one branch alone cannot trip it. The mail that trips it is held.
+- While open, every mail is held, and @devpulse gets one summary per opening, by plain email (never a wake): the recent sends and everything held. A summary that fails to send is retried at the next hold.
+- `opened_at` is stamped only on closed to open. Holds never move it. After the cooldown (300 s, doubling to 3600 s on each failed probe) the next mail is the one probe; delivered closes the breaker, a failed send reopens it. A probe that never reports back is replaced after 300 s.
+- A status read (`errors circuit-breaker`, `errors stats`) never moves the state; only the gate does.
+
+State lives in `trigger_cb_state.json`: every change reads, edits and writes it under its lock, so the daemon, a CLI `circuit-breaker reset` and a `ci poll` all see each other's writes, and it survives restarts. A reset closes the breaker and keeps per-fingerprint backoff and the held lists.
 
 **Per-fingerprint tracking:** Each unique error has independent exponential backoff and dispatch count. State persists across restarts.
 

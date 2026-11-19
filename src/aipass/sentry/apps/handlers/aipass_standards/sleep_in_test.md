@@ -55,15 +55,22 @@ Measured 2026-09-22 over 565 test files. **17 files, 43 hits, 4.0s.**
 Every hit is scored. The dispatch's ruling is "score all", and there is no legitimate form:
 both shapes above have a cure that is strictly better.
 
-Evidence lands: `test_versioned_engine.py` 89, 110, 126, 240, 315, 441 — @backup's
-baseline/diff suite, which is exactly the mtime shape.
-
 ---
 
 ## Why it cannot be satisfied by accident
 
 A sleep asserts nothing. It can only make the suite slower, or make it pass on one machine
 and fail on another. **There is no threshold and nothing to tune.**
+
+---
+
+## Bypass Rows
+
+Each sleep call is its own site, at its line, inside the test function that holds it (`<file>`
+at module level). A row with `"lines": [n]` waives the sleep on line n; a row with
+`"functions": ["test_poll"]` waives the sleeps inside `test_poll`. Every other sleep still
+convicts, and the message names only the open ones. A row with no `lines` or `functions` waives
+the whole file.
 
 ---
 

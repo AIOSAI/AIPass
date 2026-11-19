@@ -3,7 +3,7 @@
 # Description: declared_pass_symbol_resolves_check — a declared-pass name that resolves nowhere
 # Version: 1.1.1
 # Created: 2026-09-25
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/declared_pass_symbol_resolves_check.py."""
@@ -161,7 +161,7 @@ class TestAWordInProseIsNotAModule:
         Red first: both were read as modules the product never uses.
         """
         product = "import fcntl\n\n\ndef lock(f):\n    fcntl.flock(f, fcntl.LOCK_EX)\n"
-        prose = "fcntl, unavailable on Windows; the platform fallback never runs on this CI"
+        prose = "fcntl, unavailable on some hosts; the platform fallback never runs on this CI"
         declared = f"# sentry: no-test-needed(stdlib) — {prose}"
         assert _verdict(_branch(tmp_path, declared, product=product)) == (
             100,
@@ -193,10 +193,10 @@ class TestAWordInProseIsNotAModule:
         assert "declares (stdlib) needs no test, but it names nothing at all" in message
 
     def test_a_stdlib_module_this_host_cannot_import_still_resolves(self, tmp_path, monkeypatch):
-        """PR #774 Windows row 3: fcntl is stdlib on every host; a None in sys.modules makes it unimportable here."""
+        """A stdlib module a Python build can lack; a None in sys.modules makes it unimportable here."""
         monkeypatch.setitem(sys.modules, "fcntl", None)
         product = "import fcntl\n\n\ndef lock(f):\n    fcntl.flock(f, fcntl.LOCK_EX)\n"
-        declared = "# sentry: no-test-needed(stdlib) — fcntl, unavailable on Windows"
+        declared = "# sentry: no-test-needed(stdlib) — fcntl, unavailable on some hosts"
         assert _verdict(_branch(tmp_path, declared, product=product)) == (
             100,
             "Every name the declared pass mentions resolves",

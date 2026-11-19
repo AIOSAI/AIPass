@@ -11,6 +11,7 @@ from aipass.drone.apps.handlers.exceptions import (
     RegistryMismatchError,
     RegistryNotFoundError,
     RegistryPermissionError,
+    RepoRootError,
     RoutingError,
 )
 from aipass.drone.apps.handlers.executor import CommandResult
@@ -27,5 +28,6 @@ __all__ = [
     "RegistryMismatchError",
     "RegistryNotFoundError",
     "RegistryPermissionError",
+    "RepoRootError",
     "RoutingError",
 ]

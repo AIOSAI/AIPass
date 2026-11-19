@@ -3,30 +3,22 @@
 # Description: Entry point CLI for drone @trigger — event bus and error registry
 # Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-16
 # =============================================
 
 """
 TRIGGER Branch - Main Orchestrator
 """
 
-import os
 import sys
 from pathlib import Path
 
 import importlib
 from typing import List, Any
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, header, error, reset_command_state, resolve_exit
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
+from aipass.cli import console, header, error, reset_command_state, resolve_exit
 
 # Pinned to the README header version by test_trigger_entry.py.
 __version__ = "3.0.0"
@@ -49,17 +41,11 @@ def discover_modules() -> List[Any]:
 
         module_name = f"aipass.trigger.apps.modules.{file_path.stem}"
 
-        try:
-            module = importlib.import_module(module_name)
-
-            if hasattr(module, "handle_command"):
-                modules.append(module)
-                pass  # Module loaded successfully
-            else:
-                pass  # No handle_command() - skip silently
-
-        except Exception as e:
-            logger.error(f"[TRIGGER] Failed to load module {module_name}: {e}")
+        module = importlib.import_module(module_name)
+        if hasattr(module, "handle_command"):
+            modules.append(module)
+        else:
+            logger.warning(f"[TRIGGER] {module_name} has no handle_command(), not routed")
 
     return modules
 

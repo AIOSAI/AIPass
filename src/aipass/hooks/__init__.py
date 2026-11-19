@@ -1,22 +1,40 @@
-"""Hooks - package marker so pytest's module names stay unique (per devpulse, 2026-08-20).
+"""Hooks' import door (`from aipass.hooks import <name>`), and the marker that names this conftest uniquely.
 
-THIS FILE EXISTS TO KEEP PYTEST'S MODULE NAMES UNIQUE, and that is worth
-stating because an empty-looking package marker is exactly the kind of file a
-later cleanup deletes.
-
-pytest names a conftest by walking UP from it while `__init__.py` files exist,
-and the first directory without one becomes the package root. Without this
-file that walk stops at `src/aipass/hooks`, so this branch's conftest is
-imported as the bare name `tests.conftest`. With it, the walk continues to
-`src/` and the name becomes `aipass.hooks.tests.conftest` - which is what
-every other branch already gets.
-
-Two branches resolving to the same bare `tests.conftest` is a hard collection
-error (`ImportPathMismatchError`), and it takes the WHOLE suite down, not just
-the two: pytest aborts collection at the first clash. @hooks was the only
-branch missing this marker for months and got away with it by being the only
-offender - @canary's birth (2026-08-20) made it two and red the board. That
-collision is already fixed on canary's side (src/aipass/canary/__init__.py,
-commit b966b77d). This file closes the other half so the next branch born
-without a marker doesn't collide with @hooks instead.
+Without it pytest imports this branch's conftest as the bare `tests.conftest`; two such branches abort collection.
 """
+
+import importlib
+from typing import Any
+
+_TRUST = "aipass.hooks.apps.handlers.config.trust_registry"
+_SANDBOX = "aipass.hooks.apps.modules.sandbox"
+_SOUND = "aipass.hooks.apps.sound"
+
+_HOMES = {
+    "build_policy": _SANDBOX,
+    "build_srt_config": _SANDBOX,
+    "resolve_bwrap_command": _SANDBOX,
+    "BRANCH_CHAR_BUDGET": "aipass.hooks.apps.modules.grounding_content",
+    "is_muted": _SOUND,
+    "SOUND_FLAG": _SOUND,
+    "enroll": _TRUST,
+    "is_trusted": _TRUST,
+    "read_registry": _TRUST,
+    "revoke": _TRUST,
+    "registry_path": _TRUST,
+    "REGISTRY_PATH": _TRUST,
+}
+
+__all__ = list(_HOMES)
+
+
+def __getattr__(name: str) -> Any:
+    """Hand out a door name from its home on each access, never cached: a patch on the home reaches every caller."""
+    if name not in _HOMES:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return getattr(importlib.import_module(_HOMES[name]), name)
+
+
+def __dir__() -> list:
+    """Public names, whether or not they have been resolved yet."""
+    return sorted(set(globals()) | set(__all__))

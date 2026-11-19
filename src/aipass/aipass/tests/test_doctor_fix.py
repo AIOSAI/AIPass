@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_fix.py
 # Description: Tests for doctor --fix remediation report (DPLAN-0177 Phase 2)
-# Version: 1.2.1
+# Version: 1.5.0
 # Created: 2026-05-15
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/_doctor_fix.py."""
@@ -13,7 +13,6 @@
 # sentry: no-test-needed(ruff) — that _doctor_fix.py and the modules it imports parse and import
 
 import json
-import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -36,8 +35,8 @@ from aipass.aipass.apps.modules._doctor_fix import (
 # =============================================================================
 
 
-def _make_agent(tmp_path: Path, name: str, registry_id: str = "uuid-1", subdir: str = "") -> Path:
-    """Create a minimal agent directory with passport."""
+def _make_agent(tmp_path: Path, name: str, registry_id: str = "uuid-1", subdir: str = "", seed: bool = True) -> Path:
+    """Create a minimal agent directory with passport and, unless told not to, its seed."""
     if subdir:
         agent_dir = tmp_path / "src" / subdir / name
     else:
@@ -49,6 +48,9 @@ def _make_agent(tmp_path: Path, name: str, registry_id: str = "uuid-1", subdir: 
         "citizenship": {"registry_id": registry_id},
     }
     (trinity / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+    if seed:
+        (agent_dir / ".aipass").mkdir(exist_ok=True)
+        (agent_dir / ".aipass" / "passport.seed.json").write_text("{}", encoding="utf-8")
     return agent_dir
 
 
@@ -169,6 +171,22 @@ class TestGenerateRemediation:
         registry = [i for i in items if i.category == "registry"]
         assert "--dedup-registry" in registry[0].fix_command
 
+    def test_a_lost_passport_is_critical_and_names_doctor_fix_not_a_registry_dedup(self, tmp_path: Path) -> None:
+        (tmp_path / "src" / "bare").mkdir(parents=True)
+        _make_registry(tmp_path, [{"name": "bare", "path": str(tmp_path / "src" / "bare")}])
+        (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
+        items = generate_remediation(tmp_path)
+        registry = [(i.severity, i.fix_command) for i in items if i.category == "registry"]
+        assert registry == [("critical", "aipass doctor --fix")]
+
+    def test_a_citizen_without_a_seed_is_critical_and_names_doctor_fix(self, tmp_path: Path) -> None:
+        _make_agent(tmp_path, "bare", seed=False)
+        _make_registry(tmp_path, [{"name": "bare", "path": str(tmp_path / "src" / "bare")}])
+        (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
+        items = generate_remediation(tmp_path)
+        registry = [(i.severity, i.description.split(":")[0], i.fix_command) for i in items if i.category == "registry"]
+        assert registry == [("critical", "No passport seed", "aipass doctor --fix")]
+
     def test_root_artifact_warn(self, tmp_path: Path) -> None:
         """Root artifact with warn severity produces warning remediation."""
         _make_agent(tmp_path, "agent1", "uuid-1")
@@ -192,7 +210,6 @@ class TestGenerateRemediation:
         assert len(root_items) == 1
         assert root_items[0].severity == "info"
 
-    @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
     def test_a_symlinked_venv_is_not_a_remediation_item(self, tmp_path: Path) -> None:
         """The scanner passes a .venv linked to the AIPass runtime; it must not become a warning."""
         _make_agent(tmp_path, "agent1", "uuid-1")
@@ -213,6 +230,16 @@ class TestGenerateRemediation:
         root_items = [i for i in items if i.category == "root_artifact"]
         assert "--relocate-root logs" in root_items[0].fix_command
         assert "@test" in root_items[0].fix_command
+
+    def test_no_aipass_home_is_a_critical_item_naming_the_cure(self, tmp_path: Path) -> None:
+        _make_agent(tmp_path, "agent1", "uuid-1")
+        _make_registry(tmp_path, [{"name": "agent1", "path": str(tmp_path / "src" / "agent1")}])
+        (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
+        with patch("aipass.aipass.apps.modules._doctor_fix._detect_aipass_home", return_value=None):
+            items = generate_remediation(tmp_path)
+        assert items == [
+            RemediationItem("critical", "aipass_home", "AIPass home not found", "Set AIPASS_HOME=/path/to/AIPass")
+        ]
 
     def test_missing_pyproject_is_info(self, tmp_path: Path) -> None:
         """Missing pyproject.toml produces info severity."""

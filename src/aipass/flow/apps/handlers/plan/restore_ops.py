@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: restore_ops.py
 # Description: Plan Restore Implementation Handler
-# Version: 1.5.0
+# Version: 1.7.0
 # Created: 2026-03-08
-# Modified: 2026-10-26
+# Modified: 2026-11-15
 # =============================================
 
 """Plan Restore Operations Handler
@@ -11,7 +11,7 @@
 Returns data dicts - module handles all display.
 """
 
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from shutil import copy2
 from datetime import datetime, timezone
 from typing import Dict, Any, List
@@ -20,6 +20,7 @@ from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.flow.apps.handlers.plan.project_scope import archive_dir_for
+from aipass.flow.apps.handlers.plan.authority import authority_refusal, caller_address
 from aipass.flow.apps.handlers.plan.registry_routing import (
     _extract_prefix,
     _resolve_registry_file,
@@ -27,9 +28,9 @@ from aipass.flow.apps.handlers.plan.registry_routing import (
 )
 
 
-from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
+from aipass.flow.apps.handlers.repo_root import find_repo_root
 
-_PKG_ROOT = module_file(__file__).parents[4]  # handlers/plan/ -> handlers/ -> apps/ -> flow/ -> aipass/
+_PKG_ROOT = Path(__file__).resolve().parents[4]  # handlers/plan/ -> handlers/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 
@@ -41,14 +42,6 @@ def _find_repo_root() -> Path:
 PROCESSED_PLANS_DIR = _find_repo_root() / ".backup" / "processed_plans"
 
 MODULE_NAME = "restore_plan"
-
-
-def _recorded_is_absolute(recorded: str) -> bool:
-    """Is a path RECORDED IN THE REGISTRY absolute — in either dialect?
-    Registries are shared across hosts, and Path.is_absolute() answers only for this one. Both checks
-    are needed: PureWindowsPath calls ``/srv`` relative, PurePosixPath refuses a drive letter.
-    """
-    return PurePosixPath(recorded).is_absolute() or PureWindowsPath(recorded).is_absolute()
 
 
 def recover_plan_from_backup(
@@ -83,7 +76,7 @@ def recover_plan_from_backup(
         if not original_location:
             original_location = str(FLOW_ROOT)
 
-        if _recorded_is_absolute(original_location):
+        if Path(original_location).is_absolute():
             # Re-homing a vanished absolute location would file the plan where its header never said.
             if not Path(original_location).is_dir():
                 return False, (
@@ -129,6 +122,10 @@ def recover_plan_from_backup(
     registry = load_registry(registry_file=reg_file) if reg_file else load_registry()
 
     target = Path(original_location) / plan_file.name
+    # No row means no recorded creator: only the branch that will hold it, or the admin seat.
+    refusal = authority_refusal(target, {}, "restore")
+    if refusal:
+        return False, refusal
     copy2(plan_file, target)
 
     registry["plans"][plan_key] = {
@@ -227,6 +224,7 @@ def restore_plan_impl(
     scan_plan_files: Any = None,
     update_dashboard_local: Any = None,
     push_to_plans_central: Any = None,
+    authority_refusal_fn: Any = authority_refusal,
 ) -> Dict[str, Any]:
     """Implement plan restore workflow
     Returns a dict with keys success, messages, plan_key, restored_location.
@@ -311,6 +309,11 @@ def restore_plan_impl(
                 "restored_location": "",
             }
 
+        refusal = authority_refusal_fn(plan_file, plan_info, "restore")
+        if refusal:
+            messages.append({"type": "error", "error_type": "general", "plan_key": plan_key, "details": refusal})
+            return {"success": False, "messages": messages, "plan_key": plan_key, "restored_location": ""}
+
         # A normally-closed plan's file is never at its registered path: close archives it.
         if not plan_file.exists():
             recovered_path, recovery_msg = restore_file_from_backup_fn(plan_info, plan_key)
@@ -376,15 +379,13 @@ def restore_plan_impl(
             {"type": "restore_success", "plan_key": plan_key, "location": restored_location, "prefix": plan_prefix}
         )
 
-        try:
-            from aipass.trigger.apps.modules.core import trigger
+        from aipass.trigger import trigger
 
-            trigger.fire("plan_restored", plan_number=plan_key, location=restored_location)
-        except ImportError:
-            logger.info(f"[{MODULE_NAME}] Trigger module not available, skipping event fire")
+        trigger.fire("plan_restored", plan_number=plan_key, location=restored_location)
 
         json_handler.log_operation(
-            "plan_restored", {"plan_key": plan_key, "location": restored_location, "success": True}
+            "plan_restored",
+            {"plan_key": plan_key, "location": restored_location, "caller": caller_address(), "success": True},
         )
         return {
             "success": True,

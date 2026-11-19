@@ -19,7 +19,7 @@ from typing import Dict, List
 from aipass.prax import logger
 
 from aipass.cli import console
-from aipass.cli.apps.modules import error, warning
+from aipass.cli import error, warning
 
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.audit_tests import refusal

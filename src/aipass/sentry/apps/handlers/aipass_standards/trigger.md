@@ -1,6 +1,6 @@
 # Trigger Standards
-**Status:** Draft v1
-**Date:** 2025-12-04
+**Status:** Draft v1.1
+**Date:** 2026-11-17
 
 ---
 
@@ -28,7 +28,7 @@ After (event-driven):
 ## Core API
 
 ```python
-from aipass.trigger.apps.modules.core import trigger
+from aipass.trigger import trigger
 
 # Fire an event (branches do this)
 trigger.fire('event_name', **data)
@@ -45,8 +45,12 @@ trigger.status()  # Returns {'startup': 1, 'plan_closed': 2, ...}
 ## Import Patterns
 
 ### Standard Import (Most Modules)
+Trigger's package top file is its one door. Another branch imports trigger only as
+`from aipass.trigger import trigger` (or `Trigger`, the class); a path under
+`aipass.trigger.apps` is convicted by front_door.
+
 ```python
-from aipass.trigger.apps.modules.core import trigger
+from aipass.trigger import trigger
 
 def some_function():
     trigger.fire('event_name', key=value)
@@ -63,7 +67,7 @@ def _ensure_trigger():
     if not _trigger_loaded:
         _trigger_loaded = True
         try:
-            from aipass.trigger.apps.modules.core import trigger as t
+            from aipass.trigger import trigger as t
             _trigger = t
         except ImportError:
             pass  # Trigger not available, silent fallback
@@ -78,6 +82,20 @@ def fire_event(name, **data):
 - `prax/apps/modules/logger.py` - Fires `logging_system_initialized` / `logging_system_shutdown`
   from the two explicit lifecycle doors (it stopped firing `startup` on the first log line of
   every process on 2026-09-12, DPLAN-0339 step 3 — that fire was 94% of the cost of that line)
+
+### Silencing the Bus in Tests
+A test in another branch silences the event bus one way: patch `Trigger.fire` on the class.
+
+```python
+from unittest.mock import patch
+from aipass.trigger import Trigger
+
+with patch.object(Trigger, "fire"):
+    ...  # every trigger.fire(...) in the code under test is a no-op mock
+```
+
+Never `monkeypatch.setattr` on the package (`aipass.trigger`): its undo leaves the real value
+bound as a package global, and the door serves that copy from then on.
 
 ---
 
@@ -243,7 +261,7 @@ def close_plan():
 ### After: Event-Driven
 ```python
 # flow/close_plan.py - CORRECT
-from aipass.trigger.apps.modules.core import trigger
+from aipass.trigger import trigger
 
 def close_plan():
     # ... close logic ...
@@ -254,34 +272,17 @@ def close_plan():
 ```python
 # trigger/apps/handlers/events/flow.py - Handlers
 def handle_plan_closed(**kwargs):
-    """React to plan closure"""
-    from aipass.flow.apps.handlers.dashboard.update_local import update_dashboard_local
-    from aipass.flow.apps.handlers.mbank.process import process_closed_plans
+    """React to plan closure, through flow's front door."""
+    from aipass.flow import <name>  # each name flow's package top file hands out
 
-    update_dashboard_local()
-    process_closed_plans()
+    ...
 ```
 
 ---
 
-## Bypass Configuration
+## No exception for Trigger
 
-Some cross-branch handler imports are intentional in Trigger. Configure in `.sentry/bypass.json`:
-
-```json
-{
-  "bypass": [
-    {
-      "file": "apps/handlers/events/startup.py",
-      "standard": "encapsulation",
-      "lines": [38],
-      "reason": "Trigger's purpose is centralizing cross-branch calls. Memory has no modules API."
-    }
-  ]
-}
-```
-
-**Trigger is the ONE place cross-branch handler imports are acceptable** - it's literally the centralization point for these calls.
+Trigger holds the cross-branch reactions and reaches each branch through its front door, `from aipass.<branch> import <name>`, like every branch. Its handlers are judged by encapsulation, handlers and front_door exactly as anyone's. A case a door cannot serve gets its own bypass row, scoped to its lines or function, with the reason written in it.
 
 ---
 
@@ -333,6 +334,17 @@ Cure against this text, not against the regex: adding a fire somewhere else in t
 file no longer works, and was never what the standard asked for. If the fire genuinely
 belongs elsewhere — a handler the module orchestrates, another branch — that is a
 `.sentry/bypass.json` entry with a category and a reason, not a silent pass.
+
+### Bypass rows
+
+A row with no `lines` or `functions` waives the whole file and its `category` and `reason` show in
+the result. Otherwise each finding is its own site, at its line, inside the function that holds it
+(`<file>` at module level): a missing event at its `def` (Pattern 10 at the call), a handler's
+Prax logger import or `print()`, a misnamed handler at its `def`. A row with `"lines": [n]` waives
+the site on line n; a row with `"functions": ["save_registry"]` waives the sites inside
+`save_registry`. A `trigger.fire()` with no trigger import is file-level: `"functions": ["<file>"]`
+waives it and a line row does not. In a file that does not parse, no function can be named, so only
+a line row reaches its sites. Every site no row waives still convicts.
 
 ### Function Definitions (Patterns 1-9)
 
@@ -400,7 +412,8 @@ belongs elsewhere — a handler the module orchestrates, another branch — that
 
 For branches using Trigger:
 
-- [ ] Import pattern correct (`from aipass.trigger.apps.modules.core import trigger` or lazy-load)
+- [ ] Import pattern correct (`from aipass.trigger import trigger` or lazy-load)
+- [ ] Tests silence the bus with `patch.object(Trigger, "fire")` (`from aipass.trigger import Trigger`)
 - [ ] Events named correctly (lowercase, underscore, past tense)
 - [ ] Handlers have no logger imports
 - [ ] Handlers have no print statements
@@ -412,7 +425,7 @@ For Trigger branch itself:
 - [ ] Handler import guard active (blocks external access)
 - [ ] Recursion guard in fire()
 - [ ] Caller introspection logging
-- [ ] Bypass.json documents intentional encapsulation violations
+- [ ] Reaches other branches only through their front doors
 
 ---
 

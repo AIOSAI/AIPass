@@ -4,7 +4,7 @@
 # Description: Tests for tier0_kernel prompt handler
 # Branch: hooks
 # Created: 2026-06-18
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/prompt/tier0_kernel.py."""
@@ -188,12 +188,11 @@ class TestDegradedGroundingIsLoud:
         assert result["stdout"] == "KERNEL"
 
     def test_the_per_user_aipass_dir_above_a_tree_promises_nothing(self, tmp_path, monkeypatch):
-        """The Windows CI layout on every host: the cwd sits under a home that holds ~/.aipass.
+        """The cwd sits under a home that holds ~/.aipass.
 
-        On the Windows runner the temp dir is under home, so this was the shape of
-        every tmp_path there, and the walk counted ~/.aipass as a stamped tree
-        (2026-09-16). The control below keeps a REAL stamped tree under the same
-        home loud, so the skip cannot pass by silencing everything.
+        The walk once counted ~/.aipass as a stamped tree (2026-09-16). The control below
+        keeps a REAL stamped tree under the same home loud, so the skip cannot pass by
+        silencing everything.
 
         The silent side is asserted on the walk itself, not on the handler's
         stdout: tmp_path may sit under the REAL home too, and the walk keeps
@@ -206,8 +205,7 @@ class TestDegradedGroundingIsLoud:
         (home / ".aipass" / "trusted_projects.json").write_text("{}", encoding="utf-8")
         loose = home / "scratch" / "work"
         loose.mkdir(parents=True)
-        for var in ("HOME", "USERPROFILE"):
-            monkeypatch.setenv(var, str(home))
+        monkeypatch.setenv("HOME", str(home))
         monkeypatch.chdir(loose)
         found = _find_project_dir()
         assert found is None or home not in found.parents, f"the per-user dir was read as a stamped tree: {found}"
@@ -275,7 +273,6 @@ class TestDegradedGroundingIsLoud:
         (real / "work").mkdir()
         (tmp_path / "home").symlink_to(real, target_is_directory=True)
         monkeypatch.setenv("HOME", str(tmp_path / "home"))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
 
         _, failures = grounding_content.grounding_report({"cwd": str(real / "work")})
 

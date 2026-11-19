@@ -3,27 +3,19 @@
 # Description: DAEMON Status Digest Module
 # Version: 1.1.0
 # Created: 2026-01-29
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """
 Returns digest of DAEMON activity for check-ins.
 """
 
-import os
 import sys
 from typing import Dict, Any, List
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.update.data_loader import (

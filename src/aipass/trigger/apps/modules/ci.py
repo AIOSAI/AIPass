@@ -10,11 +10,10 @@
 CI red lane - poll dev's runs, wake the owner of a red, gate its cure through @sentry, push it
 """
 
-import os
 import sys
 from typing import Any, Dict, List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.trigger.apps.handlers.ci import git_door, ledger, outbound, replies, triage
 from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 from aipass.trigger.apps.handlers.events.ci_red import PAYLOAD_KEYS, is_retried, run_url
@@ -22,20 +21,13 @@ from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.modules.core import trigger
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 _SUBCOMMANDS = ["poll", "status", "reply", "verdict"]
 CHANGELOG_NAME = "CHANGELOG.md"
 
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]ci Module[/bold cyan]")
@@ -55,7 +47,7 @@ def print_introspection():
 
 def print_help() -> None:
     """Display ci command help."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]drone @trigger ci[/bold cyan] — the CI red lane")
@@ -318,7 +310,7 @@ def take_verdict(run_id: str, owner: str, text: str) -> str:
 
 def _print_status() -> None:
     """Render the ledger: the newest runs, then every cure still in the lane."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     data = ledger.load()
     runs = sorted(data["runs"].items(), key=lambda item: item[1].get("created", ""), reverse=True)[:12]
@@ -338,7 +330,7 @@ def _print_status() -> None:
 
 def _run_subcommand(subcommand: str, args: List[str]) -> bool:
     """Run one ci subcommand; a refusal goes out through error() so the exit code says so."""
-    from aipass.cli.apps.modules import console, error, success
+    from aipass.cli import console, error, success
 
     if subcommand == "status":
         _print_status()
@@ -359,7 +351,7 @@ def _run_subcommand(subcommand: str, args: List[str]) -> bool:
 
 def handle_command(command: str, args: list) -> bool:
     """Handle `ci` and its verbs; claims the module name only."""
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     if command != "ci":
         return False

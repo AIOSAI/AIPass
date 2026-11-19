@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: trust_registry.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Trusted-project registry — DPLAN-0244 Layer B
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-07-15
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Trusted-project registry for hook config loading.
@@ -14,13 +14,12 @@
 """
 
 import hashlib
-import json
 import os
 from pathlib import Path
 
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 REGISTRY_PATH = Path.home() / ".aipass" / "trusted_projects.json"
 REGISTRY_ENV = "AIPASS_TRUST_REGISTRY"
@@ -42,18 +41,20 @@ def _hash_file(path: Path) -> str:
 
 
 def read_registry() -> dict:
-    """Read the trusted-project registry. Returns empty registry if absent or corrupt."""
+    """The trusted-project registry; absent is the empty registry. A corrupt or unreadable one raises ValueError.
+
+    Never read as empty: the next enroll would write that back and erase every enrollment.
+    """
     path = registry_path()
     if not path.exists():
         return {"version": 1, "projects": {}}
     try:
         data = json_files.read_json_file(path)
-        if not isinstance(data.get("projects"), dict):
-            return {"version": 1, "projects": {}}
-        return data
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.error("[HOOKS] bad trust registry %s: %s", path, exc)
-        return {"version": 1, "projects": {}}
+    except (ValueError, OSError) as exc:
+        raise ValueError(f"trust registry {path} unreadable: {exc}") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("projects"), dict):
+        raise ValueError(f"trust registry {path} holds no projects object")
+    return data
 
 
 def _write_registry(registry: dict) -> None:

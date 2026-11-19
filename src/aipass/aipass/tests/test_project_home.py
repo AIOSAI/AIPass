@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_project_home.py
 # Description: Tests for shared/project_home.py — instruction-file ancestor fence helpers
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-07-31
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for shared/project_home.py and the instruction-file ancestor-fence helpers it drives."""
@@ -16,7 +16,6 @@
 
 import json
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -34,7 +33,7 @@ def _fence(home: str) -> list[str]:
     return [f"{home}/CLAUDE.md", f"{home}/.claude/CLAUDE.md", f"{home}/AGENTS.md", f"{home}/.claude/AGENTS.md"]
 
 
-@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="POSIX mode bits; root reads any directory")
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any directory")
 def test_is_projects_child_raises_naming_the_host_it_could_not_read(tmp_path):
     """A host whose listing is denied (mode 0o300: enter, never list) cannot say
     whether the target is its projects/ child. The error names the host, where a
@@ -56,8 +55,7 @@ def test_is_projects_child_raises_naming_the_host_it_could_not_read(tmp_path):
 def test_claude_md_excludes_returns_the_host_claude_md_and_agents_md_pairs(tmp_path):
     """Returns the four absolute paths a nested project must fence out.
 
-    The product answers in POSIX form on every platform (settings files carry
-    forward slashes), so home is built with as_posix() to match on Windows.
+    The product answers in POSIX form (settings files carry forward slashes).
     """
     home = (tmp_path / "AIPass").as_posix()
     excludes = claude_md_excludes(home)
@@ -211,6 +209,19 @@ def _make_nested(projects_dir: Path, name: str, registry: bool = True) -> Path:
     if registry:
         (proj / f"{name.upper()}_REGISTRY.json").write_text("{}", encoding="utf-8")
     return proj
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any directory")
+def test_find_fenceless_projects_raises_naming_a_project_it_could_not_read(tmp_path):
+    """Mutant: the OSError arm skips the dir again (doctor read it as 'all nested projects fenced') -> red."""
+    child = tmp_path / "projects" / "locked"
+    child.mkdir(parents=True)
+    child.chmod(0o300)
+    try:
+        with pytest.raises(RuntimeError, match=str(child)):
+            find_fenceless_projects(str(tmp_path))
+    finally:
+        child.chmod(0o755)
 
 
 def test_find_fenceless_projects_no_projects_dir(tmp_path):

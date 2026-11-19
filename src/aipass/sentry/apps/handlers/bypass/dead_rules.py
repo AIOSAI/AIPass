@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: dead_rules.py
 # Description: Bypass rules that match nothing, and inline bypass comments nothing reads
-# Version: 1.1.0
+# Version: 1.4.1
 # Created: 2026-09-25
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
-"""Bypass hygiene: rules that can never match, and comments that claim a rule.
+"""Bypass hygiene: rules that can never match, rules that cover nothing, and comments that claim a rule.
 
 ``utils.matching_rule`` treats a rule's ``file`` as a SUBSTRING of the handed path
 and skips a rule with a blank field. No code path reads the inline comment form.
+A rule covers nothing when, with it removed, its checker answers the same or a clean pass.
 """
 
 import json
@@ -21,6 +22,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.aipass_standards import applicability
 from aipass.sentry.apps.handlers.aipass_standards.skip_dirs import is_disabled_file
+from aipass.sentry.apps.handlers.checklist.verdicts import is_applicable
 from aipass.sentry.apps.handlers.json import json_handler
 
 #: The no-quote-before-hash clause keeps a string that only mentions the form out of the list.
@@ -28,8 +30,6 @@ _MARKER = re.compile(r"^[^\"'\n]*#\s*sentry:bypass\b", re.MULTILINE)
 
 #: Directories no lane hands a checker a file from, beside the retired ones.
 _NEVER_HANDED = frozenset({".git", "__pycache__", ".venv", "node_modules"})
-
-_STYLES: Tuple[Tuple[bool, bool], ...] = ((True, False), (True, True), (False, False), (False, True))
 
 
 def handed_files(branch_path: Path) -> List[str]:
@@ -76,14 +76,65 @@ def why_dead(rule: Dict[str, Any], handed: List[str], known_standards: Set[str])
     return None
 
 
-def dead_rules(branch_path: Path, rules: List[Dict[str, Any]], known_standards: Set[str]) -> List[Dict[str, Any]]:
-    """Every rule in the list that can never match, with its index, fields, why, and its own reason."""
+def _verdict(result: Dict[str, Any]) -> Tuple[Any, ...]:
+    """What a checker answered: its score and every check's name, verdict and message."""
+    checks = tuple((c.get("name"), c.get("passed"), c.get("message")) for c in result.get("checks", []))
+    return result.get("score"), result.get("passed"), checks
+
+
+def _answer(checker: Any, branch_path: Path, files: List[str], rules: List[Dict[str, Any]]) -> Tuple[Any, ...]:
+    """The checker's verdict under these rules: once for the branch, or once per file it would be handed."""
+    if getattr(checker, "AUDIT_SCOPE", "") == "branch_level" or not hasattr(checker, "check_module"):
+        return (_verdict(checker.check_branch(str(branch_path), bypass_rules=rules)),)
+    return tuple(_verdict(checker.check_module(path, bypass_rules=rules)) for path in files)
+
+
+def covers_nothing(
+    branch_path: Path, rules: List[Dict[str, Any]], index: int, checker: Any, handed: List[str]
+) -> Optional[str]:
+    """Why rule ``index`` waives nothing (without it, its checker answers the same or a clean pass), or None.
+
+    A checker with a post-pass or observe lane is not judged: those read the rules outside these two calls.
+    """
+    if hasattr(checker, "check_branch_post") or hasattr(checker, "check_branch_observe"):
+        return None
+    rule = rules[index]
+    needle = Path(rule["file"]).as_posix()
+    files = [path for path in handed if needle in path and path.endswith(".py")]
+    bare = _answer(checker, branch_path, files, rules[:index] + rules[index + 1 :])
+    # A file-wide waiver answers "bypassed", never equal to the bare answer, so a clean bare answer convicts too.
+    clean = all(
+        score in (None, 100) and passed is True and all(c[1] is True for c in checks) for score, passed, checks in bare
+    )
+    if not clean and _answer(checker, branch_path, files, rules) != bare:
+        return None
+    return f"covers nothing: {rule['standard']} answers the same or passes clean with this rule removed"
+
+
+def dead_rules(
+    branch_path: Path,
+    rules: List[Dict[str, Any]],
+    known_standards: Set[str],
+    checkers: Optional[Dict[str, Any]] = None,
+    handed_by: Optional[Dict[str, List[str]]] = None,
+) -> List[Dict[str, Any]]:
+    """Every rule in the list that can never match, with its index, fields, why, and its own reason.
+
+    With ``checkers`` (standard -> checker module), a rule that matches but waives nothing is dead too;
+    ``handed_by`` (standard -> the files the audit hands that checker) limits each checker to its own files.
+    """
     if not rules:
         return []
     handed = handed_files(branch_path)
     dead = []
     for index, rule in enumerate(rules):
         why = why_dead(rule, handed, known_standards)
+        if why is None and checkers and rule.get("standard") in checkers:
+            checker = checkers[rule["standard"]]
+            own = handed if handed_by is None else handed_by.get(rule["standard"], [])
+            # A rule is live if either lane uses it: the checklist hands files the audit never does (__init__.py).
+            own = sorted(set(own) | {path for path in handed if is_applicable(checker, path)})
+            why = covers_nothing(branch_path, rules, index, checker, own)
         if why is not None:
             dead.append(
                 {
@@ -118,24 +169,58 @@ def bypass_markers(branch_path: Path, files: Iterable[str]) -> List[str]:
     return [f"{rel}:{line}" for rel, line in sorted(found)]
 
 
-def _dump_style(config: Dict[str, Any], text: str) -> Optional[Tuple[bool, bool]]:
-    """The json.dumps variant that reproduces this file byte for byte, or None."""
-    for ensure_ascii, newline in _STYLES:
-        if json.dumps(config, indent=2, ensure_ascii=ensure_ascii) + ("\n" if newline else "") == text:
-            return ensure_ascii, newline
-    return None
+def _skip(text: str, pos: int) -> int:
+    """The first index at or after pos that is not JSON whitespace."""
+    while pos < len(text) and text[pos] in " \t\r\n":
+        pos += 1
+    return pos
 
 
-def prune(branch_path: Path, known_standards: Set[str], dry_run: bool = True) -> Dict[str, Any]:
+def without_rules(text: str, gone: Set[int]) -> str:
+    """The file's text with these indexes cut from its top-level "bypass" array; every other byte kept."""
+    decoder = json.JSONDecoder()
+    pos = _skip(text, text.index("{") + 1)
+    while text[pos] != "}":
+        key, pos = decoder.raw_decode(text, pos)
+        pos = _skip(text, _skip(text, pos) + 1)
+        if key == "bypass":
+            break
+        pos = _skip(text, decoder.raw_decode(text, pos)[1])
+        pos = _skip(text, pos + 1) if text[pos] == "," else pos
+    else:
+        raise ValueError('no top-level "bypass" array')
+    spans: List[Tuple[int, int]] = []
+    item = _skip(text, pos + 1)
+    while text[item] != "]":
+        end = decoder.raw_decode(text, item)[1]
+        spans.append((item, end))
+        after = _skip(text, end)
+        item = _skip(text, after + 1) if text[after] == "," else after
+    if not spans:
+        return text
+    sep = text[spans[0][1] : spans[1][0]] if len(spans) > 1 else ""
+    kept = [text[start:end] for index, (start, end) in enumerate(spans) if index not in gone]
+    if not kept:
+        return text[: pos + 1] + text[item:]
+    return text[: spans[0][0]] + sep.join(kept) + text[spans[-1][1] : item] + text[item:]
+
+
+def prune(
+    branch_path: Path,
+    known_standards: Set[str],
+    dry_run: bool = True,
+    checkers: Optional[Dict[str, Any]] = None,
+    handed_by: Optional[Dict[str, List[str]]] = None,
+) -> Dict[str, Any]:
     """Remove the dead rules from a branch's bypass.json; with dry_run, write nothing.
 
-    Blank-field rules are left for their owner; a file json.dumps cannot reproduce is refused, not reformatted.
+    Blank-field rules are left for their owner; only the dead rules' text is cut, the owner's layout kept.
     """
     bypass_file = branch_path / ".sentry" / "bypass.json"
     text = bypass_file.read_text(encoding="utf-8")
     config = json.loads(text)
     rules = config.get("bypass", [])
-    convicted = dead_rules(branch_path, rules, known_standards)
+    convicted = dead_rules(branch_path, rules, known_standards, checkers, handed_by)
     dead = [entry for entry in convicted if not entry["blank"]]
     outcome: Dict[str, Any] = {
         "file": str(bypass_file),
@@ -147,16 +232,19 @@ def prune(branch_path: Path, known_standards: Set[str], dry_run: bool = True) ->
     }
     if not dead or dry_run:
         return outcome
-    style = _dump_style(config, text)
-    if style is None:
-        outcome["refused"] = "the file does not round-trip through json.dumps(indent=2); a rewrite would reformat it"
-        return outcome
     gone = {entry["index"] for entry in dead}
     config["bypass"] = [rule for index, rule in enumerate(rules) if index not in gone]
-    ensure_ascii, newline = style
-    bypass_file.write_text(
-        json.dumps(config, indent=2, ensure_ascii=ensure_ascii) + ("\n" if newline else ""), encoding="utf-8"
-    )
+    new_text = ""
+    try:
+        new_text = without_rules(text, gone)
+        reads_back = json.loads(new_text) == config
+    except (ValueError, IndexError) as exc:
+        logger.warning("[dead_rules] cannot cut rules from %s: %s", bypass_file, exc)
+        reads_back = False
+    if not reads_back:
+        outcome["refused"] = "the rewrite did not read back as the kept rules"
+        return outcome
+    bypass_file.write_text(new_text, encoding="utf-8")
     outcome["written"] = True
     json_handler.log_operation(
         "bypass_rules_pruned",

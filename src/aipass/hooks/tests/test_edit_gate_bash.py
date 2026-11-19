@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.11.0
+# Version: 1.14.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-11-07
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -18,7 +18,7 @@ import json
 import os
 import shutil
 import sys
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
 import pytest
@@ -31,7 +31,7 @@ from aipass.hooks.apps.modules.bash_writes import write_targets
 # grant, and each granted test has a withheld twin. POSIX literals are test data; a path put into a
 # command uses as_posix() (bash's form on every OS); backslashes are tested only through _win().
 
-_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
+_RAIL = "aipass.ai_mail"
 _BASH_WRITES = "aipass.hooks.apps.modules.bash_writes"
 
 
@@ -268,7 +268,7 @@ class TestAGitWorkTreeWithNoRegistryIsAProject:
 
 
 class TestASessionInNoProjectCrossesIntoARegistryProject:
-    """A cwd in no project (a Seed workspace, /var/tmp) wrote into AIPass on both lanes; devpulse ruled it a crossing."""
+    """A cwd in no project (a Seed workspace, /var/tmp) wrote into AIPass on both lanes; devpulse ruled: a crossing."""
 
     @pytest.fixture
     def outside(self, tmp_path: Path) -> str:
@@ -344,7 +344,6 @@ class TestADispatchGrantOnTheScriptedLane:
         climb = (dispatch_grant.seed / "src" / "hooks" / ".." / ".." / "package.json").as_posix()
         assert _blocked(_run(dispatch_grant.seat, command=f"echo x > {climb}"))
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege on Windows")
     def test_a_symlink_escaping_a_granted_dir_is_refused(self, dispatch_grant):
         (dispatch_grant.seed / "private").mkdir()
         (dispatch_grant.seed / "src" / "hooks" / "link").symlink_to(dispatch_grant.seed / "private")
@@ -449,11 +448,13 @@ class TestScriptedLaneCatches:
 
     # Own files only, on this lane too: the project boundary alone would let hooks sed another branch.
 
-    def test_sed_into_another_branch(self, registered_projects: dict):
+    def test_sed_into_another_branch(self, registered_projects: dict, caplog):
         target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
         result = _run(registered_projects["hooks"], command=f"sed -i s/a/b/ {target}")
         assert _blocked(result)
         assert "Cross-branch write blocked (sed -i): 'hooks' cannot write to 'memory'" in _reason(result)
+        logged = [r.getMessage() for r in caplog.records if "scripted write refused, not the seat's" in r.getMessage()]
+        assert logged and logged[0].startswith("[HOOKS] edit_gate: scripted write refused, not the seat's: @hooks -> ")
 
     def test_sed_w_into_another_branch(self, registered_projects: dict):
         target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
@@ -552,8 +553,9 @@ class TestScriptedLaneDoesNotOverreach:
         target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
         for command in (f"python3 -c \"print(open('{target}').read())\"", f"grep def {target}", f"cat {target}"):
             assert _run(registered_projects["hooks"], command=command)["exit_code"] == 0, command
-        # awk is not a read-only program (print > file, system()), so it may not name it.
-        assert _run(registered_projects["hooks"], command=f"awk '/def /' {target}")["exit_code"] == 2
+        # awk reads unless its program can write or run (print > file, a pipe, system(), getline).
+        assert _run(registered_projects["hooks"], command=f"awk '/def /' {target}")["exit_code"] == 0
+        assert _run(registered_projects["hooks"], command=f"awk '/def / {{print > \"y\"}}' {target}")["exit_code"] == 2
 
     def test_sentry_no_longer_writes_across_branches_from_a_shell(self, registered_projects: dict):
         """A name (sentry) decides nothing in the shell lane either."""
@@ -584,7 +586,7 @@ class TestScriptedLaneDoesNotOverreach:
         assert _run(registered_projects["writer"], command=f"aipass init update {root} --dry-run")["exit_code"] == 0
         assert _run(registered_projects["writer"], command=f"aipass init update --dry-run {root}")["exit_code"] == 0
         assert _run(registered_projects["writer"], command=f"aipass init update {root}")["exit_code"] == 2
-        assert _run(registered_projects["writer"], command=f"aipass init run {root} --dry-run")["exit_code"] == 2
+        assert _run(registered_projects["writer"], command=f"aipass init {root} --dry-run")["exit_code"] == 2
 
     def test_a_shells_syntax_check_is_a_read_and_running_the_script_is_not(self, registered_projects: dict):
         script = (registered_projects["aipass"] / "setup.sh").as_posix()
@@ -768,19 +770,13 @@ class TestBashWritesParser:
             assert named in joined
 
     def test_no_usable_cwd_raises_rather_than_reading_no_writes(self, tmp_path: Path, monkeypatch):
-        """With no cwd to resolve against, the reader raises; [] would let a relative write through.
-
-        Windows refuses to remove a process's cwd, so there the command is read as before.
-        """
+        """With no cwd to resolve against, the reader raises; [] would let a relative write through."""
         gone = tmp_path / "gone"
         gone.mkdir()
         monkeypatch.chdir(gone)
-        shutil.rmtree(gone, ignore_errors=True)  # the platform answers by whether the directory is still there
-        if not gone.exists():
-            with pytest.raises(OSError):
-                bash_writes.write_targets_by_segment("echo hi > out.txt", "")
-        else:
-            assert write_targets("echo hi > out.txt", "") == [(gone / "out.txt", "redirection (>)")]
+        shutil.rmtree(gone)
+        with pytest.raises(OSError):
+            bash_writes.write_targets_by_segment("echo hi > out.txt", "")
 
     @pytest.mark.parametrize(
         ("command", "named"),
@@ -1005,12 +1001,6 @@ class TestBothSpellingsAreRead:
 class TestTargetSpellingIsNotPartOfTheContract:
     """Tests compare target components, never str(target), which differs per OS."""
 
-    def test_names_accepts_the_windows_rendering(self):
-        """The Windows rendering, compared on any OS: the tests above are green on Linux either way."""
-        as_windows = [(PureWindowsPath(r"\other\Project\x.json"), "python3 (interpreter)")]
-
-        assert _names(as_windows, "other", "Project", "x.json")
-
     def test_names_does_not_match_a_shorter_tail(self):
         """A comparison loose enough to pass anywhere proves nothing."""
         targets = [(PurePosixPath("/somewhere/else/x.json"), "why")]
@@ -1030,50 +1020,6 @@ class TestTargetSpellingIsNotPartOfTheContract:
         assert all(isinstance(t, LocalPath) for t, _ in targets), (
             f"targets are not the local Path flavour the fence must walk: {targets}"
         )
-
-
-class TestTheGitBashDriveSpelling:
-    """Git Bash's /c/... names drive C on Windows, not C:\\c\\... on the seat's drive."""
-
-    SEAT = r"C:\Work\AIPass\src\aipass\hooks"
-    VERA_FILE = PureWindowsPath(r"C:\Work\Vera-Studio\f.json")
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "sed -i s/a/b/ /c/Work/Vera-Studio/f.json",
-            "cd /c/Work/Vera-Studio && sed -i s/a/b/ f.json",
-            "cd /c/Work/Vera-Studio\nsed -i s/a/b/ f.json",
-            "sed -i s/a/b/ C:/Work/Vera-Studio/f.json",
-        ],
-    )
-    def test_a_drive_path_names_the_drive_on_windows(self, command):
-        assert [t for t, _ in write_targets(command, self.SEAT, PureWindowsPath)] == [self.VERA_FILE]
-
-    def test_the_bare_drive_is_its_root(self):
-        """/c alone is C:/, never the drive-relative C:, which pathlib joins as the seat itself."""
-        targets = [t for t, _ in write_targets("cd /c && touch x.json", self.SEAT, PureWindowsPath)]
-        assert targets == [PureWindowsPath(r"C:\x.json")], targets
-
-    def test_a_longer_first_component_is_not_a_drive(self):
-        """/cache is a directory on the seat's drive, not drive C with 'ache' under it."""
-        targets = [t for t, _ in write_targets("sed -i s/a/b/ /cache/f.json", self.SEAT, PureWindowsPath)]
-        assert targets == [PureWindowsPath(r"C:\cache\f.json")], targets
-
-    def test_the_respelled_ci_pin_lands_on_the_existing_test(self):
-        """test_a_subshell_cd_resolves_its_own_edit, read the way windows-setup reads it.
-
-        On Linux as_posix() changes nothing; this shows C:/... reaches the real file on Windows.
-        """
-        command = "(cd C:/Work/AIPass && sed -i s/a/b/ src/aipass/hooks/te" + "sts/test_existing.py)"
-
-        targets = [t for t, _ in write_targets(command, self.SEAT, PureWindowsPath)]
-        assert targets == [PureWindowsPath(self.SEAT) / "tests" / "test_existing.py"], targets
-
-    def test_on_posix_a_one_letter_directory_is_only_a_directory(self, tmp_path: Path):
-        """The drive reading is Windows-only. On Linux /c is a real directory named c."""
-        targets = [t for t, _ in write_targets("sed -i s/a/b/ /c/Work/f.json", tmp_path.as_posix(), PurePosixPath)]
-        assert targets == [PurePosixPath("/c/Work/f.json")], targets
 
 
 class TestTheBranchAndMemoryLanesAreDefaultDeny:
@@ -1129,7 +1075,7 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
         self, registered_projects: dict, grant_withheld, tmp_path: Path
     ):
         """An unlistable directory (0o300) must not read as no project: glob answers [] for it.
-        Where the platform still lists it (Windows, root) the crossing rule refuses instead."""
+        Where the platform still lists it (root) the crossing rule refuses instead."""
         locked = tmp_path / "Projects" / "Locked"
         locked.mkdir(parents=True)
         (locked / "LOCKED_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
@@ -1146,8 +1092,8 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
             locked.chmod(0o700)
 
     @pytest.mark.skipif(
-        sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0),
-        reason="0o300 leaves the directory listable on Windows and for root",
+        os.geteuid() == 0,
+        reason="0o300 leaves the directory listable for root",
     )
     def test_an_unlistable_project_logs_a_refusal_at_warning_and_a_crash_stays_error(
         self, registered_projects: dict, grant_withheld, tmp_path: Path, caplog
@@ -1182,13 +1128,7 @@ class TestAWordTheGateCannotProbe:
     @pytest.mark.parametrize(
         "name",
         [
-            pytest.param(
-                "x" * 300 + ".txt",
-                marks=pytest.mark.skipif(
-                    sys.platform == "win32", reason="the probe's errno for an over-long name is measured on POSIX only"
-                ),
-                id="name-over-NAME_MAX",
-            ),
+            pytest.param("x" * 300 + ".txt", id="name-over-NAME_MAX"),
             pytest.param("x" * 40000, id="path-over-PATH_MAX"),
         ],
     )
@@ -1275,3 +1215,195 @@ class TestASedPrintScriptIsARead:
         assert read["exit_code"] == 0, read["stdout"]
         for command in ("sed -i -n 68,90p .trinity/local.json", "sed -n s/a/b/p .trinity/local.json"):
             assert "Memory files are not written from a shell" in _reason(_run(str(seat), command=command)), command
+
+
+@pytest.fixture
+def fleet(tmp_path: Path) -> dict:
+    """An AIPass tree: @canary (with notes.txt and sub/), @other (with README.md), @devpulse, each with a passport."""
+    root = tmp_path / "AIPass"
+    (root / "AIPASS_REGISTRY.json").parent.mkdir(parents=True)
+    (root / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+    seats = {}
+    for name in ("canary", "other", "devpulse"):
+        seat = root / "src" / "aipass" / name
+        (seat / ".trinity").mkdir(parents=True)
+        (seat / ".trinity" / "passport.json").write_text(
+            json.dumps({"branch_info": {"branch_name": name}}), encoding="utf-8"
+        )
+        seats[name] = seat
+    (seats["canary"] / "sub").mkdir()
+    (seats["canary"] / "notes.txt").write_text("n\n", encoding="utf-8")
+    (seats["other"] / "README.md").write_text("r\n", encoding="utf-8")
+    return {"root": root, **seats}
+
+
+class TestAProviderSessionStartsOnlyInTheOwnBranch:
+    """The owner: no agent starts a session inside another branch; a session's directory IS that branch's seat."""
+
+    REFUSED = (
+        "cd ../other && claude",
+        "cd ../other && claude -p < notes.txt",
+        "(cd ../other; codex exec hi)",
+        "pushd ../other && opencode",
+        "codex -C ../other exec hi",
+        "codex --cd=../other exec hi",
+        "claude --add-dir ../other -p hi",
+        "claude --add-dir sub ../other -p hi",
+        "codex exec --add-dir ../other hi",
+        "opencode ../other",
+        "cd ../devpulse && claude",
+        "cd ../../.. && claude",
+        "bash -c 'cd ../other && claude'",
+        "env -C ../other claude",
+        "sudo -D ../other claude",
+        "systemd-run --user --working-directory=../other claude",
+        "systemd-run --user -p WorkingDirectory=../other claude",
+        "systemd-run --user claude -p hi",
+        "systemd-run claude -p hi",
+        "cd ../other && npx claude",
+        "cd ../other && nohup claude -p hi &",
+        "tmux new-session -d -c ../other claude",
+        "tmux new -s x 'cd ../other && claude'",
+        "tmux new -dc ../other claude",
+        "tmux -L s new -d -c ../other claude",
+        "tmux new -d -c sub 'cd ../../other && claude'",
+        "cd ../other && tmux new -d claude",
+        "tmux send-keys -t x claude Enter",
+        "tmux respawn-pane -k claude",
+        "tmux -c claude",
+        "tmux -c claude new -d sh",
+        "tmux new -d -c../other claude",
+        "cd $UNSET_DIR && tmux new -d claude",
+        "screen -dmS x -X stuff claude",
+        "screen -c rc -dm claude",
+        "cd ../other && screen -dmS x claude",
+        "echo claude | at now",
+        "cd $UNSET_DIR && claude",
+        "opencode $UNSET_DIR",
+    )
+    ALLOWED = (
+        "claude -p hi",
+        "cd sub && claude -p hi",
+        "codex -C . exec hi",
+        "codex -C sub exec hi",
+        "claude --add-dir sub -p hi",
+        "nohup claude -p hi &",
+        "tmux new-session -d claude",
+        "tmux -L s new -d claude",
+        "tmux new -d -s x -c sub 'claude -p hi'",
+        "tmux new-window -c sub claude",
+        "tmux splitw claude --add-dir sub",
+        "tmux new -d -c sub claude --add-dir ../sub",
+        "screen -dmS x claude -p hi",
+        "setsid claude -p hi",
+        "systemd-run --user -d claude -p hi",
+        "opencode sub",
+        'drone @ai_mail dispatch @other "Task" "start claude in tmux from ../other"',
+    )
+
+    @pytest.mark.parametrize("command", REFUSED)
+    def test_a_launch_outside_the_own_branch_is_refused(self, fleet: dict, grant_withheld, monkeypatch, command: str):
+        monkeypatch.chdir(fleet["canary"])  # an unfollowed cd must not be read against this process's cwd
+        result = _run(str(fleet["canary"]), command=command)
+        assert _blocked(result), command
+        assert "Starting a provider session" in _reason(result), command
+
+    @pytest.mark.parametrize("command", ALLOWED)
+    def test_a_launch_inside_the_own_branch_is_allowed(self, fleet: dict, grant_withheld, command: str):
+        assert _run(str(fleet["canary"]), command=command) == {"stdout": "", "exit_code": 0}, command
+
+    def test_the_admin_seat_starts_a_session_anywhere(self, fleet: dict, grant_granted):
+        for command in (
+            "cd ../other && claude",
+            "codex -C ../canary exec hi",
+            "tmux new-session -d -c ../other claude",
+        ):
+            assert _run(str(fleet["devpulse"]), command=command)["exit_code"] == 0, command
+
+    def test_a_seat_with_no_passport_starts_no_session(self, fleet: dict, grant_withheld):
+        assert _blocked(_run(str(fleet["root"]), command="claude -p hi"))
+
+    def test_systemd_run_names_the_directory_its_unit_would_start_in(self, fleet: dict, grant_withheld):
+        """With no directory given, a user unit starts in the home dir and a system unit in /."""
+        user = _reason(_run(str(fleet["canary"]), command="systemd-run --user claude -p hi"))
+        system = _reason(_run(str(fleet["canary"]), command="systemd-run claude -p hi"))
+        assert f"Refused: {Path.home()} is not inside" in user
+        assert "Refused: / is not inside" in system
+
+    def test_the_refusal_names_the_rule_the_target_and_the_way_forward_and_is_logged(
+        self, fleet: dict, grant_withheld, caplog
+    ):
+        reason = _reason(_run(str(fleet["canary"]), command="cd ../other && claude"))
+        assert "Caller: @canary." in reason
+        assert f"Refused: {fleet['other']} is not inside your own branch ({fleet['canary']})." in reason
+        assert 'drone @ai_mail dispatch @<branch> "Subject" "Body"' in reason
+        logged = [r.getMessage() for r in caplog.records if "provider launch refused" in r.getMessage()]
+        assert logged == [
+            f"[HOOKS] edit_gate: provider launch refused: @canary -> {fleet['other']} | cmd=cd ../other && claude"
+        ]
+
+
+class TestTheLaunchRuleCarriesTheWeightSoReadsPass:
+    """A provider prompt is no write target; awk and sed -n that only print are reads; each refuses if it can write."""
+
+    @pytest.mark.parametrize(
+        "command",
+        (
+            "claude -p ../other/README.md",
+            "awk '{print}' ../other/README.md",
+            "awk '{print $1}' ../other/README.md",
+            "awk -F: -v x=1 '{print $1}' ../other/README.md",
+            "sed -n '/^r/,/^s/p' ../other/README.md",
+        ),
+    )
+    def test_a_read_of_another_branch_passes(self, fleet: dict, grant_withheld, command: str):
+        assert _run(str(fleet["canary"]), command=command) == {"stdout": "", "exit_code": 0}, command
+
+    @pytest.mark.parametrize(
+        "command",
+        (
+            "awk '{print > \"x\"}' ../other/README.md",
+            "awk '{print | \"sh\"}' ../other/README.md",
+            "awk '{system(\"true\")}' ../other/README.md",
+            "awk '{\"date\" | getline d}' ../other/README.md",
+            "awk '{getline line < \"/etc/hostname\"}' ../other/README.md",
+            "awk -i inplace '{print}' ../other/README.md",
+            "awk -f prog.awk ../other/README.md",
+            "awk '@load \"inplace\"; {print}' ../other/README.md",
+            "awk '@include \"w.awk\"; {print}' ../other/README.md",
+            'awk \'BEGIN {f = "sys" "tem"; @f("true")}\' ../other/README.md',
+            "sed -n '/^r/w ../other/x' notes.txt",
+            "sed -n '/^r/,/^s/e date' ../other/README.md",
+        ),
+    )
+    def test_a_form_that_can_write_stays_refused(self, fleet: dict, grant_withheld, command: str):
+        assert _blocked(_run(str(fleet["canary"]), command=command)), command
+
+
+class TestAProviderFlagValueIsJudged:
+    """codex exec -o FILE: codex writes FILE itself, no hook sees it, so each provider flag's value is judged."""
+
+    @pytest.mark.parametrize(
+        "command",
+        (
+            'codex exec -o ../other/apps/x.py "hi"',
+            'codex exec --output-last-message=../other/apps/x.py "hi"',
+            'codex exec -o../other/README.md "hi"',
+        ),
+    )
+    def test_a_value_in_another_branch_is_refused(self, fleet: dict, grant_withheld, command: str):
+        assert "Cross-branch" in _reason(_run(str(fleet["canary"]), command=command)), command
+
+    def test_a_value_in_another_project_is_refused_by_the_project_fence(self, fleet: dict, grant_withheld):
+        vera = fleet["root"].parent / "Vera"
+        (vera / "src").mkdir(parents=True)
+        (vera / "VERA_REGISTRY.json").write_text("{}", encoding="utf-8")
+        result = _run(str(fleet["canary"]), command=f'codex exec -o {(vera / "src" / "x.py").as_posix()} "hi"')
+        assert "Cross-project write blocked" in _reason(result)
+
+    @pytest.mark.parametrize(
+        "command",
+        ('codex exec "fix ../other"', 'codex exec -o ./notes.txt "hi"', "codex exec --json ../other/README.md"),
+    )
+    def test_a_prompt_or_a_value_at_home_passes(self, fleet: dict, grant_withheld, command: str):
+        assert _run(str(fleet["canary"]), command=command) == {"stdout": "", "exit_code": 0}, command

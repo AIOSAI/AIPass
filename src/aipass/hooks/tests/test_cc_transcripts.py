@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-18
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/cc_transcripts.py."""
@@ -71,8 +71,6 @@ class TestManglingRule:
         [
             # Vectors from the CLI's own cP() run in node, so the measure is the CLI's.
             ("/srv/aipass/src/aipass/hooks", "-srv-aipass-src-aipass-hooks"),
-            # A Windows path: colon and backslashes are plain non-alphanumerics; NO drive-letter special case.
-            ("C:\\Work\\aipass\\ai_mail", "C--Work-aipass-ai-mail"),
             ("", ""),
             ("/srv/é–ø/x", "-srv-----x"),
             # Non-BMP: JS sees a SURROGATE PAIR and writes TWO dashes.

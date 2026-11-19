@@ -23,10 +23,9 @@ find the caller's branch and module, then writes the line twice: to `system_logs
 root, where every branch's output is aggregated, and to that branch's own `logs/` directory
 for local debugging. Both rotate by size. An installed package (`uv tool install`, pip) has
 no repo root to log under, so its `system_logs/` lives in `~/.aipass/system_logs`. A missing
-directory is created rather than raised, a log file that cannot be opened is reported as `Log
-handler failed` and never raised into the caller, and if prax itself cannot be imported the
-caller gets a NullLogger instead of a traceback —
-a logging system that takes the program down with it is worse than no logging system.
+directory is created rather than raised, and a log file that cannot be opened is reported as
+`Log handler failed` on prax's trail. If prax itself cannot be imported, the import raises in
+every spelling: a broken logger is a failure the caller hears, never a silent substitute.
 
 ---
 
@@ -38,8 +37,8 @@ a logging system that takes the program down with it is worse than no logging sy
   live agent sessions, with a read-only feed of The Commons.
 - **Watches for runaway logs** — growth rates per file, sustained-threshold alarms, and an
   event on the trigger bus when one goes off.
-- **Audits and rotates log files** — health summaries, truncation of oversized files, and a
-  weekly sweep of stale ones run by the daemon.
+- **Audits log files** — health summaries and oversized-file reports (writers rotate their own
+  files; nothing truncates a live one), and a weekly sweep of stale ones run by the daemon.
 - **Builds the branch dashboards** — the `DASHBOARD.local.json` every agent reads at its
   greeting, refreshed from the central files, plus the write-through API other services call
   to update their own section.
@@ -70,7 +69,7 @@ Each module carries its own reference too, reached by adding `--help` to the ver
 - Logs are the first diagnostic in this ecosystem. If something misbehaved, say which branch
   and roughly when, and the line is usually already on disk.
 - Caps other branches read from prax are named as constants, never as numbers to copy:
-  `SUBJECT_CAP` and `DASHBOARD_CHAR_BUDGET` in `aipass.prax.apps.modules.dashboard`. The
+  `SUBJECT_CAP` and `DASHBOARD_CHAR_BUDGET`, `from aipass.prax import ...`. The
   contract for both is [docs/dashboard_caps.md](docs/dashboard_caps.md).
 
 ---
@@ -91,12 +90,13 @@ modules beside it and routes each command to the one that claims it. `apps/modul
 one thin orchestrator per verb — `logger`, `monitor`, `dashboard`, `status`, `log_audit`,
 `log_health` and `discover`. `apps/handlers/` holds the implementation, one directory per
 concern: logging setup and rotation, monitoring threads, dashboard refresh and template,
-discovery and the registry, the central-file reader, the CLI predicates, the status sync, the
+discovery and the registry, the central-file reader, the CLI predicates, the
 config resolution, the background watchers, and the json service every branch shares.
 
-External branches import `aipass.prax` or `aipass.prax.apps.modules.*` only; handlers are
-internal by contract. The public surface is lazy (PEP 562) — `logger`, `append_jsonl` and
-`json_handler` resolve on first access, so importing prax costs nothing until it is used.
+External branches import from one door, the package top file: `from aipass.prax import <name>`,
+never a path under `apps/`. The door is lazy (PEP 562) and caches nothing: each name
+(`__all__` in `__init__.py` is the list) is read from its home on every access, so importing
+prax costs nothing until a name is used, and a patch on the home reaches every later read.
 
 The directory tree lives in this branch's own prompt (`.aipass/aipass_local_prompt.md`) —
 one place, so it cannot disagree with itself.
@@ -113,10 +113,10 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/monitor.md](docs/monitor.md) | Mission Control: the threads, multi-CLI session reading, the commons feed |
 | [docs/dashboard.md](docs/dashboard.md) | Refresh, template push and diff, and the write-through API services call |
 | [docs/dashboard_caps.md](docs/dashboard_caps.md) | The subject cap and whole-file budget every dashboard writer reads, including writers outside prax |
-| [docs/log_audit.md](docs/log_audit.md) | Health summaries, growth rates, truncation, and the weekly sweep the daemon runs |
+| [docs/log_audit.md](docs/log_audit.md) | Health summaries, growth rates, the stale-log sweep, and the weekly sweep the daemon runs |
 | [docs/discovery.md](docs/discovery.md) | The scheduled scan behind the module registry, and the watcher's own events |
 | [docs/json_service.md](docs/json_service.md) | The config/data/log triplet every branch writes through, and its test seam |
-| [docs/architecture.md](docs/architecture.md) | How a command reaches a handler: router, unknown-argument gate, exit seam, help behaviour, status sync |
+| [docs/architecture.md](docs/architecture.md) | How a command reaches a handler: router, unknown-argument gate, exit seam, help behaviour |
 | [docs/tests.md](docs/tests.md) | How the suite is organised, what the fixtures guarantee, how to run it |
 
 ---
@@ -143,11 +143,12 @@ Depth lives in [docs/](docs/), one file per module or handler group:
   its `DASHBOARD.local.json`.
 - Every service — the dashboard write-through API, so each owns its own section and no
   writer deletes another's keys.
-- The system — log rotation and audit enforcement, and the module registry the fleet reads.
+- The system — log rotation and audit, the module registry the fleet reads, and the published
+  `log_backup_count()`, `LOGGING_ALLOWED` and `LOGGER_DOORS` (see [docs/logging_api.md](docs/logging_api.md)).
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-11-15
 
 ---
 [← Back to AIPass](../../../README.md)

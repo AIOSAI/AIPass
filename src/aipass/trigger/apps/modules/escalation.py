@@ -1,42 +1,26 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Escalation digest CLI — inspect repeat warning/error signatures
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-08
-# Modified: 2026-10-17
+# Modified: 2026-11-16
 # =============================================
 
 """
 Escalation Digest Module — inspect the repeat-signature lane
 """
 
-import os
 import sys
 
-from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.handlers import escalation
 from aipass.trigger.apps.handlers.json import json_handler
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 _SUBCOMMANDS = ["status", "list", "config"]
 
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError.
-    except (ImportError, OSError):
-        logger.info("CLI console not available, using rich fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]escalation Module[/bold cyan]")
@@ -54,7 +38,7 @@ def print_introspection():
 
 def print_help() -> None:
     """Display escalation command help."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]drone @trigger escalation[/bold cyan] — repeat-signature digest lane")
@@ -117,11 +101,6 @@ def _handle_status(console) -> None:
         )
     if not stats["email_wired"]:
         console.print("  [dim]Email callback not wired in this process (wired when events fire).[/dim]")
-    if stats.get("trail_writes_dropped"):
-        console.print(
-            f"  [yellow]Trail lines lost  : {stats['trail_writes_dropped']}[/yellow] "
-            f"[dim](the escalation.jsonl sidecar could not be written — counting is unaffected)[/dim]"
-        )
     console.print()
     console.print(f"  [dim]state : {stats['state_file']}[/dim]")
     console.print(f"  [dim]config: {stats['config_file']}[/dim]")
@@ -182,7 +161,7 @@ def _handle_config(console) -> None:
 
 def _run_subcommand(subcommand: str, args: list) -> bool:
     """Run an escalation subcommand."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 

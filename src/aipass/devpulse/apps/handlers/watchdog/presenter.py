@@ -13,8 +13,8 @@ Nothing here decides anything: the module routes, the handlers act, this only sa
 
 import importlib
 
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, error
+from aipass.prax import logger
+from aipass.cli import console, error
 from aipass.devpulse.apps.handlers.json import json_handler
 
 MODULE_NAME = "presenter"

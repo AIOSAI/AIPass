@@ -28,9 +28,10 @@ anywhere reads `discovered_time`. What the registry feeds is prax's own dedupe
 and the module count in `drone @prax status`.
 
 **What starts a watcher.** Only a process that calls `start_file_watcher()`
-itself; nothing in production does. A process that opens it can lose its watchdog
-dispatcher, which is why the liveness check, the `died` record and the
-`file_watcher_died` fire exist.
+itself; nothing in production does, and the logger checks no watcher. A process
+that opens one can lose its watchdog dispatcher; `check_file_watcher_liveness()`,
+the `died` record and the `file_watcher_died` fire are there for that process to
+call. The watcher's diagnostics are lines on `prax/logs/watcher.jsonl`.
 
 ## The watcher's own events
 
@@ -68,12 +69,11 @@ against broken code):
 - **The guard.** Discovery is best-effort by nature — the file it describes is a
   moving target — so a failure is reported and swallowed. Losing one module
   registration is a rounding error next to losing the watcher.
-- **A liveness check that fires.** `check_file_watcher_liveness()` runs throttled
-  (one real check per 60 s) on the logging path, reports a death loudly **once**
-  with the stranded queue depth, writes the `died` record and fires
-  `file_watcher_died` on the trigger bus. It never raises: it is called by the
-  logger, and a health check that breaks logging is worse than the condition it
-  detects.
+- **A liveness check that fires.** `check_file_watcher_liveness()` is throttled
+  (one real check per 60 s), reports a death loudly **once** with the stranded
+  queue depth, writes the `died` record and fires `file_watcher_died` on the
+  trigger bus. Nothing calls it today: the logger's hook that did was cut
+  (FPLAN-0932), since no production process starts a watcher.
 
 The check is throttled *and* lock-free in the common case, both pinned — the
 throttle moving inside the lock would change cost rather than answers, and would

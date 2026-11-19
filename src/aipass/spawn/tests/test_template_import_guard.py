@@ -1,21 +1,18 @@
 # =================== AIPass ====================
 # Name: test_template_import_guard.py
 # Description: What the newborn's handler guard must survive on its very first import
-# Version: 1.1.1
+# Version: 1.3.0
 # Created: 2026-08-30
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
-"""Tests for templates/citizen/apps/handlers/__init__.py, the newborn's import-time access guard."""
+"""Tests for templates/citizen/apps/handlers/__init__.py (the newborn's guard) and templates/citizen/__init__.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that apps/modules/core.py parses and imports
 # sentry: no-test-needed(documentation) — docstrings on the guard's helper functions in the template
 
 import ast
-import importlib
-import ntpath
-import os
 import subprocess
 import sys
 import textwrap
@@ -29,15 +26,11 @@ from aipass.spawn.tests.support_template_import_guard import (
     _ARM_THE_ROUTE,
     _BUILD_PROBE_PATH,
     _CONTROL_PROBE,
-    _DENY_REALPATH,
     _EMULATE_310,
-    _HOST_FACTS,
     _PATHLIB_ROUTE_PROBE,
-    _PLATFORM_EMULATIONS,
     _child_script,
     _require_live_world,
     _run,
-    _simulation_unavailable,
 )
 
 # The guard runs at import in every newborn, so it is rendered and imported in a subprocess.
@@ -105,17 +98,8 @@ def _run_seat(seat: Path, root: Path, body: str, cwd: Path) -> subprocess.Comple
     )
 
 
-# The condition is "the cwd read RAISES": an injected world runs on every OS, a deleted
-# directory wherever the OS allows it. The injection carries a positive control, so a world
-# that did not take SKIPS instead of reading green.
-
-WINDOWS_RECIPE_SKIP = (
-    "Windows locks a process's current working directory, so this recipe dies at "
-    "rmtree with WinError 32 before reaching its claim. Windows makes the RECIPE "
-    "unavailable, not the STATE — the portable injection pin above covers the "
-    "state on every OS, and a disconnected share is how a live Windows process "
-    "reaches it for real."
-)
+# The condition is "the cwd read RAISES": an injected world, or a deleted directory.
+# The injection carries a positive control, so a world that did not take SKIPS instead of reading green.
 
 _INJECT_DEAD_CWD = (
     """
@@ -144,8 +128,6 @@ _DELETE_CWD = (
 
 PORTABLE_WORLDS = {
     "getcwd-denied": _INJECT_DEAD_CWD,
-    # Windows CI died in inspect's unprotected os.path.realpath; a getcwd denial never reaches it on POSIX.
-    "realpath-denied": _DENY_REALPATH,
 }
 
 _NO_WORLD_AT_ALL = (
@@ -181,26 +163,9 @@ _PATHLIB_ROUTE_PROBE_RELATIVE = """
         print("PATHLIB_INERT")
 """
 
-# Patches a dunder, never `pathlib.Path = X(Path)`: Path.__new__'s `cls is Path` global lookup
-# would then downgrade X to a plain PosixPath. Pinned below against a tidier rewrite.
-_A_CONCRETE_CLASS_THAT_SPELLS_ANOTHER_DIALECT = """
-    import pathlib
-
-    _real_fspath = pathlib.PurePath.__fspath__
-
-    def _fspath_in_another_dialect(self):
-        return _real_fspath(self).replace("/", chr(92))
-
-    pathlib.PurePath.__fspath__ = _fspath_in_another_dialect
-    print("DIALECT_INSTALLED")
-"""
-
-# Every row runs through an explicit platform emulation, whatever the host.
 _GETCWD_TABLE = {
-    ("posix", "absolute"): "PATHLIB_INERT",
-    ("posix", "relative"): "PATHLIB_ARMED",
-    ("nt", "absolute"): "PATHLIB_ARMED",
-    ("nt", "relative"): "PATHLIB_ARMED",
+    "absolute": "PATHLIB_INERT",
+    "relative": "PATHLIB_ARMED",
 }
 
 
@@ -208,23 +173,11 @@ class TestTheGetcwdRouteNeedsNoAccessorPatch:
     """@skills' round-7 return finding, answered by measurement.
 
     realpath looks up os.getcwd at call time, so no accessor patch is needed; Path.cwd() on <=3.10
-    stays unreachable, and the guard never calls it. Emulate both platforms or neither."""
+    stays unreachable, and the guard never calls it."""
 
-    @staticmethod
-    def _emulation_or_skip(route: str) -> str:
-        """One gate for every row that installs a platform, and the only one."""
-        emulation, requires = _PLATFORM_EMULATIONS[route]
-        why = _simulation_unavailable(requires, _HOST_FACTS)
-        if why:
-            pytest.skip(f"the {route} emulation cannot speak from this host: {why}")
-        return emulation
-
-    def _verdict(self, route: str, probe: str) -> str:
-        emulation = self._emulation_or_skip(route)
-
+    def _verdict(self, probe: str) -> str:
         result = _run(
             _child_script(
-                emulation,
                 _BUILD_PROBE_PATH,
                 _EMULATE_310,
                 _ARM_THE_ROUTE,
@@ -234,53 +187,19 @@ class TestTheGetcwdRouteNeedsNoAccessorPatch:
             cwd=Path(__file__).parent,
         )
         lines = result.stdout.split()
-        assert "PROBE_NOT_ABS" not in lines, (
-            f"the probe literal is not absolute under the {route} emulation — an "
-            f"absolute path is whatever that platform says it is:\n{result.stdout}"
-        )
-        assert "ROUTE_ARMED" in lines, f"the route never armed ({route}/{probe}):\n{result.stdout}\n{result.stderr}"
-
-        built = result.stdout.split("PROBE_PATH ", 1)[1].splitlines()[0]
-        if route == "nt":
-            assert ntpath.splitdrive(built)[0], (
-                "the windows emulation built a drive-less literal. On 3.12 that "
-                "changes nothing (ntpath.isabs still accepted rooted paths); on "
-                "3.13 abspath falls through to os.getcwd and the probe dies "
-                f"building its own argument: {built!r}"
-            )
-        else:
-            assert not ntpath.splitdrive(built)[0], f"a posix row produced a drive: {built!r}"
+        assert "PROBE_NOT_ABS" not in lines, f"the probe literal is not absolute:\n{result.stdout}"
+        assert "ROUTE_ARMED" in lines, f"the route never armed ({probe}):\n{result.stdout}\n{result.stderr}"
 
         armed = [line for line in lines if line.startswith("PATHLIB_")]
-        assert armed, f"the probe reported nothing ({route}/{probe}):\n{result.stdout}\n{result.stderr}"
+        assert armed, f"the probe reported nothing ({probe}):\n{result.stdout}\n{result.stderr}"
         return armed[0]
 
-    @pytest.mark.parametrize(("route", "probe"), sorted(_GETCWD_TABLE))
-    def test_the_getcwd_denial_answers_the_same_way_the_table_says(self, route, probe):
-        expected = _GETCWD_TABLE[(route, probe)]
+    @pytest.mark.parametrize("probe", sorted(_GETCWD_TABLE))
+    def test_the_getcwd_denial_answers_the_same_way_the_table_says(self, probe):
+        expected = _GETCWD_TABLE[probe]
 
-        assert self._verdict(route, probe) == expected, (
-            f"the {route} route answered differently for a {probe} path than the "
-            "table says. If this is the nt row, read ntpath.realpath again "
-            "before editing the table — the getcwd read ABOVE the isabs check "
-            "is what the row is derived from (ordering, not line number)."
-        )
-
-    def test_the_live_platform_agrees_with_its_own_row(self):
-        """The emulations are stand-ins; this is the host answering for itself."""
-        route = "nt" if os.name == "nt" else "posix"
-
-        result = _run(
-            _child_script(_BUILD_PROBE_PATH, _EMULATE_310, _ARM_THE_ROUTE, _INJECT_DEAD_CWD, _PATHLIB_ROUTE_PROBE),
-            cwd=Path(__file__).parent,
-        )
-        lines = result.stdout.split()
-        assert "ROUTE_ARMED" in lines, result.stdout
-        live = [line for line in lines if line.startswith("PATHLIB_")][0]
-
-        assert live == _GETCWD_TABLE[(route, "absolute")], (
-            f"this host is {os.name!r} and answered {live} where its own table "
-            f"row says {_GETCWD_TABLE[(route, 'absolute')]}"
+        assert self._verdict(probe) == expected, (
+            f"the route answered differently for a {probe} path than the table says."
         )
 
     def test_the_relative_probe_is_inert_with_no_world_at_all(self):
@@ -293,133 +212,6 @@ class TestTheGetcwdRouteNeedsNoAccessorPatch:
         assert "PATHLIB_INERT" in result.stdout.split(), (
             "the relative probe raised with NO world installed — it is "
             f"convicting for its own shape, not for the denial:\n{result.stdout}\n{result.stderr}"
-        )
-
-    def test_a_posix_route_with_a_foreign_dialect_class_is_the_windows_red(self):
-        """CI's windows red, reproduced from Linux — and the reason for the gate.
-
-        Only a foreign-dialect concrete class differs from the posix row; INERT becomes ARMED."""
-        emulation = self._emulation_or_skip("posix")
-
-        result = _run(
-            _child_script(
-                emulation,
-                _BUILD_PROBE_PATH,
-                _A_CONCRETE_CLASS_THAT_SPELLS_ANOTHER_DIALECT,
-                _EMULATE_310,
-                _ARM_THE_ROUTE,
-                _INJECT_DEAD_CWD,
-                _PATHLIB_ROUTE_PROBE,
-            ),
-            cwd=Path(__file__).parent,
-        )
-
-        assert "DIALECT_INSTALLED" in result.stdout.split(), (
-            f"the chimera never got built, so this measured nothing:\n{result.stdout}\n{result.stderr}"
-        )
-        assert "PATHLIB_ARMED" in result.stdout.split(), (
-            "a posix os.path with a foreign-dialect concrete class no longer "
-            "reads the cwd for an absolute literal — if this is genuinely fixed "
-            f"upstream, the windows skip above can go:\n{result.stdout}\n{result.stderr}"
-        )
-        assert self._verdict("posix", "absolute") == "PATHLIB_INERT", (
-            "the control moved too — then the difference above is not the dialect"
-        )
-
-    def test_a_stand_in_that_subclasses_the_class_it_replaces_is_downgraded(self):
-        """Why the dialect stand-in patches a dunder instead of adding a class.
-
-        Kept or downgraded are both legal; a half-built surviving subclass never is."""
-        result = _run(
-            _child_script(
-                _BUILD_PROBE_PATH,
-                """
-                import pathlib
-
-                class _Subclassed(pathlib.Path):
-                    pass
-
-                pathlib.Path = _Subclassed
-                _made = pathlib.Path(_ARM_ABS)
-                _kept = type(_made) is _Subclassed
-                print("SUBCLASS_KEPT" if _kept else "SUBCLASS_DOWNGRADED", type(_made).__name__)
-                print("INITIALISED" if hasattr(_made, "_raw_paths") else "UNINITIALISED")
-                """,
-            ),
-            cwd=Path(__file__).parent,
-        )
-
-        lines = result.stdout.split()
-        assert ("SUBCLASS_KEPT" in lines) != ("SUBCLASS_DOWNGRADED" in lines), (
-            f"the probe reported neither verdict:\n{result.stdout}\n{result.stderr}"
-        )
-        if "SUBCLASS_DOWNGRADED" in lines:
-            assert "UNINITIALISED" in lines, (
-                "the interpreter swapped the class but ran __init__ anyway — then "
-                "the trap this comment describes is not the one that happens here"
-            )
-        else:
-            assert "INITIALISED" in lines, (
-                "a subclass survived installation as a HALF-BUILT object: it will "
-                f"die at the first str(), a long way from here:\n{result.stdout}"
-            )
-
-    def test_no_row_of_the_table_runs_bare(self):
-        """@memory's rule, pinned where it can rot: emulate BOTH or neither.
-
-        A bare row is indistinguishable on its own host, so the table itself is pinned."""
-        for route, (prelude, _requires) in _PLATFORM_EMULATIONS.items():
-            assert prelude.strip(), (
-                f"the {route!r} row installs nothing, so it measures whatever "
-                "host runs it under a label that says otherwise"
-            )
-        assert set(_PLATFORM_EMULATIONS) == {row for row, _ in _GETCWD_TABLE}, (
-            "a table row has no platform emulation, or an emulation has no rows"
-        )
-
-    @pytest.mark.parametrize("route", sorted(_PLATFORM_EMULATIONS))
-    def test_an_emulation_stacked_on_its_own_platform_is_one_layer(self, route):
-        """@sentry's round-8 find, relayed by @devpulse, checked here.
-
-        On Windows the nt emulation lands on a host already nt; applying it twice shows that from Linux."""
-        emulation = self._emulation_or_skip(route)
-        result = _run(
-            _child_script(
-                emulation,
-                emulation,
-                _BUILD_PROBE_PATH,
-                _EMULATE_310,
-                _ARM_THE_ROUTE,
-                _PATHLIB_ROUTE_PROBE,
-            ),
-            cwd=Path(__file__).parent,
-        )
-
-        assert "RecursionError" not in result.stderr, (
-            f"the {route} emulation calls the name it replaced — stacking it on "
-            f"its own platform recurses:\n{result.stderr[-400:]}"
-        )
-        assert "ROUTE_ARMED" in result.stdout.split(), (
-            f"the {route} emulation stopped working when applied twice:\n{result.stdout}\n{result.stderr}"
-        )
-
-    @pytest.mark.parametrize("route", sorted(_PLATFORM_EMULATIONS))
-    def test_each_platform_emulation_is_inert_without_the_denial(self, route):
-        """And the same for the platform stand-ins themselves (else every row is vacuously ARMED)."""
-        result = _run(
-            _child_script(
-                self._emulation_or_skip(route),
-                _BUILD_PROBE_PATH,
-                _EMULATE_310,
-                _ARM_THE_ROUTE,
-                _PATHLIB_ROUTE_PROBE,
-            ),
-            cwd=Path(__file__).parent,
-        )
-
-        assert "PATHLIB_INERT" in result.stdout.split(), (
-            f"the {route} emulation arms the probe with no denial installed — "
-            f"every {route} row above is measuring the stand-in:\n{result.stdout}\n{result.stderr}"
         )
 
 
@@ -467,7 +259,6 @@ def test_a_cwd_inside_the_newborn_buys_a_foreign_seat_nothing(class_name, tmp_pa
     assert result.stdout.strip() == "Caller branch: foreign"
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason=WINDOWS_RECIPE_SKIP)
 @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
 def test_newborn_import_survives_a_deleted_working_directory(class_name, tmp_path):
     """The same claim against a genuinely deleted cwd — no faking at all."""
@@ -507,7 +298,6 @@ class TestBothConstructionsAgree:
             print("RESOLVED")
         """
 
-    @pytest.mark.skipif(sys.platform == "win32", reason=WINDOWS_RECIPE_SKIP)
     def test_the_two_worlds_answer_the_call_site_identically(self, tmp_path):
         (tmp_path / "stand_here").mkdir()
 
@@ -529,20 +319,6 @@ class TestBothConstructionsAgree:
             "the control probe reports a broken world on a healthy machine — it "
             f"cannot distinguish anything: {result.stdout!r}"
         )
-
-    def test_the_windows_skip_states_the_ruling_not_just_the_symptom(self):
-        """The skip reason is the evidence a future reader gets — pin it."""
-        marks = [
-            m
-            for m in getattr(test_newborn_import_survives_a_deleted_working_directory, "pytestmark")
-            if m.name == "skipif"
-        ]
-        assert len(marks) == 1, "the deleted-cwd recipe lost its platform skip"
-
-        reason = marks[0].kwargs["reason"]
-        assert "WinError 32" in reason
-        assert "RECIPE" in reason and "STATE" in reason, "the skip must say WHY Windows is excused, not just that it is"
-        assert marks[0].args[0] is (sys.platform == "win32")
 
 
 @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
@@ -568,32 +344,48 @@ def test_newborn_refuses_a_foreign_branch_and_names_it(class_name, tmp_path):
 
 
 @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
-def test_the_newborns_modules_door_is_open_to_a_foreign_branch(class_name, tmp_path):
-    """A foreign seat imports a newborn module that imports the handlers on its behalf.
+def test_the_newborns_package_door_passes_its_own_door_probe_from_a_foreign_seat(class_name, tmp_path):
+    """The template's top file and the template's support_fence 'door' shape, both rendered, from a foreign seat.
 
-    Kin asked, so the fence lets it through. The scaffold ships no door file, so one is planted."""
+    The probe answers ALLOWED only for a lazy door: nothing under apps loaded, an unknown name refused."""
     root = _plant_newborn(tmp_path / "tree", class_name)
-    modules = root / "aipass" / "newborn" / "apps" / "modules"
-    modules.mkdir()
-    (modules / "__init__.py").write_text("", encoding="utf-8")
-    (modules / "door_probe.py").write_text(
-        "from aipass.newborn.apps.handlers import MY_BRANCH\n\n__all__ = ['MY_BRANCH']\n", encoding="utf-8"
+    template = get_template_dir(class_name)
+    (root / "aipass" / "newborn" / "__init__.py").write_text(
+        _render((template / "__init__.py").read_text(encoding="utf-8")), encoding="utf-8"
+    )
+    probe = _render((template / "tests" / "support_fence.py").read_text(encoding="utf-8"))
+
+    result = _run_seat(
+        tmp_path / "aipass" / "foreign" / "probe.py",
+        root,
+        probe.replace("print(_run(sys.argv[1]))", 'print(_run("door"))'),
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ALLOWED"
+
+
+@pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
+def test_the_newborns_package_door_is_born_empty(class_name, tmp_path):
+    root = _plant_newborn(tmp_path / "tree", class_name)
+    (root / "aipass" / "newborn" / "__init__.py").write_text(
+        _render((get_template_dir(class_name) / "__init__.py").read_text(encoding="utf-8")), encoding="utf-8"
     )
 
     result = _run_seat(
         tmp_path / "aipass" / "foreign" / "probe.py",
         root,
         """
-        import importlib
+        import aipass.newborn as door
 
-        door = importlib.import_module("aipass.newborn.apps.modules.door_probe")
-        print("ALLOWED " + door.MY_BRANCH)
+        print(door.__all__)
         """,
         cwd=tmp_path,
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "ALLOWED newborn"
+    assert result.stdout.strip() == "[]"
 
 
 @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
@@ -628,110 +420,8 @@ def test_newborn_admits_its_own_code(class_name, tmp_path):
     assert result.stdout.strip() == "ADMITTED"
 
 
-def _unguarded_module_level_resolves(source: str) -> list:
-    """Line numbers of resolve() calls that run at import and are not guarded (module level, outside any try)."""
-    tree = ast.parse(source)
-
-    guarded = {
-        getattr(node, "lineno")
-        for block in ast.walk(tree)
-        if isinstance(block, ast.Try)
-        for node in ast.walk(block)
-        if hasattr(node, "lineno")
-    }
-
-    # Walk what RUNS at import: function bodies are pruned, defaults and decorators are not.
-    # Limit: a module-level call into a local function is not followed (needs a call graph).
-    found = []
-    pending: list[ast.AST] = list(tree.body)
-    while pending:
-        node = pending.pop()
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            pending.extend(getattr(node, "decorator_list", []))
-            args = getattr(node, "args", None)
-            if args is not None:
-                pending.extend(args.defaults)
-                pending.extend(d for d in args.kw_defaults if d is not None)
-            continue
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "resolve"
-            and node.lineno not in guarded
-        ):
-            found.append(node.lineno)
-        pending.extend(ast.iter_child_nodes(node))
-
-    return sorted(found)
-
-
-class TestImportTimeRootDerivationSurvivesADeadCwd:
-    """A newborn must not inherit a cwd read that runs at import.
-
-    At module level a resolve() is guarded (ntpath.realpath reads the cwd even for absolute paths);
-    inside a function it stays and raises, because a wrong-but-plausible root is worse."""
-
-    def test_no_unguarded_module_level_resolve_anywhere_in_the_template(self):
-        """The species, not the site — so a newborn cannot re-inherit the idiom."""
-        offenders = []
-        for path in _swept_py_files(get_template_dir("specialist")):
-            # Render first: skipping unparseable placeholder files would exempt the likeliest offenders.
-            offenders += [
-                f"{path.name}:{line}"
-                for line in _unguarded_module_level_resolves(_render(path.read_text(encoding="utf-8")))
-            ]
-
-        assert offenders == [], (
-            "unguarded module-level resolve() in the template — this runs at "
-            "import on every newborn, and ntpath.realpath reads the cwd even for "
-            f"an absolute path: {offenders}"
-        )
-
-    @pytest.mark.parametrize(
-        "label,source,expected",
-        [
-            (
-                "module-level unguarded — the defect",
-                "from pathlib import Path\nROOT = Path(__file__).resolve().parents[3]\n",
-                [2],
-            ),
-            (
-                "module-level guarded — the cure",
-                "from pathlib import Path\ntry:\n    ROOT = Path(__file__).resolve().parents[3]\n"
-                "except OSError:\n    ROOT = Path(__file__).parents[3]\n",
-                [],
-            ),
-            (
-                "inside a function — deliberately out of scope",
-                "from pathlib import Path\ndef root():\n    return Path(__file__).resolve().parents[3]\n",
-                [],
-            ),
-            (
-                "default argument — written in a def, RUN at import",
-                "from pathlib import Path\ndef root(base=Path(__file__).resolve()):\n    return base\n",
-                [2],
-            ),
-            (
-                "keyword-only default — same, one syntax over",
-                "from pathlib import Path\ndef root(*, base=Path(__file__).resolve()):\n    return base\n",
-                [2],
-            ),
-            (
-                "decorator — also evaluated at import",
-                "from pathlib import Path\n@register(Path(__file__).resolve())\ndef root():\n    pass\n",
-                [2],
-            ),
-        ],
-    )
-    def test_the_detector_can_tell_the_three_cases_apart(self, label, source, expected):
-        """The detector's own control — it must be able to say yes AND no."""
-        assert _unguarded_module_level_resolves(source) == expected, label
-
-
-class TestOptionalPeerImportsAreWideEnough:
-    """A peer branch being broken is allowed; dying of it is not.
-
-    A peer's import can raise OSError, so the fallback catches it; not Exception, so a real bug stays loud."""
+class TestABrokenMemoryStopsTheMint:
+    """@memory ships in the same package, so a meta-tab import that fails is a fault, never empty tabs."""
 
     @staticmethod
     def _deny(module_prefix, exc):
@@ -746,60 +436,19 @@ class TestOptionalPeerImportsAreWideEnough:
 
         return _Denier
 
-    @staticmethod
-    def _todos_meta_line(branch_root):
-        """The local.json line carrying todos_meta, whole, as it stands on disk."""
-        text = (branch_root / ".trinity" / "local.json").read_text(encoding="utf-8")
-        return next(line for line in text.splitlines() if '"todos_meta"' in line)
-
     @pytest.mark.parametrize(
         "exc",
-        [
-            FileNotFoundError(2, "No such file or directory"),
-            PermissionError(13, "Permission denied"),
-            ImportError("@memory is not installed"),
-        ],
-        ids=["dead-cwd", "unreadable", "absent"],
+        [ImportError("@memory is not installed"), PermissionError(13, "Permission denied"), ValueError("peer bug")],
+        ids=["absent", "unreadable", "bug"],
     )
-    def test_meta_tabs_fall_back_when_memory_is_broken_or_absent(self, exc, monkeypatch, tmp_path):
-        """Through the public mint; the empty-tab fallback leaves the template's todos_meta line as is."""
+    def test_the_mint_raises_before_the_copy(self, exc, monkeypatch, tmp_path):
+        """Mutant: the old (ImportError, OSError) catch answers {} and mints a citizen with empty tabs."""
         denier = self._deny("aipass.memory", exc)
         monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
         for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
             monkeypatch.delitem(sys.modules, name, raising=False)
 
-        try:
-            result = core.spawn_agent(
-                str(tmp_path / "newbie"),
-                role="Test",
-                purpose="meta-tab fallback",
-                registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
-            )
-        except (ImportError, OSError) as err:
-            pytest.fail(f"a peer raising {type(exc).__name__} took spawn's mint down instead of falling back: {err}")
-
-        assert result["success"] is True
-        template_root = get_template_dir(get_available_classes()[0])
-        assert self._todos_meta_line(tmp_path / "newbie") == self._todos_meta_line(template_root)
-
-    def test_the_denier_actually_denies(self, monkeypatch):
-        """Negative control: an inert finder would make the pins above vacuous."""
-        denier = self._deny("aipass.memory", FileNotFoundError(2, "denied"))
-        monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
-        for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
-            monkeypatch.delitem(sys.modules, name, raising=False)
-
-        with pytest.raises(FileNotFoundError):
-            importlib.import_module("aipass.memory.apps.modules.door_tab_renderer")
-
-    def test_a_real_programming_error_is_still_fatal(self, monkeypatch, tmp_path):
-        """The width is OSError, not Exception — a broken peer must stay loud."""
-        denier = self._deny("aipass.memory", ValueError("peer has a bug"))
-        monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
-        for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
-            monkeypatch.delitem(sys.modules, name, raising=False)
-
-        with pytest.raises(ValueError, match="peer has a bug"):
+        with pytest.raises(type(exc)):
             core.spawn_agent(
                 str(tmp_path / "newbie"),
                 role="Test",
@@ -868,9 +517,7 @@ class TestTheStackWalkCannotComeBack:
         source = (Path(__file__).resolve().parents[1] / "apps" / "handlers" / "__init__.py").read_text(encoding="utf-8")
 
         assert _inspect_stack_calls(source) == [], (
-            "inspect.stack() is back in the handler guard. It reads the cwd on "
-            "Windows before any of the guard's own code runs — walk frames with "
-            "sys._getframe instead"
+            "inspect.stack() is back in the handler guard — walk frames with sys._getframe instead"
         )
 
     def test_no_stack_walk_anywhere_in_apps_or_the_template(self):

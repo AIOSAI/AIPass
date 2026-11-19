@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Centralized log file watcher for system_logs directory
-# Version: 1.3.0
+# Version: 1.6.0
 # Created: 2026-01-31
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -19,27 +19,16 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from aipass.prax import logger
-from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.prax import get_system_logs_dir, log_backup_count
 from aipass.trigger.apps.handlers.json import json_handler
 
-SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent.parent / "system_logs"
+# Bound once: prax caches per process, and tests redirect by patching this name.
+SYSTEM_LOGS_DIR = get_system_logs_dir()
 
 # Sole owner of system_logs; see start_log_watcher() for why this module does not watch it.
 SYSTEM_LOGS_OWNER = "branch_log_events"
 
-# Must match prax RotatingFileHandler backup_count.
-MAX_BACKUP_CHAIN_DEPTH = 3
-
-try:
-    from watchdog.observers import Observer as WatchdogObserver
-    from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
-
-    WATCHDOG_AVAILABLE = True
-except ImportError:
-    logger.info("watchdog not available, log watcher disabled")
-    WATCHDOG_AVAILABLE = False
-    WatchdogObserver = None  # type: ignore
-    WatchdogFileSystemEventHandler = object  # type: ignore
+from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
 
 _log_observer: Any = None
 
@@ -114,7 +103,7 @@ def should_skip_log(log_line: str) -> bool:
     return False
 
 
-class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else object):  # type: ignore[misc]
+class LogFileWatcher(WatchdogFileSystemEventHandler):
     """Watch log files and fire Trigger events."""
 
     def __init__(self):
@@ -143,33 +132,29 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
         if not known_inode or last_pos <= 0:
             return
 
-        try:
-            rotated: Optional[Path] = None
-            skipped = 0
-            for index in range(1, MAX_BACKUP_CHAIN_DEPTH + 1):
-                backup = Path(f"{file_path}.{index}")
-                if not backup.exists():
-                    break
-                if backup.stat().st_ino == known_inode:
-                    rotated = backup
-                    skipped = index - 1
-                    break
-            if rotated is None:
-                return
-            if skipped:
-                logger.warning(
-                    "Rotated log found at '%s' - %d earlier backup(s) rotated past unread (not replayed)",
-                    rotated,
-                    skipped,
-                )
-            if rotated.stat().st_size <= last_pos:
-                return
-            with open(rotated, "r", encoding="utf-8", errors="ignore") as f:
-                f.seek(last_pos)
-                tail = f.read()
-        except OSError as exc:
-            logger.warning("Failed to drain rotated log for '%s': %s", file_path, exc)
+        rotated: Optional[Path] = None
+        skipped = 0
+        for index in range(1, log_backup_count() + 1):
+            backup = Path(f"{file_path}.{index}")
+            if not backup.exists():
+                break
+            if backup.stat().st_ino == known_inode:
+                rotated = backup
+                skipped = index - 1
+                break
+        if rotated is None:
             return
+        if skipped:
+            logger.warning(
+                "Rotated log found at '%s' - %d earlier backup(s) rotated past unread (not replayed)",
+                rotated,
+                skipped,
+            )
+        if rotated.stat().st_size <= last_pos:
+            return
+        with open(rotated, "r", encoding="utf-8", errors="ignore") as f:
+            f.seek(last_pos)
+            tail = f.read()
 
         if not tail.strip():
             return
@@ -184,7 +169,7 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
         Read new content from a log file and process lines.
 
         Rotation is detected by inode, not size: a fresh log may already be past the old offset.
-        Inode 0 (some Windows filesystems) means unknown and falls back to the size check.
+        Inode 0 means unknown and falls back to the size check.
         """
         stats = Path(file_path).stat()
         current_size = stats.st_size
@@ -233,65 +218,49 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
 
     def _process_log_line(self, branch: str, log_line: str, log_file: str) -> None:
         """Process a log line and fire appropriate events."""
-        try:
-            from aipass.trigger.apps.modules.core import trigger
+        from aipass.trigger.apps.modules.core import trigger
 
-            level = detect_log_level(log_line)
-            message = parse_log_message(log_line)
-            module_name = extract_module_name(log_line)
-            timestamp = datetime.now().isoformat()
-            error_hash = generate_error_hash(module_name, message)
+        level = detect_log_level(log_line)
+        message = parse_log_message(log_line)
+        module_name = extract_module_name(log_line)
+        timestamp = datetime.now().isoformat()
+        error_hash = generate_error_hash(module_name, message)
 
-            event_data = {
-                "branch": branch,
-                "message": message,
-                "level": level,
-                "module_name": module_name,
-                "timestamp": timestamp,
-                "log_file": log_file,
-                "error_hash": error_hash,
-            }
+        event_data = {
+            "branch": branch,
+            "message": message,
+            "level": level,
+            "module_name": module_name,
+            "timestamp": timestamp,
+            "log_file": log_file,
+            "error_hash": error_hash,
+        }
 
-            if level == "error":
-                try:
-                    from aipass.trigger.apps.handlers.error_registry import report as registry_report
+        if level == "error":
+            # Unreadable registry raises to on_modified, which names it; no unfingerprinted stand-in fire.
+            from aipass.trigger.apps.handlers.error_registry import report as registry_report
 
-                    result = registry_report(
-                        error_type="ERROR", message=message, component=branch, log_path=log_file, severity="medium"
-                    )
-                    error_count = result.get("count", 1)
-                    trigger.fire(
-                        "error_detected",
-                        branch=branch,
-                        module=module_name,
-                        message=message,
-                        log_path=log_file,
-                        error_hash=result.get("id", error_hash),
-                        timestamp=timestamp,
-                        fingerprint=result.get("fingerprint", ""),
-                        registry_id=result.get("id", ""),
-                        first_seen=result.get("first_seen", ""),
-                        last_seen=result.get("last_seen", ""),
-                        count=error_count,
-                    )
-                except Exception as exc:
-                    logger.warning("Registry unavailable, falling back to error_detected: %s", exc)
-                    trigger.fire(
-                        "error_detected",
-                        branch=branch,
-                        module=module_name,
-                        message=message,
-                        log_path=log_file,
-                        error_hash=error_hash,
-                        timestamp=timestamp,
-                    )
-                json_handler.log_operation("system_log_event", {"level": level, "module": module_name})
-            elif level == "warning":
-                trigger.fire("warning_logged", **event_data)
-                json_handler.log_operation("system_log_event", {"level": level, "module": module_name})
-
-        except Exception as exc:
-            logger.warning("Failed to process log line from '%s': %s", log_file, exc)
+            result = registry_report(
+                error_type="ERROR", message=message, component=branch, log_path=log_file, severity="medium"
+            )
+            trigger.fire(
+                "error_detected",
+                branch=branch,
+                module=module_name,
+                message=message,
+                log_path=log_file,
+                error_hash=result.get("id", error_hash),
+                timestamp=timestamp,
+                fingerprint=result.get("fingerprint", ""),
+                registry_id=result.get("id", ""),
+                first_seen=result.get("first_seen", ""),
+                last_seen=result.get("last_seen", ""),
+                count=result.get("count", 1),
+            )
+            json_handler.log_operation("system_log_event", {"level": level, "module": module_name})
+        elif level == "warning":
+            trigger.fire("warning_logged", **event_data)
+            json_handler.log_operation("system_log_event", {"level": level, "module": module_name})
 
     def initialize_positions(self) -> None:
         """Initialize log positions to END of existing files."""
@@ -316,19 +285,6 @@ def start_log_watcher() -> Any:
         SYSTEM_LOGS_OWNER,
     )
     return None
-
-    watcher = LogFileWatcher()
-    watcher.initialize_positions()
-    _callback = watcher.on_modified  # watchdog dispatches FileSystemEvents here
-    if WatchdogObserver is None:
-        return None
-    observer = WatchdogObserver()
-    observer.schedule(watcher, str(SYSTEM_LOGS_DIR), recursive=False)
-    observer.start()
-
-    _log_observer = observer
-
-    return observer
 
 
 def stop_log_watcher() -> None:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: central_writer.py
 # Description: Central File Writer Handler
-# Version: 0.4.0
+# Version: 0.4.1
 # Created: 2025-11-27
-# Modified: 2026-10-23
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -13,19 +13,19 @@ MEMORY.central.json is memory's API output; dashboards read it.
 """
 
 import os
+import tempfile
 from json import load as json_load, dump as json_dump
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any
 
 from aipass.memory.apps.handlers import repo_root
-from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.prax import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
-from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = get_system_logger()
 
-_MEMORY_ROOT = module_file(__file__).parents[2]
+_MEMORY_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _find_repo_root() -> Path:
@@ -82,15 +82,19 @@ def read_central_file() -> Dict[str, Any]:
 
 def write_central_file(data: Dict[str, Any]) -> None:
     """Write data to central file; a reader never sees a half-written one."""
+    tmp = None
     try:
         CENTRAL_FILE.parent.mkdir(parents=True, exist_ok=True)
-        tmp = CENTRAL_FILE.with_suffix(".tmp")
+        # A unique temp per writer: a shared name let one writer's replace take a rival's file.
+        fd, tmp = tempfile.mkstemp(dir=CENTRAL_FILE.parent, prefix=f"{CENTRAL_FILE.stem}.", suffix=".tmp")
 
-        with open(tmp, "w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json_dump(data, f, indent=2, ensure_ascii=False)
         os.replace(tmp, CENTRAL_FILE)
 
     except Exception as e:
+        if tmp is not None:
+            Path(tmp).unlink(missing_ok=True)
         logger.error(f"[central_writer] Failed to write central file: {e}")
         raise Exception(f"Failed to write central file: {e}")
 

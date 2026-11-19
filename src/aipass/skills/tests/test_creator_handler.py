@@ -3,7 +3,7 @@
 # Description: Tests for skill creation handler
 # Version: 1.0.2
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/creator_handler.py: is_valid_name and create_skill."""
@@ -90,7 +90,7 @@ class TestCreateSkill:
         assert (Path(result["path"]) / "apps").is_dir()
 
     def test_returns_created_files_list(self, tmp_path):
-        # Pins the is_file() filter, and the exact order: re-sorting as Paths is case-blind on Windows.
+        # Pins the is_file() filter, and the exact order.
         result = create_skill("test-files", template_type="full", target_dir=tmp_path)
         assert result["files"] == [
             "SKILL.md",

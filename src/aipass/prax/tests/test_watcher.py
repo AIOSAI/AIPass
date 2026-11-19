@@ -3,7 +3,7 @@
 # Description: Tests for file system watcher handlers
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/discovery/watcher.py."""
@@ -41,6 +41,11 @@ def _fresh_watcher_state(monkeypatch):
     """The discovery watcher's state as a fresh import leaves it, undone after the test."""
     monkeypatch.setattr(discovery_watcher, "_observer", None)
     monkeypatch.setattr(discovery_watcher, "_LIVENESS", discovery_watcher.LivenessState())
+
+
+def _no_trigger():
+    """Stand-in for _get_trigger on a host where the trigger import fails."""
+    raise ImportError("no trigger on this host")
 
 
 class TestDiscoveryWatcher:
@@ -172,7 +177,7 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "load_module_registry", lambda: {})
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: None)
         monkeypatch.setattr(mod, "should_ignore_path", lambda p: p.parent != tmp_path)
-        monkeypatch.setattr(mod, "_get_trigger", lambda: None)
+        monkeypatch.setattr(mod, "_get_trigger", _no_trigger)
         self._close_the_far_side(mod, monkeypatch, tmp_path)
 
         observer = self._start_real_observer(mod, tmp_path)
@@ -200,7 +205,7 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "load_module_registry", lambda: {})
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: None)
         monkeypatch.setattr(mod, "should_ignore_path", lambda p: p.parent != tmp_path)
-        monkeypatch.setattr(mod, "_get_trigger", lambda: None)
+        monkeypatch.setattr(mod, "_get_trigger", _no_trigger)
         self._close_the_far_side(mod, monkeypatch, tmp_path)
 
         observer = self._start_real_observer(mod, tmp_path)
@@ -398,39 +403,6 @@ class TestDispatcherSurvivesHandlerFailure:
 
         assert set(saved) == {"live"}
 
-    def test_the_recorded_size_is_the_real_size_under_crlf(self, tmp_path, monkeypatch):
-        """The Windows half of the size pin, run on Linux: CRLF bytes are recorded as the OS holds them."""
-        mod = self._real_watcher_module()
-        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
-        asked = []
-        monkeypatch.setattr(mod, "should_ignore_path", lambda p: asked.append(p) or p.parent != tmp_path)
-        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
-        bus = MagicMock()
-        monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
-
-        saved = {}
-        monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
-
-        crlf_file = tmp_path / "crlf.py"
-        crlf_file.write_bytes(b"y = 2\r\n")  # what Windows text mode produces
-        assert crlf_file.stat().st_size == 7, "fixture broken: CRLF file should be 7 bytes"
-
-        handler = mod.PythonFileWatcher()
-        event = MagicMock()
-        event.event_type = "created"
-        event.is_directory = False
-        event.src_path = str(crlf_file)
-        handler.dispatch(event)
-
-        assert "crlf" in saved
-        assert saved["crlf"]["size"] == crlf_file.stat().st_size == 7, (
-            "the registry must record the bytes the OS holds, not the length of a Python string"
-        )
-        assert asked == [crlf_file], "the ignore filter was never consulted"
-        bus.fire.assert_called_once_with(
-            "module_discovered", module_name="crlf", file_path=str(crlf_file), relative_path="crlf.py"
-        )
-
     def test_the_file_is_stat_ed_once_not_twice(self, tmp_path, monkeypatch):
         """One stat, not two: a file vanishing between two stats gives a torn description."""
         mod = self._real_watcher_module()
@@ -519,7 +491,7 @@ class TestDispatcherSurvivesHandlerFailure:
         assert asked == [new_file], "the ignore filter was never consulted"
 
     def test_a_host_without_trigger_still_registers_the_module(self, tmp_path, monkeypatch):
-        """`_get_trigger()` returning None is the normal answer on such a host."""
+        """A trigger that cannot be imported costs the event its fire, never the registry entry."""
         mod = self._real_watcher_module()
         monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
         asked = []
@@ -527,7 +499,7 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "load_module_registry", lambda: {})
         saved = {}
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
-        monkeypatch.setattr(mod, "_get_trigger", lambda: None)
+        monkeypatch.setattr(mod, "_get_trigger", _no_trigger)
 
         new_file = tmp_path / "lonely.py"
         new_file.write_text("x = 1\n", encoding="utf-8")
@@ -703,7 +675,7 @@ class TestWatcherLiveness:
         monkeypatch.setattr(mod, "_observer", self._dead_observer())
         errors = []
         monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
-        monkeypatch.setattr(mod, "_get_trigger", lambda: None)
+        monkeypatch.setattr(mod, "_get_trigger", _no_trigger)
 
         assert mod.check_file_watcher_liveness(force=True) is False
         assert errors, "no trigger meant no death report at all"
@@ -788,23 +760,6 @@ class TestOptionalTriggerIntegration:
         assert "DENIED FileNotFoundError True" in result.stdout, (
             "the meta_path finder did not deny the trigger import, so every pin built "
             f"on this world is vacuous.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-
-    def test_an_oserror_from_the_optional_import_falls_back(self):
-        """An OSError from the optional import is caught at the fire site (None) and prax keeps running."""
-        result = _run_with_trigger_denied(
-            "\nfrom aipass.prax.apps.handlers.discovery import watcher\n"
-            "print('IMPORTED OK')\n"
-            "print('TRIGGER', watcher._get_trigger())\n"
-        )
-        assert result.returncode == 0, (
-            "an OSError from the OPTIONAL trigger import killed prax's watcher import.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        assert "IMPORTED OK" in result.stdout
-        assert "TRIGGER None" in result.stdout, (
-            "the fire site did not fall back — an OSError escaped the guard.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
     def test_a_denied_trigger_does_not_stop_the_discovery_scan(self, tmp_path):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_handler.py
 # Description: Handler for registry file operations
-# Version: 1.4.0
+# Version: 1.5.1
 # Created: 2026-03-09
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -24,7 +24,7 @@ from .exceptions import (
     RegistryPermissionError,
 )
 from aipass.drone.apps.handlers.json import json_handler
-from .router_handler import caller_cwd, registries_in
+from .router_handler import caller_cwd, registry_named_entries
 
 
 def _validate_branch_path(branch_path: Path, project_root: Path, branch_name: str) -> bool:
@@ -181,18 +181,9 @@ def missing_home_tip() -> str:
 _ANNOUNCED_HOMES: set = set()
 
 
-VENV_LAYOUTS = {"windows": ("Scripts", "python.exe"), "posix": ("bin", "python")}
-
-
-def _venv_layout() -> tuple:
-    """This platform's venv layout, one of VENV_LAYOUTS."""
-    return VENV_LAYOUTS["windows"] if os.name == "nt" else VENV_LAYOUTS["posix"]
-
-
 def _venv_python(home: Path) -> Path:
-    """Where setup.sh puts the home's own interpreter: ``<home>/.venv/bin/python`` or ``Scripts/python.exe``."""
-    directory, name = _venv_layout()
-    return home / ".venv" / directory / name
+    """Where setup.sh puts the home's own interpreter: ``<home>/.venv/bin/python``."""
+    return home / ".venv" / "bin" / "python"
 
 
 def branch_interpreter(branch_path: str | Path) -> str:
@@ -235,7 +226,7 @@ def branch_interpreter(branch_path: str | Path) -> str:
 
 def _first_registry_in(directory: Path) -> Optional[Path]:
     """Return the alphabetically-first *_REGISTRY.json in *directory*, or None."""
-    matches = registries_in(directory)
+    matches = registry_named_entries(directory)
     return matches[0] if matches else None
 
 
@@ -299,6 +290,7 @@ def find_registry() -> Path:
             if hit is not None:
                 if _registry_matches_credential(hit):
                     return hit
+                logger.info("find_registry: skipping %s, its id does not match the caller's passport", hit)
                 continue
 
     hit = _get_aipass_home_registry_path()
@@ -419,17 +411,17 @@ def _load_registry_data(registry_path: Path) -> Dict[str, Any]:
     try:
         data = _read_registry_json(registry_path)
     except PermissionError as e:
-        raise RegistryPermissionError(f"Permission denied reading registry: {e}")
+        raise RegistryPermissionError(f"Permission denied reading registry {registry_path}: {e}")
     except json.JSONDecodeError as e:
-        raise RegistryCorruptError(f"Registry file is corrupted: {e}")
+        raise RegistryCorruptError(f"Registry file {registry_path} is corrupted: {e}")
     except Exception as e:
-        raise RegistryCorruptError(f"Failed to read registry: {e}")
+        raise RegistryCorruptError(f"Failed to read registry {registry_path}: {e}")
 
     if not isinstance(data, dict):
-        raise RegistryCorruptError("Registry must be a JSON object")
+        raise RegistryCorruptError(f"Registry {registry_path} must be a JSON object")
 
     if "branches" not in data:
-        raise RegistryCorruptError("Registry missing 'branches' field")
+        raise RegistryCorruptError(f"Registry {registry_path} missing 'branches' field")
 
     branches_raw = data["branches"]
     if isinstance(branches_raw, list):
@@ -451,7 +443,7 @@ def _load_registry_data(registry_path: Path) -> Dict[str, Any]:
             branches_dict[name] = entry
         data["branches"] = branches_dict
     elif not isinstance(branches_raw, dict):
-        raise RegistryCorruptError("Registry 'branches' must be a list or dict")
+        raise RegistryCorruptError(f"Registry {registry_path} 'branches' must be a list or dict")
 
     return data
 
@@ -478,14 +470,14 @@ def load_registry() -> Dict[str, Any]:
 
 
 def _fleet_gateway() -> Any:
-    """@memory's fleet gateway module, imported at CALL time and never at module level.
+    """@memory's external_branches, taken from its front door at CALL time and never at module level.
 
     A failure in @memory's import chain must cost the external tier, not every
     import of drone. A seam for tests: patched here, not on __import__.
     """
-    from aipass.memory.apps.modules import fleet
+    from aipass.memory import external_branches
 
-    return fleet
+    return external_branches
 
 
 def external_branches(repo_root: Optional[Path] = None) -> Optional[List[Dict[str, Any]]]:
@@ -508,7 +500,7 @@ def external_branches(repo_root: Optional[Path] = None) -> Optional[List[Dict[st
     # The import sits inside the guard: @memory's registry_scope can raise at import
     # (ENOENT on a deleted cwd), and that must not take down drone.
     try:
-        records = _fleet_gateway().external_branches(repo_root, name_from="registry")
+        records = _fleet_gateway()(repo_root, name_from="registry")
     except Exception as exc:
         logger.error(
             "External tier unavailable — @memory's fleet gateway raised: %s. "
@@ -574,7 +566,7 @@ def get_all_branches(
         primary = load_registry()
         for name, branch in primary.get("branches", {}).items():
             merged[name] = branch
-    except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
+    except RegistryNotFoundError as exc:
         logger.warning("get_all_branches: primary registry unavailable: %s", exc)
 
     home_path = _get_aipass_home_registry_path()
@@ -585,7 +577,7 @@ def get_all_branches(
             for name, branch in home_data.get("branches", {}).items():
                 if name not in merged:
                     merged[name] = branch
-        except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
+        except RegistryNotFoundError as exc:
             logger.warning("get_all_branches: AIPass home registry unavailable: %s", exc)
 
     # The one place both sides of a collision are visible, so the shadowing is named here.
@@ -623,7 +615,7 @@ def get_branch_by_name(name: str) -> Optional[Dict[str, Any]]:
         branch = registry.get("branches", {}).get(lower_name)
         if branch is not None:
             return branch
-    except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
+    except RegistryNotFoundError as exc:
         logger.warning("get_branch_by_name: primary registry unavailable for '%s': %s", name, exc)
 
     home_path = _get_aipass_home_registry_path()
@@ -635,7 +627,7 @@ def get_branch_by_name(name: str) -> Optional[Dict[str, Any]]:
             if branch is not None:
                 return branch
             # A miss here is not an answer: returning it would hide the declared roots below.
-        except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
+        except RegistryNotFoundError as exc:
             logger.warning("get_branch_by_name: AIPass home registry unavailable for '%s': %s", name, exc)
 
     for entry in _external_branches():
@@ -656,7 +648,7 @@ def get_branch_with_registry(name: str) -> Optional[tuple]:
         branch = registry.get("branches", {}).get(lower_name)
         if branch is not None:
             return branch, primary_path
-    except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
+    except RegistryNotFoundError as exc:
         logger.warning("get_branch_with_registry: primary registry unavailable for '%s': %s", name, exc)
         primary_path = None
 
@@ -667,7 +659,7 @@ def get_branch_with_registry(name: str) -> Optional[tuple]:
             branch = home_data.get("branches", {}).get(lower_name)
             if branch is not None:
                 return branch, home_path
-        except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
+        except RegistryNotFoundError as exc:
             logger.warning("get_branch_with_registry: AIPass home registry unavailable for '%s': %s", name, exc)
 
     for entry in _external_branches():

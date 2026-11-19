@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.0
 # Created: 2026-03-28
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -221,7 +221,7 @@ def test_show_leaderboard_invalid_category() -> None:
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db")
 @patch("aipass.commons.apps.modules.explore.json_handler", autospec=True)
 @patch(
-    "aipass.commons.apps.modules.commons_identity.get_caller_branch",
+    "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch",
     return_value={"name": "TEST_BRANCH"},
 )
 def test_explore_handle_command_routes_explore(
@@ -247,7 +247,7 @@ def test_explore_handle_command_routes_explore(
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db")
 @patch("aipass.commons.apps.modules.explore.json_handler", autospec=True)
 @patch(
-    "aipass.commons.apps.modules.commons_identity.get_caller_branch",
+    "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch",
     return_value={"name": "TEST_BRANCH"},
 )
 def test_explore_handle_command_routes_secrets(

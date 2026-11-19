@@ -50,7 +50,7 @@ what a test puts in its place. Item 14 had no checker at all.
 ## The rule is the install site, not the value's spelling
 
 A Mock that sits in a test is a Mock. A Mock the test puts **where the product looks** is
-an oracle. Same restriction `literal_path` took from `host_portability` ARM A — a thing
+an oracle. Same restriction as `literal_path` — a thing
 that merely sits somewhere is data, and only a thing handed to the product is in use.
 
 Measured 2026-09-22 by this checker over the fleet's 580 test files:
@@ -175,8 +175,7 @@ without following a same-file `return`, that file reads clean while eight tests 
 substituted console.
 
 A name assigned anything else anywhere in the file is **dropped**: which value reaches the
-install is a question one pass cannot answer. `literal_path` and ARM A's `_proc_bindings`
-are the precedent.
+install is a question one pass cannot answer. `literal_path` is the precedent.
 
 ---
 

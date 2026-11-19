@@ -3,7 +3,7 @@
 # Description: DPLAN-0319 — passport 2.0 fleet migration: order, drops, lanes, idempotency
 # Version: 1.0.2
 # Created: 2026-08-28
-# Modified: 2026-11-09
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/passport_migration.py's fleet-wide passport 2.0 migration (DPLAN-0319 deliverable 3)."""
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from aipass.memory.apps.modules.door_registry_scope import fleet_branches
+from aipass.memory import fleet_branches
 from aipass.spawn.apps import spawn as spawn_entry
 from aipass.spawn.apps.handlers.passport_migration import (
     BACKUP_SUFFIX,

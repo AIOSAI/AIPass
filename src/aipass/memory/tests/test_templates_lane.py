@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_templates_lane.py
 # Description: Pins for the live templates lane — spawn propagation, receipt status, the bump site, and two refusals
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-27
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/templates.py and the template_bump lane it drives."""
@@ -18,8 +18,11 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from aipass.cli.apps.modules import reset_command_state, resolve_exit
+import pytest
+
+from aipass.cli import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.monitor import registry_scope
+from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.apps.modules import templates
 from aipass.memory.apps.handlers.templates import template_bump
 
@@ -59,11 +62,13 @@ class TestRetiredVerbsAnswer:
         assert "retired" in printed.lower()
         assert "--dry-run" in printed
 
-    def test_the_refusal_says_where_the_handlers_went(self, capsys):
-        """A reader who wants the old code must be able to find it."""
+    def test_the_refusal_says_why_and_points_at_no_archive(self, capsys):
+        """The reason is the measurement; the retired code sits in .archive, which the owner empties at any time."""
         templates.handle_command("templates", ["push-templates"])
+        printed = _out(capsys)
 
-        assert "dead_template_lane_20260827" in _out(capsys)
+        assert "pre-.trinity layout" in printed, printed
+        assert ".archive" not in printed and "parked" not in printed, printed
 
     def test_a_retired_verb_writes_nothing(self, capsys):
         """The whole point: it used to no-op silently, now it no-ops loudly."""
@@ -74,7 +79,7 @@ class TestRetiredVerbsAnswer:
         # The refusal must reach the caller even with --dry-run on the line.
         printed = _out(capsys)
         assert "retired" in printed.lower(), printed
-        assert "dead_template_lane_20260827" in printed, printed
+        assert "drone @memory push" in printed, printed
 
 
 class TestHelpNeverPerforms:
@@ -108,6 +113,56 @@ class TestHelpNeverPerforms:
 
     def test_an_unrelated_command_is_not_claimed(self):
         assert templates.handle_command("search", ["anything"]) is False
+
+
+@pytest.fixture(autouse=True)
+def _memory_seat(monkeypatch):
+    monkeypatch.setattr(caller_gate, "verified_caller", lambda: ("@memory", False))
+
+
+class TestOnlyThreeSeatsWriteForSpawnOrTheFleet:
+    """spawn-templates writes @spawn's files; bump --confirm pushes every branch's memory."""
+
+    @pytest.mark.parametrize(
+        ("caller", "admin", "args"),
+        [
+            ("@spawn", False, ["spawn-templates"]),
+            ("@devpulse", True, ["spawn-templates"]),
+            ("@canary", False, ["spawn-templates", "--dry-run"]),
+        ],
+    )
+    def test_spawn_the_admin_and_any_dry_run_reach_the_pusher(self, monkeypatch, caller, admin, args):
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: (caller, admin))
+        with patch.object(templates, "push_to_spawn_templates", return_value={"success": True}) as pushed:
+            templates.handle_command("templates", args)
+        pushed.assert_called_once_with(dry_run="--dry-run" in args)
+
+    @pytest.mark.parametrize(("caller", "admin", "confirm"), [("@devpulse", True, True), ("@canary", False, False)])
+    def test_the_admin_and_any_dry_run_reach_the_bump(self, monkeypatch, caller, admin, confirm):
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: (caller, admin))
+        with patch.object(template_bump, "on_bump", return_value={"pending": False, "reason": "x"}) as bumped:
+            templates.handle_command("templates", ["bump", "--confirm"] if confirm else ["bump"])
+        bumped.assert_called_once_with(confirm=confirm)
+
+    @pytest.mark.parametrize(
+        ("args", "sentence"),
+        [
+            (["spawn-templates"], "@spawn's scaffold templates: @spawn's own seat, @memory or the verified admin only"),
+            (["bump", "--confirm"], "every branch's .trinity memory: @memory or the verified admin only, not @canary"),
+        ],
+    )
+    def test_another_seat_is_refused_non_zero_and_nothing_runs(self, monkeypatch, capsys, args, sentence):
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: ("@canary", False))
+        reset_command_state()
+        with (
+            patch.object(templates, "push_to_spawn_templates") as pushed,
+            patch.object(template_bump, "on_bump") as bumped,
+        ):
+            templates.handle_command("templates", args)
+        assert resolve_exit(True) == 2
+        assert sentence in _out(capsys)
+        pushed.assert_not_called()
+        bumped.assert_not_called()
 
 
 class TestSpawnPropagationSurvives:

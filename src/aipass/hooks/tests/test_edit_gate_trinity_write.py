@@ -3,7 +3,7 @@
 # Description: edit_gate's .trinity caps on the Write lane: clean, over cap, the cut point, warn, fail-open, legacy
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py: the .trinity character caps on Write."""
@@ -86,7 +86,7 @@ class TestTrinityWriteOverLimitEnforced:
 
     def test_a_file_the_gate_cannot_read_is_refused_not_allowed(self, tmp_path):
         """Fleet green leg 5: the catch-all around the caps check allowed the write when the current file could
-        not be read (mode 0o200: writable, not readable). Where the platform still reads it (Windows, root), the
+        not be read (mode 0o200: writable, not readable). Where the platform still reads it (root), the
         cap refuses instead: the test opens the file with its own hands and asserts the refusal either way."""
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         Path(file_path).write_text("{}", encoding="utf-8")

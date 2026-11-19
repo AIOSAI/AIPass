@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: module_registry.py
 # Description: Internal module registry for drone
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-09
-# Modified: 2026-09-28
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -16,41 +16,48 @@ to the handler layer.
 from __future__ import annotations
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.drone.apps.handlers.json import json_handler
+from aipass.drone.apps.handlers import module_registry_handler
 from aipass.drone.apps.handlers.module_registry_handler import (
-    ModuleInfo,
     list_modules,
     is_module,
     get_module_info,
-    route_module_command,
-    get_module_help,
-    get_module_introspective,
-    external_modules_error,
 )
 from aipass.drone.apps.handlers.help_flags import wants_help
 
 __all__ = [
-    "ModuleInfo",
     "external_modules_error",
-    "list_modules",
-    "is_module",
-    "get_module_info",
-    "route_module_command",
     "get_module_help",
     "get_module_introspective",
+    "handle_command",
+    "route_module_command",
 ]
+
+
+def external_modules_error() -> str | None:
+    """Why the external modules could not load, or None when routing_config.json loaded."""
+    return module_registry_handler.external_modules_error()
+
+
+def route_module_command(name: str, command: str, args: list[str] | None = None) -> dict:
+    """Route a command to a module, stamped with the caller the way a routed child is."""
+    return module_registry_handler.route_module_command(name, command, args)
+
+
+def get_module_help(name: str, command: str | None = None) -> str | None:
+    """A module's help text: "" for none, None when an internal adapter cannot be read."""
+    return module_registry_handler.get_module_help(name, command)
+
+
+def get_module_introspective(name: str) -> str | None:
+    """A module's introspective view: "" for nothing, None when an internal adapter cannot be read."""
+    return module_registry_handler.get_module_introspective(name)
 
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    except ImportError:
-        logger.warning("CLI console not available, using fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]module_registry Module[/bold cyan]")
@@ -119,7 +126,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         elif is_module(args[0]):
             # None for a REGISTERED name means its adapter could not import; an
             # unknown name is the other None. Only the second is "not found".
-            from aipass.cli.apps.modules import err_console
+            from aipass.cli import err_console
 
             err_console.print(
                 f"module_registry: @{args[0]} is registered but could not load (see drone log)", markup=False
@@ -141,7 +148,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
 
 def print_help() -> None:
     """Print help for the module_registry module."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("module_registry — Internal module registry for drone")
     console.print()

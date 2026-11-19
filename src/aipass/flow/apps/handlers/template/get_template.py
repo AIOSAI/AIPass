@@ -3,7 +3,7 @@
 # Description: Get Template Handler
 # Version: 1.3.1
 # Created: 2025-11-30
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Get Template Handler"""
@@ -14,9 +14,7 @@ from datetime import datetime
 
 from aipass.flow.apps.handlers.json import json_handler
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-_PKG_ROOT = module_file(__file__).parents[4]
+_PKG_ROOT = Path(__file__).resolve().parents[4]
 
 MODULE_NAME = "get_template"
 FLOW_ROOT = _PKG_ROOT / "flow"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dashboard.py
 # Description: Dashboard Section Utilities
-# Version: 0.5.1
+# Version: 0.6.0
 # Created: 2026-02-25
-# Modified: 2026-11-08
+# Modified: 2026-11-17
 # =============================================
 
 """Dashboard Section Utilities
@@ -12,20 +12,6 @@ Reference: docs/dashboard.md
 """
 
 __all__ = [
-    "write_section",
-    "get_dashboard_path",
-    "SUBJECT_CAP",
-    "DASHBOARD_CHAR_BUDGET",
-    "cap_subject",
-    "dashboard_lock",
-    "calculate_quick_status",
-    "get_branch_paths",
-    "resolve_branch_path",
-    "refresh_all_dashboards",
-    "refresh_single_dashboard",
-    "push_dashboard_template",
-    "get_template_status",
-    "diff_dashboard_template",
     "DASHBOARD_TEMPLATE",
     "handle_command",
     "main",
@@ -37,30 +23,11 @@ import sys
 from pathlib import Path
 from typing import List
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 
-from aipass.prax.apps.handlers.dashboard.operations import (
-    write_section,  # re-exported: the write-through API other branches call
-    get_dashboard_path,
-    # Re-exported: handlers are internal, so writers outside prax read the caps here.
-    SUBJECT_CAP,
-    DASHBOARD_CHAR_BUDGET,
-    cap_subject,
-    dashboard_lock,  # re-exported: other writers of a dashboard take the same lock
-)
-from aipass.prax.apps.handlers.dashboard.status import (
-    calculate_quick_status,
-    get_branch_paths,
-    resolve_branch_path,
-)
+from aipass.prax.apps.handlers.dashboard.operations import get_dashboard_path
+from aipass.prax.apps.handlers.dashboard.status import get_branch_paths, resolve_branch_path
 
 from aipass.prax.apps.handlers.dashboard.refresh import refresh_all_dashboards, refresh_single_dashboard
 
@@ -127,10 +94,6 @@ def print_help():
     console.print("  drone @prax dashboard diff-template             # diff all branches")
     console.print("  drone @prax dashboard diff-template --branch FLOW  # diff single branch")
     console.print("  drone @prax dashboard template-status           # version info")
-    console.print()
-    console.print("[yellow]PROGRAMMATIC (write-through API):[/yellow]")
-    console.print("  from aipass.prax.apps.modules.dashboard import write_section")
-    console.print("  write_section(branch_path, 'git', {'branch': 'main'})")
     console.print()
 
 

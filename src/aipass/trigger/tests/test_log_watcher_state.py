@@ -3,7 +3,7 @@
 # Description: Tests for the branch log watcher's state: positions, seen hashes, start/stop and the debounced writer
 # Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py's persisted state and lifecycle (trigger_data.json, start/stop)."""
@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import aipass.trigger.apps.handlers.log_watcher as lw
+from aipass.trigger.apps.handlers import medic_state
 from aipass.trigger.tests.support_log_watcher import _BRANCH_LOG_PATH
 
 pytestmark = pytest.mark.usefixtures("log_watcher_infrastructure")
@@ -54,15 +55,8 @@ class TestCallbackAndState:
 class TestStartStopStatus:
     """Tests for start_branch_log_watcher, stop, is_active, get_watcher_status."""
 
-    def test_start_returns_none_when_watchdog_unavailable(self, monkeypatch):
-        """start_branch_log_watcher returns None when WATCHDOG_AVAILABLE is False."""
-        monkeypatch.setattr(lw, "WATCHDOG_AVAILABLE", False)
-        result = lw.start_branch_log_watcher()
-        assert result is None
-
     def test_start_records_each_scheduled_logs_dir(self, monkeypatch):
         """The twin rule reads this set: a logs/ dir is in it only when it got a watch."""
-        monkeypatch.setattr(lw, "WATCHDOG_AVAILABLE", True)
         logs_dir = _a_branch_log().parent
         observer = lw.start_branch_log_watcher()
         watcher = observer.schedule.call_args_list[0].args[0]
@@ -79,11 +73,9 @@ class TestStartStopStatus:
         assert isinstance(status, dict)
         expected_keys = {
             "active",
-            "watchdog_available",
             "seen_hashes_count",
             "tracked_log_files",
             "pending_flush",
-            "excluded_files",
             "stale_threshold_seconds",
             "aipass_root",
             "watched_logs",
@@ -94,8 +86,6 @@ class TestStartStopStatus:
         """get_watcher_status returns sensible values."""
         status = lw.get_watcher_status()
         assert status["stale_threshold_seconds"] == 300
-        assert isinstance(status["excluded_files"], list)
-        assert len(status["excluded_files"]) > 0
 
 
 class TestInitializePositions:
@@ -186,13 +176,13 @@ class TestLoadSeenHashes:
         monkeypatch.setattr(lw, "_seen_error_hashes", {"existing"})
         assert self._seen_count_after_start(monkeypatch) == 1
 
-    def test_handles_corrupt_json(self, tmp_path, monkeypatch):
-        """Corrupt JSON resets _seen_error_hashes to empty set."""
+    def test_corrupt_state_raises_at_start(self, tmp_path, monkeypatch):
+        """Pins the silent reset: corrupt state started the watcher as if nothing were saved."""
         data_file = tmp_path / "trigger_data.json"
         data_file.write_text("{invalid json", encoding="utf-8")
         monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
-        monkeypatch.setattr(lw, "_seen_error_hashes", {"leftovers"})
-        assert self._seen_count_after_start(monkeypatch) == 0
+        with pytest.raises(json.JSONDecodeError):
+            self._seen_count_after_start(monkeypatch)
 
     def test_handles_missing_key(self, tmp_path, monkeypatch):
         """File exists but has no seen_error_hashes key -- loads empty."""
@@ -205,7 +195,6 @@ class TestLoadSeenHashes:
     @staticmethod
     def _seen_count_after_start(monkeypatch) -> int:
         """Start the watcher (observer is the fixture's recorder) and read the loaded hash count."""
-        monkeypatch.setattr(lw, "WATCHDOG_AVAILABLE", True)
         lw.AIPASS_PKG_ROOT.mkdir(parents=True, exist_ok=True)
         lw.start_branch_log_watcher()
         return lw.get_watcher_status()["seen_hashes_count"]
@@ -251,15 +240,15 @@ class TestLoadLogPositions:
         position, size = self._position_after_init(None)
         assert position == size
 
-    def test_returns_empty_for_corrupt_json(self):
-        """Corrupt JSON is treated as no state: snap to end of file."""
-        position, size = self._position_after_init("not json!")
-        assert position == size
+    def test_unreadable_state_raises(self):
+        """Pins the silent reset: corrupt state read as none, so every position snapped to EOF unread."""
+        with pytest.raises(json.JSONDecodeError):
+            self._position_after_init("not json!")
 
-    def test_returns_empty_when_positions_not_dict(self):
-        """A non-dict log_positions is ignored: snap to end of file."""
-        position, size = self._position_after_init('{"log_positions": "not_a_dict"}')
-        assert position == size
+    def test_misshapen_positions_raise(self):
+        """Pins the silent reset: a non-dict log_positions was read as none."""
+        with pytest.raises(ValueError, match="log_positions"):
+            self._position_after_init('{"log_positions": "not_a_dict"}')
 
     def test_coerces_values_to_int(self):
         """String position values are coerced to int."""
@@ -348,12 +337,13 @@ class TestLogInodesPersistence:
         monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", tmp_path / "nope.json")
         assert self._initialized().log_inodes == {}
 
-    def test_load_returns_empty_when_not_dict(self, tmp_path, monkeypatch):
-        """Non-dict log_inodes value is ignored."""
+    def test_misshapen_inodes_raise(self, tmp_path, monkeypatch):
+        """Pins the silent reset: a non-dict log_inodes was read as none."""
         data_file = tmp_path / "trigger_data.json"
         data_file.write_text(json.dumps({"log_inodes": "nope"}), encoding="utf-8")
         monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
-        assert self._initialized().log_inodes == {}
+        with pytest.raises(ValueError, match="log_inodes"):
+            self._initialized()
 
     @staticmethod
     def _initialized() -> Any:
@@ -483,8 +473,8 @@ class TestDebouncedWriter:
         assert written["log_positions"] == {"/b.log": 77}
         assert written["seen_error_hashes"] == ["x"]
 
-    def test_flush_handles_write_error(self, tmp_path, monkeypatch):
-        """Write failure logs a warning but does not raise."""
+    def test_a_flush_failure_is_reported_loudly(self, tmp_path, monkeypatch):
+        """Pins the warning-only catch: unsaved positions were one more watched WARNING, nobody told."""
         monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", tmp_path / "trigger_data.json")
         monkeypatch.setattr(lw, "_data_dirty", True)
         monkeypatch.setattr(
@@ -492,12 +482,12 @@ class TestDebouncedWriter:
         )
         monkeypatch.setattr(lw, "_seen_error_hashes", {"z"})
 
-        with patch.object(lw, "logger") as mock_logger:
-            with patch.object(lw, "atomic_write_json", side_effect=PermissionError("denied")):
-                lw.stop_branch_log_watcher()
+        with patch.object(lw, "atomic_write_json", side_effect=PermissionError("denied")):
+            lw.stop_branch_log_watcher()
 
-        warnings = [str(call.args) for call in mock_logger.warning.call_args_list]
-        assert any("Failed to flush trigger_data.json" in warning for warning in warnings)
+        rows = medic_state.get_failing_handlers()
+        assert [(r["handler"], r["branch"]) for r in rows] == [("log_watcher.flush", str(lw.TRIGGER_DATA_FILE))]
+        assert "denied" in rows[0]["error"]
 
     def test_restart_survival(self, tmp_path, monkeypatch):
         """Flushed data survives reload — positions and hashes intact."""

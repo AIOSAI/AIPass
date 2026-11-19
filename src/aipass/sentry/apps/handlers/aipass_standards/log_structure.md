@@ -64,8 +64,8 @@ path = Path.home() / 'logs' / 'module.log'
 
 ```python
 # CORRECT: Use prax's system_logger (auto-routes to correct location)
-from aipass.prax.apps.modules.logger import system_logger
-system_logger.info('message')  # prax handles hierarchical placement
+from aipass.prax import logger
+logger.info('message')  # prax handles hierarchical placement
 
 # ALSO CORRECT: Manual relative path to sibling logs/
 LOG_DIR = Path(__file__).resolve().parent / 'logs'

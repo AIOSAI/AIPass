@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stderr_routing_check.py
 # Description: Stderr Routing Standards Checker
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-13
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -31,7 +31,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks: List[Dict] = []
     path = Path(module_path)
 
-    # Normalize to forward slashes so string matching works on Windows too
     module_path = Path(module_path).as_posix()
 
     if is_bypassed(module_path, "stderr_routing", bypass_rules=bypass_rules):
@@ -119,7 +118,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             {
                 "name": "Stderr console creation",
                 "passed": False,
-                "message": f"{filename}: Custom Console(stderr=True) on lines {custom_stderr[:3]} — import err_console from aipass.cli.apps.modules",
+                "message": f"{filename}: Custom Console(stderr=True) on lines {custom_stderr[:3]} — use "
+                "from aipass.cli import err_console",
             }
         )
 

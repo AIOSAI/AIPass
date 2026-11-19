@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity_tripwire.py
 # Description: edit_gate's memory tripwire: a .trinity write a shell made is reported at PostToolUse, project-wide
-# Version: 1.0.0
+# Version: 1.5.0
 # Created: 2026-10-08
-# Modified: 2026-11-10
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py: tripwire_snapshot and tripwire."""
@@ -16,6 +16,9 @@
 
 import json
 import logging
+from unittest.mock import patch
+
+import pytest
 
 from aipass.hooks.apps.handlers.security import edit_gate
 from aipass.hooks.tests.support_edit_gate_trinity import (
@@ -113,6 +116,121 @@ class TestShellMemoryTripwire:
         result = self._around(seat, "drone @ai_mail inbox", during=lambda: self._over_cap(seat))
         assert "MEMORY WRITTEN FROM A SHELL" in self._context(result)
 
+    def test_a_snapshot_that_cannot_be_taken_refuses_the_call_with_one_stable_error(self, tmp_path, monkeypatch):
+        seat = self._seat(tmp_path, monkeypatch)
+        blocker = tmp_path / "not_a_dir"
+        blocker.write_text("", encoding="utf-8")
+        monkeypatch.setattr(edit_gate, "_TRIPWIRE_DIR", blocker)
+        with patch.object(edit_gate, "logger") as log:
+            result = edit_gate.tripwire_snapshot(self._data(seat, "ls"))
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert "could not take this call's before-image (NotADirectoryError" in reason
+        assert "This seat may still run exactly drone @hooks promote rollback, alone" in reason
+        assert [c.args for c in log.error.call_args_list] == [(edit_gate.SNAPSHOT_FAILED_LOG,)]
+        assert str(blocker) in str(log.info.call_args_list)
+
+    ROLLBACK = "drone @hooks promote rollback"
+    NEAR_MISSES = (
+        "drone @hooks promote rollback; ls",
+        "drone @hooks promote rollback && ls",
+        "drone @hooks promote rollback | cat",
+        "drone @hooks promote rollback > out.txt",
+        "drone @hooks promote rollback $(ls)",
+        "drone @hooks promote rollback `ls`",
+        "PATH=/tmp drone @hooks promote rollback",
+        "drone @hooks promote rollback --force",
+        "drone @hooks promote",
+        "drone @memory promote rollback",
+        "drone @hooks promote rollback\nls",
+        "(drone @hooks promote rollback)",
+        "drone '@hooks' promote rollback",
+    )
+
+    def _dark_snapshot(self, tmp_path, monkeypatch, command):
+        seat = self._seat(tmp_path, monkeypatch)
+        blocker = tmp_path / "not_a_dir"
+        blocker.write_text("", encoding="utf-8")
+        monkeypatch.setattr(edit_gate, "_TRIPWIRE_DIR", blocker)
+        with patch.object(edit_gate, "logger") as log:
+            result = edit_gate.tripwire_snapshot(self._data(seat, command))
+        return result, [c.args for c in log.error.call_args_list]
+
+    def test_with_the_snapshot_dark_the_exact_rollback_still_runs_and_the_fault_is_logged(self, tmp_path, monkeypatch):
+        for i, command in enumerate((self.ROLLBACK, f"  {self.ROLLBACK}\n")):
+            result, errors = self._dark_snapshot(tmp_path / str(i), monkeypatch, command)
+            assert result == self.SILENT, command
+            assert errors == [(edit_gate.SNAPSHOT_FAILED_LOG,)]
+
+    def test_with_the_snapshot_dark_every_near_miss_of_the_rollback_is_refused(self, tmp_path, monkeypatch):
+        for i, command in enumerate(self.NEAR_MISSES):
+            result, errors = self._dark_snapshot(tmp_path / str(i), monkeypatch, command)
+            assert result["exit_code"] == 2, command
+            assert errors == [(edit_gate.SNAPSHOT_FAILED_LOG,)]
+
+    def test_a_comparison_that_fails_tells_the_seat_and_logs_one_stable_error(self, tmp_path, monkeypatch):
+        seat = self._seat(tmp_path, monkeypatch)
+        torn = {"toolu_a": {"stats": {}}}
+        (tmp_path / "aipass-trinity-tripwire-session-1.json").write_text(json.dumps(torn), encoding="utf-8")
+        with patch.object(edit_gate, "logger") as log:
+            result = edit_gate.tripwire(self._data(seat, "ls"))
+        context = self._context(result)
+        assert context.startswith("MEMORY CHECK DID NOT RUN for this Bash call (KeyError")
+        assert [c.args for c in log.error.call_args_list] == [(edit_gate.TRIPWIRE_FAILED_LOG,)]
+
+    def _fresh_start_across(self, tmp_path, monkeypatch):
+        """Call A snapshotted, the store then damaged, call B snapshotted over it: A's snapshot is lost."""
+        seat = self._seat(tmp_path, monkeypatch)
+        store = tmp_path / "aipass-trinity-tripwire-session-1.json"
+        a, b = self._data(seat, "ls", "toolu_a"), self._data(seat, "ls", "toolu_b")
+        assert edit_gate.tripwire_snapshot(a) == self.SILENT
+        store.write_text("{torn", encoding="utf-8")
+        with patch.object(edit_gate, "logger") as log:
+            assert edit_gate.tripwire_snapshot(b) == self.SILENT
+        return seat, store, a, b, [c.args for c in log.error.call_args_list]
+
+    def test_a_damaged_store_starts_fresh_with_one_stable_error(self, tmp_path, monkeypatch):
+        _seat, store, _a, _b, errors = self._fresh_start_across(tmp_path, monkeypatch)
+        assert errors == [(edit_gate.STORE_RESET_LOG,)]
+        assert "toolu_b" in json.loads(store.read_text(encoding="utf-8"))
+
+    def test_a_call_in_flight_across_a_fresh_start_is_told_its_check_did_not_run(self, tmp_path, monkeypatch):
+        _seat, _store, a, b, _errors = self._fresh_start_across(tmp_path, monkeypatch)
+        with patch.object(edit_gate, "logger") as log:
+            context = self._context(edit_gate.tripwire(a))
+        assert context.startswith("MEMORY CHECK DID NOT RUN for this Bash call (LookupError")
+        assert [c.args for c in log.error.call_args_list] == [(edit_gate.TRIPWIRE_FAILED_LOG,)]
+        assert edit_gate.tripwire(b) == self.SILENT, "a call snapshotted after the fresh start is checked as normal"
+
+    def test_the_fresh_start_mark_ends_with_its_window_and_never_touches_unwatched_calls(self, tmp_path, monkeypatch):
+        seat, store, a, _b, _errors = self._fresh_start_across(tmp_path, monkeypatch)
+        unwatched = tmp_path / "elsewhere"
+        unwatched.mkdir()
+        for call in ({**a, "tool_use_id": None}, {**a, "cwd": str(unwatched)}):
+            assert edit_gate.tripwire(call) == self.SILENT
+        monkeypatch.setattr(edit_gate, "FRESH_START_WINDOW_S", 0)
+        assert edit_gate.tripwire(a) == self.SILENT
+        assert edit_gate.tripwire_snapshot(self._data(seat, "ls", "toolu_c")) == self.SILENT
+        assert edit_gate.FRESH_START_KEY not in json.loads(store.read_text(encoding="utf-8"))
+
+    @pytest.mark.parametrize(
+        ("damage", "cause"),
+        [("directory", "IsADirectoryError"), ("not json", "JSONDecodeError"), ("a list", "ValueError")],
+    )
+    def test_a_snapshot_store_that_exists_but_cannot_be_read_is_the_check_failing(
+        self, tmp_path, monkeypatch, damage, cause
+    ):
+        seat = self._seat(tmp_path, monkeypatch)
+        store = tmp_path / "aipass-trinity-tripwire-session-1.json"
+        if damage == "directory":
+            store.mkdir()
+        else:
+            store.write_text("{torn" if damage == "not json" else "[]", encoding="utf-8")
+        with patch.object(edit_gate, "logger") as log:
+            result = edit_gate.tripwire(self._data(seat, self.RESIDUAL))
+        assert self._context(result).startswith(f"MEMORY CHECK DID NOT RUN for this Bash call ({cause}")
+        assert [c.args for c in log.error.call_args_list] == [(edit_gate.TRIPWIRE_FAILED_LOG,)]
+
     def test_a_file_the_shell_left_unreadable_is_named(self, tmp_path, monkeypatch):
         seat = self._seat(tmp_path, monkeypatch)
         result = self._around(seat, self.RESIDUAL, during=lambda: self._write(seat, "local.json", "x\n"))
@@ -153,6 +271,7 @@ class TestShellMemoryTripwire:
         with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
             assert edit_gate.tripwire(self._data(seat, self.RESIDUAL)) == self.SILENT
         assert "no snapshot for toolu_a" in caplog.text
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING], "no store at all is not damage"
 
     def test_the_pending_snapshots_stay_bounded(self, tmp_path, monkeypatch):
         """A call whose PostToolUse never fires (a later gate refused it) must not grow the file."""
@@ -162,6 +281,42 @@ class TestShellMemoryTripwire:
                 edit_gate.tripwire_snapshot(self._data(seat, "ls", tool_use_id=f"toolu_{index}"))
         pending = json.loads((tmp_path / "aipass-trinity-tripwire-session-1.json").read_text(encoding="utf-8"))
         assert list(pending) == [f"toolu_{index}" for index in range(12, 20)]
+
+
+class TestEveryTripwireCallLeavesATrailEntry:
+    """tripwire_snapshot and tripwire each append one entry to edit_gate's json trail, a refusal as well."""
+
+    WIRE = TestShellMemoryTripwire()
+
+    @pytest.fixture
+    def trail(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "logs"))
+        return tmp_path / "logs" / "hooks" / "hooks_json" / "edit_gate_log.json"
+
+    def _dark(self, tmp_path, monkeypatch, seat):
+        blocker = tmp_path / "not_a_dir"
+        blocker.write_text("", encoding="utf-8")
+        monkeypatch.setattr(edit_gate, "_TRIPWIRE_DIR", blocker)
+        return edit_gate.tripwire_snapshot(self.WIRE._data(seat, "ls"))["exit_code"]
+
+    def test_an_allow_and_a_refusal_each_write_their_verdict(self, trail, tmp_path, monkeypatch):
+        seat = self.WIRE._seat(tmp_path, monkeypatch)
+        self.WIRE._around(seat, "ls")
+        assert self._dark(tmp_path, monkeypatch, seat) == 2
+        entries = [(e["operation"], e["data"]) for e in json.loads(trail.read_text(encoding="utf-8"))]
+        assert entries == [
+            ("tripwire_snapshot", {"tool": "Bash", "verdict": "allow", "seat": str(seat)}),
+            ("tripwire", {"tool": "Bash", "verdict": "allow", "seat": str(seat)}),
+            ("tripwire_snapshot", {"tool": "Bash", "verdict": "refuse", "seat": str(seat)}),
+        ]
+
+    def test_a_trail_that_cannot_be_written_changes_no_verdict(self, trail, tmp_path, monkeypatch):
+        seat = self.WIRE._seat(tmp_path, monkeypatch)
+        with patch.object(edit_gate.json_handler, "log_operation", return_value=False) as logged:
+            assert self.WIRE._around(seat, "ls") == self.WIRE.SILENT
+            assert self._dark(tmp_path, monkeypatch, seat) == 2
+        assert [c.args[0] for c in logged.call_args_list] == ["tripwire_snapshot", "tripwire", "tripwire_snapshot"]
+        assert not trail.exists()
 
 
 class TestTripwireWatchesEveryTrinityInTheProject:

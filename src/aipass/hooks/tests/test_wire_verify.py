@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_wire_verify.py
-# Version: 1.7.0
+# Version: 1.9.0
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
-# Modified: 2026-11-04
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/wire_verify.py."""
@@ -20,6 +20,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.hooks.apps.handlers.config import codex_trust
 from aipass.hooks.apps.modules import wire_verify
 
 _BRIDGE_CMD = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py"
@@ -90,7 +91,21 @@ def _codex_file(tmp_path, *event_args: str, pretool: bool = True):
         hooks.setdefault(arg.split(":", 1)[0], []).append(entry)
     path = tmp_path / "codex_hooks.json"
     path.write_text(json.dumps({"hooks": hooks}), encoding="utf-8")
-    return path
+    return _approve(path)
+
+
+def _approve(codex_path):
+    """Write the config.toml beside *codex_path* approving every row, as the owner's /hooks review does."""
+    hooks = json.loads(codex_path.read_text(encoding="utf-8"))["hooks"]
+    lines = []
+    for event, groups in hooks.items():
+        label = codex_trust.event_label(event)
+        for gi, group in enumerate(groups):
+            for hi, handler in enumerate(group["hooks"]):
+                lines.append(f'[hooks.state."{codex_path}:{label}:{gi}:{hi}"]')
+                lines.append(f'trusted_hash = "{codex_trust.hook_hash(event, group, handler)}"')
+    codex_path.with_name("config.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return codex_path
 
 
 def _never_fires(event: str, hook: str) -> str:
@@ -165,6 +180,12 @@ class TestCheckEventWiring:
         assert result["errors"] == [
             "SessionStart: 1 enabled handler(s) in project config but NO provider event entry — handlers never fire"
         ]
+
+    def test_a_seed_only_event_with_no_claude_row_is_info_not_an_error(self, tmp_path):
+        """Pins the doctor red on every install: PostCompact convicted against Claude settings."""
+        result = _verify(tmp_path, {}, {"PostCompact": {"post_compact_regrounding": _ENABLED}})
+        assert result["errors"] == []
+        assert "PostCompact: 1 enabled handler(s) for Seed only, not wired for Claude" in result["info"]
 
     def test_missing_per_hook_entry(self, tmp_path):
         provider = {"UserPromptSubmit": [_provider_entry("UserPromptSubmit:identity_injector")]}
@@ -356,12 +377,13 @@ class TestReadProviderHooks:
         result = wire_verify.verify_wiring(provider_path=settings, project_config={"hooks_enabled": True})
         assert "Stop: provider entry exists but hooks array is EMPTY — nothing fires" in result["errors"]
 
-    def test_malformed_json_returns_empty(self, tmp_path):
+    def test_malformed_json_is_an_error_naming_the_file(self, tmp_path):
         settings = tmp_path / "settings.json"
         settings.write_text("not json{{{", encoding="utf-8")
         result = wire_verify.verify_wiring(provider_path=settings, project_config=GOOD_PROJECT)
+        (unreadable,) = [e for e in result["errors"] if e.startswith(f"Cannot read {settings}")]
         assert result == {
-            "errors": ["No provider hooks found in ~/.claude/settings.json"],
+            "errors": [unreadable, "No provider hooks found in ~/.claude/settings.json"],
             "warnings": [],
             "info": [],
             "ok": False,
@@ -389,7 +411,26 @@ class TestCodexOnlyHandlers:
         codex_path = tmp_path / "codex_hooks.json"
         claude_row = {"PreToolUse": [_CODEX_PRETOOL], "SessionStart": [_provider_entry("SessionStart:culture")]}
         codex_path.write_text(json.dumps({"hooks": claude_row}), encoding="utf-8")
+        _approve(codex_path)
         assert self._verify(tmp_path, codex_path)["errors"] == [_never_fires("SessionStart", "culture")]
+
+    @pytest.mark.parametrize("gap", [" ", ""], ids=["space_before_shell", "no_space"])
+    def test_a_guarded_pretooluse_row_still_reaches_the_bridge_on_both_sides(self, tmp_path, gap):
+        claude_guard = f"{_BRIDGE_CMD} PreToolUse{gap}; c=$?; [ $c -eq 0 ] || [ $c -eq 2 ] || exit 2; exit $c"
+        settings = tmp_path / "settings.json"
+        provider = {"PreToolUse": [{"hooks": [{"type": "command", "command": claude_guard}]}]}
+        settings.write_text(json.dumps({"hooks": provider}), encoding="utf-8")
+        codex_row = {
+            "matcher": "Bash|apply_patch",
+            "hooks": [{"type": "command", "command": f"python3 bridges/codex.py PreToolUse{gap}|| printf '%s' '{{}}'"}],
+        }
+        codex_path = tmp_path / "codex_hooks.json"
+        codex_path.write_text(json.dumps({"hooks": {"PreToolUse": [codex_row]}}), encoding="utf-8")
+        _approve(codex_path)
+        result = wire_verify.verify_wiring(
+            provider_path=settings, project_config={"hooks_enabled": True}, codex_path=codex_path
+        )
+        assert result["errors"] == []
 
     def test_a_codex_file_whose_pretooluse_misses_a_tool_is_an_error_naming_it(self, tmp_path):
         result = self._verify(tmp_path, _codex_file(tmp_path, "SessionStart:culture", pretool=False))
@@ -411,6 +452,96 @@ def _manifest(tmp_path, *event_args: str):
     path = tmp_path / "provider_manifest.json"
     path.write_text(json.dumps({"cli": {"opencode": {"hooks": rows}}}), encoding="utf-8")
     return path
+
+
+_BRIDGE_PY = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/codex.py"
+_GUARD = (
+    ' || printf \'%s\' \'{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",'
+    '"permissionDecisionReason":"HOOKS BROKEN: codex.py exited without an answer"},'
+    '"systemMessage":"HOOKS BROKEN: codex.py exited without an answer"}\''
+)
+# Three rows as a real Codex 0.164 approved them, with the trusted_hash it wrote: no matcher and no
+# timeout; a timeout; a matcher and a guarded command full of quotes.
+_APPROVED = {
+    "Stop": (
+        {"hooks": [{"type": "command", "command": f"{_BRIDGE_PY} Stop"}]},
+        "sha256:2472c7d568105ca65f9f36781554e05a17bfd6bdefcd4159833449a544b2f65f",
+    ),
+    "UserPromptSubmit": (
+        {"hooks": [{"type": "command", "command": f"{_BRIDGE_PY} UserPromptSubmit:presence_gate", "timeout": 90}]},
+        "sha256:cf372058c5a9735c9c5cff74406987f884eb13ce5e564af7891934a26b89a74d",
+    ),
+    "PreToolUse": (
+        {"matcher": "Bash|apply_patch", "hooks": [{"type": "command", "command": f"{_BRIDGE_PY} PreToolUse{_GUARD}"}]},
+        "sha256:41f25623ebfcef5deb81f7e94f265f1d0cbd0f21bac288763e7e14280a1a1fc0",
+    ),
+}
+_LABEL = {"Stop": "stop", "UserPromptSubmit": "user_prompt_submit", "PreToolUse": "pre_tool_use"}
+
+
+class TestCodexHookTrust:
+    """Codex skips, without a word, a hook row whose trusted_hash in config.toml is not the row's own."""
+
+    def _verify(self, tmp_path, rows: dict, state: dict | None):
+        home = tmp_path / "codex_home"
+        home.mkdir()
+        codex_path = home / "hooks.json"
+        codex_path.write_text(json.dumps({"hooks": {e: [row] for e, row in rows.items()}}), encoding="utf-8")
+        if state is not None:
+            lines = []
+            for event, fields in state.items():
+                lines.append(f'[hooks.state."{codex_path}:{_LABEL[event]}:0:0"]')
+                lines += [f"{k} = {json.dumps(v)}" for k, v in fields.items()]
+            (home / "config.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({"hooks": _PRETOOL}), encoding="utf-8")
+        result = wire_verify.verify_wiring(
+            provider_path=settings, project_config={"hooks_enabled": True}, codex_path=codex_path
+        )
+        return [e for e in result["errors"] if " (Codex) row " in e]
+
+    def test_rows_codex_approved_pass(self, tmp_path):
+        rows = {e: row for e, (row, _) in _APPROVED.items()}
+        assert self._verify(tmp_path, rows, {e: {"trusted_hash": h} for e, (_, h) in _APPROVED.items()}) == []
+
+    def test_a_row_changed_since_it_was_approved_is_an_error_naming_it(self, tmp_path):
+        row, approved = _APPROVED["PreToolUse"]
+        changed = {**row, "hooks": [{"type": "command", "command": f"{_BRIDGE_PY} PreToolUse"}]}
+        (error,) = self._verify(tmp_path, {"PreToolUse": changed}, {"PreToolUse": {"trusted_hash": approved}})
+        assert error.startswith("PreToolUse (Codex) row 0: changed since the owner approved it")
+        assert "no gate runs" in error and "/hooks" in error
+
+    def test_a_row_never_approved_is_an_error(self, tmp_path):
+        row, _ = _APPROVED["Stop"]
+        (error,) = self._verify(tmp_path, {"Stop": row}, {})
+        assert error.startswith("Stop (Codex) row 0: never approved")
+
+    def test_with_no_config_toml_every_row_is_never_approved(self, tmp_path):
+        rows = {e: row for e, (row, _) in _APPROVED.items()}
+        errors = self._verify(tmp_path, rows, None)
+        assert sorted(e.split(":", 1)[0] for e in errors) == [
+            "PreToolUse (Codex) row 0",
+            "Stop (Codex) row 0",
+            "UserPromptSubmit (Codex) row 0",
+        ]
+
+    def test_a_row_disabled_in_codex_is_an_error(self, tmp_path):
+        row, approved = _APPROVED["Stop"]
+        (error,) = self._verify(tmp_path, {"Stop": row}, {"Stop": {"trusted_hash": approved, "enabled": False}})
+        assert error.startswith("Stop (Codex) row 0: disabled in Codex")
+
+    def test_an_unreadable_config_toml_is_an_error_naming_it(self, tmp_path):
+        row, _ = _APPROVED["Stop"]
+        self._verify(tmp_path, {"Stop": row}, {})
+        config = tmp_path / "codex_home" / "config.toml"
+        config.write_text("[hooks.state\nnot toml", encoding="utf-8")
+        settings = tmp_path / "settings.json"
+        result = wire_verify.verify_wiring(
+            provider_path=settings,
+            project_config={"hooks_enabled": True},
+            codex_path=tmp_path / "codex_home" / "hooks.json",
+        )
+        assert [e for e in result["errors"] if e.startswith(f"Cannot read {config}")]
 
 
 class TestOpenCodePlugin:
@@ -448,6 +579,12 @@ class TestOpenCodePlugin:
         plugin.write_text("// edited\n", encoding="utf-8")
         result = self._verify(tmp_path, plugin, _manifest(tmp_path, "SessionStart:culture"))
         assert [e for e in result["errors"] if e.startswith("OpenCode plugin stale") and str(plugin) in e]
+
+    def test_an_unreadable_manifest_is_an_error_naming_it(self, tmp_path):
+        manifest = tmp_path / "provider_manifest.json"
+        manifest.write_text("not json{{{", encoding="utf-8")
+        result = self._verify(tmp_path, self._installed(tmp_path), manifest)
+        assert [e for e in result["errors"] if e.startswith(f"Cannot read the provider manifest {manifest}")]
 
     def test_no_opencode_rows_is_an_error(self, tmp_path):
         manifest = tmp_path / "provider_manifest.json"
@@ -495,6 +632,16 @@ class TestTheProjectRow:
         assert "UserPromptSubmit:hark_events: wired for Codex only" in result["info"]
 
 
+def _on_path(tmp_path, monkeypatch, *clis: str):
+    """PATH holds only a bin dir with an executable stub per name in *clis*: installed, as `command -v` sees it."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for cli in clis:
+        (bin_dir / cli).write_text("#!/bin/sh\n", encoding="utf-8")
+        (bin_dir / cli).chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+
+
 class TestHandleCommand:
     def test_returns_false_for_non_verify(self):
         assert wire_verify.handle_command("status", []) is False
@@ -504,6 +651,7 @@ class TestHandleCommand:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
         monkeypatch.setenv("AIPASS_HOME", str(tmp_path / "home"))
         monkeypatch.setenv("SEED_HOME", str(tmp_path / "seed_home"))
+        _on_path(tmp_path, monkeypatch, "codex", "opencode")
         mock_result = {"ok": True, "errors": [], "warnings": [], "info": []}
         with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
             assert wire_verify.handle_command("verify", []) is True
@@ -548,10 +696,10 @@ class TestHandleCommand:
         """The passing path must stay a normal return — only ERROR findings exit."""
         monkeypatch.delenv("CODEX_HOME", raising=False)
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
         monkeypatch.setenv("AIPASS_HOME", str(tmp_path / "home"))
         monkeypatch.delenv("SEED_HOME", raising=False)
+        _on_path(tmp_path, monkeypatch, "codex", "opencode")
         mock_result = {"ok": True, "errors": [], "warnings": ["cosmetic"], "info": []}
         with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
             assert wire_verify.handle_command("verify", []) is True
@@ -565,6 +713,58 @@ class TestHandleCommand:
         assert "Wire check passed" in err
         assert "cosmetic" in err
         assert "0 errors, 1 warnings" in err
+
+    def test_a_provider_cli_not_installed_is_not_checked_and_says_so(self, capsys, tmp_path, monkeypatch):
+        """A Claude-only machine has no Codex or OpenCode seat to run ungated: their wiring is not an ERROR."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path / "home"))
+        _on_path(tmp_path, monkeypatch)
+        mock_result = {"ok": True, "errors": [], "warnings": [], "info": []}
+        with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
+            assert wire_verify.handle_command("verify", []) is True
+        kwargs = mock_verify.call_args.kwargs
+        assert kwargs["codex_path"] is None
+        assert kwargs["opencode_plugin"] is None
+        err = capsys.readouterr().err
+        assert "Codex: not installed" in err
+        assert "OpenCode: not installed" in err
+
+    def test_opencode_in_its_own_bin_dir_is_installed(self, tmp_path, monkeypatch):
+        """setup.sh wires OpenCode found at ~/.opencode/bin/opencode too, so verify checks it there."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+        _on_path(tmp_path, monkeypatch, "codex")
+        opencode = tmp_path / ".opencode" / "bin" / "opencode"
+        opencode.parent.mkdir(parents=True)
+        opencode.write_text("#!/bin/sh\n", encoding="utf-8")
+        opencode.chmod(0o755)
+        mock_result = {"ok": True, "errors": [], "warnings": [], "info": []}
+        with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
+            wire_verify.handle_command("verify", [])
+        assert (
+            mock_verify.call_args.kwargs["opencode_plugin"] == tmp_path / "cfg" / "opencode" / "plugins" / "aipass.ts"
+        )
+
+    def test_an_installed_cli_with_its_wiring_missing_stays_an_error(self, capsys, tmp_path, monkeypatch):
+        """Installed with no hooks file or plugin: that seat runs ungated, so verify exits non-zero."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex_home"))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+        _on_path(tmp_path, monkeypatch, "codex", "opencode")
+        provider = tmp_path / "settings.json"
+        provider.write_text(json.dumps({"hooks": {"Stop": [_provider_entry("Stop")]}}), encoding="utf-8")
+        real = wire_verify.verify_wiring
+
+        def _verify(**kwargs):
+            return real(provider_path=provider, project_config={}, **kwargs)
+
+        with patch.object(wire_verify, "verify_wiring", side_effect=_verify):
+            with pytest.raises(SystemExit) as exc:
+                wire_verify.handle_command("verify", [])
+        assert exc.value.code != 0
+        err = " ".join(capsys.readouterr().err.split())
+        assert "Codex hooks file missing" in err
+        assert "OpenCode plugin missing" in err
 
 
 class TestRenderResults:

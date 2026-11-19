@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_watchers_log_watcher.py
 # Description: Unit tests for centralized system_logs log watcher
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for the centralized system_logs watcher (apps/handlers/watchers/log_watcher.py)."""
@@ -21,6 +21,11 @@ import pytest
 import aipass.trigger.apps.handlers.error_registry as error_registry
 import aipass.trigger.apps.handlers.watchers.log_watcher as wlw
 import aipass.trigger.apps.modules.core as trigger_core
+from aipass.prax import get_system_logs_dir
+
+# Fixtures swap SYSTEM_LOGS_DIR and AIPASS_TEST_LOG_DIR per test; both sides are read at import, as the watcher's was.
+_SYSTEM_LOGS_AT_IMPORT = wlw.SYSTEM_LOGS_DIR
+_PRAX_SYSTEM_LOGS_AT_IMPORT = get_system_logs_dir()
 
 
 @pytest.fixture(autouse=True)
@@ -36,7 +41,7 @@ def _mock_infrastructure(monkeypatch, tmp_path):
     mock_json_handler.log_operation = MagicMock(return_value=True)
     monkeypatch.setattr(wlw, "json_handler", mock_json_handler)
 
-    # SYSTEM_LOGS_DIR is built from TRIGGER_ROOT at import: the LIVE system_logs.
+    # SYSTEM_LOGS_DIR is prax's answer at import: the LIVE system_logs outside pytest.
     monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
 
     # The lazy `from ... import report` reads the attribute at call time; left real,
@@ -46,9 +51,14 @@ def _mock_infrastructure(monkeypatch, tmp_path):
     # Never the live bus that would run medic's handlers.
     monkeypatch.setattr(trigger_core, "trigger", MagicMock())
 
-    # -- watchdog: no real observer is ever armed over a directory.
-    monkeypatch.setattr(wlw, "WatchdogObserver", MagicMock())
     monkeypatch.setattr(wlw, "_log_observer", None)
+
+
+class TestSystemLogsFolder:
+    """The watcher reads the folder prax serves, never one counted up from this file."""
+
+    def test_the_watcher_reads_prax_system_logs_folder_not_a_climb(self):
+        assert _SYSTEM_LOGS_AT_IMPORT == _PRAX_SYSTEM_LOGS_AT_IMPORT
 
 
 class TestGenerateErrorHash:
@@ -552,8 +562,28 @@ class TestLogFileWatcherInodeRotation:
         warnings = [str(call.args) for call in mock_logger.warning.call_args_list]
         assert any("not replayed" in warning and ".log.2" in warning for warning in warnings)
 
-    def test_tracked_inode_beyond_chain_reads_new_file_from_zero(self, tmp_path):
+    def test_the_chain_depth_is_prax_backup_count_read_now(self, tmp_path, monkeypatch):
+        """Pins the hardcoded depth of 3: prax keeping 5 backups left a tail at '.log.4' unread."""
+        monkeypatch.setattr(wlw, "log_backup_count", lambda: 5)
+        watcher = wlw.LogFileWatcher()
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("header\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | ERROR | tail four rotations back\n")
+        for _ in range(4):
+            _rotate_chain(log_file, backup_count=5)
+        log_file.write_text("\n".join(_fresh_lines(2)) + "\n", encoding="utf-8")
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        assert any("tail four rotations back" in line for line in _processed_lines(mock_proc))
+
+    def test_tracked_inode_beyond_chain_reads_new_file_from_zero(self, tmp_path, monkeypatch):
         """Inode matching nothing within the chain: nothing drained, new file read whole."""
+        monkeypatch.setattr(wlw, "log_backup_count", lambda: 3)
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -630,7 +660,7 @@ class TestLogFileWatcherInodeRotation:
     def test_zero_inode_falls_back_to_size_check(self, tmp_path):
         """No-overreach guard: a recorded inode of 0 is treated as unknown.
 
-        Some Windows filesystems report st_ino 0, which must never read as a rotation."""
+        An st_ino of 0 must never read as a rotation."""
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -652,11 +682,6 @@ class TestLogFileWatcherInodeRotation:
 
 class TestStartStopActive:
     """Tests for start_log_watcher, stop_log_watcher, is_log_watcher_active."""
-
-    def test_start_returns_none_when_watchdog_unavailable(self, monkeypatch):
-        """start_log_watcher returns None when WATCHDOG_AVAILABLE is False."""
-        monkeypatch.setattr(wlw, "WATCHDOG_AVAILABLE", False)
-        assert wlw.start_log_watcher() is None
 
     def test_start_returns_none_when_dir_missing(self, tmp_path, monkeypatch):
         """start_log_watcher returns None when SYSTEM_LOGS_DIR does not exist."""
@@ -736,7 +761,6 @@ class TestWatcherOnModified:
 
         warned: MagicMock = wlw.logger.warning  # type: ignore[assignment]
         warned.assert_called_once()
-        # Assert on the call's own arguments: repr doubles backslashes in a Windows path.
         reported_args = warned.call_args.args
         assert str(logs_dir / "app.log") == reported_args[1], f"the failing file must be named: {reported_args}"
         assert "disk error" in str(reported_args[2]), f"the cause must be named, got: {reported_args}"
@@ -806,33 +830,98 @@ class TestSystemLogsOwnership:
     One condition must not mint two escalation signatures with different attribution."""
 
     def test_start_declines_even_when_it_could_start(self, tmp_path, monkeypatch):
-        """Watchdog available and the directory present — still declines.
-
-        A deliberate refusal, proven where the old code WOULD have started an observer."""
-        monkeypatch.setattr(wlw, "WATCHDOG_AVAILABLE", True)
+        """The directory present — still declines: a deliberate refusal."""
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path)
         (tmp_path / "hooks_edit_gate.log").write_text("x", encoding="utf-8")
 
-        scheduled = MagicMock()
-        monkeypatch.setattr(wlw, "WatchdogObserver", MagicMock(return_value=scheduled))
-
         assert wlw.start_log_watcher() is None
-        scheduled.schedule.assert_not_called()
-        scheduled.start.assert_not_called()
 
     def test_start_leaves_no_observer_behind(self, tmp_path, monkeypatch):
-        """Declining must not build an observer or park one in module state (mutant: WatchdogObserver() built)."""
-        monkeypatch.setattr(wlw, "WATCHDOG_AVAILABLE", True)
+        """Declining must not park an observer in module state."""
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path)
         monkeypatch.setattr(wlw, "_log_observer", None)
-        observer_cls = MagicMock()
-        monkeypatch.setattr(wlw, "WatchdogObserver", observer_cls)
 
         wlw.start_log_watcher()
 
-        observer_cls.assert_not_called()
         assert wlw.is_log_watcher_active() is False
 
     def test_owner_is_named_in_module_state(self):
         """The ruling is readable from the code, not just from a commit."""
         assert wlw.SYSTEM_LOGS_OWNER == "branch_log_events"
+
+
+def _modified(log_file: Path) -> MagicMock:
+    """A watchdog modified event for ``log_file``."""
+    return MagicMock(is_directory=False, src_path=str(log_file))
+
+
+class TestAFailureReachesTheCallback:
+    """A line that cannot be handled raises to on_modified's warning; it is never consumed in silence."""
+
+    def test_a_line_the_bus_refuses_is_not_read_past(self, tmp_path, monkeypatch):
+        """Pins the default: a line that failed to process was skipped and its offset advanced past it."""
+        log_file = tmp_path / "system_logs" / "prax_core.log"
+        log_file.parent.mkdir()
+        log_file.write_text("2026-08-04 | mod | INFO | seen\n", encoding="utf-8")
+        watcher = wlw.LogFileWatcher()
+        watcher.initialize_positions()
+        before = watcher.log_positions[str(log_file)]
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | WARNING | disk filling\n")
+        monkeypatch.setattr(trigger_core, "trigger", MagicMock(**{"fire.side_effect": RuntimeError("bus down")}))
+
+        log = MagicMock()
+        monkeypatch.setattr(wlw, "logger", log)
+
+        watcher.on_modified(_modified(log_file))
+
+        assert watcher.log_positions[str(log_file)] == before
+        assert "bus down" in str(log.warning.call_args.args[2])
+
+    def test_an_unreadable_registry_fires_no_unfingerprinted_stand_in(self, tmp_path, monkeypatch):
+        log_file = tmp_path / "system_logs" / "prax_core.log"
+        log_file.parent.mkdir()
+        log_file.write_text("2026-08-04 | mod | INFO | seen\n", encoding="utf-8")
+        watcher = wlw.LogFileWatcher()
+        watcher.initialize_positions()
+        before = watcher.log_positions[str(log_file)]
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | ERROR | disk gone\n")
+        monkeypatch.setattr(error_registry, "report", MagicMock(side_effect=ValueError("registry torn")))
+        bus = MagicMock()
+        monkeypatch.setattr(trigger_core, "trigger", bus)
+        log = MagicMock()
+        monkeypatch.setattr(wlw, "logger", log)
+
+        watcher.on_modified(_modified(log_file))
+
+        bus.fire.assert_not_called()
+        assert watcher.log_positions[str(log_file)] == before
+        assert "registry torn" in str(log.warning.call_args.args[2])
+
+    def test_an_unreadable_rotated_backup_is_named_by_the_reader(self, tmp_path, monkeypatch):
+        """Pins the default: the drain swallowed its own read error; now it raises to the reader, which names it."""
+        log_file = tmp_path / "system_logs" / "prax_core.log"
+        log_file.parent.mkdir()
+        log_file.write_text("2026-08-04 | mod | INFO | seen\n", encoding="utf-8")
+        watcher = wlw.LogFileWatcher()
+        watcher.initialize_positions()
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | WARNING | unread tail\n")
+        _rotate_log(log_file)
+        log_file.write_text("2026-08-04 | mod | INFO | fresh\n", encoding="utf-8")
+        real_open = open
+
+        def deny_backup(path, *args, **kwargs):
+            if str(path).endswith(".log.1"):
+                raise PermissionError("backup denied")
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(wlw, "open", deny_backup, raising=False)
+        log = MagicMock()
+        monkeypatch.setattr(wlw, "logger", log)
+
+        watcher.on_modified(_modified(log_file))
+
+        warned = [call.args for call in log.warning.call_args_list]
+        assert any("Failed to drain rotated tail" in args[0] and "backup denied" in str(args[2]) for args in warned)

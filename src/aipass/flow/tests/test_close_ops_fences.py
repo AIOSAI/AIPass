@@ -3,7 +3,7 @@
 # Description: Tests for close_all's project-scope fence, split from test_close_ops.py (oversize, leg 12)
 # Version: 1.0.0
 # Created: 2026-10-06
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for the project-scope fence of close_all_plans_impl in apps/handlers/plan/close_ops.py."""
@@ -12,19 +12,15 @@
 # sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
-from pathlib import PurePath, PurePosixPath, PureWindowsPath
+from pathlib import PurePath
 from unittest.mock import MagicMock, patch
 
-import aipass.flow.apps.handlers.plan.close_ops as close_ops
 from aipass.flow.apps.handlers.plan.close_ops import close_all_plans_impl
 from aipass.flow.tests.support_close_ops import _closed_ids, _held_ids, _scope
 
 
 def _under(path: PurePath, root: PurePath) -> bool:
-    """True when `path` IS `root` or lives beneath it.
-
-    A path relationship, never a string prefix: Windows separators break ``str(path).startswith``.
-    """
+    """True when `path` IS `root` or lives beneath it."""
     return path.is_relative_to(root)
 
 
@@ -302,102 +298,4 @@ class TestDryRunEqualsRunUnderFences:
         assert message["text"].startswith("Error in close_all: Unreadable project register ")
         assert str(broken) in message["text"]
         close_plan_fn.assert_not_called()
-        mock_bg.assert_not_called()
-
-
-class TestTheScopeComparisonIsPlatformNeutral:
-    """Guards the idiom the windows-setup runner caught, from Linux."""
-
-    ROW = "/aipass/src"
-    ROOT = "/aipass"
-    OTHER = "/elsewhere/loose"
-
-    def test_a_row_under_the_root_is_recognised_on_both_platforms(self):
-        for flavour in (PurePosixPath, PureWindowsPath):
-            assert _under(flavour(self.ROW), flavour(self.ROOT)), flavour.__name__
-
-    def test_the_root_itself_counts_as_inside_on_both_platforms(self):
-        for flavour in (PurePosixPath, PureWindowsPath):
-            assert _under(flavour(self.ROOT), flavour(self.ROOT)), flavour.__name__
-
-    def test_a_row_outside_the_root_stays_outside_on_both_platforms(self):
-        for flavour in (PurePosixPath, PureWindowsPath):
-            assert not _under(flavour(self.OTHER), flavour(self.ROOT)), flavour.__name__
-
-    def test_a_sibling_that_merely_shares_a_prefix_is_not_inside(self):
-        """ROOT + "-old" is not under ROOT. A string prefix would say it is."""
-        for flavour in (PurePosixPath, PureWindowsPath):
-            sibling = flavour(self.ROOT + "-old") / "src"
-            assert str(sibling).startswith(str(flavour(self.ROOT)))
-            assert not _under(sibling, flavour(self.ROOT)), flavour.__name__
-
-
-class TestTheFenceUnderWindowsPathSemantics:
-    """Runs the scope fence with close_ops seeing Windows paths, from Linux.
-
-    Patching close_ops' ``Path`` to PureWindowsPath reproduces separator defects; not drive or filesystem ones.
-    """
-
-    @staticmethod
-    def _rows():
-        return [
-            ("0100", {"subject": "ours", "location": "/aipass/src", "file_path": "/aipass/src/DPLAN-0100_o.md"}),
-            ("0101", {"subject": "theirs", "location": "/aipass/projects/baud/a", "file_path": "/x/DPLAN-0101.md"}),
-            (
-                "0102",
-                {"subject": "nowhere", "location": "/elsewhere/loose", "file_path": "/elsewhere/loose/DPLAN-0102_x.md"},
-            ),
-        ]
-
-    @staticmethod
-    def _resolver(aipass, baud):
-        def resolve(path):
-            if _under(path, baud):
-                return baud
-            if _under(path, aipass):
-                return aipass
-            return None
-
-        return resolve
-
-    @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
-    @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_the_three_buckets_survive_windows_separators(self, _mock_jh, mock_bg):
-        close_all = close_all_plans_impl
-
-        aipass, baud = PureWindowsPath("/aipass"), PureWindowsPath("/aipass/projects/baud")
-        mock_close = MagicMock(return_value={"success": True, "messages": []})
-
-        with patch.object(close_ops, "Path", PureWindowsPath):
-            result = close_all(
-                caller_project=aipass,
-                resolve_project_fn=self._resolver(aipass, baud),
-                get_open_plans=MagicMock(return_value=self._rows()),
-                close_plan_fn=mock_close,
-            )
-
-        assert _closed_ids(mock_close) == ["DPLAN-0100"]
-        assert sorted(_held_ids(result)) == ["DPLAN-0101", "DPLAN-0102"]
-        mock_bg.assert_called_once_with()
-
-    @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
-    @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_the_held_reasons_still_tell_foreign_from_unattributable(self, _mock_jh, mock_bg):
-        """The load-bearing half: a held row must still say WHY it was held."""
-        close_all = close_all_plans_impl
-
-        aipass, baud = PureWindowsPath("/aipass"), PureWindowsPath("/aipass/projects/baud")
-
-        with patch.object(close_ops, "Path", PureWindowsPath):
-            result = close_all(
-                dry_run=True,
-                caller_project=aipass,
-                resolve_project_fn=self._resolver(aipass, baud),
-                get_open_plans=MagicMock(return_value=self._rows()),
-                close_plan_fn=MagicMock(),
-            )
-
-        reasons = {m["plan_id"]: m["reason"] for m in result["messages"] if m.get("type") == "held_row"}
-        assert reasons["DPLAN-0101"] == "belongs to baud"
-        assert "no project register" in reasons["DPLAN-0102"]
         mock_bg.assert_not_called()

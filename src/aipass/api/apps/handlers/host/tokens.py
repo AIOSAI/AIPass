@@ -3,7 +3,7 @@
 # Description: Host API Token Handler — bearer token issue, verify, revoke
 # Version: 1.4.0
 # Created: 2026-08-14
-# Modified: 2026-11-06
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -67,30 +67,30 @@ class TokenError(Exception):
 
 
 def load_tokens() -> List[Dict[str, Any]]:
-    """Read every token record from the store."""
+    """Read every token record from the store: a missing store is empty, a misshaped one raises and is left alone.
+
+    mint, revoke and touch write back what this returns, so a store read as [] would be overwritten.
+    """
     stored = host_store.read(TOKEN_SLUG)
 
     if stored is None:
         return []
 
-    if not isinstance(stored, dict):
-        logger.error("[host_api] token store is not a JSON object — treating as empty (all requests will be denied)")
-        return []
+    records = stored.get("tokens") if isinstance(stored, dict) else None
+    if not isinstance(records, list) or not all(isinstance(record, dict) for record in records):
+        raise host_store.StoreUnavailable(
+            f"The host store file {host_store.store_path(TOKEN_SLUG).name} is not a tokens document "
+            "(an object holding a 'tokens' list of records); left untouched"
+        )
 
-    records = stored.get("tokens")
-    if not isinstance(records, list):
-        logger.error("[host_api] token store has no 'tokens' list — treating as empty (all requests will be denied)")
-        return []
-
-    return [record for record in records if isinstance(record, dict)]
+    return records
 
 
 def prepare_receipt_dir(target: Path) -> None:
     """Make sure a receipt's directory exists and is owner-only."""
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    if os.name == "posix":
-        os.chmod(target.parent, 0o700)
+    os.chmod(target.parent, 0o700)
 
 
 def receipt_path(label: str) -> Path:
@@ -142,7 +142,6 @@ def store_lock() -> Iterator[None]:
 @contextmanager
 def _store_lock(wait: Optional[float] = None) -> Iterator[None]:
     """Hold an exclusive write lock on the token store."""
-    # O_CREAT|O_EXCL rather than fcntl: this has to work on Windows too.
     # wait=None reads LOCK_WAIT_SECONDS at call time, not def time: the tests shorten it there.
     wait = LOCK_WAIT_SECONDS if wait is None else wait
     path = lock_path()
@@ -162,11 +161,8 @@ def _store_lock(wait: Optional[float] = None) -> Iterator[None]:
                 raise OSError(f"Token store lock held longer than {wait}s at {path}") from None
             time.sleep(LOCK_POLL_SECONDS)
         except PermissionError as e:
-            # Windows answers a delete-pending lock with ACCESS DENIED: still held, so poll it.
-            # Never a staleness check (a stale lock answers FILE EXISTS); past the wait, a real denial.
-            if time.monotonic() >= deadline:
-                raise OSError(f"Token store lock at {path} still denied access after {wait}s: {e}") from e
-            time.sleep(LOCK_POLL_SECONDS)
+            # Rewrapped: socket_bearer reads a raw PermissionError as a refused token, not a store outage.
+            raise OSError(f"Token store lock at {path} denied access: {e}") from e
 
     try:
         yield
@@ -180,7 +176,7 @@ def _lock_is_stale(path: Path) -> bool:
     try:
         age = time.time() - path.stat().st_mtime
     except OSError as e:
-        # Gone (or Windows delete-pending ACCESS DENIED) since the failed create: raced, not stale.
+        # Gone since the failed create: raced, not stale.
         logger.debug("[host_api] token store lock vanished while checking its age: %s", e)
         return False
 

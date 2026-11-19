@@ -14,7 +14,7 @@ Creates plan files with validation and error handling.
 from pathlib import Path
 from typing import Tuple
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.flow.apps.handlers.json import json_handler
 
 

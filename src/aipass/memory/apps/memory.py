@@ -12,26 +12,18 @@ Memory System - Central Memory Archive & Rollover System
 
 __version__ = "1.3.1"
 
-import os
 import sys
 
 from pathlib import Path
 from typing import List, Any
 import importlib
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from rich.panel import Panel
 from rich import box
 from rich.table import Table
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
+from aipass.cli import console, error, reset_command_state, resolve_exit
 
 _PACKAGE_BASE = "aipass.memory.apps.modules"
 
@@ -113,11 +105,6 @@ def print_help():
     # A verb that exists and is not in --help is a verb nobody finds.
     table.add_row("health @branch", "Read-only branch health: rollover state + cap violations")
     table.add_row("roots", "Declared repo roots on this machine: list, init, add, remove, heal")
-    table.add_row("fleet", "The fleet definition — who counts as a citizen, answered once")
-    table.add_row("limits", "The entry shape, the char caps and the file budgets — one door")
-    table.add_row("rollover_config", "Describes the config verb — its implementation after the split")
-    table.add_row("rollover_json", "Describes the shared --json emitter the config verbs answer through")
-    table.add_row("governance", "Pure surfacing governance — state-in/state-out decisions")
     # `\\[` because Rich reads `[@name]` as a markup tag and prints nothing.
     table.add_row("todo \\[@branch]", "One line: the todo pad against its count, and the backlog count")
     table.add_row("todo backlog \\[@branch]", "List a branch's todo backlog (.backup/todo/<branch>/backlog.json)")
@@ -125,6 +112,18 @@ def print_help():
     table.add_row("watch", "Start memory watcher (auto-rollover on changes)")
 
     console.print(table)
+
+    console.print()
+    # Library modules other code imports; each answers only its own introspection, never a verb.
+    console.print("[bold cyan]LIBRARIES:[/bold cyan] [dim](imported by code, not commands)[/dim]")
+    for name, what in (
+        ("fleet", "The fleet definition — who counts as a citizen, answered once"),
+        ("limits", "The entry shape, the char caps and the file budgets — one door"),
+        ("rollover_config", "The config verb's implementation after the split"),
+        ("rollover_json", "The shared --json emitter the config verbs answer through"),
+        ("governance", "Pure surfacing governance — state-in/state-out decisions"),
+    ):
+        console.print(f"  [green]{name:<16}[/green] [dim]{what}[/dim]")
 
     console.print()
     console.print("-" * 70)
@@ -199,27 +198,22 @@ def discover_modules() -> List[Any]:
 
         module_name = f"{_PACKAGE_BASE}.{file_path.stem}"
 
-        try:
-            module = importlib.import_module(module_name)
+        # A module that fails to import raises: its verbs must not read as "Unknown command".
+        module = importlib.import_module(module_name)
 
-            if hasattr(module, "handle_command"):
-                modules.append(module)
-                logger.info(f"[memory] Discovered module: {module_name}")
-        except Exception as e:
-            logger.error(f"[memory] Failed to load module {module_name}: {e}")
+        if hasattr(module, "handle_command"):
+            modules.append(module)
+            logger.info(f"[memory] Discovered module: {module_name}")
 
     return modules
 
 
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
-    """Route command to the first module whose handle_command() returns True."""
+    """Route command to the first module whose handle_command() returns True; a module that raises propagates."""
     # Bare `push` is the gated trinity push, never an alias of the fleet-wide `rollover push` reset.
     for module in modules:
-        try:
-            if module.handle_command(command, args):
-                return True
-        except Exception as e:
-            logger.error(f"[memory] Module {module.__name__} error: {e}")
+        if module.handle_command(command, args):
+            return True
 
     return False
 
@@ -254,7 +248,15 @@ def main() -> int:
         print_help()
         return 0
 
-    if route_command(command, remaining_args, modules):
+    try:
+        routed = route_command(command, remaining_args, modules)
+    except Exception as e:
+        # A module took the command and crashed in it: its failure (exit 2), never "Unknown command".
+        logger.error(f"[memory] {command} failed: {type(e).__name__}: {e}")
+        error(f"{command} failed: {type(e).__name__}: {e}")
+        return resolve_exit(True)
+
+    if routed:
         return resolve_exit(True)  # Routed — 0, or 2 if the module refused
     else:
         console.print()

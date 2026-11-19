@@ -3,7 +3,7 @@
 # Description: Uncalled Public Function Standards Content Handler
 # Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -77,14 +77,12 @@ def get_uncalled_public_function_standards() -> str:
         "  brief's own wording is 'no test anywhere in the branch's tests/ calls', so",
         "  this rule ACQUITS it and is right to.",
         "",
-        "  generate_diff_content is offered conditionally, 'if generator.py is within",
-        "  the subject of a backup test file'. It is not — test_versioned_engine.py",
-        "  declares copy/versioned.py and modules/restore.py. The rule does not see",
-        "  it, which is correct and is also a hole: [yellow]a module nothing declares as a",
-        "  subject is invisible to O no matter how untested it is.[/yellow]",
+        "  A module no test file declares as its subject is not seen. That is correct",
+        "  and also a hole: [yellow]such a module is invisible to O no matter how",
+        "  untested it is.[/yellow]",
         "",
-        "  restore.py's bare-basename fallback is a coverage gap inside a function,",
-        "  not a function. O does not see it and should not.",
+        "  A coverage gap inside a function is not a function. O does not see it and",
+        "  should not.",
         "",
         "[bold cyan]WHY IT CANNOT BE SATISFIED BY ACCIDENT:[/bold cyan]",
         "  The file says in its own docstring that it tests this module. If a public",

@@ -4,7 +4,7 @@
 # Description: Regression tests for _srt_resolve.mjs candidate-list resolution
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/_srt_resolve.mjs, the resolver apps/modules/sandbox.py calls (DPLAN-0279)."""
@@ -16,7 +16,6 @@
 # sentry: no-test-needed(generated) — the full-mode wrapped command resolve_bwrap_command returns; sandbox-runtime builds it
 # sentry: no-test-needed(stdlib) — subprocess.run's process launch, the stdlib's own
 
-import os
 import shutil
 import stat
 import subprocess
@@ -30,10 +29,7 @@ _NODE = shutil.which("node")
 
 pytestmark = pytest.mark.skipif(_NODE is None, reason="requires a real node binary")
 
-# POSIX layouts by design; on Windows the minimal envs also abort node (its CSPRNG needs SYSTEMROOT).
-_posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX-layout scenario")
-
-# A hang backstop, not a latency assertion: cold Windows runners are slow to start node.
+# A hang backstop, not a latency assertion.
 _NODE_TIMEOUT_S = 60
 
 
@@ -75,7 +71,6 @@ def _run_resolve(tmp_path: Path, env: dict) -> subprocess.CompletedProcess:
 class TestSrtResolveCandidates:
     """Regression coverage: candidate-list prefix discovery."""
 
-    @_posix_only
     def test_npm_config_prefix_env_wins(self, tmp_path):
         """nvm-style layout: the environment names the prefix directly -- highest
         priority candidate, resolved without needing npm on PATH at all."""
@@ -88,7 +83,6 @@ class TestSrtResolveCandidates:
         assert result.returncode == 0
         assert result.stdout.strip() == str(entry)
 
-    @_posix_only
     def test_npm_root_g_used_when_no_env_prefix(self, tmp_path):
         """Debian/Ubuntu-style split-prefix layout: no env var, but `npm root -g`
         (queried directly, authoritative) reports the real /usr/local-style root."""
@@ -104,7 +98,6 @@ class TestSrtResolveCandidates:
         assert result.returncode == 0
         assert result.stdout.strip() == str(entry)
 
-    @_posix_only
     def test_env_prefix_takes_priority_over_npm_root_g(self, tmp_path):
         """Candidate order: npm_config_prefix must win even when `npm root -g`
         would also resolve to something (and to something WITHOUT the package)."""
@@ -122,7 +115,6 @@ class TestSrtResolveCandidates:
         assert result.returncode == 0
         assert result.stdout.strip() == str(entry)
 
-    @_posix_only
     def test_missing_entirely_exits_nonzero_with_tried_candidates(self, tmp_path):
         """srt not installed anywhere a candidate looks: non-zero exit, no
         stdout, and the tried candidate paths listed on stderr (not silently

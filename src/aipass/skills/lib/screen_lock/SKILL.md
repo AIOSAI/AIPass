@@ -43,10 +43,20 @@ locked, does not require a desktop environment, and does not refuse when no
 graphical session can be resolved (it still tries the bare call). Callers that
 gate *other* verbs on screen state must leave this one ungated.
 
+The one gate it has is the skill's own off-switch. Off means off: while
+`drone @skills off screen_lock` holds, or the switch state is unreadable,
+`lock_screen()` and `lock_state()` refuse before running anything, whether
+reached through `drone @skills run` or imported in-process. Each refusal
+carries a reason code a caller can branch on: `switched_off` when the skill is
+off on purpose (logged as INFO, the switch working), `switch_unreadable` when
+the switch state cannot be read (logged as ERROR, a fault to repair). The
+package door serves both as `SCREEN_LOCK_REASON_SWITCHED_OFF` and
+`SCREEN_LOCK_REASON_SWITCH_UNREADABLE`.
+
 ## The read beside the lock
 
 `lock_state()` answers whether the screen **is** locked — the question "did I
-lock the laptop?" asked from away (FPLAN-0585). It reads through the same pair
+lock the laptop?" asked from away. It reads through the same pair
 the lock writes through, in the same order, and changes nothing:
 
 1. `loginctl show-session <id> -p LockedHint` on the resolved graphical session
@@ -55,12 +65,14 @@ the lock writes through, in the same order, and changes nothing:
    (`org.freedesktop.ScreenSaver.GetActive` is not implemented on GNOME and is
    never asked.)
 
-It is not gated either — the lock never is, so its read is not — and it never
-raises. **Unknown is never unlocked:** a read that cannot tell answers
+Like the lock, it is gated on the off-switch alone, and it never raises.
+**Unknown is never unlocked:** a read that cannot tell answers
 `ok: False, locked: None` with a reason code, never `locked: False`.
 
 | `reason`      | Meaning                                                          |
 |---------------|------------------------------------------------------------------|
+| `switched_off` | the skill is switched off; nothing was read                     |
+| `switch_unreadable` | the switch state is unreadable, so the skill counts as off; nothing was read |
 | `no_session`  | logind lists no active graphical session of ours, and D-Bus did not answer |
 | `no_reader`   | neither `loginctl` nor `gdbus` is installed                      |
 | `read_failed` | a reader ran and failed, or answered something other than yes/no |
@@ -82,12 +94,12 @@ drone @skills run screen_lock state
 In-process (what the host API verb lane uses):
 
 ```python
-from aipass.skills.lib.screen_lock import handler as screen_lock
+from aipass.skills import lock_screen, lock_state
 
-result = screen_lock.lock_screen()
+result = lock_screen()
 # {"locked": True, "method": "loginctl", "session": "3", "error": None}
 
-state = screen_lock.lock_state()
+state = lock_state()
 # {"ok": True, "locked": False, "method": "loginctl", "session": "3",
 #  "reason": None, "detail": "The screen is unlocked, per logind session 3."}
 ```
@@ -117,6 +129,9 @@ Do NOT use this skill when:
 {"locked": bool, "method": "loginctl" | "dbus" | None, "session": str | None, "error": str | None}
 ```
 
+Switched off, it answers `{"locked": False, "method": None, "session": None, "reason": "switched_off", "error": <the refusal sentence>}`;
+over an unreadable switch state the reason is `switch_unreadable`. Only the refusal carries `reason`.
+
 `lock_state()` returns the read, six keys every time:
 
 ```python
@@ -125,7 +140,7 @@ Do NOT use this skill when:
     "locked": bool | None,                        # None whenever ok is False
     "method": "loginctl" | "dbus" | None,
     "session": str | None,                        # the resolved logind session
-    "reason": "no_session" | "no_reader" | "read_failed" | None,
+    "reason": "no_session" | "no_reader" | "read_failed" | "switched_off" | "switch_unreadable" | None,
     "detail": str,                                # the skill's own sentence
 }
 ```
@@ -135,10 +150,12 @@ envelope with `detail (reason=<code>)` when it cannot tell.
 
 ## Notes
 
-- Stdlib + the Prax logger only — importing this skill pulls in no Telegram
-  stack, no bot, no network client. A test asserts that in a clean interpreter.
-- `resolve_graphical_session()` is public: callers can ask which session is ours
-  without locking anything.
+- Stdlib + the Prax logger only — importing this skill pulls in no third-party
+  module, no network client. A test asserts that in a clean interpreter. The
+  off-switch loads only when `lock_screen()` or `lock_state()` asks it.
+- `resolve_graphical_session()` is public inside this branch and not gated: it
+  locks nothing, and the package door, the one import surface for other
+  branches, does not serve it.
 - `loginctl` is the declared requirement; `gdbus` is the fallback and is not
   required for the skill to be usable.
 - Only sessions of type `wayland`/`x11`, state `active`, owned by our own uid are

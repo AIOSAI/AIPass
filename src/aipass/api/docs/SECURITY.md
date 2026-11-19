@@ -11,12 +11,10 @@ Every secret value rests in the owner's login keyring, reached through the pytho
 | OS      | Backend                                              |
 |---------|------------------------------------------------------|
 | Linux   | SecretService (GNOME Keyring, KWallet) over D-Bus    |
-| macOS   | the login Keychain                                   |
-| Windows | the Credential Locker                                |
 
 - One entry per secret: service `aipass`, username `<provider>/<slug>`, the value as the password. A value written with `as_json` is stored as a JSON document.
 - `aipass` / `<provider>/` is the provider's index entry, a JSON list of its slugs, kept by `set_secret` so `list_secrets` needs no file on disk.
-- Examples: `openrouter/api_key`, `google/creds`, `google/client_secret`, `telegram/<bot>`.
+- Examples: `openrouter/api_key`, `google/creds`, `google/client_secret`.
 - The owner inspects the keyring with `secret-tool search service aipass` (package `libsecret-tools`) or Seahorse. No seat runs either.
 
 A backend that cannot hold a secret raises `SecretsUnavailable`, naming the backend class and the reason, never a value and never a path: keyring's `fail` and `null` backends, any `keyrings.alt` plaintext backend, a chainer with no member or a plaintext member, and a locked or absent keyring. There is no fall back to a file or to `None`. A missing entry is `None`.

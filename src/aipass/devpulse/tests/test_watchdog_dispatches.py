@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_dispatches.py
 # Description: Tests for watchdog seat attribution (FPLAN-0452 P2 — only MY dispatches reach me)
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-08-22
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/watchdog/dispatches.py: whose completion was that, and what is still out."""
@@ -15,8 +15,8 @@
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock
 
-from aipass.spawn.apps.modules import door_owner as spawn_registry
 import pytest
 
 from aipass.devpulse.apps.handlers.owner import guard
@@ -57,7 +57,7 @@ def test_attribution_tolerates_the_at_sign_and_case():
 def test_seat_email_reads_the_owner_entrys_email_not_the_dict(monkeypatch):
     """get_owner returns an ENTRY DICT: stringified, it matches nothing and silently excludes every dispatch."""
     monkeypatch.setattr(
-        spawn_registry,
+        guard,
         "get_owner",
         lambda start_path=None: {"email": "@vera", "owner": True, "name": "vera"},
     )
@@ -66,21 +66,23 @@ def test_seat_email_reads_the_owner_entrys_email_not_the_dict(monkeypatch):
 
 def test_seat_email_is_portable_across_projects(monkeypatch):
     """@devpulse owns AIPass, @vera owns Vera Studio — never a directory name."""
-    monkeypatch.setattr(spawn_registry, "get_owner", lambda start_path=None: {"email": "wren", "owner": True})
+    monkeypatch.setattr(guard, "get_owner", lambda start_path=None: {"email": "wren", "owner": True})
     assert dispatches.seat_email() == "@wren"
 
 
 def test_seat_email_refuses_when_no_owner_is_sealed(monkeypatch):
     """Without an identity there is no 'mine', and it is never guessed."""
-    monkeypatch.setattr(spawn_registry, "get_owner", lambda start_path=None: None)
+    lookup = MagicMock(return_value=None)
+    monkeypatch.setattr(guard, "get_owner", lookup)
     with pytest.raises(dispatches.RegisterUnavailable) as exc:
         dispatches.seat_email()
     assert "no sealed owner" in str(exc.value)
+    lookup.assert_called_once()
 
 
 def test_seat_email_refuses_an_owner_entry_with_no_email(monkeypatch):
     """An entry with no email cannot name a seat: the same refusal and remedy as 'no owner sealed'."""
-    monkeypatch.setattr(spawn_registry, "get_owner", lambda start_path=None: {"owner": True, "name": "vera"})
+    monkeypatch.setattr(guard, "get_owner", lambda start_path=None: {"owner": True, "name": "vera"})
     with pytest.raises(dispatches.RegisterUnavailable) as exc:
         dispatches.seat_email()
     assert "aipass doctor" in str(exc.value)
@@ -88,7 +90,7 @@ def test_seat_email_refuses_an_owner_entry_with_no_email(monkeypatch):
 
 def test_the_owner_lookup_has_exactly_one_implementation():
     """seat_email delegates to the guard handler: two answers to one question drift."""
-    assert dispatches._owner_address is guard.owner_address
+    assert dispatches.owner_address is guard.owner_address
 
 
 def test_register_unavailable_catches_as_a_runtime_error():

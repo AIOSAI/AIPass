@@ -3,7 +3,7 @@
 # Description: Tests for the gateway boundary standards checker
 # Version: 1.1.1
 # Created: 2026-08-18
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/gateway_boundary_check.py."""
@@ -247,7 +247,7 @@ class TestTheSecretsStoreIsApisAlone:
         assert "line 2" in _check(tmp_path, source, branch="skills")["checks"][0]["message"]
 
     def test_a_path_built_into_the_store_is_a_row(self, tmp_path: Path):
-        source = "from pathlib import Path\n\nSESSION_DIR = Path.home() / '.secrets' / 'aipass' / 'telegram'\n"
+        source = "from pathlib import Path\n\nSESSION_DIR = Path.home() / '.secrets' / 'aipass' / 'chat'\n"
         assert "line 3" in _check(tmp_path, source, branch="skills")["checks"][0]["message"]
 
     def test_an_expanded_store_literal_is_a_row(self, tmp_path: Path):
@@ -257,7 +257,7 @@ class TestTheSecretsStoreIsApisAlone:
     def test_a_call_above_its_late_import_is_the_row_and_names_the_action(self, tmp_path: Path):
         source = (
             "def token():\n"
-            "    return secrets.get_secret('telegram', 'bot')\n"
+            "    return secrets.get_secret('chat', 'bot')\n"
             "\n"
             "\n"
             "from aipass.api.apps.modules import secrets\n"
@@ -281,7 +281,7 @@ class TestTheSecretsStoreIsApisAlone:
         assert _check(tmp_path, source, branch="backup")["passed"] is True
 
     def test_a_docstring_naming_the_store_is_not_a_row(self, tmp_path: Path):
-        source = '"""Session is saved to ~/.secrets/aipass/telegram/.telethon.session."""\n'
+        source = '"""Session is saved to ~/.secrets/aipass/chat/.client.session."""\n'
         assert _check(tmp_path, source, branch="skills")["passed"] is True
 
     def test_api_reaching_its_own_store_is_not_a_row(self, tmp_path: Path):
@@ -296,7 +296,7 @@ class TestTheSecretsStoreIsApisAlone:
     def test_a_renamed_function_called_above_its_late_import_is_the_row(self, tmp_path: Path):
         source = (
             "def token():\n"
-            "    return fetch('telegram', 'bot')\n"
+            "    return fetch('chat', 'bot')\n"
             "\n"
             "\n"
             "from aipass.api.apps.modules.secrets import get_secret as fetch\n"

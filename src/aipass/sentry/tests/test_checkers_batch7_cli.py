@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_cli.py
 # Description: cli_check rulings: relays, the pre-console window, the stream ruling (split from test_checkers_batch7.py)
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/cli_check.py and cli_content.py."""
@@ -71,7 +71,7 @@ class TestCliAllowsARawWriteBeforeTheConsoleExists:
     """@commons' second finding, the same block one line down: the CLI checker
     demanded ``console.print()`` before the module imports the console."""
 
-    CONSOLE_IMPORT = "from aipass.cli.apps.modules import console\n"
+    CONSOLE_IMPORT = "from aipass.cli import console\n"
 
     def _passed(self, tmp_path, source):
         target = tmp_path / "modules" / "probe.py"
@@ -117,8 +117,8 @@ class TestCliAllowsARawWriteBeforeTheConsoleExists:
             "except OSError as _exc:\n"
             "    sys.stderr.write('[commons] cannot resolve\\n')\n"
             "for _d in _script_dirs:\n    if _d in sys.path:\n        sys.path.remove(_d)\n\n"
-            "from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: E402\n"
-            "from aipass.cli.apps.modules import console  # noqa: E402\n"
+            "from aipass.prax import logger  # noqa: E402\n"
+            "from aipass.cli import console  # noqa: E402\n"
         )
         assert self._passed(tmp_path, source) is True
 
@@ -192,7 +192,7 @@ class TestHandlerSeparationJudgesTheStreamNotTheSpelling:
 
         aipass_root = Path(__file__).resolve().parents[2]
         assert aipass_root.name == "aipass", aipass_root
-        stream_write = aipass_root / "skills" / "apps" / "handlers" / "module_paths.py"
+        stream_write = aipass_root / "drone" / "apps" / "handlers" / "router_handler.py"
         stream_print = aipass_root / "flow" / "apps" / "handlers" / "__init__.py"
         assert stream_write.exists() and stream_print.exists()
 
@@ -231,6 +231,48 @@ class TestCliReadsCodeLinesAndNeverDocstrings:
         assert result is not None
         assert result["passed"] is False
         assert check_handler_separation("def f(ok):\n    if ok: print('hi')\n")["passed"] is False
+
+
+class TestCliReadsImportsFromTheParseTree:
+    """FPLAN-1024: a cli import is an import statement, door or long spelling; text naming one is not."""
+
+    MODULE = "mybranch/apps/modules/m.py"
+
+    def _imports(self, content):
+        result = cli_check.check_cli_imports(content, self.MODULE)
+        assert result is not None
+        return result
+
+    @pytest.mark.parametrize(
+        "spelling", ["from aipass.cli import console\n", "from aipass.cli.apps.modules import console\n"]
+    )
+    def test_either_spelling_is_a_cli_import_in_a_handler_and_credits_a_module(self, spelling):
+        assert check_handler_separation(spelling)["message"].startswith("Handler imports CLI services on lines [1]")
+        result = self._imports(spelling + 'console.print("x")\n')
+        assert result["passed"] is True
+        assert result["message"] == "Using CLI services (console)"
+
+    def test_a_cli_import_named_mid_string_is_not_a_handler_import(self):
+        content = 'HINT = "send it to stderr: from aipass.cli import err_console"\n'
+        assert check_handler_separation(content)["passed"] is True
+
+    def test_a_docstring_naming_the_cli_import_does_not_credit_a_module_that_prints(self):
+        assert self._imports('"""Use from aipass.cli import console."""\nprint("x")\n')["passed"] is False
+
+    def test_an_unparseable_handler_keeps_its_cli_import_finding(self):
+        result = check_handler_separation("from aipass.cli import console\ndef broken(:\n")
+        assert result["message"].startswith("Handler imports CLI services on lines [1]")
+
+    def test_the_missing_import_hint_names_the_front_door(self):
+        message = self._imports('print("x")\n')["message"]
+        assert "(from aipass.cli import console)" in message
+        assert "apps.modules" not in message
+
+    def test_the_duplicate_display_hint_names_the_front_door_and_only_its_names(self):
+        content = "def header():\n    pass\n\ndef info():\n    pass\n"
+        result = cli_check.check_duplicate_display_functions(content, self.MODULE)
+        assert result is not None
+        assert result["message"] == "Defines own header, info() - use from aipass.cli import header"
 
 
 class TestTheCliRulingsAreQueryableNotJustEnforced:

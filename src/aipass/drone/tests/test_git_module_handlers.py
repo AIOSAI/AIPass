@@ -3,7 +3,7 @@
 # Description: Tests for the handlers @git drives — lock, repo root, status, sync, PR, remote set, uncommit and init
 # Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for the lock, status, sync, PR, remote, uncommit and init handlers that apps/modules/git_module.py drives."""
@@ -31,6 +31,7 @@ from aipass.drone.apps.handlers.git.lock_handler import (
 from aipass.drone.apps.handlers.git.status_handler import get_branch_status
 from aipass.drone.apps.handlers.git.sync_handler import sync_main, sync_main_ref
 from aipass.drone.apps.handlers.git import init_handler, remote_handler, repo_door
+from aipass.drone.apps.modules import RepoRootError
 from aipass.drone.apps.modules.git_module import handle_command
 
 from .conftest import make_owner_project
@@ -197,6 +198,16 @@ class TestFindRepoRoot:
         with patch("aipass.drone.apps.handlers.git.lock_handler.subprocess.run", return_value=mock_result):
             root = find_repo_root()
         assert root == tmp_path
+
+    def test_no_repository_and_no_registry_raises_by_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: the old arm hands back the cwd, and every git verb runs in a directory that is no repo."""
+        monkeypatch.chdir(tmp_path)
+        mock_result = MagicMock(returncode=128, stdout="")
+        with patch("aipass.drone.apps.handlers.git.lock_handler.subprocess.run", return_value=mock_result):
+            with pytest.raises(RepoRootError, match="not inside a git repository"):
+                find_repo_root()
 
 
 # ===========================================================================

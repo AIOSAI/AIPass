@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: errors.py
 # Description: Error registry management module for Medic v2 commands
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-02-13
-# Modified: 2026-10-24
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -21,12 +21,11 @@ Architecture: Module orchestrates, error_registry handler manages data
 """
 
 import json
-import os
 import sys
 from typing import Optional
 
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.error_registry import (
     query,
@@ -44,24 +43,10 @@ from aipass.trigger.apps.handlers.error_reporter import (  # noqa: F401
     send_source_fix_email as _send_source_fix_email,
 )
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
-    except (ImportError, OSError):
-        logger.info("CLI console not available, using rich fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]errors Module[/bold cyan]")
@@ -134,7 +119,7 @@ def _fmt_time(iso: str) -> str:
 
 def print_help() -> None:
     """Print module help using Rich formatting."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
     from rich.panel import Panel
 
     console.print(Panel("Error Registry - Medic v2 Error Management", style="bold"))
@@ -183,7 +168,7 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         True if command was handled, False otherwise
     """
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 
@@ -287,7 +272,7 @@ def _cmd_list(console, args: list) -> bool:
 def _cmd_detail(console, args: list) -> bool:
     """Show full error details for a fingerprint or ID."""
     from rich.panel import Panel
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     if not args:
         error("Missing error ID or fingerprint", suggestion="Usage: drone @trigger errors detail <id_or_fingerprint>")
@@ -347,7 +332,7 @@ def _cmd_detail(console, args: list) -> bool:
 
 def _cmd_suppress(console, args: list) -> bool:
     """Mark error as suppressed with optional reason."""
-    from aipass.cli.apps.modules import error, warning
+    from aipass.cli import error, warning
 
     if not args:
         error(
@@ -391,7 +376,7 @@ def _cmd_unsuppress(console, args: list) -> bool:
     error that was mid-backoff when it got silenced resumes where it left off
     rather than firing immediately.
     """
-    from aipass.cli.apps.modules import error, success
+    from aipass.cli import error, success
 
     if not args:
         error(
@@ -421,7 +406,7 @@ def _cmd_unsuppress(console, args: list) -> bool:
 
 def _cmd_resolve(console, args: list) -> bool:
     """Mark error as resolved."""
-    from aipass.cli.apps.modules import error, success
+    from aipass.cli import error, success
 
     if not args:
         error(
@@ -446,7 +431,7 @@ def _cmd_resolve(console, args: list) -> bool:
 
 def _cmd_clear_resolved(console, args: list) -> bool:
     """Purge old resolved entries. Optional --days=N (default 7)."""
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     days = int(_parse_args(args).get("days", "7"))
     removed = clear_resolved(days=days)
@@ -467,7 +452,7 @@ def _cmd_purge(console, args: list) -> bool:
     days = int(parsed.get("days", "30"))
     removed = purge_stale(days=days)
     if removed < 0:
-        from aipass.cli.apps.modules import error
+        from aipass.cli import error
 
         error("Failed to purge stale errors - the registry could not be read", suggestion="See the trigger log")
         return True
@@ -506,14 +491,15 @@ def _cmd_stats(console, args: list) -> bool:
     console.print("  [bold]Circuit Breaker:[/bold]")
     console.print(f"    State:         [{cc}]{cb_st}[/{cc}]")
     console.print(f"    Cooldown:      {cb.get('cooldown_seconds', 0)}s")
-    console.print(f"    Recent errors: {cb.get('recent_error_count', 0)}")
+    console.print(f"    Recent mails:  {cb.get('recent_send_count', 0)}")
+    console.print(f"    Held mails:    {cb.get('held_count', 0)}")
     console.print()
     return True
 
 
 def _cmd_circuit_breaker(console, args: list) -> bool:
     """Show or reset the circuit breaker."""
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     if args and args[0] == "reset":
         circuit_breaker_reset()
@@ -530,7 +516,8 @@ def _cmd_circuit_breaker(console, args: list) -> bool:
     console.print()
     console.print(f"  State:           [{cc}]{cb_st}[/{cc}]")
     console.print(f"  Cooldown:        {cb.get('cooldown_seconds', 0)}s")
-    console.print(f"  Recent errors:   {cb.get('recent_error_count', 0)}")
+    console.print(f"  Recent mails:    {cb.get('recent_send_count', 0)}")
+    console.print(f"  Held mails:      {cb.get('held_count', 0)}")
     console.print(f"  Summary sent:    {cb.get('summary_sent', False)}")
     console.print()
 
@@ -538,7 +525,7 @@ def _cmd_circuit_breaker(console, args: list) -> bool:
         console.print("  [dim]Normal operation - all dispatch allowed[/dim]")
     elif cb_st == "open":
         remaining = cb.get("remaining_seconds", 0)
-        error(f"Dispatch paused - {remaining}s remaining until half-open")
+        error(f"Dispatch paused - {remaining}s until the next mail may probe")
         console.print()
         console.print("  [dim]Run 'drone @trigger errors circuit-breaker reset' to force close[/dim]")
     elif cb_st == "half_open":

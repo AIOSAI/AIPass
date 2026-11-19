@@ -11,22 +11,13 @@ Inbox Cleanup Handler
 """
 
 import json
-import os
-import sys
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Tuple, Optional, Any
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.email.inbox_ops import count_new
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 
 _inbox_lock = None

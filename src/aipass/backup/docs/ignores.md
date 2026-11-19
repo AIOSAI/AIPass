@@ -20,7 +20,7 @@ file. A writer killed mid-write leaves the temp behind. The real json is intact
 either way, so a temp is never anyone's work, and backing one up only copies
 litter.
 
-- **One rule, one place.** `load_spec()` is the only ignore source for every lane: `snapshot`, `versioned`, `all` (one shared scan) and `drive_sync` (which re-filters the snapshot store through it before uploading). `DIFF_IGNORE_PATTERNS` in `handlers/diff/generator.py` decides only which files get a diff, never which files get copied, so it is not a copy rule.
+- **One rule, one place.** `load_spec()` is the only ignore source for every lane: `snapshot`, `all` (which runs the snapshot) and `drive_sync` (which re-filters the snapshot store through it before uploading).
 - **Why not the seed?** The seed reaches only projects registered after the edit, and `.backupignore` is never overwritten. AIPass's own `/.backupignore` (hand-maintained) does not name `*.tmp`.
 - **Overridable.** The floor goes first, so a project that genuinely keeps `.tmp` files re-includes them with `!*.tmp` in its own `.backupignore` (last match wins). A `whitelist` entry in `.backup/config.json` also overrides it, as it overrides any ignore.
 - **Scope of the match.** gitwildmatch `*.tmp` matches at any depth and also matches a *directory* named `*.tmp`, which drops that directory's contents too. Near-misses such as `notes.tmpl`, `tmp.json`, `state.tmp.json` or `tmp/data.json` are not matched (pinned in `tests/test_ignore_pathspec.py`).

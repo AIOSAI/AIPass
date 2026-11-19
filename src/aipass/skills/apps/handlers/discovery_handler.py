@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery_handler.py
 # Description: Skill discovery handler
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-03-08
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -12,18 +12,10 @@ Skill Discovery Handler
 
 from pathlib import Path
 
+import yaml
+
 from aipass.prax import logger
 from aipass.skills.apps.handlers.json import json_handler
-from aipass.skills.apps.handlers.module_paths import module_file
-
-yaml = None
-try:
-    import yaml
-
-    HAS_YAML = True
-except ImportError:
-    logger.warning("yaml package not available — using simple frontmatter parser")
-    HAS_YAML = False
 
 
 def get_search_paths():
@@ -44,7 +36,7 @@ def get_search_paths():
     global_path = Path.home() / ".aipass" / "skills"
     paths.append((global_path, "global"))
 
-    builtin_path = module_file(__file__).parent.parent.parent / "lib"
+    builtin_path = Path(__file__).resolve().parent.parent.parent / "lib"
     paths.append((builtin_path, "builtin"))
 
     return paths
@@ -95,12 +87,11 @@ def discover_skills_in_path(search_path, source_label):
 
 
 def read_skill_md(skill_md_path):
-    """Read a SKILL.md once: (frontmatter metadata, body), or (None, None) without a readable --- block."""
+    """Read a SKILL.md once: (frontmatter metadata, body), or (None, None) without a --- block; unreadable or malformed raises ValueError."""
     try:
         content = Path(skill_md_path).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        logger.warning(f"Failed to read SKILL.md: {skill_md_path}")
-        return None, None
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"Unreadable SKILL.md at {skill_md_path}: {type(exc).__name__}") from exc
 
     lines = content.strip().splitlines()
     if not lines or lines[0].strip() != "---":
@@ -109,107 +100,16 @@ def read_skill_md(skill_md_path):
     if end_idx is None:
         return None, None
 
-    return _parse_frontmatter_text("\n".join(lines[1:end_idx])), "\n".join(lines[end_idx + 1 :]).strip()
+    frontmatter_text = "\n".join(lines[1:end_idx])
+    try:
+        metadata = yaml.safe_load(frontmatter_text)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Malformed YAML frontmatter in {skill_md_path}: {exc}") from exc
+    if metadata is not None and not isinstance(metadata, dict):
+        raise ValueError(f"Frontmatter in {skill_md_path} is a {type(metadata).__name__}, not a mapping")
+    return metadata, "\n".join(lines[end_idx + 1 :]).strip()
 
 
 def parse_frontmatter(skill_md_path):
     """Parse YAML frontmatter from a SKILL.md file."""
     return read_skill_md(skill_md_path)[0]
-
-
-def _parse_frontmatter_text(frontmatter_text):
-    """Parse the text between the --- fences: PyYAML when present, else the simple parser."""
-    if yaml is not None:
-        try:
-            return yaml.safe_load(frontmatter_text)
-        except yaml.YAMLError:
-            logger.warning("YAML parse failed — falling back to simple parser")
-    return _simple_frontmatter_parse(frontmatter_text)
-
-
-def _simple_frontmatter_parse(text):
-    """Simple YAML-like frontmatter parser (no yaml dependency).
-
-    An empty-valued key stays `pending` until the next line shows a nested block or a block list;
-    deciding early reads every block list as "" or {} (the switch's units vanish without PyYAML)."""
-    result = {}
-    current_key = None
-    current_list = None
-    pending = None
-
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-
-        if stripped.startswith("- "):
-            if current_list is None and pending is not None:
-                container, pending_key = pending
-                current_list = []
-                container[pending_key] = current_list
-                pending = None
-            if current_list is None:
-                continue
-            value = stripped[2:].strip().strip("'\"")
-            if value:
-                current_list.append(value)
-            continue
-
-        if ":" in stripped:
-            current_list = None
-            pending = None
-
-            colon_idx = stripped.index(":")
-            key = stripped[:colon_idx].strip()
-            value = stripped[colon_idx + 1 :].strip()
-
-            indent = len(line) - len(line.lstrip())
-
-            if indent > 0 and current_key is not None:
-                if not isinstance(result.get(current_key), dict):
-                    result[current_key] = {}
-                if not value:
-                    result[current_key][key] = {}
-                    pending = (result[current_key], key)
-                    continue
-                parsed_value = _parse_simple_value(value)
-                result[current_key][key] = parsed_value
-                if isinstance(parsed_value, list):
-                    current_list = parsed_value
-                    result[current_key][key] = current_list
-            else:
-                current_key = key
-                if value:
-                    result[key] = _parse_simple_value(value)
-                else:
-                    result[key] = {}
-                    pending = (result, key)
-
-    return result
-
-
-def _parse_simple_value(value):
-    """Parse a simple YAML value string."""
-    if value == "[]":
-        return []
-
-    if value.startswith("[") and value.endswith("]"):
-        inner = value[1:-1].strip()
-        if not inner:
-            return []
-        items = [item.strip().strip("'\"") for item in inner.split(",")]
-        return [item for item in items if item]
-
-    if value.lower() == "true":
-        return True
-    if value.lower() == "false":
-        return False
-
-    try:
-        if "." in value:
-            return float(value)
-        return int(value)
-    except ValueError:
-        logger.debug(f"Not a numeric value, falling through to string: {value}")
-
-    return value.strip("'\"")

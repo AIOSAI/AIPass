@@ -3,7 +3,7 @@
 # Description: Plan Auto-Cleanup Handler
 # Version: 0.2.0
 # Created: 2025-11-15
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Plan Auto-Cleanup Handler"""
@@ -14,9 +14,7 @@ from typing import Dict, Any, Tuple
 
 from aipass.flow.apps.handlers.json import json_handler
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-_PKG_ROOT = module_file(__file__).parents[4]
+_PKG_ROOT = Path(__file__).resolve().parents[4]
 
 
 def auto_close_orphaned_plans(registry: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:

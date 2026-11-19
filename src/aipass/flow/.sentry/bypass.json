@@ -30,240 +30,6 @@
       "reason": "Thin orchestrator - aggregate_central delegates to aggregate_ops handler which fires trigger events"
     },
     {
-      "file": "apps/modules/post_close_runner.py",
-      "standard": "trigger",
-      "category": "internal_ops",
-      "reason": "Lock file .unlink() is infrastructure (process locking), not a business state change"
-    },
-    {
-      "file": "apps/handlers/mbank/process.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Cross-handler import of plan_type_loader.discover_plan_types \u2014 mbank needs plan type discovery to process closed plans across all registered types"
-    },
-    {
-      "file": "apps/handlers/dashboard/push_central.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Cross-handler import of aggregate_ops \u2014 push_central calls aggregate_central_impl after pushing data to central"
-    },
-    {
-      "file": "apps/handlers/dashboard/push_central.py",
-      "standard": "imports",
-      "category": "architectural",
-      "reason": "Parent module import needed \u2014 push_central invokes aggregate_central for dashboard data"
-    },
-    {
-      "file": "apps/handlers/registry/monitor_ops.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Handler imports trigger module \u2014 monitor_ops fires trigger events for registry health changes"
-    },
-    {
-      "file": "apps/handlers/plan/get_open_plans.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Cross-handler import of load_registry \u2014 get_open_plans needs registry data to find open plans"
-    },
-    {
-      "file": "apps/handlers/plan/list_ops.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Cross-handler import of plan_type_loader \u2014 list_ops needs plan type discovery to merge plans from all registries"
-    },
-    {
-      "file": "apps/handlers/plan/close_ops.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Cross-handler imports of load_registry, plan_type_loader, display \u2014 close needs registry access, type resolution, and formatting"
-    },
-    {
-      "file": "apps/handlers/plan/display.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Cross-handler import of load_registry \u2014 display needs registry data for plan status formatting"
-    },
-    {
-      "file": "apps/handlers/registry/load_registry.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Cross-handler import of plan_type_loader \u2014 registry loader needs type discovery for auto-healing orphaned entries"
-    },
-    {
-      "file": "apps/handlers/registry/heal_registry.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Cross-handler imports of close_helpers (_self_heal_unregistered_plan, _find_relocated_plan) and registry_routing (_load_template_registry) \u2014 doctrine heal deliberately reuses the already-tested close-path self-heal mechanic instead of forking a second copy of it"
-    },
-    {
-      "file": "apps/modules/create_plan.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "location, subject, template_type are local variables from arg parsing, not module-level constants"
-    },
-    {
-      "file": "apps/handlers/dashboard/push_branch_dashboard.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "active_plans, closed_plans, branch_total are local computation variables, not constants"
-    },
-    {
-      "file": "apps/handlers/template/plan_type_loader.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "template_path, available are local variables in function scope, not constants"
-    },
-    {
-      "file": "apps/handlers/template/registry_ops.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "templates_dir, plan_registry_path, module_name are local variables, not constants"
-    },
-    {
-      "file": "apps/handlers/template/get_template.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "template_file, formatted_number, plan_number are local variables, not constants"
-    },
-    {
-      "file": "apps/handlers/plan/list_ops.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "Local variables in list aggregation functions, not constants"
-    },
-    {
-      "file": "apps/handlers/plan/close_ops.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "Local variables in close operation functions, not constants"
-    },
-    {
-      "file": "apps/handlers/plan/display.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "Local variables in display formatting functions, not constants"
-    },
-    {
-      "file": "apps/handlers/mbank/process.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "Local variables in plan processing functions, not constants"
-    },
-    {
-      "file": "apps/handlers/registry/monitor_ops.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "Local variables in monitor operations, not constants"
-    },
-    {
-      "file": "apps/handlers/template/registry_ops.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "add_type has docstring \u2014 checker 5-line lookahead too small for multi-line signature (6 lines to closing paren)"
-    },
-    {
-      "file": "apps/handlers/template/get_template.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "get_template has docstring \u2014 checker 5-line lookahead too small for multi-line signature (9 lines to closing paren)"
-    },
-    {
-      "file": "apps/handlers/plan/list_ops.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "list_plans_impl has docstring \u2014 checker 5-line lookahead too small for multi-line signature (8 lines to closing paren)"
-    },
-    {
-      "file": "apps/modules/create_plan.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "create_plan has docstring \u2014 checker 5-line lookahead too small for multi-line signature"
-    },
-    {
-      "file": "apps/handlers/plan/close_ops.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "Functions have docstrings \u2014 checker 5-line lookahead too small for multi-line signatures"
-    },
-    {
-      "file": "apps/handlers/mbank/process.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "Functions have docstrings \u2014 checker 5-line lookahead too small for multi-line signatures"
-    },
-    {
-      "file": "apps/handlers/plan/display.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "Functions have docstrings \u2014 checker 5-line lookahead too small for multi-line signatures"
-    },
-    {
-      "file": "apps/handlers/plan/aggregate_ops.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Handler imports trigger module \u2014 aggregate_ops fires trigger events for plan aggregation changes"
-    },
-    {
-      "file": "apps/handlers/plan/create_ops.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Handler imports trigger module \u2014 create_ops fires trigger events when plans are created"
-    },
-    {
-      "file": "apps/handlers/plan/command_parser.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Cross-handler import of registry_ops.get_type_map \u2014 parser needs plan type mappings to validate commands"
-    },
-    {
-      "file": "apps/handlers/plan/restore_ops.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Handler imports trigger module \u2014 restore_ops fires trigger events when plans are restored"
-    },
-    {
-      "file": "apps/handlers/plan/calculate_relative_path.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "relative_location is a local variable, not a constant"
-    },
-    {
-      "file": "apps/handlers/plan/create_file.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "parent_name, error_msg are local variables, not constants"
-    },
-    {
-      "file": "apps/handlers/plan/create_ops.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "required_deps, error_msg, prefix are local variables, not constants"
-    },
-    {
-      "file": "apps/handlers/plan/build_registry_entry.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "entry is a local variable, not a constant"
-    },
-    {
-      "file": "apps/handlers/plan/restore_ops.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "plan_info, error_msg are local variables, not constants"
-    },
-    {
-      "file": "apps/handlers/plan/aggregate_ops.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "Local variables in aggregation functions, not constants"
-    },
-    {
-      "file": "apps/handlers/plan/resolve_location.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "target_dir is a local variable, not a constant"
-    },
-    {
       "file": "apps/modules/close_plan.py",
       "standard": "deep_nesting",
       "category": "deferred",
@@ -295,18 +61,6 @@
     },
     {
       "file": "apps/handlers/dashboard/push_branch_dashboard.py",
-      "standard": "deep_nesting",
-      "category": "deferred",
-      "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
-    },
-    {
-      "file": "apps/handlers/registry/monitor_ops.py",
-      "standard": "deep_nesting",
-      "category": "deferred",
-      "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
-    },
-    {
-      "file": "apps/handlers/plan/list_ops.py",
       "standard": "deep_nesting",
       "category": "deferred",
       "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
@@ -345,43 +99,22 @@
       "file": "apps/modules/create_plan.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [254],
+      "lines": [245],
       "reason": "handle_command's True means 'this command was mine', never 'it succeeded' (the module contract in flow.py). The handler calls cli_error() first, which flow.py's resolve_exit turns into exit 2: measured 2026-10-04, `drone @flow create . probe NOSUCHTYPE` exits 2. The failure reaches the caller through the exit code, not the bool (flow's decision, leg 5)."
-    },
-    {
-      "file": "apps/modules/post_close_runner.py",
-      "standard": "logged_fallback",
-      "category": "false_positive",
-      "lines": [79],
-      "reason": "handle_command's True means 'this command was mine', never 'it succeeded' (the module contract in flow.py). The handler calls error() first, which flow.py's resolve_exit turns into a failing exit code; False would route the command on to the next module and end in 'unknown command' (flow's decision, leg 5)."
     },
     {
       "file": "apps/modules/registry_monitor.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [138, 174],
+      "lines": [135, 171],
       "reason": "handle_command's True means 'this command was mine', never 'it succeeded' (the module contract in flow.py). Each handler calls error() first, which flow.py's resolve_exit turns into a failing exit code; False would route 'registry' on to the next module and end in 'unknown command' (flow's decision, leg 6)."
     },
     {
       "file": "apps/handlers/runner/lock_ops.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [91, 139, 156],
+      "lines": [42, 75, 92],
       "reason": "The exception is the answer, not a failure. 97: os.kill(pid, 0) raising PermissionError means the process exists and belongs to someone else, so alive is the true answer. 160 and 186 (147 and 173 until leg 11's seam moved them): FileNotFoundError on the lock means its holder released it between our create and our read, so stale (take over) is the true answer; every other OSError on those reads re-raises (leg 3) (flow's decision, leg 5)."
-    },
-    {
-      "file": "apps/handlers/runner/lock_ops.py",
-      "standard": "logged_fallback",
-      "category": "false_positive",
-      "lines": [83],
-      "reason": "_pid_alive answers liveness, not success: True means 'alive, or cannot tell'. Its one caller, is_lock_stale, then calls the lock not stale, so acquire_lock waits and never steals it. Answering False on a failed Windows check would let a live holder's lock be taken. Fails safe by design, logged at info (flow's decision, leg 10)."
-    },
-    {
-      "file": "apps/handlers/registry/save_registry.py",
-      "standard": "logged_fallback",
-      "category": "false_positive",
-      "lines": [85],
-      "reason": "False means 'not saved' on every path, the lock timeout and the except alike; the success path returns True only. Leg 10 re-read every caller. Ten ignored the False; each now says 'could not save': close (step 2 fails, step 3 and orphan cleanup warn), restore and its backup recovery fail, self-heal and the four heal saves raise into their sweep's logged failure. create_ops step 2 (auto-cleanup) is re-saved with the same dict at step 10, whose False fails the create and names the registry file. registry_ops' load-time prune re-derives on the next read (flow's decision, leg 10)."
     },
     {
       "file": "apps/handlers/mbank/process.py",
@@ -398,22 +131,10 @@
       "reason": "Each False means 'not done' on every path; no success path answers False. save_branch_registry: its callers, auto_close_plan and repoint_plan, log the failure and return False, and the plan is then not reported healed. 434 save_central: its one caller, aggregate_central_impl, logs it and returns False. 601 aggregate_central_impl: the aggregate command prints 'Central plans aggregation failed'; push_to_plans_central now raises it into its own failure (leg 10), and close, create and restore warn on that (flow's decision, leg 10)."
     },
     {
-      "file": "tests/test_project_scope.py",
-      "standard": "stdlib_patch",
-      "category": "false_positive",
-      "reason": "File-wide because stdlib_patch passes no line (a lines rule is inert, measured leg 10); it covers lines 336 and 365. Host emulation: Path.glob is folded case-blind, the way Windows and macOS list a directory. No disk under the Linux runner folds case, so no tmp world can produce it. A seam in project_scope would have no product caller, since its one listing is this glob. 365 is the control proving the fold reaches the code under test (flow's decision, leg 10)."
-    },
-    {
-      "file": "tests/test_import_dead_cwd.py",
-      "standard": "no_product_call",
-      "category": "false_positive",
-      "reason": "Host probe measures a premise. File-wide because no_product_call passes no line (a lines rule would be inert); it covers lines 1391, 1553, 1571, 1714, 1745 and 1764 (each moved down one in DPLAN-0404 leg 13, when the support_fence import was added). Each pins the emulated hosts (posix and nt dialect tables, the shipped accessor cure they emulate, the literal probe paths) that every dead-cwd import pin in this file is written on. No product code answers whether the emulation is faithful; the pins measure the premise, not the product (flow's decision, leg 10)."
-    },
-    {
       "file": "apps/flow.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [85],
+      "lines": [76],
       "reason": "route_command's True means 'a module handled this command'. A BrokenPipeError is the reader closing stdout early (`drone @flow list | head`): the command ran and its output was cut by the reader, not failed. False would print 'unknown command' for a known one (flow's decision, leg 5)."
     }
   ],

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.13.0
+# Version: 1.14.0
 # Description: Context fill per CLI (Claude transcript, Codex rollout, OpenCode store) and the compact window
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-20
-# Modified: 2026-11-10
+# Modified: 2026-11-17
 # =============================================
 
 """Live context fill from a session transcript, and the window each CLI runs, read from a live source only.
@@ -33,11 +33,12 @@ from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.opencode_paths import opencode_db_path, opencode_store
 from aipass.hooks.apps.handlers.json import files as json_files
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 CONSOLE = err_console
 
@@ -135,7 +136,15 @@ def _codex_token_info(entry: dict, field: str) -> object:
 def read_latest_usage(transcript_path: str, tail_bytes: int = _TAIL_BYTES, provider: str = "") -> dict | None:
     """The newest usage dict: Claude's assistant message.usage, or Codex's token_count last_token_usage.
 
-    *provider* is the caller's transcript_provider() reading or the payload's; empty reads it here."""
+    *provider* is the caller's transcript_provider() reading or the payload's; empty reads it here.
+    Each call leaves one json trail entry."""
+    usage = _read_latest_usage(transcript_path, tail_bytes, provider)
+    json_handler.log_operation("read_latest_usage", {"provider": provider, "usage": usage is not None})
+    return usage
+
+
+def _read_latest_usage(transcript_path: str, tail_bytes: int, provider: str) -> dict | None:
+    """read_latest_usage's reading, untrailed."""
     if not transcript_path or provider == SEED:
         return None
     try:
@@ -147,7 +156,7 @@ def read_latest_usage(transcript_path: str, tail_bytes: int = _TAIL_BYTES, provi
         logger.debug("[HOOKS] context_window: no transcript yet (turn 0): %s", transcript_path)
         return None
     except OSError as exc:
-        logger.info("[HOOKS] context_window: transcript read failed: %s", exc)
+        logger.warning("[HOOKS] context_window: transcript read failed: %s", exc)
         return None
     return usage if isinstance(usage, dict) else None
 
@@ -211,7 +220,7 @@ def explicit_window(cwd: str) -> int | None:
         try:
             return max(_EXPLICIT_MIN, min(_EXPLICIT_MAX, int(env_window)))
         except ValueError:
-            logger.info("[HOOKS] context_window: bad env window value %r", env_window)
+            logger.warning("[HOOKS] context_window: bad env window value %r", env_window)
 
     candidates: list[Path] = []
     branch_dir = find_branch_dir(cwd)
@@ -335,7 +344,7 @@ def _opencode_limit(session_id: str) -> int:
             model = json.loads(row[0]) if row and row[0] else {}
             updated = (conn.execute(_CATALOG_UPDATED).fetchone() or [None])[0]
             name = f"{model.get('providerID')}/{model.get('id')}"
-            hit = cache.get(name)
+            hit = cache.get(name) if cache is not None else None
             if (
                 isinstance(hit, dict)
                 and hit.get("catalog") == updated
@@ -349,24 +358,27 @@ def _opencode_limit(session_id: str) -> int:
         return 0
     value = limit.get("input") or limit.get("context") if isinstance(limit, dict) else None
     value = value if isinstance(value, int) and value > 0 else 0
+    if cache is None:
+        return value
     cache[name] = {"limit": value, "catalog": updated, "at": time.time()}
     try:
         json_files.write_json_file(opencode_limit_cache_path(), cache)
     except OSError as exc:
-        logger.info("[HOOKS] context_window: OpenCode limit cache not written: %s", exc)
+        logger.warning("[HOOKS] context_window: OpenCode limit cache not written: %s", exc)
     return value
 
 
-def _read_limit_cache() -> dict:
+def _read_limit_cache() -> dict | None:
+    """The cached limits, {} when absent; None when unreadable or not an object, which is then never overwritten."""
     path = opencode_limit_cache_path()
     if not path.is_file():
         return {}
     try:
         cache = json_files.read_json_file(path)
     except (OSError, ValueError) as exc:
-        logger.info("[HOOKS] context_window: OpenCode limit cache unreadable, reading the catalog: %s", exc)
-        return {}
-    return cache if isinstance(cache, dict) else {}
+        logger.warning("[HOOKS] context_window: OpenCode limit cache unreadable, left as found: %s", exc)
+        return None
+    return cache if isinstance(cache, dict) else None
 
 
 def _opencode_buffer(cwd: str) -> int | None:

@@ -43,11 +43,10 @@ pins it: help rendered, command not run.
 
 The entry point checks the first position only. Every module goes further:
 
-- a bare `drone @canary <command>` prints that module's short map (`note` adds
-  its store path)
+- a bare `drone @canary <command>` prints that module's short map
 - `<command> help` as a bare word answers like the two flag spellings
 - `--help` or `-h` *anywhere* in a command's arguments prints help and runs
-  nothing, so `note add --help` stores nothing
+  nothing, so `kv store.txt set --help colour` writes nothing
 
 ## Versions
 

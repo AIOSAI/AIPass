@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: file_ops.py
 # Description: Template copy and file operations
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Template copy and file rename operations."""
@@ -13,7 +13,7 @@ import json
 import shutil
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.spawn.apps.handlers.placeholders import replace_placeholders
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json import json_handler
@@ -29,6 +29,16 @@ def ensure_directory(path):
     Path(path).mkdir(parents=True, exist_ok=True)
 
 
+def copy_undecodable(source, dest):
+    """Copy a file that is not UTF-8 text byte for byte; one carrying a {{ placeholder would ship unrendered, so it raises."""
+    source = Path(source)
+    if b"{{" in source.read_bytes():
+        raise ValueError(
+            f"{source} is not UTF-8 text but carries a {{{{...}}}} placeholder; refusing to copy it unrendered"
+        )
+    shutil.copy2(source, dest)
+
+
 def copy_template(template_dir, target_dir, replacements):
     """Recursively copy template to target, replacing placeholders in text files."""
     template_dir = Path(template_dir)
@@ -39,7 +49,6 @@ def copy_template(template_dir, target_dir, replacements):
     for item in _walk(template_dir):
         rel_path = item.relative_to(template_dir)
 
-        # as_posix(), never str(): Windows would mix backslashes with the "/ (dir)" suffix.
         if _should_skip(rel_path):
             skipped.append(rel_path.as_posix())
             continue
@@ -63,8 +72,8 @@ def copy_template(template_dir, target_dir, replacements):
                 atomic_write_text(dest, content)
                 copied.append(listed)
             except (UnicodeDecodeError, UnicodeEncodeError) as e:
-                logger.warning(f"[spawn] Text read/write failed for {listed}, falling back to binary copy: {e}")
-                shutil.copy2(item, dest)
+                logger.warning(f"[spawn] {listed} is not UTF-8 text, copying it byte for byte: {e}")
+                copy_undecodable(item, dest)
                 copied.append(f"{listed} (binary)")
 
     try:

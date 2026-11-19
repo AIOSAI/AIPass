@@ -3,7 +3,7 @@
 # Description: Tests for the host API photo lane — bytes onto disk, named by the server
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/uploads.py and its POST /v1/files/upload route."""
@@ -17,7 +17,6 @@
 
 import os
 import stat
-import sys
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -304,10 +303,6 @@ class TestTheCapRefusesAndNeverTruncates:
 class TestTheFileOnDisk:
     """What the stored object actually is, checked on a real filesystem."""
 
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="0o600 is a POSIX mode; Windows st_mode carries no owner-only story to assert",
-    )
     def test_it_is_created_private_not_narrowed_afterwards(self, landing: Path) -> None:
         """0o600 via os.open, not chmod-after: a file narrowed a moment later was readable for that moment."""
         result = host_uploads.store_image(BytesIO(PNG))
@@ -360,15 +355,13 @@ class TestWhereImagesLand:
         (config / "user-dirs.dirs").write_text('XDG_PICTURES_DIR="$HOME/Billeder"\n', encoding="utf-8")
 
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.delenv("XDG_PICTURES_DIR", raising=False)
 
         assert host_uploads.upload_root() == tmp_path / "Billeder" / "BAUD"
 
     def test_the_fallback_needs_no_platform_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """~/Pictures is also the right answer on Windows and macOS."""
+        """With no XDG answer, ~/Pictures."""
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.delenv("XDG_PICTURES_DIR", raising=False)
 
         assert host_uploads.upload_root() == tmp_path / "Pictures" / "BAUD"
@@ -388,7 +381,6 @@ class TestWhereImagesLand:
         config.mkdir()
         (config / "user-dirs.dirs").write_bytes(b"\xff\xfe\xfa not utf-8")
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.delenv("XDG_PICTURES_DIR", raising=False)
 
         assert host_uploads.upload_root() == tmp_path / "Pictures" / "BAUD"

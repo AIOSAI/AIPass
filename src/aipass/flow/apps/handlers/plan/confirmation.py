@@ -3,20 +3,19 @@
 # Description: Plan Confirmation Handler
 # Version: 0.5.0
 # Created: 2025-11-15
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Plan Confirmation Handler"""
 
 import sys
 from typing import Callable, Optional
+from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.flow.apps.handlers.json import json_handler
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-_PKG_ROOT = module_file(__file__).parents[4]
+_PKG_ROOT = Path(__file__).resolve().parents[4]
 
 
 def confirm_plan_deletion(

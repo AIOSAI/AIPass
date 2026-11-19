@@ -23,12 +23,12 @@ something breaks. Work in progress, research and dated one-offs belong in
   write-through API services call.
 - [dashboard_caps.md](dashboard_caps.md) — the subject cap and whole-file budget
   every dashboard section writer reads, including writers outside prax.
-- [log_audit.md](log_audit.md) — health summaries, growth rates, truncation, and
+- [log_audit.md](log_audit.md) — health summaries, growth rates, the stale-log sweep, and
   the weekly sweep the daemon runs.
 - [discovery.md](discovery.md) — the scheduled scan behind the module registry,
   and the watcher's own events.
 - [json_service.md](json_service.md) — the config/data/log triplet every branch
   writes through, and its test seam.
 - [architecture.md](architecture.md) — how a command reaches a handler: router,
-  unknown-argument gate, exit seam, help behaviour, status sync.
+  unknown-argument gate, exit seam, help behaviour.
 - [tests.md](tests.md) — how the suite is organised and how to run it.

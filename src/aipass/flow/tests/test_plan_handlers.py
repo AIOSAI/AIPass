@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_plan_handlers.py
 # Description: Tests for apps/handlers/plan/create_ops.py and sibling plan handlers
-# Version: 1.3.0
+# Version: 1.5.0
 # Created: 2026-04-05
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/plan/create_ops.py and sibling plan handlers."""
@@ -11,7 +11,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that the module parses and imports
 
-import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +20,7 @@ import pytest
 
 from aipass.flow.apps.handlers.plan.create_ops import slugify_subject, create_plan_impl
 from aipass.flow.apps.handlers.plan.create_file import create_plan_file
+from aipass.flow.apps.handlers.plan import authority
 from aipass.flow.apps.handlers.plan.build_registry_entry import build_plan_registry_entry
 from aipass.flow.apps.handlers.plan.calculate_relative_path import calculate_relative_location
 from aipass.flow.apps.handlers.plan.resolve_location import resolve_plan_location
@@ -130,6 +130,13 @@ class TestBuildPlanRegistryEntry:
         assert entry["file_path"] == str(plan_file)
         assert entry["template_type"] == "default"
 
+    def test_the_row_records_the_verified_caller_as_creator(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: "@alpha")
+
+        entry = build_plan_registry_entry(1, tmp_path, "alpha", "brief", tmp_path / "FPLAN-0001.md", "default")
+
+        assert entry["created_by"] == "@alpha"
+
     def test_created_timestamp_is_iso_utc(self, tmp_path: Path):
         before = datetime.now(timezone.utc)
         entry = build_plan_registry_entry(
@@ -154,7 +161,16 @@ class TestBuildPlanRegistryEntry:
             plan_file=tmp_path / "p.md",
             template_type="master",
         )
-        required_keys = {"location", "relative_path", "created", "subject", "status", "file_path", "template_type"}
+        required_keys = {
+            "location",
+            "relative_path",
+            "created",
+            "subject",
+            "status",
+            "file_path",
+            "template_type",
+            "created_by",
+        }
         assert required_keys == set(entry.keys())
 
 
@@ -168,7 +184,7 @@ class TestCalculateRelativeLocation:
         target.mkdir(parents=True)
 
         result = calculate_relative_location(target, root)
-        assert result.replace(os.sep, "/") == "src/flow"
+        assert result == "src/flow"
 
     def test_same_directory_returns_root(self, tmp_path: Path):
         result = calculate_relative_location(tmp_path, tmp_path)
@@ -189,7 +205,7 @@ class TestCalculateRelativeLocation:
         target.mkdir(parents=True)
 
         result = calculate_relative_location(target, root)
-        assert result.replace(os.sep, "/") == "a/b/c/d"
+        assert result == "a/b/c/d"
 
 
 class TestResolvePlanLocation:
@@ -371,8 +387,8 @@ class TestCreatePlanImpl:
 
     @pytest.fixture(autouse=True)
     def bus(self):
-        """Stand in for the trigger bus where it lives, so no real plan_created is fired."""
-        with patch("aipass.trigger.apps.modules.core.trigger") as fake:
+        """Stand in for the bus at trigger's door, where create_plan_impl imports it, so no real plan_created fires."""
+        with patch("aipass.trigger.trigger") as fake:
             yield fake
 
     def _make_deps(self, **overrides) -> dict:
@@ -415,6 +431,65 @@ class TestCreatePlanImpl:
         deps["create_plan_file"].assert_called_once()
         deps["save_registry"].assert_called()
         bus.fire.assert_called_once_with("plan_created", plan_number=1, location="plans", subject="Widget feature")
+
+    def _create_in(self, target: Path) -> tuple:
+        deps = self._make_deps(resolve_plan_location=MagicMock(return_value=(True, target, "")))
+        result = create_plan_impl(location=str(target), subject="brief", template_type="default", **deps)
+        return result, deps
+
+    @pytest.mark.parametrize("forbidden", [".trinity", ".aipass", ".git", ".codex", ".agents", ".archive"])
+    def test_a_forbidden_tree_is_refused_even_for_the_admin(self, tmp_path, make_seat, mock_json_handler, forbidden):
+        target = make_seat(tmp_path / "beta") / forbidden / "deep"
+        target.mkdir(parents=True)
+
+        (success, *_rest, err, _msgs), deps = self._create_in(target)
+
+        assert success is False and f"inside {forbidden}/" in err
+        deps["create_plan_file"].assert_not_called()
+        deps["auto_close_orphaned_plans"].assert_not_called()
+        deps["save_registry"].assert_not_called()
+        mock_json_handler.assert_any_call("plan_create_refused", {"target": str(target), "caller": "@devpulse"})
+
+    def test_a_link_into_a_forbidden_tree_is_followed_and_refused(self, tmp_path, make_seat):
+        git = make_seat(tmp_path / "beta") / ".git"
+        git.mkdir()
+        (tmp_path / "innocent").symlink_to(git)
+
+        (success, *_rest, err, _msgs), deps = self._create_in(tmp_path / "innocent")
+
+        assert success is False and "inside .git/" in err
+        deps["create_plan_file"].assert_not_called()
+
+    def test_outside_every_branch_is_the_admins_only(self, tmp_path, monkeypatch):
+        loose = tmp_path / "loose"
+        loose.mkdir()
+        (admin_ok, *_r), _deps = self._create_in(loose)
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: "@alpha")
+
+        (success, *_rest, err, _msgs), deps = self._create_in(loose)
+
+        assert admin_ok is True
+        assert success is False and "outside every branch" in err and "you are @alpha" in err
+        deps["create_plan_file"].assert_not_called()
+
+    def test_any_citizen_files_a_brief_inside_another_branch(self, tmp_path, monkeypatch, make_seat):
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: "@alpha")
+
+        (success, *_r), deps = self._create_in(make_seat(tmp_path / "beta"))
+
+        assert success is True
+        deps["create_plan_file"].assert_called_once()
+
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
+    def test_the_create_log_names_the_creator(self, mock_jh, bus):
+        deps = self._make_deps(build_plan_registry_entry=MagicMock(return_value={"created_by": "@alpha"}))
+
+        assert create_plan_impl(location="plans", subject="brief", template_type="default", **deps)[0] is True
+
+        mock_jh.log_operation.assert_any_call(
+            "plan_created",
+            {"plan_number": 1, "location": "plans", "template": "default", "created_by": "@alpha", "success": True},
+        )
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     def test_a_number_a_row_holds_is_never_issued_again(self, mock_jh, bus):

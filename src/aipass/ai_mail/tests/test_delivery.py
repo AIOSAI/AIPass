@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_delivery.py
 # Description: Tests for email delivery handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py."""
@@ -21,8 +21,8 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import aipass.ai_mail.apps.handlers.email.delivery as delivery_mod
+import aipass.ai_mail.apps.handlers.registry.read as registry_read
 import aipass.ai_mail.apps.handlers.notify as notify_mod
-from aipass.memory.apps.modules import fleet
 from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
 
 
@@ -321,7 +321,7 @@ def test_deliver_unknown_branch(repo_root, noop_inbox_lock):
     assert "@nonexistent" in error
 
 
-def test_deliver_says_so_when_the_external_tier_cannot_answer(repo_root, noop_inbox_lock, monkeypatch):
+def test_deliver_says_so_when_the_external_tier_cannot_answer(repo_root, noop_inbox_lock):
     """A gateway that cannot answer is not "unknown address": delivery names it.
 
     Before leg 11 get_external_branches answered {} on any gateway failure, so a
@@ -334,9 +334,10 @@ def test_deliver_says_so_when_the_external_tier_cannot_answer(repo_root, noop_in
     def _gateway_down(**kwargs):
         raise RuntimeError("gateway down")
 
-    monkeypatch.setattr(fleet, "external_branches", _gateway_down)
-
-    with patch.object(delivery_mod, "get_all_branches", return_value=[]):
+    with (
+        patch("aipass.memory.external_branches", _gateway_down),
+        patch.object(delivery_mod, "get_all_branches", return_value=[]),
+    ):
         success, error = deliver_email_to_branch("@nonexistent", _make_email_data())
 
     assert success is False
@@ -856,11 +857,10 @@ def test_an_unreadable_hosted_registry_refuses_the_admin_rather_than_serving_a_n
 def test_an_unreadable_aipass_registry_refuses_rather_than_serving_a_hosted_namesake(external_world, monkeypatch):
     """Mail for an AIPass citizen never lands on a hosted project's citizen of the same name.
 
-    AIPASS_REGISTRY.json is not JSON, so get_all_branches answers [] (stood in
-    here: the real one reads this checkout's registry). Before leg 12 the admin
-    sweep then found projects/lab's @target and the verified admin, exempt from
-    the boundary, had the mail delivered there. Now delivery refuses and names
-    the AIPass registry.
+    AIPASS_REGISTRY.json is not JSON, so the real get_all_branches raises RegistryUnreadable. Before
+    leg 12 the admin sweep found projects/lab's @target and the verified admin,
+    exempt from the boundary, had the mail delivered there. Now delivery refuses
+    and names the AIPass registry.
     """
     home = external_world["tmp"] / "AIPass"
     (home / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
@@ -870,7 +870,9 @@ def test_an_unreadable_aipass_registry_refuses_rather_than_serving_a_hosted_name
         json.dumps({"branches": [{"name": "target", "email": "@target", "path": str(lab_target)}]}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(delivery_mod, "get_all_branches", lambda *a, **kw: [])
+    monkeypatch.setattr(registry_read, "BRANCH_REGISTRY_PATH", home / "AIPASS_REGISTRY.json")
+    # The world fixture stands in get_all_branches; restore the real reader for this file.
+    monkeypatch.setattr(delivery_mod, "get_all_branches", registry_read.get_all_branches)
     # No caller cwd: from the admin seat's cwd the caller-project walk already
     # reaches AIPASS_REGISTRY.json and refuses; this is the lane with no walk.
     monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
@@ -928,3 +930,92 @@ def test_a_mail_delivered_onto_an_inbox_file_names_it_the_same_way(baud_project,
     [event] = _feed_events()
     assert (event["mail_id"], event["recipient"], event["project"]) == (reply_id, "target", "baud")
     assert json.loads(inbox_file.read_text(encoding="utf-8"))["messages"][0]["id"] == reply_id
+
+
+# ---- Every delivered mail carries a kind (docs/mail_kinds.md) ----
+
+
+def _deliver_kind(baud_project, sender: str, subject: str, **extra) -> tuple:
+    """Deliver one mail into a fresh inbox: (stored kind, the feed line's mail_kind)."""
+    branches = _setup_branch(baud_project)
+    with patch.object(delivery_mod, "get_all_branches", return_value=branches):
+        success, error = deliver_email_to_branch("@target", _make_email_data(sender=sender, subject=subject, **extra))
+    assert success is True, error
+    inbox = json.loads((Path(branches[0]["path"]) / ".ai_mail.local" / "inbox.json").read_text(encoding="utf-8"))
+    return inbox["messages"][0]["kind"], _feed_events()[-1]["mail_kind"]
+
+
+@pytest.mark.parametrize(
+    "sender, subject, extra, kind",
+    [
+        ("@trigger", "[ROLL-UP] 8 warning(s) repeating past their age limit", {}, "medic"),
+        ("@trigger", "[REPEAT 26h] WARNING x10 @drone / captured_rm", {}, "medic"),
+        ("@trigger", "RE: FPLAN-0933: medic never goes deaf silently", {}, "mail"),
+        ("@backup", "[ERROR] not from trigger", {}, "mail"),
+        ("@memory", "Rounds @memory 2026-11-14: amber", {}, "rounds"),
+        ("@prax", "prax rounds 2026-11-15: green", {}, "rounds"),
+        ("@devpulse", "RE: Rounds @memory 2026-11-14", {}, "mail"),
+        ("@sentry", "Command job FAILED: @sentry/ratchet (exit 1, 3.0s)", {}, "job_failed"),
+        ("@sentry", "Command job started: @sentry/ratchet", {}, "notice"),
+        ("@sentry", "Command job passed: @sentry/ratchet (exit 0, 1.0s)", {}, "notice"),
+        ("@ai_mail", "Dispatch complete: @hooks finished (exit 0)", {}, "notice"),
+        ("@memory", "FPLAN-0957 done", {}, "mail"),
+        ("@daemon", "Command job started: x", {"kind": "mail"}, "mail"),
+        ("@hooks", "anything", {"kind": "medic"}, "medic"),
+    ],
+)
+def test_a_delivered_mail_stores_its_kind_and_the_feed_line_carries_it(
+    baud_project, noop_inbox_lock, sender, subject, extra, kind
+):
+    assert _deliver_kind(baud_project, sender, subject, **extra) == (kind, kind)
+
+
+def test_an_unknown_declared_kind_is_refused_and_nothing_is_written(baud_project, noop_inbox_lock):
+    branches = _setup_branch(baud_project)
+    with patch.object(delivery_mod, "get_all_branches", return_value=branches):
+        success, error = deliver_email_to_branch("@target", _make_email_data(kind="urgent"))
+
+    assert success is False
+    assert error.startswith("Refused: unknown mail kind 'urgent'")
+    inbox = json.loads((Path(branches[0]["path"]) / ".ai_mail.local" / "inbox.json").read_text(encoding="utf-8"))
+    assert inbox["messages"] == []
+    assert not notify_mod.FEED_PATH.exists()
+
+
+def test_the_inbox_file_lane_stamps_the_kind_and_refuses_an_unknown_one(baud_project, noop_inbox_lock):
+    inbox_file = baud_project / "target" / ".ai_mail.local" / "inbox.json"
+    inbox_file.parent.mkdir(parents=True)
+    inbox_file.write_text(json.dumps(_empty_inbox()), encoding="utf-8")
+
+    refused = delivery_mod.deliver_to_inbox_file(inbox_file, {**_DELIVERED, "kind": "urgent"})
+    success, err, _rid = delivery_mod.deliver_to_inbox_file(
+        inbox_file, {**_DELIVERED, "subject": "Dispatch complete: x"}
+    )
+
+    assert refused[0] is False and refused[1].startswith("Refused: unknown mail kind 'urgent'")
+    assert success is True, err
+    assert json.loads(inbox_file.read_text(encoding="utf-8"))["messages"][0]["kind"] == "notice"
+    assert [e["mail_kind"] for e in _feed_events()] == ["notice"]
+
+
+def test_the_rate_limit_drops_plain_mail_lines_but_never_an_urgent_kind(baud_project, noop_inbox_lock):
+    branches = _setup_branch(baud_project)
+    with patch.object(delivery_mod, "get_all_branches", return_value=branches):
+        for kind in ["mail"] * 5 + ["medic", "rounds", "job_failed", "notice"]:
+            assert deliver_email_to_branch("@target", _make_email_data(kind=kind))[0] is True
+
+    assert [e["mail_kind"] for e in _feed_events()] == ["mail"] * 3 + ["medic", "rounds", "job_failed"]
+
+
+def test_an_upsert_update_stamps_the_kind_on_a_message_stored_before_kinds(baud_project, noop_inbox_lock):
+    branches = _setup_branch(baud_project)
+    inbox_file = Path(branches[0]["path"]) / ".ai_mail.local" / "inbox.json"
+    legacy = {"id": "old1", "from": "@trigger", "subject": "[ROLL-UP] 1", "message": "m", "status": "new"}
+    inbox_file.write_text(json.dumps({**_empty_inbox(), "messages": [{**legacy, "upsert_key": "k"}]}), encoding="utf-8")
+
+    with patch.object(delivery_mod, "get_all_branches", return_value=branches):
+        data = _make_email_data(sender="@trigger", subject="[ROLL-UP] 2")
+        assert deliver_email_to_branch("@target", data, upsert_key="k")[0] is True
+
+    [message] = json.loads(inbox_file.read_text(encoding="utf-8"))["messages"]
+    assert (message["id"], message["kind"]) == ("old1", "medic")

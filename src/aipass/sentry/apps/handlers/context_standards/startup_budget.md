@@ -31,13 +31,13 @@ A cap nobody measures is a preference. This is the measurement.
 | File | Cap | Owner | Where the checker reads it |
 |---|---|---|---|
 | `README.md` | 10,000 | **sentry** | `context_standards/pack.json` → `caps["README.md"].max_chars` |
-| `.aipass/aipass_local_prompt.md` | 9,000 | hooks | `aipass.hooks.apps.modules.grounding_content.BRANCH_CHAR_BUDGET` |
+| `.aipass/aipass_local_prompt.md` | 9,000 | hooks | `aipass.hooks.BRANCH_CHAR_BUDGET` (hooks' door) |
 | `.trinity/local.json` | 25,000 | memory | `memory.config.json` → `entry_limits.file_budgets` |
 | `.trinity/observations.json` | 15,000 | memory | same key |
 | `.trinity/passport.json` | 6,000 file, 600 per string | memory | same key (`max_chars`, `max_string_chars`) |
-| `DASHBOARD.local.json` | 6,000 | prax | `aipass.prax.apps.modules.dashboard.DASHBOARD_CHAR_BUDGET` |
+| `DASHBOARD.local.json` | 6,000 | prax | `aipass.prax.DASHBOARD_CHAR_BUDGET` (prax's door) |
 
-**Read, never copied.** The checker reads each name off the owner's live module — or the owner's config — at CALL time. It carries no copy of any of these numbers. Move a cap at its owner and the next audit moves with it; nothing in sentry is edited.
+**Read, never copied.** The checker reads each name off the owner's door — or the owner's config — at CALL time. It carries no copy of any of these numbers. Move a cap at its owner and the next audit moves with it; nothing in sentry is edited.
 
 **@memory's caps are read from its config, not its handler.** `entry_limits.load_file_budgets()` serves a regeneration seed when `file_budgets` is absent: right for @memory, which keeps working with a broken config, and wrong for an auditor, which would score the fleet against numbers no config contains. Importing it is also a cross-branch handler import, which sentry's handler independence standard forbids, and @memory publishes no `modules/` gateway for the budgets. The checker reads `entry_limits.file_budgets` in `memory.config.json` itself; a missing or unreadable key is the error row and nothing is scored.
 

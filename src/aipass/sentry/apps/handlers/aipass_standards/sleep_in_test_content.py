@@ -3,7 +3,7 @@
 # Description: Sleep In Test Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -48,7 +48,6 @@ def get_sleep_in_test_standards() -> str:
         "  [green]17 files, 43 hits[/green] — the review's first cut exactly, once aliases count.",
         "  Every hit is scored. There is no legitimate form: both shapes above have a",
         "  cure that is strictly better.",
-        "  Evidence lands: test_versioned_engine.py 89, 110, 126, 240, 315, 441.",
         "",
         "[bold cyan]WHY IT CANNOT BE SATISFIED BY ACCIDENT:[/bold cyan]",
         "  A sleep asserts nothing. It can only make the suite slower, or make it",

@@ -80,7 +80,7 @@ CONTEXT_PHASE_SEPARATOR = "|"
 #: Import/collection time: the one class where selecting nothing would be wrong.
 NO_TEST_CONTEXT = ""
 
-#: Always slash-separated; `os.sep` here would be a Windows bug Linux never surfaces.
+#: Always slash-separated.
 NODEID_SEPARATOR = "/"
 
 #: Runs under the TARGET's interpreter, whose coverage wrote the file (another version

@@ -3,7 +3,7 @@
 # Description: Catchup Operations Handler
 # Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -12,7 +12,7 @@ Catchup Operations Handler
 
 from datetime import datetime, timezone, timedelta
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.database.catchup_queries import (
@@ -21,7 +21,7 @@ from aipass.commons.apps.handlers.database.catchup_queries import (
     update_last_active,
     mark_mentions_read,
 )
-from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
+from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 from aipass.commons.apps.handlers.json import json_handler
 
 

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: feedback_pulse.py
-# Version: 1.0.0
+# Version: 1.0.2
 # Description: Periodic feedback ask — one ignorable line every ~10 turns
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-18
-# Modified: 2026-07-18
+# Modified: 2026-11-15
 # =============================================
 
 """Periodic feedback pulse — surfaces a one-line feedback ask every ~10 turns.
@@ -19,7 +19,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.hooks.apps.handlers.json import json_handler
 
 _STATE_DIR = Path(tempfile.gettempdir())
@@ -48,7 +48,7 @@ def _load_and_increment(path: Path) -> int:
         path.write_text(json.dumps({"turn": turn}), encoding="utf-8")
         return turn
     except (json.JSONDecodeError, OSError) as exc:
-        logger.info("[HOOKS] feedback_pulse: state access failed: %s", exc)
+        logger.warning("[HOOKS] feedback_pulse: state access failed: %s", exc)
         return 0
 
 
@@ -94,5 +94,5 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": _FEEDBACK_LINE, "exit_code": 0}
 
     except Exception as exc:
-        logger.info("[HOOKS] feedback_pulse: unexpected error: %s", exc)
+        logger.error("[HOOKS] feedback_pulse: unexpected error: %s", exc)
         return {"stdout": "", "exit_code": 0}

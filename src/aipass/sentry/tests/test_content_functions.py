@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_content_functions.py
 # Description: Unit tests for all 37 content handler functions
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_content.py and 36 sibling content functions."""
@@ -143,7 +143,8 @@ def test_get_cli_standards_has_expected_content():
     result = get_cli_standards()
     _assert_content_str(result, "cli_standards")
     assert "OUTPUT STANDARD: Rich console.print() ONLY" in result
-    assert "from aipass.cli.apps.modules import console" in result
+    assert "from aipass.cli import console" in result
+    assert "from aipass.cli.apps" not in result
 
 
 def test_get_cli_flags_standards_has_expected_content():

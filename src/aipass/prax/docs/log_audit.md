@@ -2,7 +2,7 @@
 
 # log_audit and log_health — size, growth, rotation
 
-Log health summaries, runaway-growth rates, truncation, and the weekly tmp sweep the daemon runs.
+Log health summaries, runaway-growth rates, the stale-log sweep, and the weekly tmp sweep the daemon runs.
 
 ---
 
@@ -10,14 +10,19 @@ Log health summaries, runaway-growth rates, truncation, and the weekly tmp sweep
 
 ```bash
 drone @prax log-audit                    # Show audit module info
-drone @prax log-audit audit              # Scan system_logs/ for health + oversized files
-drone @prax log-audit enforce            # Truncate oversized logs to 1000 lines
-drone @prax log-audit sweep              # Delete log files older than 30 days
+drone @prax log-audit audit              # Scan system_logs/ and branch logs/ for oversized files
+drone @prax log-audit sweep              # Delete .log files older than 30 days
 drone @prax log-audit --help             # Audit usage
 ```
 
 `audit` reports problems but always exits 0 — it flags unbounded and critical
 files in its output, so a health gate must read the text, not `$?`.
+
+Nothing here rewrites a log. A live file has other processes appending to it,
+so truncating it in place loses their lines; every writer rotates its own file
+(`.log` through prax's rotating handler, `.jsonl` through `append_jsonl`). The
+sweep deletes stale `*.log` and `*.log.N` only; a `.jsonl` and its backups are
+left to the writer that rotates them.
 
 ## Log Health
 
@@ -63,7 +68,7 @@ drone rm --stale 10d ..        # '..' from src/aipass/prax is src/aipass
   the job never fires at whatever minute a tick first discovers it. A Sunday
   missed while the machine was off fires on the first tick after it is back.
 - **Where it shows.** The `FIRE` and `DONE` lines (exit code, duration, output
-  tail) in daemon's `logs/run.log` and in `~/.aipass/daemon-tick.log`. The
+  tail) in daemon's `logs/run.log` and in `system_logs/daemon_run.log`. The
   runstate row `@prax/tmp-sweep-weekly` in `daemon/daemon_json/daemon_runstate.json`.
   One row per deleted file in `.ai_central/deletions.jsonl` (`mode: stale`,
   `age: 10d`). A mail to @devpulse when the sweep starts and another when it

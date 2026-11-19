@@ -3,7 +3,7 @@
 # Description: The settings conformance corpus, python side — shared goldens both runtimes must satisfy
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/host/settings.py's read and write doors against the shared conformance corpus."""
@@ -39,7 +39,7 @@ RUNTIME = "python"
 SUPPORTED = "supported"
 PENDING = "pending"
 
-# Measured on the running machine, never read from sys.platform (root, Windows).
+# Measured on the running machine, never assumed (root reads through mode bits).
 UNREADABLE_FILES = "unreadable_files"
 POSIX_MODE_BITS = "posix_mode_bits"
 PARENT_IS_A_FILE_IS_DISTINGUISHABLE = "parent_is_a_file_is_distinguishable"
@@ -136,7 +136,7 @@ class TestTheCorpusItself:
         """
         manifest = _load_manifest()
         on_disk = {
-            str(path.relative_to(CORPUS)).replace(os.sep, "/"): digest(path.read_bytes())
+            str(path.relative_to(CORPUS)): digest(path.read_bytes())
             for path in sorted(CORPUS.rglob("*.json"))
             if path.name != "manifest.json"
         }
@@ -220,11 +220,8 @@ class TestTheCorpusItself:
         assert needy[0]["id"] in str(skipped.value)
         assert "cannot host the case" in str(skipped.value)
 
-    # Trap: the getattr is needed. test_windows_import hides os.geteuid with os.name
-    # still "posix", and a bare call here runs at collection and takes the file with it.
     @pytest.mark.skipif(
-        os.name != "posix" or getattr(os, "geteuid", lambda: 0)() == 0,
-        reason="this guard is about a non-root POSIX machine, where all three capabilities exist",
+        os.geteuid() == 0, reason="this guard is about a non-root machine, where all three capabilities exist"
     )
     def test_a_posix_machine_measures_every_capability(self) -> None:
         """The counterpart to verify-then-skip, and the reason it is not a hole."""

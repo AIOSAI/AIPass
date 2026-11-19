@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch9.py
 # Description: Unit tests for readme_check and trigger_check
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/readme_check.py and apps/handlers/aipass_standards/trigger_check.py."""
@@ -382,36 +382,34 @@ def test_no_print_in_main_block_ok(tmp_path):
     assert result["passed"] is True
 
 
-def test_trigger_import_pattern_correct(tmp_path):
-    """Correct trigger import pattern passes."""
-    content = 'from aipass.trigger.apps.modules.core import trigger\n\ndef do_work():\n    trigger.fire("event")\n'
-    lines = _lines(content)
-
-    result = check_trigger_import_pattern(content, lines, (tmp_path / "fake" / "module.py").as_posix())
-    assert result is not None
-    assert result["passed"] is True
+def test_the_front_door_import_of_trigger_passes_as_the_ruled_form(tmp_path):
+    content = 'from aipass.trigger import trigger\n\ndef do_work():\n    trigger.fire("event")\n'
+    result = check_trigger_import_pattern(content, _lines(content), (tmp_path / "fake" / "module.py").as_posix())
+    assert result is not None and result["passed"] is True
+    assert result["message"] == "Imports trigger through its front door"
 
 
-def test_the_fleets_core_module_import_passes_and_the_unexported_name_fails(tmp_path):
+def test_a_long_path_under_triggers_apps_reads_as_trigger_in_use_never_as_correct(tmp_path):
+    """A front_door violation: this row credits the service, front_door judges the form."""
     path = (tmp_path / "fake" / "module.py").as_posix()
-    real = 'from aipass.trigger.apps.modules import core\n\ndef do_work():\n    core.trigger.fire("event")\n'
-    broken = 'from aipass.trigger import trigger\n\ndef do_work():\n    trigger.fire("event")\n'
-    real_result = check_trigger_import_pattern(real, _lines(real), path)
-    broken_result = check_trigger_import_pattern(broken, _lines(broken), path)
-    assert real_result is not None and broken_result is not None
-    assert real_result["passed"] is True
-    assert broken_result["passed"] is False
+    for long_form in (
+        'from aipass.trigger.apps.modules.core import trigger\n\ndef do_work():\n    trigger.fire("event")\n',
+        'from aipass.trigger.apps.modules import core\n\ndef do_work():\n    core.trigger.fire("event")\n',
+    ):
+        result = check_trigger_import_pattern(long_form, _lines(long_form), path)
+        assert result is not None and result["passed"] is True
+        assert "correct" not in result["message"].lower()
+        assert "from aipass.trigger import trigger" in result["message"]
 
 
-def test_trigger_import_pattern_missing(tmp_path):
-    """trigger.fire() without import fails."""
+def test_trigger_fire_with_no_import_fails_and_names_the_door_form(tmp_path):
     content = 'def do_work():\n    trigger.fire("event")\n'
-    lines = _lines(content)
-
-    result = check_trigger_import_pattern(content, lines, (tmp_path / "fake" / "module.py").as_posix())
+    result = check_trigger_import_pattern(content, _lines(content), (tmp_path / "fake" / "module.py").as_posix())
     assert result is not None
     assert result["passed"] is False
-    assert "missing proper import" in result["message"]
+    assert result["message"] == (
+        "Uses trigger.fire() but never imports trigger — add: from aipass.trigger import trigger"
+    )
 
 
 def test_trigger_import_pattern_no_trigger(tmp_path):
@@ -525,7 +523,7 @@ class SystemLogger:
 
 def initialize_logging_system():
     """Initialize the complete logging system"""
-    from aipass.trigger.apps.modules.core import trigger
+    from aipass.trigger import trigger
 
     result = run_initialize(MODULE_NAME)
     trigger.fire("logging_system_initialized", modules_count=result["modules_count"])
@@ -533,7 +531,7 @@ def initialize_logging_system():
 
 def shutdown_logging_system():
     """Shutdown logging system cleanly"""
-    from aipass.trigger.apps.modules.core import trigger
+    from aipass.trigger import trigger
 
     run_shutdown(MODULE_NAME)
     trigger.fire("logging_system_shutdown")
@@ -544,7 +542,7 @@ def shutdown_logging_system():
 _PRAX_LOGGER_SHAPE_BROKEN = '''
 class SystemLogger:
     def _ensure_watcher(self):
-        from aipass.trigger.apps.modules.core import trigger
+        from aipass.trigger import trigger
 
         SystemLogger._watcher_started = True
         trigger.fire("startup")

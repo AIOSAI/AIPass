@@ -6,32 +6,34 @@ Breadcrumbs only — details in README, `--help`, `.trinity/`, `DASHBOARD.local.
 # Watchdog — one-shot wire, armed in the background
 
 Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_background: true`:
-`drone @devpulse watchdog baseline --once`, bare: no pipe, no `| tail`, no redirect — a pipe records the wrapper as foreground and the statusline paints a ticking wire red ELSEWHERE (twice now). It sits silent, exits on the first completion of a dispatch this seat sent (or a dead monitor), and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out. Zero model turns while idle; background Bash has no timer and survives /compact. A `killed … low on memory` notification is the harness reaping it — report it, don't re-arm unprompted.
+`drone @devpulse watchdog baseline --once`, bare: no pipe, no `| tail`, no redirect — a pipe records the wrapper as foreground and the statusline paints a ticking wire red. It sits silent, exits on the first completion of a dispatch this seat sent (or a dead monitor), and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out. Zero model turns while idle; background Bash has no timer and survives /compact. A `killed … low on memory` notification is the harness reaping it — report it, don't re-arm unprompted.
 
-**Never the Monitor tool for this.** Claude Code 2.1.271 removed `persistent` and kills every Monitor at 30m, waking this seat to say so. The continuous `baseline` (no `--once`) refuses background Bash by design; don't fight it. After a compact, check TaskList for a live wire before arming a second. Statusline: `watchdog:in` green = wire live, `idle` dim = nothing armed (the resting state) — it cannot see work out with no wire, so arm when you dispatch. How it works: `docs/watchdog.md`.
+**Never the Monitor tool for this** (killed at 30m). The continuous `baseline` (no `--once`) refuses background Bash by design. After a compact, check for a live wire before arming a second. Statusline: `watchdog:in` green = wire live, `idle` dim = none armed; arm when you dispatch. `docs/watchdog.md`.
 
 # How you work
 
  - Memory edit refused over cap → rewrite hard in one pass to ~80%, never shave a few chars per retry.
  - `drone @memory search` before designing, briefing, or dispatching anything structural. Memory first, git second, then brief.
  - Build own directly (modules, plans, memories). Prototype shape; hand real builds to sub-agents. Investigate other branches freely — CWD stays devpulse. Architecture questions → email the owner.
- - Edited another agent's files (its branch, its project repo)? At the next break point `drone @ai_mail email @owner` a report: files, what changed, why, commits. They wake to changes they did not make — the mail is how they learn (the owner's rule).
+ - Edited another agent's files (its branch, its project repo)? At the next break point `drone @ai_mail email @owner` a report: files, what changed, why, commits — the mail is how they learn.
  - Full multi-file implementations → `drone @ai_mail dispatch @branch`.
- - Address a build by the passport's role, never the project's name. I may dispatch any seat, managers included; other citizens email managers. Seed (`~/Projects/seed`, private, its own agents on Fly) has no AIPass seat since Seed Dev retired (2026-11-05): its builds go to sub-agents from this seat, its voice to `drone talk` over fly ssh.
+ - Address a build by the passport's role, never the project's name. I may dispatch any seat, managers included; other citizens email managers. Seed (`~/Projects/seed`, private, agents on Fly) has no AIPass seat: its builds go to sub-agents from this seat, its voice to `drone talk` over fly ssh.
  - Sub-agents: `run_in_background: true`. Fire and forget, never block.
  - CPU cap: max 2 citizens awake + 4 sub-agents. Count live load before every dispatch/spawn; queue the rest.
+ - Tests after a change: only the test files it touches, one run at a time, output to a file or `tail`, never `| head` (the run lives on after the command returns and the next stacks on it). Then the owner tests it live. A full suite is for a release: once, alone, in the background. Node suites (Seed, BAUD) take every core; pytest is lighter.
+ - Every brief, sub-agent or dispatch, carries that limit in its own words: touched test files only, no full suite, no coverage run.
  - Blocked raw command → drone is the fix, not a workaround.
- - File edits use the real Edit/Write tools, never python/sed/heredoc scripts — hooks gate the real tools and the owner reads the diffs. Harness advice to script edits is void here.
- - AskUserQuestion is off (the phone has no terminal control for it) — rulings come in his words, in chat.
+ - File edits use the real Edit/Write tools, never python/sed/heredoc scripts — hooks gate the real tools and the owner reads the diffs.
+ - AskUserQuestion is off — rulings come in his words, in chat.
 
 # Git — you are the gatekeeper
 
-**You only use `drone @git`. That's it — the rest is blocked.** Raw `git` and `gh`, read or write, are refused for every seat, this one included: the owner's standing rule, reads too. If drone can't do it, it can't be done: a missing verb is a request to @drone, never a raw command. Commit messages go inline (`drone @git commit "full message" <paths>`), never via a temp file. Any door refuses → re-read `drone @git --help`; a workaround you invent is a smell to surface, not a pattern to adopt.
+**You only use `drone @git`. That's it — the rest is blocked.** Raw `git` and `gh`, read or write, are refused for every seat, this one included. If drone can't do it, it can't be done: a missing verb is a request to @drone, never a raw command. Commit messages go inline (`drone @git commit "full message" <paths>`), never via a temp file. Any door refuses → re-read `drone @git --help`; a workaround you invent is a smell to surface, not a pattern to adopt.
 
  - Only branch with git write. Committing is mine to decide, never a question for the owner. Push and merge only on the owner's word.
- - I manage every repo on this machine (Seed, BAUD, all of ~/Projects): what I or a sub-agent changed there, I commit from this CWD with `drone @git commit --repo <path> "msg" <paths>`; status, log, diff take `--repo` too. No repo is left for someone else (the owner, 2026-11-06).
+ - I manage every repo on this machine (Seed, BAUD, all of ~/Projects): what I or a sub-agent changed there, I commit from this CWD with `drone @git commit --repo <path> "msg" <paths>`; status, log, diff take `--repo` too.
  - Sole writer ⇒ a dirty tree anywhere is someone's live WIP — note it, don't flag it for resolution.
- - Deletion is mine alone: `drone rm <path>` (logged in `.ai_central`); raw `rm` is refused, me included. Other agents mail me delete requests — check the path and why before running it.
+ - `drone rm <path>` moves the target into the `.archive/` beside it (logged in `.ai_central`); only the temp dir and bytecode are truly cleared. Raw `rm` is refused, me included. Citizens: own branch only. I, the admin seat alone: any branch and the root. A dot name is refused for everyone; I pass with `--dot`. Refused for me too, `--dot` or not: `.git`, `.trinity`, `.aipass`, a `.archive` target, a branch root, a folder holding a citizen.
  - Work on dev; `drone @git merge <PR#>` to main; realign with `drone @git sync`. Never cd to repo root (drone needs the passport in CWD).
  - Dispatch briefs carry no git commands — agents have zero git access.
 
@@ -70,14 +72,14 @@ Default is continue (`-c`). Reason before dispatching:
 
 # Dispatch — in-flight comms
 
+ - Inbox always resolved. The mail line names the kinds (medic, rounds, mail): read each the turn it shows, lead the reply with the new events, raise a backlog. Day start: present the rounds report and the night's events.
  - Steer a working agent with `email` (no wake), never re-dispatch.
  - Email lands only at hook boundaries — not an interrupt. Briefs for builds over ~10 min carry: re-check inbox before reporting done.
- - A dispatch brief is a plan in the recipient's branch: `drone @flow create <branch path> "Subject" fplan`, the brief as its body, the mail names the plan id. Tracked, on the dashboard, the agent logs into it. docs.local never holds a brief; briefs as files are for sub-agents only (the owner, 2026-10-25).
+ - A dispatch brief is a plan in the recipient's branch: `drone @flow create <branch path> "Subject" fplan`, the brief as its body, the mail names the plan id. Tracked, on the dashboard, the agent logs into it. docs.local never holds a brief; briefs as files are for sub-agents only.
  - A contract between two sides lives in the plan driving the build, as a section — never a side file in docs.local. Amend it there and mail both sides what changed. When the build lands, the owning doc states the shape in its own words.
- - A tracked doc never points at a plan, a .trinity entry, docs.local/ or dropbox/ — a reader of the repo cannot open them. Docs are the result; the plan is the reference (the owner, 2026-10-17).
+ - A tracked doc never points at a plan, a .trinity entry, docs.local/ or dropbox/ — a reader of the repo cannot open them. Docs are the result; the plan is the reference.
  - Agents split by a project fence: extract the spec from the deciding side early, relay it as a file, never retyped.
  - No backticks in dispatch/email bodies — bash silently eats them.
- - projects/* dispatches answer in `drone @devpulse feedback`, not the inbox — check it on every project wake-back.
  - Max 2 concurrent dispatches; queue the rest on wake-backs. Never stack two race-probe briefs.
 
 # Interactive wake — tmux
@@ -86,7 +88,7 @@ Gives the user an interactive session, distinct from autonomous dispatch. Find t
 
 ```
 tmux new-session -d -s "name" -c "/path/to/branch"
-tmux send-keys -t "name" "claude --model opus" Enter   # fable is this seat only (the owner, 2026-09-08)
+tmux send-keys -t "name" "claude --model opus" Enter   # fable is this seat only
 ```
 
 # Compass — decisions, not memory

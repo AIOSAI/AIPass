@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_ratchet.py
 # Description: Template v1 — the ratchet verb, its pick and its series
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-10-12
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/ratchet.py and the handlers it drives."""
@@ -16,6 +16,7 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -291,7 +292,7 @@ class TestRun:
         assert refused.value.code == refusal.EXIT_BUDGET_EXHAUSTED
 
     def test_the_run_after_a_fragment_probes_only_what_it_left_and_says_slice_two(self, fleet, probe, monkeypatch):
-        monkeypatch.setattr(series, "REPO_ROOT", fleet.parent)
+        monkeypatch.setattr(series, "repo_root", lambda: fleet.parent)
         probe["document"] = _fragment()
         with pytest.raises(CommandRefused):
             ratchet.handle_command("ratchet", ["run"])
@@ -344,7 +345,7 @@ class TestPortablePaths:
     def test_an_archive_from_a_run_under_a_home_holds_no_absolute_path(self, fleet, probe, monkeypatch, tmp_path):
         home = tmp_path / "home" / "devlin"
         root = home / "Projects" / "AIPass"
-        monkeypatch.setattr(series, "REPO_ROOT", root)
+        monkeypatch.setattr(series, "repo_root", lambda: root)
         monkeypatch.setattr(series, "HOME_DIR", home)
         branch = root / "src" / "aipass" / "alpha"
         document = _artifact()
@@ -373,8 +374,18 @@ class TestPortablePaths:
         assert developer_home_check.scan_text(series_text) == []
         assert json.loads(series_text)["reason"] == f"probed {relative}"
 
+    def test_the_root_is_drones_aipass_home(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(series, "resolve_aipass_home", lambda: SimpleNamespace(path=tmp_path, tried=()))
+        assert series.repo_root() == tmp_path
+
+    def test_no_aipass_home_raises_naming_what_was_tried(self, monkeypatch):
+        tried = ("AIPASS_HOME", "trusted_projects.json")
+        monkeypatch.setattr(series, "resolve_aipass_home", lambda: SimpleNamespace(path=None, tried=tried))
+        with pytest.raises(RuntimeError, match="trusted_projects.json"):
+            series.repo_root()
+
     def test_the_series_line_names_its_archive_relative_to_the_root(self, fleet, probe, monkeypatch):
-        monkeypatch.setattr(series, "REPO_ROOT", fleet.parent)
+        monkeypatch.setattr(series, "repo_root", lambda: fleet.parent)
 
         ratchet.handle_command("ratchet", ["run"])
 

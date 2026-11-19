@@ -18,7 +18,7 @@ from typing import List, Any
 
 from aipass.prax import logger
 from aipass.cli import console, header
-from aipass.cli.apps.modules import error
+from aipass.cli import error
 from aipass.sentry.apps.modules import CommandRefused
 from aipass.sentry.apps.modules import standards_audit
 
@@ -276,6 +276,10 @@ def print_help() -> None:
         "[dim]# No developer home path in a tracked text file (the CI gate)[/dim]"
     )
     console.print(
+        "  [green]drone @sentry front-door scan[/green]                "
+        "[dim]# Fleet counts for the front_door standard, per branch and target[/dim]"
+    )
+    console.print(
         "  [green]drone @sentry bypass prune @flow[/green]             "
         "[dim]# Remove bypass rules that match nothing (--dry-run to preview)[/dim]"
     )
@@ -303,7 +307,7 @@ def print_help() -> None:
     console.print(
         "[dim]Commands: audit, audit-tests, test-inventory, shadow-cycle, standards_audit, standards_query,"
         " standard, checklist, diagnostics, diagnostics_audit, proof, proof_query, test_map, readme,"
-        " readme_update, permissions, inbox_audit, home-paths, ratchet, tests, bypass, --help[/dim]"
+        " readme_update, permissions, inbox_audit, home-paths, front-door, ratchet, tests, bypass, --help[/dim]"
     )
     console.print()
 

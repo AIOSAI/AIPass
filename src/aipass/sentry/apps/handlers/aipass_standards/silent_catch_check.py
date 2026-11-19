@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: silent_catch_check.py
 # Description: Silent Catch Standards Checker Handler
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-22
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -235,7 +235,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         for handler in node.handlers:
             silent_lines.extend(_judge_handler(handler, node, module_path))
 
-    silent_lines.sort()
+    silent_lines = sorted(ln for ln in silent_lines if not is_bypassed(module_path, "silent_catch", ln, bypass_rules))
 
     checks = []
     violation_count = len(silent_lines)
@@ -243,9 +243,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if violation_count == 0:
         checks.append({"name": "Silent catch blocks", "passed": True, "message": "No silent exception catches found"})
     else:
-        first_three = silent_lines[:3]
-        line_preview = ", ".join(str(ln) for ln in first_three)
-        suffix = f" (and {violation_count - 3} more)" if violation_count > 3 else ""
+        line_preview = ", ".join(str(ln) for ln in silent_lines)
+        suffix = ""
         checks.append(
             {
                 "name": "Silent catch blocks",

@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @commons
 # Version: 1.2.2
 # Created: 2026-03-08
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -19,33 +19,18 @@ import sys
 from pathlib import Path
 from typing import List, Any
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 # Run as a script, apps/ is sys.path[0] and this file shadows the commons package.
 # Both spellings go: through a symlinked checkout sys.path[0] is the REAL dir while
-# __file__ keeps the link. The guard is inline (not handlers.module_root) because
-# importing the package before this repair is unsafe; resolve() can raise with a dead cwd.
+# __file__ keeps the link. Inline, before any aipass import: importing the package first is unsafe.
 _script_dirs = [str(Path(__file__).parent)]
-try:
-    _script_dirs.append(str(Path(__file__).resolve().parent))
-except OSError as _exc:
-    # stderr, not the logger: @prax is not importable until after this repair.
-    sys.stderr.write(
-        f"[commons] Cannot resolve {__file__} ({type(_exc).__name__}) — "
-        "sys.path repair limited to its unresolved spelling\n"
-    )
+_script_dirs.append(str(Path(__file__).resolve().parent))
 for _script_dir in _script_dirs:
     if _script_dir in sys.path:
         sys.path.remove(_script_dir)
 
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, header, error, warning
-from aipass.cli.apps.modules.display import reset_command_state, resolve_exit
+from aipass.prax import logger
+from aipass.cli import console, header, error, warning
+from aipass.cli import reset_command_state, resolve_exit
 
 
 MODULE_ROOT = Path(__file__).parent
@@ -61,10 +46,9 @@ HELP_AWARE_COMMANDS = frozenset({"activity", "catchup", "digest", "explore", "ro
 def ensure_database() -> bool:
     """Ensure the database is initialized with schema and default rooms."""
     try:
-        from aipass.commons.apps.modules.database import init_db, close_db
+        from aipass.commons.apps.modules.database import init_schema
 
-        conn = init_db()
-        close_db(conn)
+        init_schema()
         return True
     except Exception as e:
         logger.error(f"[commons] Database initialization failed: {e}")
@@ -334,8 +318,7 @@ def main() -> int:
 if __name__ == "__main__":
     # SIGPIPE default here, never at import: set at import it kills pytest workers
     # silently on the first EPIPE.
-    if hasattr(signal, "SIGPIPE"):
-        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     try:
         sys.exit(main())
     except BrokenPipeError:

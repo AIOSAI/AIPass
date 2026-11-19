@@ -3,7 +3,7 @@
 # Description: Named Encoding Standards Checker Handler
 # Version: 1.0.1
 # Created: 2026-09-21
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -38,7 +38,7 @@ _TEXT_METHODS: frozenset[str] = frozenset({"read_text", "write_text"})
 
 _UTF8_SPELLINGS: frozenset[str] = frozenset({"utf-8", "utf8"})
 
-FIX = 'name encoding="utf-8"; the default is cp1252 on Windows and the product\'s output is not ASCII'
+FIX = 'name encoding="utf-8"; the default follows the locale, a non-UTF-8 locale breaks it, and the output is not ASCII'
 
 
 def _keyword(node: ast.Call, name: str) -> ast.keyword | None:

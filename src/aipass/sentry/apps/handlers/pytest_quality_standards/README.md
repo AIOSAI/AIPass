@@ -51,14 +51,11 @@ The design was the defect. This pack is the correction.
 | `mock_drift` | does the patched target still exist in production? |
 | `self_skip` | does this test skip itself into permanent silence? |
 | `fresh_clone` | would this test pass on a machine that has only what the repo ships? |
-| `platform_oracle` | is this test's pass or fail a fact about the code, or about the host? |
-| `posix_literal` | does this test hardcode one platform's path shape? |
 | `entry_point_diff` | does production declare a verb no test names? |
 | `coverage_slot` | does this test confess, in prose, to existing for coverage? |
 | `docstring_pin` | does the docstring name a symbol the test actually calls? |
 | `host_state` | does this test leave the machine the way it found it? |
 | `module_eviction` | does this test leave the import cache holding the module it found? |
-| `host_leak` | does this test fake a platform and then build its fixture out of the real host? |
 
 ## Two design commitments
 
@@ -83,27 +80,6 @@ Even structurally, it currently measures 89.8% of the fleet's tests as unanchore
 So it defaults to `SCORED = False`: it publishes the full violation list and the
 measured number, and reports 100. Gating on it today would fail all eighteen
 branches on day one, which is how a standard teaches people to game it.
-
-## `host_leak` ships unscored too, for the opposite reason
-
-`docstring_pin` does not score because it flags **too much** — 89.8% of the
-fleet. `host_leak` does not score because it flags **nothing**: zero rows across
-18 branches and 18,997 units, because the one row it exists for was cured hours
-before the rule landed.
-
-That is not a reason to drop it, and it is not a reason to score it. An arm with
-zero live positives has never been observed convicting, so its precision on a
-real hit is unmeasured — a reconstructed unit proves the arm *fires*, not that it
-is calibrated. And the thing that decides whether a flagged site is a defect
-lives in **production**: the same woven host path is red when the subject parses
-the text and green when the subject hands the value back, and those two are
-indistinguishable from inside a test. So it nominates, publishes the measured
-number, and reports 100. A regression guard, not a finder.
-
-Its own page carries the two arms that were measured and **rejected** before it —
-23 rows and 223 rows, hand-read, all correct code — and the sibling shape that was
-measured and refused outright. Writing down what a rule decided *not* to be is how
-the next reader avoids re-deriving it.
 
 ## Classify and return — the third disposition
 

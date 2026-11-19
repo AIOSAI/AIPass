@@ -3,7 +3,7 @@
 # Description: Receipt rows for delete and retire-project, written to the fleet deletion trail through drone's door
 # Version: 1.0.0
 # Created: 2026-10-22
-# Modified: 2026-10-22
+# Modified: 2026-11-17
 # =============================================
 
 """Receipt rows for spawn's removals: measured and validated before anything goes, written after.
@@ -14,9 +14,9 @@ drone's door writes the moment it is called, so validation here is what lets a b
 import os
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
-from aipass.drone.apps.modules.door_deletion_log import record_deletion
+from aipass.drone import record_foreign_deletion
 from aipass.spawn.apps.handlers.json import json_handler
 
 # The door refuses a row missing any of these; the measurement must carry exactly drone's four keys.
@@ -79,7 +79,7 @@ def write_receipts(rows: list[dict], outcome: str, project_root: Path) -> int:
     written = 0
     for row in rows:
         try:
-            record_deletion(outcome=outcome, project_root=project_root, **row)
+            record_foreign_deletion(outcome=outcome, project_root=project_root, **row)
             written += 1
         except ValueError as exc:
             logger.error("[receipts] drone refused the row for %s after removal: %s", row["resolved"], exc)

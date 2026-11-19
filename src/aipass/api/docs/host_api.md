@@ -40,7 +40,7 @@ and `last_used`, which tells a live token from a merely un-revoked one.
 
 `last_used` writes on every authenticated request, so the store is written
 atomically (temp file, `fsync`, `os.replace`, created `0o600`) behind a
-cross-platform lock with stale-lock breaking. **Telemetry never undoes security**:
+lock with stale-lock breaking. **Telemetry never undoes security**:
 the touch re-reads inside the lock, so a stale list never revives a revoked token,
 and a lock it cannot take drops the timestamp, never raises. Writes coalesce to
 one per minute per token. The envelope is versioned; records predating the fields
@@ -67,7 +67,7 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `POST /v1/pair` | none | `{"code"}` → **200** `{token, id, label, scope}` for a live one-use pairing code. **401** `pairing_refused` for unknown, expired and used alike; **429** after 10 attempts a minute per address; **400** without a string code. See [Pairing](#pairing) |
 | `GET /v1/feed?since=&limit=` | read | Cursor is a **timestamp**, clamped both ends, `gap` flagged |
 | `GET /v1/roots` | read | Every place the file lane may stand: `home`, every project in @baud's census, this server's own repo. Rows of `{kind, name, label}`. No census, no roster — 503, never a short list |
-| `GET /v1/files?branch=&file=&project=&root=` | read | Name by NAME, file relative to the root; 512KB cap **refuses**, never trims. `root` = `branch`\|`home`\|`project`\|`aipass`, absent = branch. Answers carry `floor` — the root's absolute path, so a copy-path button can paste into a terminal. Any project |
+| `GET /v1/files?branch=&file=&project=&root=` | read | Name by NAME, file relative to the root; 512KB cap **refuses**, never trims. `root` = `branch`\|`home`\|`project`\|`aipass`, absent = branch. Answers carry `floor`, the root's absolute path. Any project |
 | `GET /v1/dir?branch=&dir=&project=&root=&offset=` | read | One directory level, the phone's file browser. Same optional `root`; `branch` carries the name WITHIN that kind — and a kind that names nothing may name *itself* (`branch=home&root=home`), any other name refused. Answers carry `floor`, and `floor` + an entry's path is that entry's real location. Pages of 400 from `offset` (int ≥ 0, default 0, else 400 `read_refused`); `total` counts past the noise filter, `truncated` while `offset` + page < `total`, past the end `[]`; audited |
 | `GET /v1/diff?branch=&staged=&project=&path=&grain=&ref=` | read | One patch, through `drone @git`, never raw. `path` = ONE file (refused, not trimmed, over 512KB), branch-local at `branch` grain; one the worktree patch lacks comes from the index (`staged: true`). `grain` = `branch`\|`repo`; `ref` = a commit. Any project |
 | `GET /v1/git-changes?branch=&project=&grain=` | read | Changed files. `branch` grain (default) = @baud's desktop card contract; `repo` grain = the whole repo. The answer names its grain. `rows[]` carries git's own two-column code per path, untracked included **by name**. `repo` grain adds `root`, the `/v1/roots` root its paths open under, matched by resolved path: `{kind: aipass, name: null}` for this server's repo, `{kind: project, name}` for a census project, else `null` |
@@ -75,25 +75,27 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/commit?branch=&ref=&project=` | read | One commit: author, date, subject, message, files with ± counts. Its patch rides on `/v1/diff` |
 | `GET /v1/git-remote?branch=&project=` | read | The repository's remote, for link-cards out to the forge. `url` as configured (password redacted), `web` browsable or `null`, `remote` names which one answered. No remote: 200, all three `null` |
 | `GET /v1/fleet?project=` | read | @baud's snapshot envelope; rows only gain live state. `project` is case-sensitive |
-| `/v1/agent/…`, `/v1/models`, `/v1/speak` | read / operate | Agent chat: [host_agent_chat.md](host_agent_chat.md) |
+| `/v1/agent/…`, `/v1/models`, `/v1/speak` | read / operate | Agent chat: [host_agent_chat.md](host_agent_chat.md); feed lines `user`, `agent`, `tool`, `notice` (the agent's mail: `{n, role, kind, text, time, mail_id}`) |
 | `GET /v1/rooms?project=` | read | A filter over that same snapshot — never a room judgment of its own |
 | `GET /v1/projects` | read | @baud's project census — the switcher menu's rows, unchanged |
 | `GET /v1/roster` | read | Every working agent in **every** project, rows with live state as /v1/fleet's. Takes no parameters — any is a 400, never a silent drop |
-| `GET /v1/machine` | read | @skills' `machine_vitals()`, **verbatim**: `ok`, `schema`, `sampled_at` and nine sections (cpu, load, memory, swap, temp, fan, network, processes, battery), each carrying `available`/`reason`/`sentence`/`detail`. 1 s single-flight cache; a fresh server's first read shows cpu and network `warming`. An absent reading is a **200** with its section, never a zero; **503** only when the skill refused (`psutil_missing`, `switched_off`: code in `error.reason`, detail in the host log) or its door failed (`machine_door_failed`). No parameters; any is a 400 |
-| `GET /v1/machine/processes?limit=20` | read | @skills' `machine_processes(limit)`, **verbatim**. A real ~0.5 s CPU sample, uncached: ask on open, never poll. `limit` as sent (the skill clamps); not a number is a 400. Refusals as `/v1/machine` |
-| `GET /v1/lock` | read | @skills' `lock_state()`, **verbatim**: `ok`, `locked`, `method`, `session`, `reason`, `detail`. 1 s single-flight cache. Cannot tell (`ok: false`, `locked: null`) is a **200**, drawn unknown, never unlocked; **503** `lock_door_failed` only when the door raised or broke its shape. No parameters; any is a 400. Locking stays `POST /v1/verbs/lock`, operate scope |
+| `GET /v1/machine` | read | @skills' `machine_vitals()`, **verbatim**: `ok`, `schema`, `sampled_at` and nine sections (cpu, load, memory, swap, temp, fan, network, processes, battery), each carrying `available`/`reason`/`sentence`/`detail`. 1 s single-flight cache; a new server's first read: cpu, network `warming`. An absent reading is a **200** with its section, never a zero; **503** only when the skill refused (code in `error.reason`; logged `switched_off` info, `switch_unreadable` error, else warning) or its door failed (`machine_door_failed`). No parameters; any is a 400 |
+| `GET /v1/machine/processes?limit=20` | read | @skills' `machine_processes(limit)`, **verbatim**. A ~0.5 s CPU sample, uncached: ask on open, never poll. `limit` as sent (the skill clamps); not a number is a 400. Refusals as `/v1/machine` |
+| `GET /v1/lock` | read | @skills' `lock_state()`, **verbatim**: `ok`, `locked`, `method`, `session`, `reason`, `detail`. 1 s single-flight cache. Cannot tell (`ok: false`, `locked: null`) is a **200**, drawn unknown, never unlocked; **503** `lock_door_failed` only when the door raised or broke its shape. No parameters; any is a 400 |
 | `GET /v1/memory-config?branch=` | read | @memory's limits. No branch = the fleet view; a branch = that one |
 | `POST /v1/memory-config/set` | operate | `{branch, type, count}` — one branch's override. 1–100 |
 | `POST /v1/memory-config/set-default` | operate | `{type, count}` — the default only. **Does not reach any branch** |
 | `POST /v1/memory-config/push` | operate | Empty body. What actually delivers a default everywhere |
 | `POST /v1/verbs/wake` | operate | `{branch, project, message?, fresh?}` → `@ai_mail dispatch wake` |
 | `POST /v1/verbs/kill` | operate | `{branch, project}` → `baud --end-room`. Returns `room` and `ended` |
-| `POST /v1/verbs/lock` | operate | Empty body. Proxied to `@skills`' screen_lock. Never gated |
+| `POST /v1/verbs/lock` | operate | Empty body. Proxied to `@skills`' screen_lock; refused while off (logged info); locked anyway: error |
 | `POST /v1/verbs/new-project` | operate | `{name, template?}` → `aipass new` + its agent. 200 `{ok, name, project, target, template, agent, agent_home, detail}`; 400 `project_name_refused`/`template_refused`/`project_refused`, 409 `project_exists`, 503 `project_door_failed` |
-| `POST /v1/backup/run` | operate | `{project, lane}` → **202** the running job. Lanes `snapshot`, `versioned`, `all`, `drive_sync`. Same lane already running: **400**. See [host_surfaces.md](host_surfaces.md) |
-| `POST /v1/backup/cancel` | operate | `{project, lane}` → `drone @backup stop <root> <lane>`. **200** `{project, lane, stopped, message}`, stop's line. Nothing running: **404** `not_running`, @backup's first stdout line; none: **503**, stderr logged |
-| `GET /v1/backup/job?id=` | read | One job, `running`/`done`/`stopped` (exit 130)/`failed`, `summary` the output's tail. Forgotten: **404** `job_unknown` |
-| `GET /v1/backup/status?project=&sizes=` | read | `drone @backup status --json` passed through; each `running` entry gains `job` (this server's id, else `null`). No `--json` on this machine: **503** |
+| `POST /v1/backup/run` | operate | `{project, lane}` → **202** the running job. Lanes `snapshot`, `all`, `drive_sync`. Same lane running: **400**. See [host_backup.md](host_backup.md) |
+| `POST /v1/backup/cancel` | operate | `{project, lane}` → **200** `{project, lane, stopped, message}`. Nothing running: **404** `not_running` |
+| `GET /v1/backup/job?id=` | read | One job: `running`/`done`/`stopped`/`failed`. Forgotten: **404** `job_unknown` |
+| `GET /v1/backup/status?project=&sizes=` | read | `drone @backup status --json` passed through; each `running` entry gains `job`. No `--json`: **503** |
+| `GET /v1/backup/schedule?project=` | read | `drone @backup schedule --json` passed through, keys unchanged |
+| `POST /v1/backup/schedule` | operate | `{project, frequency?, time?, weekday?, day?, on?}` → **200** the read-back. A bad body or @backup refusing: **400** `verb_refused` |
 | `GET /v1/agent-settings?branch=&project=` | read | One branch's three owned claude settings; an absent key reads `null`. `project` names a census project's citizen, absent = the seat |
 | `POST /v1/agent-settings` | operate | `{branch, project?, patch}`. Three-state: absent touches nothing, `null` removes, a value sets; the file keeps its mode |
 | `GET /v1/baud-settings` | read | BAUD's own document for the seat, whole and opaque |
@@ -246,9 +248,8 @@ credential, once, for five minutes.
 
 **The browser extension** pairs by `host-api pair extension`: [host_agent_chat.md](host_agent_chat.md).
 
-The module door: `mint_pairing(label, scope="read", ttl_seconds=300) -> dict`,
-`render_qr(text) -> str` and `PairingError` (a `TokenError`), on
-`aipass.api.apps.modules.host_api`.
+`aipass.api` hands out `mint_pairing(label, scope="read", ttl_seconds=300)
+-> dict`, `render_qr(text) -> str` and `PairingError` (a `TokenError`).
 
 ---
 

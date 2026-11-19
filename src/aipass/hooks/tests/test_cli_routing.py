@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for hooks's entry point routing, help and introspection
-# Version: 1.2.3
+# Version: 1.2.6
 # Created: 2026-09-03
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/hooks.py, the branch's CLI entry point."""
@@ -165,6 +165,26 @@ def test_route_command_survives_a_raising_module(entry_logger):
     assert any(level == "error" for level, _ in entry_logger)
 
 
+def test_a_crashing_module_names_its_error_on_stderr_and_exits_nonzero(monkeypatch, capsys):
+    """Pins the defect: a module crash printed only 'Unknown command'."""
+
+    class _Exploding:
+        __name__ = "exploding"
+
+        def handle_command(self, command, args):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(branch_entry, "discover_modules", lambda: [_Exploding()])
+
+    result = _run(monkeypatch, ["probe"])
+
+    out, err = capsys.readouterr()
+    assert result == 1
+    assert "exploding" in err
+    assert "boom" in err
+    assert "boom" not in out
+
+
 def test_known_command_exits_zero(monkeypatch, stub_module):
     """A routed command reports success."""
     assert _run(monkeypatch, ["probe"]) == 0
@@ -249,6 +269,19 @@ class TestDiscoverySkipsRetiredModules:
 
         assert branch_entry.discover_modules() == [stub]
 
+    def test_a_module_whose_import_breaks_is_an_error_not_a_quiet_retry(self, monkeypatch, tmp_path, caplog):
+        """A broken dependency logged INFO 'not found', then a retry under apps.modules masked it."""
+        self._modules_dir(monkeypatch, tmp_path)
+        (tmp_path / "broken.py").write_text("", encoding="utf-8")
+        (tmp_path / "sessions.py").write_text("", encoding="utf-8")
+        stub = _StubModule()
+        self._stand_in(monkeypatch, "sessions", stub)
+        monkeypatch.setitem(sys.modules, f"{_MODULES_PACKAGE}.broken", None)  # None in sys.modules: ImportError
+
+        with caplog.at_level("ERROR"):
+            assert branch_entry.discover_modules() == [stub]
+        assert [r.levelname for r in caplog.records if "broken" in r.getMessage()] == ["ERROR"]
+
     def test_the_mark_is_matched_anywhere_in_the_name(self, monkeypatch, tmp_path):
         # "presence(disabled)_v2" is the same retirement as a suffix mark.
         self._modules_dir(monkeypatch, tmp_path)
@@ -256,3 +289,40 @@ class TestDiscoverySkipsRetiredModules:
         self._stand_in(monkeypatch, "presence(disabled)_v2", _StubModule())
 
         assert branch_entry.discover_modules() == []
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["closure", "bogus"],
+        ["closure", "list", "extra"],
+        ["seed", "bogus"],
+        ["receipt", "bogus"],
+        ["testwrite", "bogus"],
+        ["test", "bogus"],
+        ["log", "extra"],
+        ["ledger", "bogus"],
+        ["dismiss", "an-id", "extra"],
+        ["hooksound", "--json", "extra"],
+    ],
+    ids=lambda argv: "-".join(argv),
+)
+def test_a_stray_argument_is_refused_never_ignored(monkeypatch, capsys, argv):
+    """Through the real modules: an ignored argument ran the verb anyway and exited 0."""
+    assert _run(monkeypatch, argv) == 1
+    assert "Unknown command" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("count", ["0", "-1"])
+def test_ledger_last_takes_a_count_above_zero(monkeypatch, capsys, count):
+    """--last 0 and --last -1 each printed one row as if asked for."""
+    with pytest.raises(SystemExit) as refused:
+        _run(monkeypatch, ["ledger", "--last", count])
+    assert refused.value.code == 2
+    assert "above zero" in capsys.readouterr().err
+
+
+def test_engine_help_names_the_engine_verb(monkeypatch, capsys):
+    """engine --help listed only `log`."""
+    assert _run(monkeypatch, ["engine", "--help"]) == 0
+    assert "drone @hooks engine" in capsys.readouterr().err

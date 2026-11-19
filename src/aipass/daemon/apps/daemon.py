@@ -3,27 +3,19 @@
 # Description: Entry point CLI for drone @daemon
 # Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """
 DAEMON Branch - Main Orchestrator
 """
 
-import os
 import sys
 from typing import List, Any
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
+from aipass.prax import logger
 
-from aipass.prax.apps.modules.logger import system_logger as logger
-
-from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
+from aipass.cli import console, error, reset_command_state, resolve_exit
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.modules import (
     UnknownArgument,

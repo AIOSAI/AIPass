@@ -3,7 +3,7 @@
 # Description: Tests for the read lane's feed cursor and name fence — limits, robustness, branch roots, the seat
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/feed.py (the cursor) and the name fence in apps/handlers/host/reads.py."""
@@ -12,7 +12,6 @@
 # sentry: no-test-needed(ruff) — that feed.py and reads.py parse and import
 
 import json
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -236,9 +235,6 @@ class TestFence:
 
     def test_symlink_escape_refused(self, fake_repo: dict) -> None:
         """The post-resolution check — the only gate that sees a symlink out."""
-        if sys.platform == "win32":
-            pytest.skip("POSIX symlinks")
-
         link = fake_repo["branch"] / "escape.txt"
         link.symlink_to(fake_repo["root"] / "secret.txt")
 
@@ -249,9 +245,6 @@ class TestFence:
 
     def test_symlink_into_a_sibling_sharing_the_prefix_refused(self, fake_repo: dict) -> None:
         """demo-evil starts with demo's path as a string; only the separator in the guard tells them apart."""
-        if sys.platform == "win32":
-            pytest.skip("POSIX symlinks")
-
         sibling = fake_repo["branch"].parent / (fake_repo["branch"].name + "-evil")
         sibling.mkdir()
         (sibling / "secret.txt").write_text("do not read me", encoding="utf-8")

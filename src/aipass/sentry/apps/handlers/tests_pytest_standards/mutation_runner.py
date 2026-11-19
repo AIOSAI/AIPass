@@ -17,7 +17,7 @@ import re
 import signal
 import subprocess
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.tests_pytest_standards.mutation_shapes import BaselineResult, SuiteRun, SuiteTarget
@@ -93,11 +93,6 @@ def run_in_group(
     Killing only the direct child leaves pytest's grandchildren holding the scratch tree.
     Raises `subprocess.TimeoutExpired` / `OSError` like `subprocess.run`.
     """
-    group: Dict[str, Any]
-    if os.name == "nt":
-        group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-    else:
-        group = {"start_new_session": True}
     with subprocess.Popen(
         list(command),
         cwd=cwd,
@@ -105,7 +100,7 @@ def run_in_group(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        **group,
+        start_new_session=True,
     ) as process:
         try:
             stdout, stderr = process.communicate(timeout=timeout)
@@ -117,13 +112,10 @@ def run_in_group(
 
 def _kill_group(process: "subprocess.Popen[str]") -> None:
     """Kill the child and everything it started, then reap the child."""
-    if os.name == "nt":
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True, check=False)
-    else:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError as exc:
-            logger.warning(f"{LOG_TAG} process group {process.pid} already exited before the kill: {exc}")
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError as exc:
+        logger.warning(f"{LOG_TAG} process group {process.pid} already exited before the kill: {exc}")
     process.kill()
     process.wait()
 

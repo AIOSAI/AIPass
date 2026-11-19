@@ -2,12 +2,10 @@
 #
 # AIPass setup script
 # Creates a venv, installs the package in editable mode, and verifies CLI entry points.
-# On interactive terminals it then ends in a conversation with the AIPass concierge —
-# the cold install ends in chat, not project creation (DPLAN-0274). Project creation
-# stays a separate, later step: `aipass init run`.
+# It ends in `aipass install --finish`: the doctor, the install report and the final screen.
 #
-# Usage: ./setup.sh [--no-chat] [--no-symlink] [--force-symlink]
-#   --no-chat        skip the welcome-chat ending (build only)
+# Usage: ./setup.sh [--no-finish] [--no-symlink] [--force-symlink]
+#   --no-finish      skip the doctor/report tail (`aipass install` passes it and runs the tail itself)
 #   --no-symlink     do not create/modify global drone/aipass CLI symlinks
 #   --force-symlink  repoint a global symlink even if it points at a different install (#660)
 #
@@ -18,42 +16,24 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# --- OS detection ---
-# Detect Windows (Git Bash / MSYS2 / Cygwin) and macOS — used throughout the script
-IS_WINDOWS=0
-IS_MACOS=0
-case "${OSTYPE:-}" in
-    msys*|cygwin*|mingw*) IS_WINDOWS=1 ;;
-    darwin*) IS_MACOS=1 ;;
-    *)
-        # Fallback: check uname if OSTYPE is unset
-        if uname -s 2>/dev/null | grep -qi "mingw\|msys\|cygwin"; then
-            IS_WINDOWS=1
-        elif uname -s 2>/dev/null | grep -qi "darwin"; then
-            IS_MACOS=1
-        fi
-        ;;
-esac
-
 # --- Args ---
-# Mirrors the `aipass install` handoff: --no-chat skips the welcome chat,
-# default (auto) ends in chat on interactive terminals only — CI/headless skip.
-RUN_CHAT="auto"
+RUN_FINISH="yes"
 SKIP_SYMLINK="no"
 FORCE_SYMLINK="no"
 for arg in "$@"; do
     case "$arg" in
-        --no-chat)       RUN_CHAT="no" ;;
+        --no-finish)     RUN_FINISH="no" ;;
         --no-symlink)    SKIP_SYMLINK="yes" ;;
         --force-symlink) FORCE_SYMLINK="yes" ;;
+        --yes)           export AIPASS_YES=1 ;;
         *) echo "WARN: unknown argument '$arg' (ignored)" ;;
     esac
 done
 
 # --- Collected action-needed items (round-2 install UX: a0f2351e Catch 2) ---
 # Anything printed mid-run that needs a follow-up command gets appended here,
-# then re-printed as ONE highlighted block right before the welcome chat —
-# scrolling output buries sudo hints and skipped-identity notices otherwise.
+# then printed as ONE block at the end and written to .aipass/setup_attention.txt
+# for the install report — scrolling output buries sudo hints otherwise.
 ACTION_NEEDED=()
 
 print_action_needed() {
@@ -90,36 +70,26 @@ echo "=== AIPass Setup ==="
 echo "Repo root: $SCRIPT_DIR"
 echo ""
 
-# --- Strip broken venv from PATH (Windows: stale .venv/Scripts shadows real Python) ---
-if [ "$IS_WINDOWS" -eq 1 ]; then
-    export PATH=$(echo "$PATH" | tr ':' '\n' | grep -v '\.venv' | tr '\n' ':' | sed 's/:$//')
-    export PYTHONUTF8=1
-fi
-
-# --- Find working Python (#292: Windows python3 → MS Store alias) ---
+# --- Find working Python ---
+# This checkout's venv is deleted below: one active in the calling shell must not be the python picked here.
+PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$SCRIPT_DIR/.venv/bin" | paste -sd:)
 PYTHON=""
-# Probe versioned binaries first — on macOS, Homebrew installs Python as
-# python3.11 and stock python3 may still point to 3.9. Checking versioned
-# names first finds a suitable interpreter without auto-install on Mac too.
+# Probe versioned binaries first: stock python3 may be older than 3.10.
 for v in 3.13 3.12 3.11 3.10; do
     if command -v "python$v" &>/dev/null && "python$v" -c "import sys" &>/dev/null 2>&1; then
         PYTHON="python$v"
         break
     fi
 done
-# Fall back to python3, then python (Windows installs as 'python' not 'python3')
+# Fall back to python3 (bare `python` is not probed: Python 2 on old hosts)
 if [ -z "$PYTHON" ]; then
     if command -v python3 &>/dev/null && python3 -c "import sys" &>/dev/null 2>&1; then
         PYTHON="python3"
-    elif command -v python &>/dev/null && python -c "import sys" &>/dev/null 2>&1; then
-        PYTHON="python"
     fi
 fi
 
 if [ -z "$PYTHON" ]; then
     echo "FAIL: No working Python found. Install Python 3.10+ and try again."
-    echo "  Windows: install from python.org, NOT the Microsoft Store."
-    echo "  Then disable the Store alias: Settings > Apps > Advanced app settings > App execution aliases"
     exit 1
 fi
 
@@ -129,67 +99,8 @@ echo "Found $PYTHON $PY_VERSION"
 # --- Check minimum version ---
 PY_OK=$($PYTHON -c 'import sys; print(int(sys.version_info >= (3, 10)))')
 if [ "$PY_OK" != "1" ]; then
-    if [ "$IS_MACOS" -eq 1 ]; then
-        # Auto-install on Mac. Stock macOS 12 ships only python3 3.9 and has no
-        # versioned binaries. Try Homebrew if it's already installed (no admin
-        # needed to USE brew — only to install it), then fall back to uv, which
-        # installs entirely in user-space and works on non-admin Mac accounts.
-        echo "Python 3.10+ not found on this Mac. Attempting auto-install ..."
-
-        # Path 1: existing Homebrew. Don't attempt to install brew itself —
-        # that step requires admin/sudo and locks out non-admin accounts.
-        if command -v brew &>/dev/null; then
-            echo "Homebrew present — installing python@3.11 via brew ..."
-            if brew install python@3.11; then
-                if command -v python3.11 &>/dev/null; then
-                    PYTHON="python3.11"
-                elif [ -x /opt/homebrew/opt/python@3.11/bin/python3.11 ]; then
-                    PYTHON="/opt/homebrew/opt/python@3.11/bin/python3.11"
-                elif [ -x /usr/local/opt/python@3.11/bin/python3.11 ]; then
-                    PYTHON="/usr/local/opt/python@3.11/bin/python3.11"
-                fi
-            fi
-            if [ -n "$PYTHON" ] && "$PYTHON" -c 'import sys; exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-                PY_OK=1
-            fi
-        fi
-
-        # Path 2: uv — no sudo, no admin, works on any account.
-        # Installs a prebuilt standalone Python to ~/.local/share/uv/python.
-        if [ "$PY_OK" != "1" ]; then
-            echo "Using uv (no-sudo Python installer) ..."
-            if ! command -v uv &>/dev/null; then
-                echo "Installing uv to ~/.local/bin ..."
-                curl -LsSf https://astral.sh/uv/install.sh | sh
-                export PATH="$HOME/.local/bin:$PATH"
-            fi
-            if ! command -v uv &>/dev/null; then
-                echo "FAIL: uv install did not succeed."
-                echo "Install Python 3.10+ manually from https://www.python.org/downloads/ and retry."
-                exit 1
-            fi
-            echo "Downloading Python 3.11 via uv ..."
-            uv python install 3.11
-            # Locate the installed python
-            UV_PY=$(uv python find 3.11 2>/dev/null || true)
-            if [ -z "$UV_PY" ] || [ ! -x "$UV_PY" ]; then
-                UV_PY=$(ls -1 "$HOME/.local/share/uv/python/"*"/bin/python3.11" 2>/dev/null | head -1)
-            fi
-            if [ -n "$UV_PY" ] && [ -x "$UV_PY" ]; then
-                PYTHON="$UV_PY"
-                PY_OK=1
-            else
-                echo "FAIL: uv installed but python3.11 binary not located."
-                exit 1
-            fi
-        fi
-
-        PY_VERSION=$("$PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-        echo "Now using $PYTHON $PY_VERSION"
-    else
-        echo "FAIL: Python 3.10+ required, found $PY_VERSION"
-        exit 1
-    fi
+    echo "FAIL: Python 3.10+ required, found $PY_VERSION"
+    exit 1
 fi
 
 # --- Check ensurepip (Debian/Ubuntu split it into python3-venv apt package) ---
@@ -206,45 +117,17 @@ if ! $PYTHON -c 'import ensurepip' &>/dev/null 2>&1; then
 fi
 
 # --- Create venv ---
-if [ "$IS_WINDOWS" -eq 1 ] && [ -f ".venv/Scripts/python.exe" ]; then
-    # Windows: skip venv recreation if python.exe exists (rm -rf unreliable due to file locking)
-    echo "Existing .venv found — reusing (Windows file locking prevents clean removal)"
-elif [ -d ".venv" ]; then
+if [ -d ".venv" ]; then
     echo "Existing .venv found — removing it for a clean install."
     rm -rf .venv
 fi
 
-if [ ! -d ".venv" ]; then
-    echo "Creating virtual environment at .venv ..."
-    if [ "$IS_WINDOWS" -eq 1 ]; then
-        # Windows: create without pip, bootstrap manually to avoid subprocess path issues
-        $PYTHON -m venv --without-pip .venv
-    else
-        $PYTHON -m venv .venv
-    fi
-fi
+echo "Creating virtual environment at .venv ..."
+$PYTHON -m venv .venv
 
 # --- Activate and install ---
-# Determine venv python path for explicit invocation
-if [ "$IS_WINDOWS" -eq 1 ] && [ -f ".venv/Scripts/python.exe" ]; then
-    source .venv/Scripts/activate
-    VENV_PYTHON=".venv/Scripts/python.exe"
-    # Bootstrap pip if missing (--without-pip on Windows)
-    if ! "$VENV_PYTHON" -m pip --version &>/dev/null 2>&1; then
-        echo "Bootstrapping pip in venv ..."
-        "$VENV_PYTHON" -m ensurepip --default-pip || true
-        if ! "$VENV_PYTHON" -m pip --version &>/dev/null 2>&1; then
-            echo "ensurepip did not install pip — falling back to get-pip.py"
-            "$VENV_PYTHON" -c "import urllib.request; urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', 'get-pip.py')"
-            "$VENV_PYTHON" get-pip.py
-            rm -f get-pip.py
-        fi
-        "$VENV_PYTHON" -m pip --version || { echo "ERROR: pip still missing after bootstrap" >&2; exit 1; }
-    fi
-else
-    source .venv/bin/activate
-    VENV_PYTHON="python3"
-fi
+source .venv/bin/activate
+VENV_PYTHON="python3"
 
 echo "Upgrading pip ..."
 "$VENV_PYTHON" -m pip install --upgrade pip --quiet
@@ -252,129 +135,92 @@ echo "Upgrading pip ..."
 echo "Installing aipass in editable mode (with dev, memory, llm, drive, bluesky extras) — this can take a few minutes while the memory wheels build ..."
 "$VENV_PYTHON" -m pip install -e ".[dev,memory,llm,drive,bluesky,host]"
 
-# --- Detect shadowing drone installs (Windows) ---
-# Issues #317 + #321: system-Python pip or legacy npm aipass-drone can shadow venv drone.exe.
-# Warn the user with precise uninstall commands; don't touch anything automatically.
-if [ "$IS_WINDOWS" -eq 1 ]; then
-    echo ""
-    echo "Checking for shadowing drone installs ..."
-
-    # System Python check (#317)
-    for sys_py in "python" "py -3" "python3"; do
-        if command -v $sys_py &>/dev/null; then
-            if $sys_py -m pip show aipass &>/dev/null 2>&1; then
-                # Don't match our own venv python
-                SYS_PY_PATH=$($sys_py -c "import sys; print(sys.executable)" 2>/dev/null || echo "")
-                if [ -n "$SYS_PY_PATH" ] && [[ "$SYS_PY_PATH" != *".venv"* ]]; then
-                    echo "  WARN: aipass is installed in system Python at $SYS_PY_PATH"
-                    echo "  This shadows the venv drone.exe on Windows PATH. To fix:"
-                    echo "    \"$SYS_PY_PATH\" -m pip uninstall aipass -y"
-                    break
-                fi
-            fi
-        fi
-    done
-
-    # Legacy npm aipass-drone check (#321)
-    NPM_BIN="$APPDATA/npm"
-    if [ -d "$NPM_BIN" ] && { [ -f "$NPM_BIN/drone" ] || [ -f "$NPM_BIN/drone.cmd" ] || [ -f "$NPM_BIN/drone.ps1" ]; }; then
-        echo "  WARN: Legacy npm drone scripts found in $NPM_BIN — these shadow venv drone.exe."
-        echo "  To fix:"
-        echo "    npm uninstall -g aipass-drone"
-        echo "    rm -f \"$NPM_BIN/drone\" \"$NPM_BIN/drone.cmd\" \"$NPM_BIN/drone.ps1\""
-    fi
-fi
-
 # --- Sandbox prerequisites (kernel FS boundary) ---
 echo ""
 echo "Checking sandbox prerequisites ..."
 
-if [ "$IS_WINDOWS" -eq 1 ] || [ "$IS_MACOS" -eq 1 ]; then
-    echo "  kernel sandbox: Linux-only for now, skipping"
+SB_MISSING=()
+
+# bwrap
+if command -v bwrap &>/dev/null; then
+    echo "  bwrap     ... $(bwrap --version 2>/dev/null || echo 'found')"
 else
-    SB_MISSING=()
+    echo "  bwrap     ... MISSING"
+    echo "    sudo apt install bubblewrap"
+    SB_MISSING+=("bwrap")
+fi
 
-    # bwrap
-    if command -v bwrap &>/dev/null; then
-        echo "  bwrap     ... $(bwrap --version 2>/dev/null || echo 'found')"
+# node
+if command -v node &>/dev/null; then
+    echo "  node      ... $(node --version 2>/dev/null)"
+else
+    echo "  node      ... MISSING"
+    echo "    Install Node.js: https://nodejs.org/"
+    SB_MISSING+=("node")
+fi
+
+# npm (needed for srt install)
+if command -v npm &>/dev/null; then
+    echo "  npm       ... $(npm --version 2>/dev/null)"
+else
+    echo "  npm       ... MISSING"
+    SB_MISSING+=("npm")
+fi
+
+# @anthropic-ai/sandbox-runtime — resolve via the real resolver (owned by
+# the hooks branch, handles node-prefix != npm-prefix layouts, DPLAN-0279)
+SRT_RESOLVER="$SCRIPT_DIR/src/aipass/hooks/apps/modules/_srt_resolve.mjs"
+if command -v node &>/dev/null && [ -f "$SRT_RESOLVER" ]; then
+    SRT_PATH=$(node "$SRT_RESOLVER" --resolve 2>/dev/null) || SRT_PATH=""
+    if [ -n "$SRT_PATH" ]; then
+        echo "  srt       ... $SRT_PATH"
     else
-        echo "  bwrap     ... MISSING"
-        echo "    sudo apt install bubblewrap"
-        SB_MISSING+=("bwrap")
-    fi
-
-    # node
-    if command -v node &>/dev/null; then
-        echo "  node      ... $(node --version 2>/dev/null)"
-    else
-        echo "  node      ... MISSING"
-        echo "    Install Node.js: https://nodejs.org/"
-        SB_MISSING+=("node")
-    fi
-
-    # npm (needed for srt install)
-    if command -v npm &>/dev/null; then
-        echo "  npm       ... $(npm --version 2>/dev/null)"
-    else
-        echo "  npm       ... MISSING"
-        SB_MISSING+=("npm")
-    fi
-
-    # @anthropic-ai/sandbox-runtime — resolve via the real resolver (owned by
-    # the hooks branch, handles node-prefix != npm-prefix layouts, DPLAN-0279)
-    SRT_RESOLVER="$SCRIPT_DIR/src/aipass/hooks/apps/modules/_srt_resolve.mjs"
-    if command -v node &>/dev/null && [ -f "$SRT_RESOLVER" ]; then
-        SRT_PATH=$(node "$SRT_RESOLVER" --resolve 2>/dev/null) || SRT_PATH=""
-        if [ -n "$SRT_PATH" ]; then
-            echo "  srt       ... $SRT_PATH"
-        else
-            echo "  srt       ... MISSING"
-            if command -v npm &>/dev/null; then
-                NPM_PREFIX=$(npm root -g 2>/dev/null)
-                echo "    Attempting: npm install -g @anthropic-ai/sandbox-runtime (into ${NPM_PREFIX:-npm global prefix})"
-                if npm install -g @anthropic-ai/sandbox-runtime 2>/dev/null; then
-                    echo "    srt       ... installed"
-                else
-                    echo "    Install failed (may need sudo). Run manually:"
-                    echo "      sudo npm install -g @anthropic-ai/sandbox-runtime"
-                    SB_MISSING+=("srt")
-                fi
+        echo "  srt       ... MISSING"
+        if command -v npm &>/dev/null; then
+            NPM_PREFIX=$(npm root -g 2>/dev/null)
+            echo "    Attempting: npm install -g @anthropic-ai/sandbox-runtime (into ${NPM_PREFIX:-npm global prefix})"
+            if npm install -g @anthropic-ai/sandbox-runtime; then
+                echo "    srt       ... installed"
             else
-                echo "    Install node+npm first, then: npm install -g @anthropic-ai/sandbox-runtime"
+                echo "    Install failed (may need sudo). Run manually:"
+                echo "      sudo npm install -g @anthropic-ai/sandbox-runtime"
                 SB_MISSING+=("srt")
             fi
+        else
+            echo "    Install node+npm first, then: npm install -g @anthropic-ai/sandbox-runtime"
+            SB_MISSING+=("srt")
         fi
-    elif ! command -v node &>/dev/null; then
-        echo "  srt       ... skipped (no node)"
-        SB_MISSING+=("srt")
-    else
-        # Not an optional tool: the resolver is a tracked file of this checkout.
-        # Its absence means the clone is incomplete, which is the one sandbox
-        # row that belongs in ACTION NEEDED (DPLAN-0409, the 2026-10-15 review).
-        echo "  srt       ... skipped (resolver script missing: $SRT_RESOLVER)"
-        SB_MISSING+=("srt")
-        ACTION_NEEDED+=("Checkout incomplete — $SRT_RESOLVER is a tracked file and is missing. Run: drone @git status, then drone @git fix, or re-run the install line to clone again")
     fi
+elif ! command -v node &>/dev/null; then
+    echo "  srt       ... skipped (no node)"
+    SB_MISSING+=("srt")
+else
+    # Not an optional tool: the resolver is a tracked file of this checkout.
+    # Its absence means the clone is incomplete, which is the one sandbox
+    # row that belongs in ACTION NEEDED (DPLAN-0409, the 2026-10-15 review).
+    echo "  srt       ... skipped (resolver script missing: $SRT_RESOLVER)"
+    SB_MISSING+=("srt")
+    ACTION_NEEDED+=("Checkout incomplete — $SRT_RESOLVER is a tracked file and is missing. Run: drone @git status, then drone @git fix, or re-run the install line to clone again")
+fi
 
-    # rg (ripgrep)
-    if command -v rg &>/dev/null; then
-        echo "  rg        ... $(rg --version 2>/dev/null | head -1)"
-    elif [ -f "$HOME/.local/bin/rg" ]; then
-        echo "  rg        ... $HOME/.local/bin/rg"
-    else
-        echo "  rg        ... MISSING"
-        echo "    sudo apt install ripgrep"
-        SB_MISSING+=("rg")
-    fi
+# rg (ripgrep)
+if command -v rg &>/dev/null; then
+    echo "  rg        ... $(rg --version 2>/dev/null | head -1)"
+elif [ -f "$HOME/.local/bin/rg" ]; then
+    echo "  rg        ... $HOME/.local/bin/rg"
+else
+    echo "  rg        ... MISSING"
+    echo "    sudo apt install ripgrep"
+    SB_MISSING+=("rg")
+fi
 
-    if [ ${#SB_MISSING[@]} -eq 0 ]; then
-        echo "  sandbox prereqs: READY"
-    else
-        # Optional (DPLAN-0407): AIPass runs without the kernel sandbox, so a missing
-        # tool is a line here, never an ACTION NEEDED item after "ready" (the owner's
-        # test 13: the install ended on a homework list of five optional tools).
-        echo "  sandbox: optional, not set up here (${SB_MISSING[*]} missing); AIPass runs without it — aipass doctor says how"
-    fi
+if [ ${#SB_MISSING[@]} -eq 0 ]; then
+    echo "  sandbox prereqs: READY"
+else
+    # Optional (DPLAN-0407): AIPass runs without the kernel sandbox, so a missing
+    # tool is a line here, never an ACTION NEEDED item after "ready" (the owner's
+    # test 13: the install ended on a homework list of five optional tools).
+    echo "  sandbox: optional, not set up here (${SB_MISSING[*]} missing); AIPass runs without it — aipass doctor says how"
 fi
 
 # --- Verify CLI entry points ---
@@ -468,26 +314,11 @@ resolve_git_identity() {
 }
 resolve_git_identity
 
-# --- User's display name (round-2 install UX, 43ff5873: collected once here so
-# the registry — and later the concierge greeting — already has it; the chat's
-# own name-ask becomes a fallback for whenever this is skipped or empty) ---
+# --- User's display name: git user.name, else $USER, never asked (the owner: no
+# questions about the user). Stored as registry metadata.user; the install report
+# carries it as user_name and devpulse greets by it. ---
 resolve_user_name() {
-    USER_NAME=""
-    if is_interactive; then
-        if [ -n "$GIT_NAME" ]; then
-            read -r -p "What should we call you? [$GIT_NAME] (Enter to accept, or 'skip'): " USER_NAME
-            if [ -z "$USER_NAME" ]; then
-                USER_NAME="$GIT_NAME"
-            elif [ "$USER_NAME" = "skip" ]; then
-                USER_NAME=""
-            fi
-        else
-            read -r -p "What should we call you? (Enter to skip): " USER_NAME
-            # set -e trap: a bare `[ ... ] && ...` as the function's last command
-            # returns 1 when the test fails, killing the whole install silently.
-            if [ "$USER_NAME" = "skip" ]; then USER_NAME=""; fi
-        fi
-    fi
+    USER_NAME="${GIT_NAME:-${USER:-}}"
 }
 resolve_user_name
 
@@ -573,66 +404,15 @@ bootstrap_branch() {
 import sys
 from pathlib import Path
 
-from aipass.spawn.apps.handlers.class_registry import get_template_dir, resolve_template_class
-from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
+from aipass.spawn import render_bootstrap_trinity
 
 branch_name, target_path, citizen_class, role = sys.argv[1:5]
-target = Path(target_path)
-
-# PASSPORT SEEDS (TDPLAN-0017): a branch shipping a tracked seed births its real
-# identity from it — machine-local ids minted fresh, same as spawn's seed door.
-# The template loop below only fills what this lane didn't write. A seed that
-# fails validation kills the install loudly — never a silent template fallback.
-import json
-import uuid
-
-from aipass.spawn.apps.handlers.seed_ops import find_seed, mint_and_write
-
-minted = []
-seed_file = find_seed(target)
-passport_dest = target / ".trinity" / "passport.json"
-if seed_file is not None and not passport_dest.exists():
-    registry = json.loads(Path("AIPASS_REGISTRY.json").read_text(encoding="utf-8"))
-    mint_and_write(
-        seed_file,
-        passport_dest,
-        branch_name=branch_name,
-        registry_id=registry.get("metadata", {}).get("id", ""),
-        citizen_id=str(uuid.uuid4()),
-    )
-    minted.append("passport.json(seed)")
-
-# "manager" (devpulse) isn't template-selectable — resolve_template_class picks
-# its real shape via identity.role, same logic `spawn update` heals against.
-template_class = resolve_template_class({"citizen_class": citizen_class, "role": role})
-template_dir = get_template_dir(template_class)
-
-try:
-    from aipass.memory.apps.handlers.tracking.tab_renderer import render_all_meta_tabs
-    meta_tabs = render_all_meta_tabs()
-except ImportError:
-    meta_tabs = {}
-
-replacements = build_replacements_dict(
-    target, branch_name, role=role, purpose=role, citizen_class=citizen_class, meta_tabs=meta_tabs,
+# Spawn owns the render: seed first, then the class template for each missing
+# file. A bad seed or an unreadable registry kills the install loudly.
+written = render_bootstrap_trinity(
+    branch_name, Path(target_path), citizen_class, role, Path("AIPASS_REGISTRY.json"),
 )
-# build_replacements_dict's MODULE default is bare (shared with non-package
-# project_agent branches) — every src/aipass/* branch's real import path
-# carries the aipass. package prefix.
-replacements["MODULE"] = f"aipass.{replacements['branchname']}"
-
-created = list(minted)
-for filename in ("passport.json", "local.json", "observations.json"):
-    dest = target / ".trinity" / filename
-    if dest.exists():
-        continue
-    src = template_dir / ".trinity" / filename
-    content = replace_placeholders(src.read_text(encoding="utf-8"), replacements)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(content, encoding="utf-8")
-    created.append(filename)
-
-print(",".join(created))
+print(",".join(written))
 PYEOF
 )
         if [ -n "$rendered" ]; then
@@ -673,8 +453,8 @@ bootstrap_branch "trigger"  "$SCRIPT_DIR/src/aipass/trigger" "specialist" "Event
 bootstrap_branch "spawn"    "$SCRIPT_DIR/src/aipass/spawn" "specialist" "Branch lifecycle management"
 bootstrap_branch "devpulse" "$SCRIPT_DIR/src/aipass/devpulse" "manager" "Orchestration hub and coordination"
 bootstrap_branch "memory"   "$SCRIPT_DIR/src/aipass/memory" "specialist" "Vector memory bank"
-bootstrap_branch "aipass"   "$SCRIPT_DIR/src/aipass/aipass" "specialist" "Concierge — init, doctor, profile, onboarding"
-bootstrap_branch "hooks"    "$SCRIPT_DIR/src/aipass/hooks" "specialist" "Hook engine — cross-platform hook dispatch and per-project config"
+bootstrap_branch "aipass"   "$SCRIPT_DIR/src/aipass/aipass" "specialist" "Machine concierge — host and OS diagnosis, doctor, installer, fleet health"
+bootstrap_branch "hooks"    "$SCRIPT_DIR/src/aipass/hooks" "specialist" "Hook engine — hook dispatch and per-project config"
 bootstrap_branch "backup"   "$SCRIPT_DIR/src/aipass/backup" "specialist" "Local-first backups, snapshots and restore"
 bootstrap_branch "commons"  "$SCRIPT_DIR/src/aipass/commons" "specialist" "Community social space — posts, comments, votes"
 bootstrap_branch "daemon"   "$SCRIPT_DIR/src/aipass/daemon" "specialist" "Task scheduler — per-branch schedule discovery"
@@ -683,11 +463,10 @@ bootstrap_branch "canary"   "$SCRIPT_DIR/src/aipass/canary" "specialist" "Perman
 
 # All 18 core branches in src/aipass/ are bootstrapped above. (A stale note here
 # once claimed backup/commons/daemon/skills were external — they returned to core
-# long ago; the drift canary caught the gap on the Windows runner, DPLAN-0262.)
+# long ago; the drift canary caught the gap, DPLAN-0262.)
 # THIS LIST IS A BIRTH-DAY HAZARD: every citizen @spawn creates must be added by
 # hand or fresh installs mint every passport except theirs — which is exactly how
-# @canary (born 2026-08-22) failed spawn's drift test on the Windows runner the
-# next morning. @spawn is told; the durable fix is deriving this list from the
+# @canary (born 2026-08-22) failed spawn's drift test the next morning. @spawn is told; the durable fix is deriving this list from the
 # tree the way the registry build already does.
 
 echo "  $BRANCH_COUNT branches bootstrapped"
@@ -722,6 +501,72 @@ if [ -f "$MEMORY_CONFIG_EXAMPLE" ] && [ ! -f "$MEMORY_CONFIG_FILE" ]; then
     echo "  memory_bank.config.json seeded from example"
 fi
 
+# --- Enroll this install in the hook trust registry (the owner's ruling, compass #221) ---
+# The hook engine only loads .aipass/hooks.json for projects listed in
+# ~/.aipass/trusted_projects.json. That gate exists to stop a FOREIGN project's
+# hostile hooks.json from running — it was never meant to distrust the config
+# this installer just wired up. Without this step a non-interactive install
+# finishes "clean" with every hook silently dead ("No .aipass/hooks.json found").
+# enroll() is idempotent (dict-key assignment + stale prune), so re-running
+# setup.sh refreshes the hash instead of duplicating the entry.
+echo ""
+echo "Enrolling this install in the hook trust registry ..."
+if "$VENV_PYTHON" - "$SCRIPT_DIR" << 'PYEOF'
+import sys
+
+from aipass.hooks import enroll
+
+sys.exit(0 if enroll(sys.argv[1]) else 1)
+PYEOF
+then
+    echo "  trusted -> $SCRIPT_DIR"
+else
+    echo "  WARN: could not enroll $SCRIPT_DIR — hooks stay inactive until it is trusted"
+    ACTION_NEEDED+=("Hook trust enrollment failed — run: aipass trust $SCRIPT_DIR")
+fi
+
+# --- Machine changes outside this checkout (owner rule: one explanation, one yes/no) ---
+# On a tty one question covers the block below; on no it is skipped whole. AIPASS_YES=1
+# (aipass install --yes) is the yes given up front. With no tty, AIPASS_NON_INTERACTIVE
+# or CI and no AIPASS_YES, nobody was asked, so it is a no: never a silent yes.
+confirm_machine_changes() {
+    MACHINE_CHANGES="yes"
+    if [ "${AIPASS_YES:-}" = "1" ]; then
+        return 0
+    fi
+    if ! is_interactive || [ -n "${CI:-}" ]; then
+        MACHINE_CHANGES="no"
+        echo ""
+        echo "  Machine changes skipped: no terminal to ask on and no --yes."
+        ACTION_NEEDED+=("Machine changes skipped (no --yes): hooks, shell rc, AIPASS_HOME, symlinks. Run: aipass install --yes, or $SCRIPT_DIR/setup.sh on a terminal")
+        return 0
+    fi
+    echo ""
+    echo "Setup now changes these things outside $SCRIPT_DIR:"
+    echo "  - ~/.claude/settings.json: AIPass hooks, env and deny rules (backed up first)"
+    echo "  - ~/.claude/commands/memo.md"
+    echo "  - ~/.bashrc: a claude() boot shim, AIPASS_HOME, and a PATH line if needed; ~/.profile: AIPASS_HOME"
+    echo "  - Codex hooks and config pins, the OpenCode plugin (only if they are installed)"
+    echo "  - drone/aipass symlinks in /usr/local/bin (sudo) or ~/.local/bin"
+    local answer=""
+    read -r -p "Make these changes? [Y/n]: " answer || answer="n"
+    case "$answer" in
+        ""|y|Y|yes|Yes|YES) return 0 ;;
+    esac
+    MACHINE_CHANGES="no"
+    echo "  Skipped. Until you run $SCRIPT_DIR/setup.sh again and answer yes:"
+    echo "    - Claude Code, Codex and OpenCode run without AIPass hooks: no memory injection, no gates"
+    echo "    - 'drone' and 'aipass' are not on PATH: use $SCRIPT_DIR/.venv/bin/drone"
+    echo "    - projects outside this checkout cannot find it (no AIPASS_HOME in your shell)"
+    ACTION_NEEDED+=("Machine changes skipped (hooks, shell rc, symlinks): run $SCRIPT_DIR/setup.sh and answer yes to make them")
+}
+confirm_machine_changes
+
+SYMLINK_SKIPPED=0
+LINUX_SYMLINK_DIR=""
+# === Gated block start: runs only when MACHINE_CHANGES=yes (not re-indented: heredocs) ===
+if [ "$MACHINE_CHANGES" = "yes" ]; then
+
 # --- Install Claude Code hooks ---
 # One door writes ~/.claude/settings.json at install: refresh_provider_hooks below
 # (hooks, env, permissions, scalars), which backs the file up and leaves a receipt
@@ -747,34 +592,10 @@ else
     echo "Skipping Claude hooks (bridge not found at src/aipass/hooks/apps/handlers/bridges/claude.py)"
 fi
 
-# --- Enroll this install in the hook trust registry (the owner's ruling, compass #221) ---
-# The hook engine only loads .aipass/hooks.json for projects listed in
-# ~/.aipass/trusted_projects.json. That gate exists to stop a FOREIGN project's
-# hostile hooks.json from running — it was never meant to distrust the config
-# this installer just wired up. Without this step a non-interactive install
-# finishes "clean" with every hook silently dead ("No .aipass/hooks.json found").
-# enroll() is idempotent (dict-key assignment + stale prune), so re-running
-# setup.sh refreshes the hash instead of duplicating the entry.
-echo ""
-echo "Enrolling this install in the hook trust registry ..."
-if "$VENV_PYTHON" - "$SCRIPT_DIR" << 'PYEOF'
-import sys
-
-from aipass.hooks.apps.modules.door_trust_registry import enroll
-
-sys.exit(0 if enroll(sys.argv[1]) else 1)
-PYEOF
-then
-    echo "  trusted -> $SCRIPT_DIR"
-else
-    echo "  WARN: could not enroll $SCRIPT_DIR — hooks stay inactive until it is trusted"
-    ACTION_NEEDED+=("Hook trust enrollment failed — run: aipass trust $SCRIPT_DIR")
-fi
-
 # --- Install claude() boot shim (attach-if-live / start-in-tmux) ---
 # Ships via the .gitignore negation (#666). Idempotent: the installer checks for
 # its marker before appending to the shell rc, and resolves the venv Python from
-# its own location (POSIX/Windows/fallback). Composes with presence_gate seeding.
+# its own location. Composes with presence_gate seeding.
 BOOT_SHIM="$SCRIPT_DIR/src/aipass/hooks/tools/install_boot_shim.sh"
 if [ -f "$BOOT_SHIM" ]; then
     echo "Installing claude() boot shim ..."
@@ -788,9 +609,14 @@ COMMANDS_SRC="$SCRIPT_DIR/.claude/templates"
 COMMANDS_DST="$HOME/.claude/commands"
 if [ -f "$COMMANDS_SRC/memo.md" ]; then
     mkdir -p "$COMMANDS_DST"
-    cp -n "$COMMANDS_SRC/memo.md" "$COMMANDS_DST/memo.md" 2>/dev/null && \
-        echo "  memo.md -> $COMMANDS_DST/ (installed)" || \
+    if [ -e "$COMMANDS_DST/memo.md" ]; then
         echo "  memo.md -> $COMMANDS_DST/ (already exists, skipped)"
+    elif cp "$COMMANDS_SRC/memo.md" "$COMMANDS_DST/memo.md"; then
+        echo "  memo.md -> $COMMANDS_DST/ (installed)"
+    else
+        echo "  memo.md -> $COMMANDS_DST/ FAILED (see the error above)"
+        ACTION_NEEDED+=("/memo command not installed: cp $COMMANDS_SRC/memo.md $COMMANDS_DST/memo.md")
+    fi
 fi
 
 # --- Install Codex CLI hooks ---
@@ -843,122 +669,34 @@ fi
 echo ""
 echo "Configuring cross-project access ..."
 
-if [ "$IS_WINDOWS" -eq 1 ]; then
-    # Windows (Git Bash): write to ~/.bash_profile
-    PROFILE="$HOME/.bash_profile"
-    touch "$PROFILE"
+PROFILE="$HOME/.bashrc"
 
-    # AIPASS_HOME
-    if ! grep -q "AIPASS_HOME" "$PROFILE" 2>/dev/null; then
-        echo "" >> "$PROFILE"
-        echo "# AIPass — cross-project access" >> "$PROFILE"
-        echo "export AIPASS_HOME=\"$SCRIPT_DIR\"" >> "$PROFILE"
-        echo "  AIPASS_HOME added to $PROFILE"
-    else
-        echo "  AIPASS_HOME already in $PROFILE"
-    fi
-
-    # PATH (venv Scripts for Windows)
-    VENV_SCRIPTS="$SCRIPT_DIR/.venv/Scripts"
-    if ! grep -q ".venv/Scripts" "$PROFILE" 2>/dev/null; then
-        echo "export PATH=\"$VENV_SCRIPTS:\$PATH\"" >> "$PROFILE"
-        echo "  PATH updated in $PROFILE (drone available globally)"
-    else
-        echo "  PATH already includes venv in $PROFILE"
-    fi
-
-    # PYTHONUTF8
-    if ! grep -q "PYTHONUTF8" "$PROFILE" 2>/dev/null; then
-        echo "export PYTHONUTF8=1" >> "$PROFILE"
-        echo "  PYTHONUTF8=1 added to $PROFILE"
-    fi
-
-    # Export for current session too
-    export AIPASS_HOME="$SCRIPT_DIR"
-    export PATH="$VENV_SCRIPTS:$PATH"
-    export PYTHONUTF8=1
-
-    # PowerShell profile wrapper — makes `drone @branch cmd` work from PowerShell
-    # without @ being consumed by PS splatting operator. See issue #340.
-    PS_PROFILE_DIR="$HOME/Documents/WindowsPowerShell"
-    PS_PROFILE="$PS_PROFILE_DIR/Microsoft.PowerShell_profile.ps1"
-    mkdir -p "$PS_PROFILE_DIR"
-    if [ ! -f "$PS_PROFILE" ] || ! grep -q "AIPass drone wrapper" "$PS_PROFILE" 2>/dev/null; then
-        cat >> "$PS_PROFILE" <<'PSWRAP'
-
-# AIPass drone wrapper — preserves @branch args that PowerShell would otherwise splat
-function drone {
-    $exe = Join-Path $env:AIPASS_HOME '.venv\Scripts\drone.exe'
-    if (-not (Test-Path $exe)) { Write-Error "drone.exe not found at $exe"; return }
-    $raw = $MyInvocation.Line.Trim()
-    if ($raw -match '^drone\s+(.+)$') {
-        $argsPart = $Matches[1]
-        $argsPart = ($argsPart -split '\s*\|\s*')[0].TrimEnd()
-        cmd /c "`"$exe`" $argsPart"
-    } else { & $exe }
-}
-PSWRAP
-        echo "  PowerShell drone wrapper written to $PS_PROFILE"
-    else
-        echo "  PowerShell drone wrapper already in $PS_PROFILE"
-    fi
+# AIPASS_HOME
+if ! grep -q "AIPASS_HOME" "$PROFILE" 2>/dev/null; then
+    echo "" >> "$PROFILE"
+    echo "# AIPass — cross-project access" >> "$PROFILE"
+    echo "export AIPASS_HOME=\"$SCRIPT_DIR\"" >> "$PROFILE"
+    echo "  AIPASS_HOME added to $PROFILE"
 else
-    # Linux/macOS: write to the user's shell rc.
-    # macOS default shell has been zsh since Catalina (2019) — stock macOS
-    # will not source ~/.bashrc, so exports there are invisible. Pick the
-    # right rc based on $SHELL on Mac; leave Linux behavior as-is (~/.bashrc).
-    if [ "$IS_MACOS" -eq 1 ]; then
-        case "${SHELL:-}" in
-            */zsh) PROFILE="$HOME/.zshrc" ;;
-            */bash) PROFILE="$HOME/.bash_profile" ;;   # Mac bash login shell sources .bash_profile, not .bashrc
-            *) PROFILE="$HOME/.zshrc" ;;               # zsh is the macOS default; sensible fallback
-        esac
-    else
-        PROFILE="$HOME/.bashrc"
-    fi
-
-    # AIPASS_HOME
-    if ! grep -q "AIPASS_HOME" "$PROFILE" 2>/dev/null; then
-        echo "" >> "$PROFILE"
-        echo "# AIPass — cross-project access" >> "$PROFILE"
-        echo "export AIPASS_HOME=\"$SCRIPT_DIR\"" >> "$PROFILE"
-        echo "  AIPASS_HOME added to $PROFILE"
-    else
-        echo "  AIPASS_HOME already in $PROFILE"
-    fi
-
-    # ~/.bashrc returns early when not interactive; ~/.profile reaches every login shell (Codex's shell snapshot, cron).
-    if [ "$IS_MACOS" -eq 0 ] && [ -f "$HOME/.profile" ]; then
-        if ! grep -q "AIPASS_HOME" "$HOME/.profile" 2>/dev/null; then
-            echo "" >> "$HOME/.profile"
-            echo "# AIPass — cross-project access (login shells, interactive or not)" >> "$HOME/.profile"
-            echo "export AIPASS_HOME=\"$SCRIPT_DIR\"" >> "$HOME/.profile"
-            echo "  AIPASS_HOME added to $HOME/.profile"
-        else
-            echo "  AIPASS_HOME already in $HOME/.profile"
-        fi
-    fi
-
-    # Mac: ensure ~/.local/bin is on PATH so the drone symlink resolves.
-    # Linux already symlinks into /usr/local/bin (already on PATH everywhere).
-    if [ "$IS_MACOS" -eq 1 ]; then
-        if ! grep -q '\.local/bin' "$PROFILE" 2>/dev/null; then
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$PROFILE"
-            echo "  ~/.local/bin added to PATH in $PROFILE"
-        else
-            echo "  ~/.local/bin already on PATH in $PROFILE"
-        fi
-        export PATH="$HOME/.local/bin:$PATH"
-    fi
-
-    export AIPASS_HOME="$SCRIPT_DIR"
+    echo "  AIPASS_HOME already in $PROFILE"
 fi
 
-# --- Create global symlinks for CLI tools (Linux/macOS only) ---
+# ~/.bashrc returns early when not interactive; ~/.profile reaches every login shell (Codex's shell snapshot, cron).
+if [ -f "$HOME/.profile" ]; then
+    if ! grep -q "AIPASS_HOME" "$HOME/.profile" 2>/dev/null; then
+        echo "" >> "$HOME/.profile"
+        echo "# AIPass — cross-project access (login shells, interactive or not)" >> "$HOME/.profile"
+        echo "export AIPASS_HOME=\"$SCRIPT_DIR\"" >> "$HOME/.profile"
+        echo "  AIPASS_HOME added to $HOME/.profile"
+    else
+        echo "  AIPASS_HOME already in $HOME/.profile"
+    fi
+fi
+
+# --- Create global symlinks for CLI tools ---
 # #660: never SILENTLY hijack a global 'drone'/'aipass' that points at a
 # DIFFERENT install. safe_symlink skips a different-target link (loud warning)
 # unless --force-symlink; --no-symlink opts out of symlinking entirely.
-SYMLINK_SKIPPED=0
 safe_symlink() {
     # safe_symlink <src> <dest> [sudo]  ->  0 linked · 1 skipped(diff target) · 2 ln failed
     local src="$1" dest="$2" use_sudo="${3:-}" existing=""
@@ -990,33 +728,9 @@ echo ""
 if [ "$SKIP_SYMLINK" = "yes" ]; then
     echo "Skipping global CLI symlinks (--no-symlink)."
     echo "  'drone'/'aipass' resolve from $SCRIPT_DIR/.venv/bin — add it to PATH to use them."
-elif [ "$IS_WINDOWS" -eq 1 ]; then
-    echo "Windows: drone available via PATH (set above)"
-elif [ "$IS_MACOS" -eq 1 ]; then
-    # Mac: symlink into ~/.local/bin (user-writable, no sudo needed).
-    # PATH export for ~/.local/bin is handled in the profile block above.
-    echo "Creating user symlinks in ~/.local/bin ..."
-    VENV_BIN="$SCRIPT_DIR/.venv/bin"
-    LOCAL_BIN="$HOME/.local/bin"
-    mkdir -p "$LOCAL_BIN"
-
-    for cmd in drone aipass; do
-        if [ -f "$VENV_BIN/$cmd" ]; then
-            rc=0
-            safe_symlink "$VENV_BIN/$cmd" "$LOCAL_BIN/$cmd" || rc=$?
-            if [ "$rc" -eq 0 ]; then
-                echo "  $LOCAL_BIN/$cmd -> $VENV_BIN/$cmd"
-            elif [ "$rc" -eq 2 ]; then
-                echo "  WARN: Could not create symlink for $cmd"
-                echo "  Manual fix: ln -sf $VENV_BIN/$cmd $LOCAL_BIN/$cmd"
-            fi
-        fi
-    done
 else
     echo "Creating global symlinks ..."
     VENV_BIN="$SCRIPT_DIR/.venv/bin"
-    LINUX_SYMLINK_DIR=""
-
     for cmd in drone aipass; do
         if [ -f "$VENV_BIN/$cmd" ]; then
             rc=0
@@ -1045,11 +759,17 @@ else
                 elif [ "$rc" -eq 2 ]; then
                     echo "  WARN: Could not create symlink for $cmd"
                     echo "  Manual fix: ln -sf $VENV_BIN/$cmd $LOCAL_BIN/$cmd"
+                    ACTION_NEEDED+=("No global '$cmd' command: both symlinks failed. Run: ln -sf $VENV_BIN/$cmd $LOCAL_BIN/$cmd")
                 fi
             fi
         fi
     done
 fi
+
+fi
+# === Gated block end ===
+
+export AIPASS_HOME="$SCRIPT_DIR"
 
 if [ "$SYMLINK_SKIPPED" -gt 0 ]; then
     echo ""
@@ -1058,69 +778,54 @@ if [ "$SYMLINK_SKIPPED" -gt 0 ]; then
     ACTION_NEEDED+=("$SYMLINK_SKIPPED global symlink(s) left untouched — rerun with --force-symlink to repoint them here")
 fi
 
+# --- Action items for the install report (read by `aipass install --finish`) ---
+mkdir -p "$SCRIPT_DIR/.aipass"
+{
+    if [ ${#ACTION_NEEDED[@]} -gt 0 ]; then printf '%s\n' "${ACTION_NEEDED[@]}"; fi
+    if [ "$GIT_IDENTITY_SKIPPED" = "yes" ]; then
+        echo "Git identity skipped: commits fail until git config --global user.name and user.email are set"
+    fi
+} > "$SCRIPT_DIR/.aipass/setup_attention.txt"
+
 # --- Result ---
 echo ""
 if [ "$FAIL" -eq 0 ]; then
     echo "=== Setup complete ==="
     echo ""
-    if [ "$IS_WINDOWS" -eq 1 ]; then
-        echo "drone is available in .venv/Scripts/ (or .venv/bin/ for Git Bash)."
-        echo "Add the appropriate directory to your PATH (see above)."
-    elif [ "$IS_MACOS" -eq 1 ]; then
-        echo "drone is available via ~/.local/bin symlink (on PATH)."
-    elif [ "${LINUX_SYMLINK_DIR:-}" = "/usr/local/bin" ]; then
-        echo "drone is available globally via /usr/local/bin symlink."
-    else
-        echo "drone is available via ~/.local/bin symlink (on PATH)."
-    fi
+    case "$LINUX_SYMLINK_DIR" in
+        /usr/local/bin) echo "drone is available globally via /usr/local/bin symlink." ;;
+        "") echo "drone has no global symlink: run $SCRIPT_DIR/.venv/bin/drone, or put that directory on PATH." ;;
+        *) echo "drone is available via $LINUX_SYMLINK_DIR symlink (on PATH in a new shell)." ;;
+    esac
     echo "sentry is accessed via: drone @sentry"
     echo "No venv activation needed for CLI commands."
     echo ""
-    echo "CLI integrations:"
-    echo "  Claude Code: hooks installed to ~/.claude/settings.json"
-    { command -v opencode &>/dev/null || [ -x "$HOME/.opencode/bin/opencode" ]; } && echo "  OpenCode:    plugin installed to ~/.config/opencode/plugins/aipass.ts"
-    command -v codex &>/dev/null && echo "  Codex CLI:   hooks merged into ${CODEX_HOME:-~/.codex}/hooks.json, pins in its config.toml (trust them once in codex)"
-    echo ""
+    if [ "$MACHINE_CHANGES" = "yes" ]; then
+        echo "CLI integrations:"
+        echo "  Claude Code: hooks installed to ~/.claude/settings.json"
+        { command -v opencode &>/dev/null || [ -x "$HOME/.opencode/bin/opencode" ]; } && echo "  OpenCode:    plugin installed to ~/.config/opencode/plugins/aipass.ts"
+        command -v codex &>/dev/null && echo "  Codex CLI:   hooks merged into ${CODEX_HOME:-~/.codex}/hooks.json, pins in its config.toml (trust them once in codex)"
+        echo ""
+    fi
 
-    # Last thing on screen before the chat launches — everything collected
-    # above (sudo hints, skipped identity, untouched symlinks) in one place.
     print_action_needed
 
-    # --- End in a welcome chat (DPLAN-0274: cold install ends in a conversation,
-    # not project creation — commit 71e5198d / TDPLAN-0014 built the chat machinery
-    # this reuses: `aipass install --chat-only` composes the same prompt via
-    # install.py's _build_install_prompt and launches it via launch_inline. Nothing
-    # is recomposed here in bash, no prompt text is duplicated.
     AIPASS_BIN=""
-    if [ "$IS_WINDOWS" -eq 1 ] && [ -f "$SCRIPT_DIR/.venv/Scripts/aipass.exe" ]; then
-        AIPASS_BIN="$SCRIPT_DIR/.venv/Scripts/aipass.exe"
-    elif [ "$IS_WINDOWS" -eq 1 ] && [ -f "$SCRIPT_DIR/.venv/Scripts/aipass" ]; then
-        AIPASS_BIN="$SCRIPT_DIR/.venv/Scripts/aipass"
-    elif [ -f "$SCRIPT_DIR/.venv/bin/aipass" ]; then
+    if [ -f "$SCRIPT_DIR/.venv/bin/aipass" ]; then
         AIPASS_BIN="$SCRIPT_DIR/.venv/bin/aipass"
     elif command -v aipass &>/dev/null; then
         AIPASS_BIN="$(command -v aipass)"
     fi
 
-    if [ "$RUN_CHAT" = "no" ]; then
-        echo "Skipping the welcome chat (--no-chat). Run 'claude' in $SCRIPT_DIR when ready, or 'aipass init run' in a fresh directory to start a project."
+    if [ "$RUN_FINISH" = "no" ]; then
+        :   # aipass install runs the tail itself
     elif [ -z "$AIPASS_BIN" ]; then
-        echo "WARN: aipass binary not found — open a new terminal and run 'aipass install --chat-only --path $SCRIPT_DIR'."
+        echo "ERROR: aipass binary not found: no health check, no install report. Open a new terminal and run: aipass install --finish --path $SCRIPT_DIR"
+        exit 1
     elif [ ! -t 0 ] || [ -n "${CI:-}" ]; then
-        echo "Non-interactive shell — skipping the welcome chat. Run 'claude' in $SCRIPT_DIR when ready, or 'aipass init run' in a fresh directory to start a project."
+        "$AIPASS_BIN" install --finish --non-interactive --path "$SCRIPT_DIR"
     else
-        # --path (not --here): setup.sh can be invoked from any CWD, but the home
-        # it built is always its own directory. ACTION_NEEDED items + the
-        # identity-skip flag pass through as env vars — composition of the
-        # concierge's opener stays in install.py's _build_install_prompt, the
-        # ONE place that builds it (round-2 install UX, a0f2351e/43ff5873).
-        if [ ${#ACTION_NEEDED[@]} -eq 0 ]; then
-            export AIPASS_ACTION_NEEDED=""
-        else
-            export AIPASS_ACTION_NEEDED="$(printf '%s\n' "${ACTION_NEEDED[@]}")"
-        fi
-        [ "$GIT_IDENTITY_SKIPPED" = "yes" ] && export AIPASS_IDENTITY_SKIPPED="1"
-        "$AIPASS_BIN" install --chat-only --path "$SCRIPT_DIR"
+        "$AIPASS_BIN" install --finish --path "$SCRIPT_DIR"
     fi
 else
     echo "=== Setup finished with errors ==="

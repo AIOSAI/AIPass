@@ -20,7 +20,7 @@ section("Results")
 ## Operation templates
 
 ```python
-from aipass.cli.apps.modules import operation_start, operation_complete
+from aipass.cli import operation_start, operation_complete
 
 operation_start("Processing", count=10)
 # ... do work ...
@@ -30,7 +30,7 @@ operation_complete(created=5, skipped=3, failed=0, time="1.2s")
 ## Fatal (exit on error)
 
 ```python
-from aipass.cli.apps.modules import fatal
+from aipass.cli import fatal
 
 fatal("Config file missing", suggestion="Run aipass init first")
 # Prints error message + suggestion, then calls sys.exit(1)
@@ -46,7 +46,7 @@ console.print("[bold cyan]Custom Rich output[/bold cyan]")
 
 ## The public API
 
-Exported from `apps/modules/__init__.py`:
+Handed out by the package door, `aipass.cli` (`__init__.py`), lazily on first access:
 
 | Function | Signature | Purpose |
 |----------|-----------|---------|
@@ -69,20 +69,22 @@ Exported from `apps/modules/__init__.py`:
 The last four are the exit seam; see [the exit seam](exit_seam.md) for the idiom
 to copy into your own `main()`.
 
-Import paths:
+Every name above, and the `display` module itself, come through the one door:
 
 ```python
-from aipass.cli import console, header, success, error, warning, section, escape  # Top-level
-from aipass.cli.apps.modules import header, fatal, operation_start        # Full set
-from aipass.cli.apps.modules.display import header                        # Direct module
+from aipass.cli import console, err_console, fatal, operation_start, resolve_exit
+from aipass.cli import display  # the module, for monkeypatching its consoles in tests
 ```
+
+A cross-branch import that reaches under `aipass.cli.apps` fails sentry's `front_door` standard.
 
 `error()`'s `suggestion` must not include a "Try:" prefix — `display.py` adds it.
 
 ## Two-tier design
 
-- `apps/modules/` — Public API. Import from here.
-- `apps/handlers/` — Internal implementation. Don't import directly.
+- `aipass.cli` — the door. Other branches import from here.
+- `apps/modules/` — where the door's names live. Inside this branch only.
+- `apps/handlers/` — internal implementation; the fence refuses a foreign importer.
 
 Passing a value that may contain square brackets? `header`, `success`, `section`
 and the templates parse markup and eat it silently — wrap the value in

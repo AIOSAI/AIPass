@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_structure_check.py
 # Description: Log Structure Standards Checker Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-06
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Log Structure Standards Checker Handler; the prose is log_structure.md."""
@@ -15,6 +15,7 @@ from typing import Dict
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.aipass_standards.logging_allowed import MAIL_LANE_LOG_NAMES
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, hash_lines, prose_lines
 
 # APPLIES_TO: message format is a product decision.
@@ -130,12 +131,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
 # Written into every dispatched branch's logs/ by @ai_mail's dispatch machinery, not by the branch;
 # counting them would make the audit's own delivery mechanism manufacture the observation.
-_MAIL_LANE_LOG_PREFIX = "dispatch_"
-
-
 def _is_mail_lane_artifact(log_file: Path) -> bool:
     """Return True if *log_file* belongs to @ai_mail's lane rather than the branch."""
-    return log_file.name.startswith(_MAIL_LANE_LOG_PREFIX)
+    return log_file.name in MAIL_LANE_LOG_NAMES
 
 
 def _system_log_dir(branch_path: Path) -> Path | None:

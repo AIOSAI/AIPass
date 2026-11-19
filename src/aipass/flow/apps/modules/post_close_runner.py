@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: post_close_runner.py
 # Description: Background post-close processing
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-02-14
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -12,37 +12,25 @@ Post-Close Background Runner
 Runs @memory archival as a background process.
 Called by close_plan.py via subprocess.Popen so the close command returns fast.
 
-Uses a lock file to prevent concurrent execution - if another instance is
-already running, this one exits silently (the running instance will pick up
-all unprocessed plans since it scans ALL of them). A lock file that cannot be
-created at all (still denied after lock_ops' retry budget) is not "already
-running": it is logged as an error and the runner exits non-zero.
+A held lock means a running instance, which scans every unprocessed plan, so
+this one exits 0; a lock that cannot be created is logged and exits 1.
 
 This script lives inside the flow branch so handler import guards allow it.
 """
 
 import sys
-import os
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
+from pathlib import Path
 
 
-from aipass.cli.apps.modules import console, error, success, warning
+from aipass.cli import console, error
 from aipass.flow.apps.handlers.cli.arg_gate import UnknownArgument, refuse_extra
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.flow.apps.handlers.mbank.process import process_closed_plans
 from aipass.flow.apps.handlers.runner.lock_ops import acquire_lock, release_lock
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-_PKG_ROOT = module_file(__file__).parents[3]
+_PKG_ROOT = Path(__file__).resolve().parents[3]
 FLOW_ROOT = _PKG_ROOT / "flow"
 MODULE_NAME = "post_close_runner"
 LOCK_FILE = FLOW_ROOT / ".post_close_runner.lock"
@@ -67,48 +55,6 @@ def handle_command(command: str, args: list) -> bool:
     except UnknownArgument as exc:
         error(exc.message, suggestion=exc.usage)
         raise SystemExit(1) from exc
-
-    json_handler.log_operation("post_close_processed", {"command": command, "args": args})
-
-    try:
-        acquired = acquire_lock(LOCK_FILE)
-    except OSError as e:
-        # A lock that cannot be created, read or removed is not a running instance.
-        logger.error("[%s] Could not create lock %s: %s", MODULE_NAME, LOCK_FILE, e)
-        error(f"Could not create lock: {e}")
-        return True
-    if not acquired:
-        warning("Another instance is already running")
-        return True
-
-    try:
-        process_closed_plans()
-
-        try:
-            import importlib
-
-            _plans_mod = importlib.import_module("aipass.memory.apps.modules.door_plans_processor")
-            result = _plans_mod.process_plans()
-            if result.get("success"):
-                count = result.get("files_processed", 0)
-                chunks = result.get("total_chunks", 0)
-                if count > 0:
-                    success(f"Vectorized {count} plan(s) ({chunks} chunks)")
-                logger.info("[%s] Plan vectorization: %s", MODULE_NAME, result)
-            else:
-                logger.error("[%s] Plan vectorization failed: %s", MODULE_NAME, result.get("error", "unknown"))
-                error(f"Vectorization failed: {result.get('error', 'unknown')}")
-        except Exception as e:
-            logger.error("[%s] Plan vectorization error: %s", MODULE_NAME, e)
-            error(f"Vectorization error: {e}")
-
-    except Exception as e:
-        logger.error(f"[{MODULE_NAME}] Background processing failed: {e}")
-        error(f"Processing failed: {e}")
-    finally:
-        release_lock(LOCK_FILE)
-
-    return True
 
 
 def print_introspection():
@@ -156,14 +102,14 @@ def main(argv: list[str]) -> int:
     if not acquired:
         return 0
 
+    json_handler.log_operation("post_close_processed", {"argv": argv[1:]})
     try:
         process_closed_plans()
 
         try:
-            import importlib
+            from aipass.memory import process_plans
 
-            _plans_mod = importlib.import_module("aipass.memory.apps.modules.door_plans_processor")
-            result = _plans_mod.process_plans()
+            result = process_plans()
             if result.get("success"):
                 logger.info("[%s] Plan vectorization: %s", MODULE_NAME, result)
             else:

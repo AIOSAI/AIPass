@@ -16,7 +16,7 @@ shelf is committed — write it as if it ships.
 | [project_config.md](project_config.md) | Which config runs (the AIPass root, ignored branch configs, external projects behind trust, never "no hooks"), the project template, the retired watchdog, and the release notice |
 | [git_gate.md](git_gate.md) | Raw git and gh refused for every seat (the admin seat included), the drone twins, the protected files, the rm gate (every delete is the admin seat's), and the settings backup |
 | [edit_gate.md](edit_gate.md) | The branch and project fences, the direction table, and the verified admin-seat exemption |
-| [bash_writes.md](bash_writes.md) | The scripted lane: which write targets a shell command can be seen to name, what it deliberately misses, and both Windows path spellings |
+| [bash_writes.md](bash_writes.md) | The scripted lane: which write targets a shell command can be seen to name, what it deliberately misses, and backslash-separated path spellings |
 | [trinity_memory_gate.md](trinity_memory_gate.md) | Memory writes: the shell refusal, the tripwire, and how a write is judged on what it authors |
 | [testwrite_gate.md](testwrite_gate.md) | The ruling that agents do not create tests, the policy file, and the fail-closed reasoning |
 | [prompt_injection.md](prompt_injection.md) | The injection caps and where each is read from, the loud fail-open, and the alert banners |

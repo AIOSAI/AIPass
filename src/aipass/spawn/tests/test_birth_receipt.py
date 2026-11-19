@@ -3,7 +3,7 @@
 # Description: Birth receipt lane — a newborn arrives carrying .trinity/.template_version.json
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/receipt_ops.py and the birth-receipt lane it drives through apps/modules/core.py."""
@@ -14,12 +14,13 @@
 
 import ast
 import json
+import os
 from pathlib import Path
 
 import pytest
 
-from aipass.hooks.apps.modules import grounding_content
-from aipass.prax.apps.modules import dashboard
+from aipass.hooks import BRANCH_CHAR_BUDGET
+import aipass.prax
 from aipass.spawn.apps.handlers import delete_ops, mint_ops, receipt_ops, update_ops
 from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
 from aipass.spawn.apps.modules import core
@@ -297,6 +298,10 @@ def test_retire_carries_the_whole_trinity_into_the_archive(tmp_path, monkeypatch
 
     monkeypatch.setattr(delete_ops, "find_registry", lambda *a, **k: registry_path)
     monkeypatch.setattr(delete_ops, "is_protected", lambda *a, **k: (False, ""))
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+    monkeypatch.setattr(
+        delete_ops, "is_verified_admin_caller", lambda: os.environ["AIPASS_CALLER_BRANCH"] == "devpulse"
+    )
 
     result = delete_ops.delete_branch("leaver", confirm=False)
 
@@ -338,13 +343,13 @@ def _readme_cap() -> int:
 def _prompt_cap() -> int:
     """@hooks' cap, read off the module that enforces it at render time."""
 
-    return int(getattr(grounding_content, "BRANCH_CHAR_BUDGET"))
+    return int(BRANCH_CHAR_BUDGET)
 
 
 def _dashboard_cap() -> int:
     """@prax's cap, read off its exported name."""
 
-    return int(getattr(dashboard, "DASHBOARD_CHAR_BUDGET"))
+    return int(getattr(aipass.prax, "DASHBOARD_CHAR_BUDGET"))
 
 
 def _memory_file_budgets() -> dict:

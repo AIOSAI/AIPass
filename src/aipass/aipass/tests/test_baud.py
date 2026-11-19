@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_baud.py
 # Description: Tests for aipass baud's command line: each value flag reaches the function it feeds
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/baud.py: the install and status flags as a user types them, and the phone print."""
@@ -25,7 +25,6 @@
 import hashlib
 import http.server
 import io
-import os
 import socket
 import stat
 import sys
@@ -50,7 +49,6 @@ from aipass.aipass.apps.modules import baud
 from aipass.aipass.apps.modules.install import handle_command as install_command
 
 _TAILNET_IP = "100.101.102.103"
-_POSIX_ONLY = pytest.mark.skipif(os.name == "nt", reason="the fake tailscale is a POSIX shell script")
 
 
 class _Recorder:
@@ -219,7 +217,6 @@ def tailscale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 class TestPhoneReadiness:
-    @_POSIX_ONLY
     def test_a_dry_run_reads_the_bind_and_runs_no_tailscale_and_no_probe(self, tailscale, face_server):
         answer, runs = tailscale
         answer(_TAILNET_IP)
@@ -228,7 +225,6 @@ class TestPhoneReadiness:
         assert (ready.tailnet, ready.server) == ("absent", "unprobed")
         assert not runs.exists()
 
-    @_POSIX_ONLY
     def test_tailscale_up_and_a_serving_face_are_read_as_such(self, tailscale, face_server):
         answer, runs = tailscale
         answer(f"{_TAILNET_IP}\\n")
@@ -236,7 +232,6 @@ class TestPhoneReadiness:
         assert (ready.tailnet, ready.server) == (_TAILNET_IP, "serving")
         assert runs.read_text(encoding="utf-8").split() == ["ip", "-4"]
 
-    @_POSIX_ONLY
     def test_tailscale_with_no_tailnet_address_is_down_not_an_address(self, tailscale, closed_port):
         answer, _runs = tailscale
         answer("", code=1)
@@ -802,18 +797,17 @@ class TestThePauseBeforeTheCode:
         assert out.rstrip().endswith(_PAIR_PLAN_NONE)
 
 
-class TestInstallEndsOnThePhone:
-    @_POSIX_ONLY
-    def test_a_dry_run_install_passes_the_tag_and_ends_on_the_phone_lines(
+class TestInstallPhoneThenReport:
+    def test_a_dry_run_install_passes_the_tag_and_prints_the_phone_lines_before_the_report_line(
         self, tmp_path, monkeypatch, capsys, tailscale
     ):
-        """--baud-tag reaches baud's install as tag; on --no-chat the phone's dry-run lines are the last print."""
+        """--baud-tag reaches baud's install as tag; the phone's dry-run lines come right before the report line."""
         answer, runs = tailscale
         answer(_TAILNET_IP)
         installs: list[dict] = []
         monkeypatch.setattr(baud, "install_phone_face", lambda **kw: installs.append(kw) or 0)
         monkeypatch.setattr(baud, "_api_host_config", lambda: _ApiStore())
-        args = ["--dry-run", "--no-chat", "--non-interactive", "--path", str(tmp_path / "AIPass")]
+        args = ["--dry-run", "--non-interactive", "--path", str(tmp_path / "AIPass")]
         args += ["--baud-tag", "v0.2.1", "--force-global-home"]
         # tmp_path is a throwaway home; install reads its override from sys.argv, as a user types it.
         monkeypatch.setattr(sys, "argv", ["aipass", "install", *args])
@@ -822,6 +816,9 @@ class TestInstallEndsOnThePhone:
         assert exc.value.code == 0
         assert installs == [{"tag": "v0.2.1", "dry_run": True, "best_effort": True}]
         out = capsys.readouterr().out.rstrip()
-        assert out.endswith(_PAIR_PLAN_NONE)
+        report = tmp_path / "AIPass" / "src" / "aipass" / "devpulse" / "dropbox" / "install_report.json"
+        phone, report_line = out.rsplit("\n", 1)
+        assert phone.rstrip().endswith(_PAIR_PLAN_NONE)
+        assert report_line == f"[dry-run] would write the install report: {report}"
         assert not runs.exists()
         assert not (tmp_path / "AIPass").exists()

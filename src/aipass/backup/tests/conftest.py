@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: conftest.py
 # Description: Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync
-# Version: 1.3.5
+# Version: 1.5.0
 # Created: 2026-06-12
-# Modified: 2026-10-17
+# Modified: 2026-11-16
 # =============================================
 
 """Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync."""
@@ -14,6 +14,7 @@ import tempfile
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
+import json
 import logging
 import sys
 import types
@@ -26,8 +27,15 @@ import pytest
 from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.handlers.drive import upload as drive_upload
 from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.project import registry
+from aipass.backup.apps.handlers.schedule import jobs
 from aipass.backup.apps.handlers.state import stop_flag
-from aipass.cli.apps.modules import display
+import aipass.ai_mail as ai_mail
+from aipass.cli import display
+
+# The verified-caller names' home module, reached through the door (its handlers fence a direct import).
+# The door reads the names there on every access, so a patch on it reaches caller.py's lazy import.
+VERIFIED_CALLER_HOME = sys.modules[ai_mail.is_verified_admin_caller.__module__]
 
 BRANCH_MODULE = "aipass.backup"
 
@@ -87,6 +95,44 @@ def mock_infrastructure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox
+
+
+@pytest.fixture(autouse=True)
+def schedule_file(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Every test's schedule file is temp, beside tmp_path, never in it: tmp_path is often a project root."""
+    path = tmp_path_factory.mktemp("daemon") / "schedule.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "branch": "@backup",
+                "jobs": [
+                    {"id": "wake-test", "enabled": False, "schedule": {"type": "interval", "interval_minutes": 5}}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(jobs, "SCHEDULE_PATH", path)
+    return path
+
+
+@pytest.fixture
+def tmp_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the project registry at a file under tmp_path, never the branch's real one."""
+    path = tmp_path / "registry" / "project_registry.json"
+    path.parent.mkdir()
+    monkeypatch.setattr(registry, "REGISTRY_PATH", path)
+    return path
+
+
+@pytest.fixture(autouse=True)
+def verified_seat(monkeypatch: pytest.MonkeyPatch) -> types.SimpleNamespace:
+    """Every test runs as the verified admin seat; a fence test sets ``caller`` and ``admin`` itself."""
+    seat = types.SimpleNamespace(caller="@devpulse", admin=True)
+    monkeypatch.setattr(VERIFIED_CALLER_HOME, "resolve_verified_caller", lambda: seat.caller)
+    monkeypatch.setattr(VERIFIED_CALLER_HOME, "is_verified_admin_caller", lambda: seat.admin)
+    return seat
 
 
 @pytest.fixture(autouse=True, scope="session")

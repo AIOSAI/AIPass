@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_differ.py
 # Description: Dashboard Template Diff Handler
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-02-25
-# Modified: 2026-11-08
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -16,17 +16,16 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 from aipass.prax.apps.handlers.fleet import fleet_rows
-from aipass.prax.apps.handlers.repo_root import resolved_file
 from aipass.prax.apps.handlers.dashboard.template_pusher import DEPRECATED_QUICK_STATUS_KEYS, DEPRECATED_SECTIONS
 
 logger = get_direct_logger()
 
-_PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # .../prax/
+_PRAX_ROOT = Path(__file__).resolve().parents[3]  # .../prax/
 
 
 def _find_repo_root() -> Path:

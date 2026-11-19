@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: gates.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Which hooks are gates, and how each one fails — in code, never in config
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-09-30
-# Modified: 2026-10-25
+# Modified: 2026-11-17
 # =============================================
 
 """Gates are not injectors (DPLAN-0356 item 2).
@@ -15,6 +15,8 @@ FAIL_CLOSED gates that crash answer BLOCK with BROKEN_GATE; anything in neither 
 """
 
 import copy
+
+from aipass.hooks.apps.handlers.json import json_handler
 
 _SECURITY = "aipass.hooks.apps.handlers.security"
 
@@ -174,4 +176,6 @@ def enforce(config: dict, gate_set: dict) -> dict:
             out[event] = target
         for name, entry in entries.items():
             target[name] = copy.deepcopy(entry)
+    forced = sum(len(entries) for entries in gate_set.values() if isinstance(entries, dict))
+    json_handler.log_operation("enforce", {"gates": forced})
     return out

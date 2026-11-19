@@ -3,7 +3,7 @@
 # Description: The trinity push lane — dry-run reporting and gated execution
 # Version: 1.2.0
 # Created: 2026-08-27
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Trinity Push Module
@@ -13,22 +13,14 @@ Gates: a fleet write needs ``--confirm`` (the owner reads the dry-run first), an
 alias of ``rollover push`` (the fleet-wide config reset keeps its own verb).
 """
 
-import os
-import sys
 from typing import List
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 from rich.panel import Panel
 from rich import box
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
+from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.templates import push_report
@@ -68,6 +60,12 @@ def handle_command(command: str, args: List[str]) -> bool:
                 "Run 'drone @memory push --dry-run' first — that report is the gate; then re-run with --confirm"
             ),
         )
+        return True
+
+    what = f"@{branch.lstrip('@')}'s .trinity memory" if branch else "every branch's .trinity memory"
+    refusal = None if dry_run else caller_gate.other_branch_refusal("push", branch, what)
+    if refusal:
+        error(refusal)
         return True
 
     _run_push(branch, dry_run)

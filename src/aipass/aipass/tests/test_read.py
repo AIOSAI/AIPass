@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_read.py
 # Description: Tests for aipass read — branch README rendering
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-08-07
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/read.py — aipass read command."""
@@ -20,6 +20,7 @@ from unittest.mock import patch
 import pytest
 
 from aipass.aipass.apps.modules.read import COMMAND, handle_command
+from aipass.cli import command_failed
 
 # Ensure encoding='utf-8' appears (PATTERN check)
 _ENCODING = "utf-8"
@@ -132,6 +133,22 @@ class TestRenderReadme:
                 with patch(f"{_MOD}.json_handler", autospec=True):
                     assert handle_command("read", ["drone"]) is True
         mock_read.assert_called_once_with(readme)
+
+    @pytest.mark.parametrize("args", [[], ["drone"]])
+    def test_no_aipass_home_is_an_error_naming_it_never_an_empty_roster(
+        self, args: list[str], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        refusal = RuntimeError("No AIPass home found: set AIPASS_HOME=/path/to/AIPass")
+        with (
+            patch(f"{_MOD}.list_branches", side_effect=refusal),
+            patch(f"{_MOD}.get_readme_path", side_effect=refusal),
+            patch(f"{_MOD}.json_handler", autospec=True),
+        ):
+            assert handle_command("read", args) is True
+        out, err = capsys.readouterr()
+        assert "set AIPASS_HOME=/path/to/AIPass" in err
+        assert "Run 'aipass read <branch>'" not in out
+        assert command_failed()
 
     def test_unreadable_file_errors(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """OSError on read surfaces as an error, not a crash.

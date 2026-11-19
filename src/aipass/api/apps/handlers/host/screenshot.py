@@ -10,7 +10,7 @@
 Host API Screenshot
 Reference: docs/host_agent_chat.md. The XDG desktop portal's interactive Screenshot call opens the desktop's picker
 on the host; the portal answers by D-Bus signal, and with no D-Bus client here this waits for the new file where
-the desktop saves it. shortcut: Linux desktops with xdg-desktop-portal only; macOS or Windows need their own call.
+the desktop saves it. shortcut: desktops with xdg-desktop-portal only.
 """
 
 import shutil

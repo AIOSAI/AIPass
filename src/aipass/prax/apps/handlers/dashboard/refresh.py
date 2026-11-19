@@ -16,7 +16,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 
 from .operations import cap_subject, create_fresh_dashboard, dashboard_lock, get_dashboard_path, save_dashboard
 from .status import calculate_quick_status, merge_quick_status

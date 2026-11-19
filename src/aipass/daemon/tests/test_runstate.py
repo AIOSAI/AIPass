@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_runstate.py
 # Description: Tests for the scheduler runstate — load/save, due-logic, catch-up, slots
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-15
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/schedule/runstate.py — the scheduler's runstate and its due-logic."""
@@ -12,7 +12,9 @@
 # sentry: no-test-needed(constant) — WINDOW_MINUTES' and MISSED_MARKER's values; the tests read them, never restate them
 # sentry: no-test-needed(stdlib) — json's parse of the runstate file and datetime.fromisoformat's accepted forms
 
+import importlib.util
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -307,6 +309,61 @@ class TestRotationDue:
         assert next_run is not None
         assert datetime.fromisoformat(next_run).strftime("%H:%M") == "05:00"
         assert datetime.fromisoformat(next_run) > datetime.now()
+
+
+# 2026-11-16 is a Monday.
+MONDAY_5AM = datetime(2026, 11, 16, 5, 0)
+WEEKLY = {"type": "weekly", "weekday": "monday", "time": "05:00", "catch_up": False}
+MONTHLY = {"type": "monthly", "day": 31, "time": "05:00", "catch_up": False}
+
+
+class TestWeeklyDue:
+    def test_due_in_the_window_on_its_weekday_and_on_no_other_day(self):
+        assert due(WEEKLY, MONDAY_5AM) is True
+        assert [d for d in range(1, 7) if due(WEEKLY, MONDAY_5AM + timedelta(days=d))] == []
+
+    def test_a_changed_weekday_fires_on_the_new_day_not_the_old_phase(self):
+        ran_monday = (MONDAY_5AM + timedelta(minutes=2)).isoformat()
+        moved = dict(WEEKLY, weekday="wednesday")
+        assert due(moved, MONDAY_5AM + timedelta(days=2)) is True
+        assert due(moved, MONDAY_5AM + timedelta(days=2), last_run=ran_monday) is True
+        assert due(moved, MONDAY_5AM + timedelta(days=7), last_run=ran_monday) is False
+
+    def test_a_changed_time_fires_at_the_new_time_not_the_old(self):
+        ran_last_week = (MONDAY_5AM - timedelta(days=7)).isoformat()
+        moved = dict(WEEKLY, time="18:00")
+        assert due(moved, MONDAY_5AM.replace(hour=18), last_run=ran_last_week) is True
+        assert due(moved, MONDAY_5AM, last_run=ran_last_week) is False
+
+    def test_a_window_wrapping_midnight_belongs_to_its_weekday(self):
+        just_after_midnight = dict(WEEKLY, time="00:05")
+        assert due(just_after_midnight, datetime(2026, 11, 15, 23, 55)) is True
+        assert due(just_after_midnight, datetime(2026, 11, 16, 23, 55)) is False
+
+
+class TestMonthlyDue:
+    def test_once_a_month_on_its_day(self):
+        december = [d for d in range(1, 32) if due(MONTHLY, datetime(2026, 12, d, 5, 0))]
+        assert december == [31]
+
+    def test_a_day_past_the_months_end_runs_on_its_last_day(self):
+        november = [d for d in range(1, 31) if due(MONTHLY, datetime(2026, 11, d, 5, 0))]
+        assert november == [30]
+        assert due(MONTHLY, datetime(2027, 2, 28, 5, 0)) is True
+        assert due(dict(MONTHLY, day=29), datetime(2028, 2, 29, 5, 0)) is True
+        assert due(dict(MONTHLY, day=29), datetime(2028, 2, 28, 5, 0)) is False
+
+
+class TestWeeklyAndMonthlyMissedWindow:
+    def test_a_closed_window_is_missed_on_its_day_and_on_no_other(self):
+        job = {"owner": "@x", "id": "j", "enabled": True, "schedule": WEEKLY, "prompt": "p"}
+        assert missed_window(job, {"jobs": {}}, MONDAY_5AM.replace(hour=9)) is True
+        assert missed_window(job, {"jobs": {}}, MONDAY_5AM.replace(hour=9) + timedelta(days=1)) is False
+
+    def test_catch_up_fires_late_on_its_day_and_on_no_other(self):
+        catching_up = dict(MONTHLY, catch_up=True)
+        assert due(catching_up, datetime(2026, 11, 30, 9, 0)) is True
+        assert due(catching_up, datetime(2026, 12, 1, 9, 0)) is False
 
 
 class TestUpdateRunstate:
@@ -668,3 +725,34 @@ def test_next_run_steps_from_the_window_that_fired(schedule, fired, expected):
     runstate = {"jobs": {}}
     update_job_runstate(runstate, "@a", "j", schedule, timestamp=fired)
     assert runstate["jobs"]["@a/j"]["next_run"] == expected
+
+
+class TestUnreadableTimesAreLogged:
+    """Medic sees every failure: an unreadable stored time still answers, and says so at warning."""
+
+    def test_an_unreadable_missed_window_is_queued_and_logged(self, caplog):
+        job = {"owner": "@a", "id": "j", "schedule": {"type": "daily", "time": "04:00", "catch_up": True}}
+        job["schedule"][recovery.CATCH_UP_MAX_AGE_FIELD] = 24
+        with caplog.at_level("WARNING"):
+            entry = recovery.queue_catch_up({}, job, ["not-a-time"], {"cause": "boot"}, now=datetime(2026, 11, 15))
+        assert entry is not None
+        assert entry["missed"] == ["not-a-time"]
+        assert "[recovery] missed window 'not-a-time' for @a/j unreadable" in caplog.text
+
+    def test_an_unreadable_last_run_still_heads_the_wake_and_is_logged(self, caplog):
+        job = {"owner": "@a", "id": "j", "schedule": {"type": "daily", "time": "04:00"}}
+        with caplog.at_level("WARNING"):
+            header = recovery.scheduled_header(job, {"last_run": "not-a-time"}, now=datetime(2026, 11, 15))
+        assert "Last run not-a-time." in header
+        assert "[recovery] last_run 'not-a-time' unreadable" in caplog.text
+
+
+class TestRunstateFileFollowsTheStateRoot:
+    def test_runstate_file_lives_under_the_state_root_not_the_package(self, tmp_path, monkeypatch):
+        """A fixed-depth climb writes daemon_runstate.json inside an installed wheel; it must follow the state root."""
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        spec = importlib.util.spec_from_file_location("runstate_fresh", str(runstate_mod.__file__))
+        assert spec is not None and spec.loader is not None
+        fresh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fresh)  # a fresh copy: the shared module keeps the conftest seam
+        assert Path(fresh.RUNSTATE_FILE) == tmp_path / "daemon" / "daemon_json" / "daemon_runstate.json"

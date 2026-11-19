@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config_loader.py
 # Description: Unified config loader for memory.config.json
-# Version: 1.8.0
+# Version: 1.8.1
 # Created: 2026-06-13
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -21,11 +21,9 @@ from typing import Any
 
 from aipass.memory.apps.handlers.json import budget
 from aipass.memory.apps.handlers.json import json_handler
-from aipass.prax import logger
-from aipass.memory.apps.handlers.repo_root import module_file
+from aipass.prax import branch_state_root, logger
 
-_MEMORY_ROOT = module_file(__file__).parents[3]
-_CONFIG_PATH = _MEMORY_ROOT / "memory_json" / "custom_config" / "memory.config.json"
+_CONFIG_PATH = branch_state_root("memory") / "memory_json" / "custom_config" / "memory.config.json"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "_meta": {
@@ -228,11 +226,20 @@ def _regenerate(reason: str) -> dict[str, Any]:
     return copy.deepcopy(DEFAULT_CONFIG)
 
 
+class ConfigUnreadable(ValueError):
+    """memory.config.json exists and cannot be used; raised (naming the file), never answered with defaults."""
+
+
+def _unreadable(detail: str) -> ConfigUnreadable:
+    """The one refusal sentence the config verbs print, with the reason after it."""
+    return ConfigUnreadable(f"Config at {_CONFIG_PATH} is unreadable — fix or move it aside, then try again: {detail}")
+
+
 def load() -> dict[str, Any]:
     """Load memory.config.json, deep-merged over DEFAULT_CONFIG.
 
     MISSING regenerates in full. EXISTS but unreadable for ANY reason (syntax, bytes, permissions,
-    shape) is never written over and never raises: log ERROR, serve defaults in memory.
+    shape) is never written over: log ERROR and raise ConfigUnreadable naming the file.
     """
     if not _CONFIG_PATH.exists():
         logger.info(f"[config_loader] No config at {_CONFIG_PATH}, regenerating from defaults")
@@ -247,7 +254,7 @@ def load() -> dict[str, Any]:
             {"path": str(_CONFIG_PATH), "error": f"{type(exc).__name__}: {exc}"},
             module_name="config_loader",
         )
-        return copy.deepcopy(DEFAULT_CONFIG)
+        raise _unreadable(f"{type(exc).__name__}: {exc}") from exc
 
     try:
         file_config = json.loads(raw)
@@ -258,7 +265,7 @@ def load() -> dict[str, Any]:
             {"path": str(_CONFIG_PATH), "error": str(exc)},
             module_name="config_loader",
         )
-        return copy.deepcopy(DEFAULT_CONFIG)
+        raise _unreadable(f"malformed JSON: {exc}") from exc
 
     if not isinstance(file_config, dict):
         # Valid JSON, wrong shape: deep_merge would raise on it.
@@ -268,7 +275,7 @@ def load() -> dict[str, Any]:
             {"path": str(_CONFIG_PATH), "found_type": type(file_config).__name__},
             module_name="config_loader",
         )
-        return copy.deepcopy(DEFAULT_CONFIG)
+        raise _unreadable(f"{type(file_config).__name__}, expected object")
 
     merged = deep_merge(DEFAULT_CONFIG, file_config)
     json_handler.log_operation(
@@ -338,7 +345,7 @@ def push_defaults_to_per_branch() -> dict[str, Any]:
     """Overwrite every per_branch entry with defaults (full replacement, not merge)."""
     try:
         per_branch = materialize_per_branch()
-    except RegistryUnreadable as exc:
+    except (RegistryUnreadable, ConfigUnreadable) as exc:
         logger.error(f"[config_loader] Refusing push: {exc}")
         return {"success": False, "error": str(exc)}
     if not per_branch:
@@ -539,20 +546,23 @@ def get_branches_with_overrides() -> dict[str, Any]:
 
 def get_file_budgets() -> dict[str, Any]:
     """Return a private copy of the whole-file ceilings; ``entry_limits`` delegates here (one reader per key)."""
-    budgets = _as_dict(section("entry_limits").get("file_budgets"))
-    if not budgets:
-        logger.warning("[config_loader] No 'file_budgets' in config — serving the regeneration seed")
-        budgets = DEFAULT_CONFIG["entry_limits"]["file_budgets"]
+    budgets = section("entry_limits").get("file_budgets")
+    if not isinstance(budgets, dict) or not budgets:
+        # Absent keys are filled by the merge, so only a wrong-shape value in the file lands here.
+        raise ConfigUnreadable(f"entry_limits.file_budgets in {_CONFIG_PATH} is {budgets!r}, expected an object")
     return copy.deepcopy(budgets)
 
 
+_ABSENT = object()
+
+
 def get_draft_percent() -> int:
-    """Return the percent of a cap an agent should draft to; the seed's 80 when unusable, never removed."""
-    raw = section("entry_limits").get("draft_percent")
-    if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= 100:
-        if raw is not None:
-            logger.warning(f"[config_loader] entry_limits.draft_percent is not 1-100 ({raw!r}) — serving the seed")
+    """Return the percent of a cap an agent should draft to (absent: the merged seed's 80; unusable: raises)."""
+    raw = section("entry_limits").get("draft_percent", _ABSENT)
+    if raw is _ABSENT:  # a caller's config that never carried the key: the defined empty state
         return int(DEFAULT_CONFIG["entry_limits"]["draft_percent"])
+    if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= 100:
+        raise ConfigUnreadable(f"entry_limits.draft_percent in {_CONFIG_PATH} is not 1-100 ({raw!r})")
     return raw
 
 

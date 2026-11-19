@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_incremental_audit.py
 # Description: Equivalence + re-run-matrix tests for audit_branch_incremental
-# Version: 1.5.1
+# Version: 1.6.0
 # Created: 2026-07-31
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/audit/branch_audit.py's audit_branch_incremental and incremental_cache.py beside it."""
@@ -91,7 +91,6 @@ def _prepare(tmp_path, monkeypatch, files: dict) -> tuple:
     """Wire up an isolated branch_audit/incremental_cache pair for one test."""
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
     monkeypatch.setattr(incremental_cache, "CACHE_DIR", tmp_path / "sentry_json" / "audit_cache")
-    monkeypatch.setattr(incremental_cache, "LEGACY_CACHE_FILE", tmp_path / "sentry_json" / "audit_cache.json")
     monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
     monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
 
@@ -868,20 +867,6 @@ class TestThePerCheckerStampScopesAReRun:
         assert result["_cache_hit"] is False
         assert first == {"good.py", "main.py"}
 
-    def test_a_drive_letter_path_is_the_first_checkers_call_not_a_tagged_one(self, tmp_path):
-        """A Windows absolute path carries a colon, and the split told calls apart by colon."""
-        call_log = tmp_path / "calls.log"
-        call_log.write_text(
-            "C:/runner/work/apps/good.py\nsecond:C:/runner/work/apps/good.py\nbranchlevel:C:/runner/work\n",
-            encoding="utf-8",
-        )
-
-        first, second, branch_level = self._split(call_log)
-
-        assert first == {"good.py"}
-        assert second == {"good.py"}
-        assert branch_level == ["branchlevel:C:/runner/work"]
-
 
 _READER_CHECKER_TEMPLATE = """
 CALL_LOG = "__CALL_LOG__"
@@ -1031,9 +1016,8 @@ class TestTheCacheKeyDiscriminatesThePack:
 
 @pytest.fixture
 def cache_dir(tmp_path, monkeypatch):
-    """incremental_cache pointed at a tmp cache directory and legacy doc."""
+    """incremental_cache pointed at a tmp cache directory."""
     monkeypatch.setattr(incremental_cache, "CACHE_DIR", tmp_path / "audit_cache")
-    monkeypatch.setattr(incremental_cache, "LEGACY_CACHE_FILE", tmp_path / "audit_cache.json")
     return incremental_cache
 
 
@@ -1086,81 +1070,10 @@ class TestTheFilenameIsSafeOnEveryHost:
     def test_a_plain_key_keeps_its_name_readable(self):
         assert incremental_cache.entry_filename("memory").startswith("memory.")
 
-    def test_no_illegal_character_survives(self):
-        """':' cannot appear in a Windows filename, and every key carries '::'."""
-        name = incremental_cache.entry_filename("memory::pack=pytest_quality")
-
-        assert ":" not in name
-        assert "memory__pack" in name
-
     def test_two_keys_that_flatten_alike_get_different_files(self):
         assert incremental_cache.entry_filename("memory::no-bypass") != incremental_cache.entry_filename(
             "memory=no-bypass"
         )
-
-    def test_keys_differing_only_in_case_get_different_files(self):
-        """Windows and macOS filesystems are case-insensitive; the fleet has BACKUP."""
-        upper = incremental_cache.entry_filename("BACKUP")
-        lower = incremental_cache.entry_filename("backup")
-
-        assert upper.lower() != lower.lower()
-
-    def test_a_windows_device_name_is_prefixed_out_of_the_way(self):
-        assert incremental_cache.entry_filename("con").startswith("_con.")
-
-
-class TestTheLegacyFlatDocMigrates:
-    def _legacy(self, cache, branches):
-        cache.LEGACY_CACHE_FILE.write_text(json.dumps({"schema_version": 1, "branches": branches}), encoding="utf-8")
-
-    def test_every_entry_survives_the_split(self, cache_dir):
-        """47.7 MB of still-valid results must not cost a cold fleet scan."""
-        cache = cache_dir
-        self._legacy(cache, {"memory": {"stamp": "m"}, "drone::no-bypass": {"stamp": "d"}})
-
-        assert cache.migrate_legacy_cache() == 2
-        assert cache.load_branch_entry("memory")["stamp"] == "m"
-        assert cache.load_branch_entry("drone::no-bypass")["stamp"] == "d"
-
-    def test_the_flat_doc_is_retired_by_rename_never_deleted(self, cache_dir):
-        cache = cache_dir
-        self._legacy(cache, {"memory": {"stamp": "m"}})
-
-        cache.migrate_legacy_cache()
-
-        assert not cache.LEGACY_CACHE_FILE.exists()
-        assert list(cache.LEGACY_CACHE_FILE.parent.glob("audit_cache.retired-*.json"))
-
-    def test_migrating_twice_is_a_no_op(self, cache_dir):
-        cache = cache_dir
-        self._legacy(cache, {"memory": {"stamp": "m"}})
-        cache.migrate_legacy_cache()
-
-        assert cache.migrate_legacy_cache() == 0
-        assert cache.load_branch_entry("memory")["stamp"] == "m"
-
-    def test_a_newer_per_key_file_is_not_overwritten(self, cache_dir):
-        """A run under the new shape knows more than the doc it replaced."""
-        cache = cache_dir
-        cache.save_branch_entry("memory", {"stamp": "fresh"})
-        self._legacy(cache, {"memory": {"stamp": "stale"}})
-
-        cache.migrate_legacy_cache()
-
-        assert cache.load_branch_entry("memory")["stamp"] == "fresh"
-
-    def test_an_unreadable_flat_doc_migrates_nothing_and_still_retires(self, cache_dir):
-        cache = cache_dir
-        cache.LEGACY_CACHE_FILE.write_text("{not json", encoding="utf-8")
-
-        assert cache.migrate_legacy_cache() == 0
-        assert not cache.LEGACY_CACHE_FILE.exists()
-
-    def test_a_load_migrates_without_being_asked(self, cache_dir):
-        cache = cache_dir
-        self._legacy(cache, {"memory": {"stamp": "m"}})
-
-        assert cache.load_branch_entry("memory")["stamp"] == "m"
 
 
 class TestBranchLevelCheckerInputsInvalidateTheCache:

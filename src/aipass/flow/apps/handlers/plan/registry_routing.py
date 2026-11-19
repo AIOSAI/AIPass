@@ -3,7 +3,7 @@
 # Description: Plan-type Registry Routing Helpers
 # Version: 1.2.0
 # Created: 2026-07-28
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Plan-Type Registry Routing
@@ -18,11 +18,10 @@ from typing import Any, Dict
 from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
-from aipass.flow.apps.handlers.repo_root import module_file
 
 MODULE_NAME = "registry_routing"
 
-_PKG_ROOT = module_file(__file__).parents[4]
+_PKG_ROOT = Path(__file__).resolve().parents[4]
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 

@@ -1,25 +1,24 @@
 # =================== AIPass ====================
 # Name: runstate.py
 # Description: Daemon runstate tracking and due-logic for decentralized scheduler
-# Version: 1.8.0
+# Version: 1.9.1
 # Created: 2026-06-15
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """
 Daemon runstate — tracks last_run/next_run per job and evaluates due-ness.
 """
 
+import calendar
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import AbstractSet, Optional
 
-from aipass.prax import logger
+from aipass.prax import branch_state_root, logger
 from aipass.daemon.apps.handlers.json import json_handler
-from aipass.daemon.apps.handlers.module_root import module_file
 
-_DAEMON_ROOT = module_file(__file__).parents[3]  # src/aipass/daemon/
-RUNSTATE_FILE = _DAEMON_ROOT / "daemon_json" / "daemon_runstate.json"
+RUNSTATE_FILE = branch_state_root("daemon") / "daemon_json" / "daemon_runstate.json"
 
 
 def _empty_runstate() -> dict:
@@ -119,13 +118,34 @@ def _target_minutes(schedule: dict) -> Optional[int]:
     try:
         target_h, target_m = map(int, target_time.split(":"))
     except (ValueError, AttributeError) as e:
-        logger.info("[runstate] Daily time parse failed for %r: %s", target_time, e)
+        logger.warning("[runstate] Daily time parse failed for %r: %s", target_time, e)
         return None
     return target_h * 60 + target_m
 
 
+# A weekly job's weekday, spelled as date.weekday() counts: monday is 0.
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def _runs_on(schedule: dict, day: date) -> bool:
+    """Is *day* one of the job's days? Every day unless weekly or monthly.
+
+    A monthly day past the month's end means its last day, so a monthly job never skips a month.
+    """
+    sched_type = schedule.get("type")
+    if sched_type == "weekly":
+        return schedule.get("weekday") == WEEKDAYS[day.weekday()]
+    if sched_type == "monthly":
+        wanted = schedule.get("day")
+        if isinstance(wanted, bool) or not isinstance(wanted, int):
+            logger.warning("[runstate] Monthly day %r is not a day of the month, never due", wanted)
+            return False
+        return min(wanted, calendar.monthrange(day.year, day.month)[1]) == day.day
+    return True
+
+
 def _is_daily_due(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
-    """Check if a daily job is due (within +/-15 min window)."""
+    """Check if a daily, weekly or monthly job is due (within +/-15 min window, on one of its days)."""
     target_minutes = _target_minutes(schedule)
     if target_minutes is None:
         return False
@@ -133,6 +153,9 @@ def _is_daily_due(schedule: dict, last_run: Optional[str], now: datetime) -> boo
     target = _nearest_target(now, midnight + timedelta(minutes=target_minutes), timedelta(days=1))
     window = timedelta(minutes=WINDOW_MINUTES)
     if abs(now - target) > window:
+        return False
+    # The target's date, not now's: a window wrapping midnight belongs to the day its target falls on.
+    if not _runs_on(schedule, target.date()):
         return False
     return not _ran_since(last_run, target - window)
 
@@ -169,7 +192,7 @@ def _is_interval_due(schedule: dict, last_run: Optional[str], now: datetime) -> 
         elapsed = (now - last_dt).total_seconds() / 60
         return elapsed >= interval
     except (ValueError, TypeError) as e:
-        logger.info("[runstate] Interval last_run parse failed: %s", e)
+        logger.warning("[runstate] Interval last_run parse failed: %s", e)
         return True
 
 
@@ -202,7 +225,7 @@ RECOVERY_LANE_LIVE = False
 
 _DAILY_TYPES = frozenset({"daily", "rotation"})
 
-_WINDOWED_TYPES = frozenset({"daily", "rotation", "hourly"})
+_WINDOWED_TYPES = frozenset({"daily", "rotation", "hourly", "weekly", "monthly"})
 
 # Runstate key: the date whose miss was already reported, so MISSED logs once per job per day.
 MISSED_MARKER = "missed_logged_for"
@@ -223,6 +246,9 @@ def window_closed_unrun(schedule: dict, last_run: Optional[str], now: datetime) 
         return False
 
     if now.hour * 60 + now.minute <= close_minutes:
+        return False
+
+    if not _runs_on(schedule, now.date()):
         return False
 
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -491,6 +517,10 @@ def is_job_due(job: dict, runstate: dict, now: Optional[datetime] = None) -> boo
         "hourly": lambda: (
             _is_hourly_due(schedule, since_success, now) or _is_catch_up_due(schedule, since_success, now)
         ),
+        "weekly": lambda: _is_daily_due(schedule, since_success, now) or _is_catch_up_due(schedule, since_success, now),
+        "monthly": lambda: (
+            _is_daily_due(schedule, since_success, now) or _is_catch_up_due(schedule, since_success, now)
+        ),
         "interval": lambda: _is_interval_due(schedule, last_run, now),
         "once": lambda: _is_once_due(schedule, completed, now),
     }
@@ -509,32 +539,39 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
     """
     sched_type = schedule.get("type", "")
 
-    if sched_type in ("daily", "rotation"):
+    if sched_type in ("daily", "rotation", "weekly", "monthly"):
         target_time = schedule.get("time", "00:00")
         try:
             target_h, target_m = map(int, target_time.split(":"))
         except (ValueError, AttributeError) as e:
-            logger.info("[runstate] calc_next_run daily time parse failed: %s", e)
+            logger.warning("[runstate] calc_next_run daily time parse failed: %s", e)
             return None
         try:
             last_dt = datetime.fromisoformat(last_run_ts)
         except (ValueError, TypeError) as e:
-            logger.info("[runstate] calc_next_run daily last_run parse failed: %s", e)
+            logger.warning("[runstate] calc_next_run daily last_run parse failed: %s", e)
             return None
         today_target = last_dt.replace(hour=target_h, minute=target_m, second=0, microsecond=0)
-        return (_fired_occurrence(last_dt, today_target, timedelta(days=1)) + timedelta(days=1)).isoformat()
+        candidate = _fired_occurrence(last_dt, today_target, timedelta(days=1)) + timedelta(days=1)
+        # 31 days always reach a weekly or monthly day; past them the day is unreadable.
+        for _ in range(31):
+            if _runs_on(schedule, candidate.date()):
+                return candidate.isoformat()
+            candidate += timedelta(days=1)
+        logger.info("[runstate] calc_next_run: no day in 31 matches %r", schedule)
+        return None
 
     if sched_type == "hourly":
         target_m_str = schedule.get("time", "0")
         try:
             target_m = int(target_m_str)
         except (ValueError, TypeError) as e:
-            logger.info("[runstate] calc_next_run hourly time parse failed: %s", e)
+            logger.warning("[runstate] calc_next_run hourly time parse failed: %s", e)
             return None
         try:
             last_dt = datetime.fromisoformat(last_run_ts)
         except (ValueError, TypeError) as e:
-            logger.info("[runstate] calc_next_run hourly last_run parse failed: %s", e)
+            logger.warning("[runstate] calc_next_run hourly last_run parse failed: %s", e)
             return None
         this_hour = last_dt.replace(minute=target_m, second=0, microsecond=0)
         return (_fired_occurrence(last_dt, this_hour, timedelta(hours=1)) + timedelta(hours=1)).isoformat()
@@ -548,7 +585,7 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
             last_dt = datetime.fromisoformat(last_run_ts)
             return (last_dt + timedelta(minutes=interval)).isoformat()
         except (ValueError, TypeError) as e:
-            logger.info("[runstate] calc_next_run interval parse failed: %s", e)
+            logger.warning("[runstate] calc_next_run interval parse failed: %s", e)
             return None
 
     if sched_type == "once":

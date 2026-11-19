@@ -3,7 +3,7 @@
 # Description: Per-run size/file-count ceiling — refuses runaway backups loudly
 # Version: 1.0.0
 # Created: 2026-08-20
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """Per-run backup ceiling.
@@ -64,7 +64,7 @@ class CeilingBreach:
 
 def _offender_key(rel_path: str) -> str:
     """Collapse a relative file path to its reporting directory."""
-    parts = rel_path.replace("\\", "/").split("/")[:-1]
+    parts = rel_path.split("/")[:-1]
     if not parts:
         return "."
     return "/".join(parts[:_OFFENDER_DEPTH])

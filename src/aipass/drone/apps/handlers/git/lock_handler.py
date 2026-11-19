@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lock_handler.py
 # Description: Atomic lock management for git PR workflow
-# Version: 1.1.5
+# Version: 1.2.1
 # Created: 2026-03-17
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -15,13 +15,13 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from aipass.prax import logger
+from aipass.drone.apps.handlers.exceptions import RepoRootError
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.drone.apps.handlers.router_handler import caller_cwd, registries_in
+from aipass.drone.apps.handlers.router_handler import caller_cwd, registry_named_entries
 
 _LOCK_FILENAME = ".git_pr.lock"
 _STALE_THRESHOLD_SECONDS = 600
@@ -30,42 +30,11 @@ _STALE_THRESHOLD_SECONDS = 600
 _PROJECT_MARKERS = (".git", "pyproject.toml", "setup.py", "setup.cfg")
 
 
-def _pid_alive_windows(pid: int) -> bool:
-    """Windows-safe liveness check via OpenProcess + GetExitCodeProcess."""
-    import ctypes
-    from ctypes import wintypes
-
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    STILL_ACTIVE = 259
-
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        return False
-    try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return False
-        return exit_code.value == STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
-
-
 def _pid_alive(pid: int) -> bool:
-    """Return True if the process is alive. Platform-guarded: Windows uses
-    OpenProcess (os.kill on win32 calls TerminateProcess — kills the target).
+    """Return True if the process is alive.
 
     A check that fails raises (the caller reports "unchecked"); permission denied means alive.
     """
-    if sys.platform == "win32":
-        return _pid_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -83,11 +52,12 @@ def find_repo_root() -> Path:
     Any ``*_REGISTRY.json`` marks a root: external projects name theirs after themselves.
     With no CWD it never answers "unknown" (callers build a lock path from it): it
     uses find_registry's order, AIPASS_HOME then the walk up from this file.
+    Raises RepoRootError when the CWD is in no git repository and below no registry.
     """
     cwd = caller_cwd()
     current = cwd
     while current is not None and current != current.parent:
-        if registries_in(current):
+        if registry_named_entries(current):
             return current
         current = current.parent
 
@@ -95,11 +65,11 @@ def find_repo_root() -> Path:
         aipass_home = os.environ.get("AIPASS_HOME")
         if aipass_home:
             home = Path(aipass_home)
-            if home.is_dir() and registries_in(home):
+            if home.is_dir() and registry_named_entries(home):
                 return home
         here = Path(__file__).resolve()
         for parent in here.parents:
-            if registries_in(parent):
+            if registry_named_entries(parent):
                 return parent
         # CI's case: a clean checkout has no registry (gitignored). Never the deleted cwd.
         for parent in here.parents:
@@ -114,12 +84,13 @@ def find_repo_root() -> Path:
             text=True,
             cwd=str(cwd),
         )
-        if result.returncode == 0 and result.stdout.strip():
-            return Path(result.stdout.strip())
     except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning("find_repo_root: git rev-parse fallback failed, using CWD: %s", exc)
-
-    return cwd
+        logger.error("find_repo_root: git rev-parse could not run in %s: %s", cwd, exc)
+        raise RepoRootError(f"cannot find the repository root of {cwd}: git rev-parse could not run: {exc}") from exc
+    if result.returncode == 0 and result.stdout.strip():
+        return Path(result.stdout.strip())
+    logger.error("find_repo_root: %s is in no git repository and below no *_REGISTRY.json", cwd)
+    raise RepoRootError(f"{cwd} is not inside a git repository and no *_REGISTRY.json is above it")
 
 
 def release_lock(force: bool = False) -> dict:

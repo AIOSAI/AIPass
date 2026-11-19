@@ -18,13 +18,12 @@ touched, so a later resume in the branch continues where the agent stopped.
 import os
 import signal
 import subprocess
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.dispatch import register
 from aipass.ai_mail.apps.handlers.dispatch.pid_lock import check_lock, check_pid_alive
@@ -39,9 +38,6 @@ MONITOR_MARK = "dispatch_monitor"
 
 def is_monitor(pid: int) -> bool:
     """Whether pid runs the dispatch monitor: a lock's pid may be a pre-spawn parent or a reused number."""
-    if sys.platform == "win32":
-        # shortcut: Windows has no ps; the lock's live pid is trusted. Upgrade with a WMI query if Windows dispatches.
-        return True
     try:
         result = subprocess.run(["ps", "-ww", "-o", "args=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError) as e:
@@ -77,13 +73,6 @@ def _signal(pid: int, as_group: bool, sig: int) -> None:
 
 def _end_process_group(pid: int, grace: float) -> None:
     """TERM the monitor's group (the monitor and its agent), wait out the grace, then KILL what is left."""
-    if sys.platform == "win32":
-        subprocess.run(["taskkill", "/PID", str(pid), "/T"], capture_output=True, timeout=15)
-        deadline = time.monotonic() + grace
-        while check_pid_alive(pid) and time.monotonic() < deadline:
-            time.sleep(0.2)
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=15)
-        return
     # Both spawn lanes make the monitor a session leader; anything else gets the pid alone, never a stranger's group.
     try:
         as_group = os.getpgid(pid) == pid
@@ -144,8 +133,8 @@ def stop_dispatch(branch_path: Path, email: str, by: str) -> Tuple[bool, str, st
         entry = None
 
     _end_process_group(pid, GRACE_SECONDS)
-    # The group reads empty while the monitor is still exiting: on macOS it answers kill(pid, 0) and ps shows
-    # no Z yet, so a stop right behind the signal called a dead monitor alive (CI 2026-11-02).
+    # The group reads empty while the monitor is still exiting, so a stop right behind the signal
+    # called a dead monitor alive (CI 2026-11-02).
     deadline = time.monotonic() + EXIT_SETTLE_SECONDS
     while check_pid_alive(pid) and time.monotonic() < deadline:
         time.sleep(0.05)

@@ -33,11 +33,13 @@ drone @spawn delete @my_agent --retire --dry-run   # preview retiring a citizen
   added, JSON is deep-merged, `.py` is skipped by design, markdown is compared and reported
   but never written, and a branch's own `.updateignore` is honoured before every other rule.
 - **Retires citizens.** Archive the whole tree including its memories, then deregister. A
+  real delete runs from the verified admin seat only; a dry run previews from any seat. A
   registered citizen goes only with `--retire`, which archives its passport as unregistered.
   A path reaches a branch in any project; `retire-project` retires a whole project from the
   admin seat. Every removal leaves a row in `.ai_central/deletions.jsonl`.
 - **Keeps the registry true.** Scan, repair, relocate, and migrate passports to the current
-  schema; each write-capable lane previews first and needs an explicit flag to act.
+  schema; each write-capable lane previews first and needs an explicit flag to act. A real
+  run that rewrites another citizen is @spawn's or the verified admin seat's; previews are open.
 - **Owns the birth shape.** The template is the source of truth for what a citizen is, and a
   newborn is pinned to start inside every startup cap the fleet's other branches publish.
 
@@ -83,12 +85,12 @@ flags before parsing, routes a verb to the first module that claims it, and reso
 exit code so a refusal can never leave as success. `apps/modules/` holds one coordinator per
 surface — `core` (mint and adopt), `update`, `delete`, `retire_project`, `sync_registry`,
 `regenerate_registry`, `migrate_passports`, `export_seeds`, `repair`, `adopt_citizen` and `grant_admin` —
-each parsing arguments and delegating. Two door modules, `door_owner` and
-`door_class_registry`, are no commands: they re-export handler names for other branches,
-because `apps/handlers/__init__.py` is a fence that refuses a foreign importer.
+each parsing arguments and delegating. Other branches import from the package door,
+`from aipass.spawn import <name>`, because `apps/handlers/__init__.py` is a fence that
+refuses a foreign importer.
 `apps/handlers/` holds the implementation, grouped by
 concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verify`,
-`class_registry`, `docs_page`), the identity lanes (`registry`, `passport_migration`, `seed_ops`,
+`class_registry`, `bootstrap_render`), the identity lanes (`registry`, `passport_migration`, `seed_ops`,
 `receipt_ops`, `adoption_ops`), the engines (`update_ops`, `update_ignore`, `delete_ops`, `deletion_receipts`,
 `sync_registry_ops`, `regenerate_registry_ops`, `repair_ops`, `adopt_citizen_ops`), and the primitives
 (`atomic_write`, `metadata`, and the fleet json shim under `json/`).
@@ -98,8 +100,6 @@ concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verif
 template file and regenerate that manifest in the same pass. A newborn is born fenced: the
 template's `apps/handlers/__init__.py` is the fleet's fence template (v2.1), and
 its tests ship the fence pair `test_handlers_fence.py` and `support_fence.py`.
-`templates/docs_page.md`, the docs page skeleton, sits beside it so that no mint ever stamps it.
-
 The full directory tree lives in this branch's own prompt
 (`.aipass/aipass_local_prompt.md`) — one place, so it cannot disagree with itself.
 
@@ -128,20 +128,18 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 - **aipass.prax** — logging through `system_logger`, and the fleet json service that
   `apps/handlers/json/json_handler.py` binds as a byte-identical shim
 - **aipass.cli** — console output, refusal formatting and exit-code state
-- **aipass.aipass.shared** — `deep_merge` and `backup_json`, registry discovery, and the one
-  shared home detector used by the placeholder engine
+- **aipass.drone** — `is_registry_filename`, the one registry name check, and
+  `resolve_aipass_home`, the AIPass home every home reader here takes; no home is a refusal
 - **aipass.memory** (optional) — meta tabs at create, through its `door_tab_renderer`; the
   import is guarded and degrades to empty when it is unavailable
 
 ### Provides To
 
 - Every branch — creation, template updates, retirement, and citizenship itself
-- Every branch — the class-registry gateway for resolving a `citizen_class`
-- **@sentry** — the docs page skeleton its `docs_page` standard renders, read live through
-  the same gateway
+- Every branch — the class registry for resolving a `citizen_class`, through the package door
 - Registry CRUD on `AIPASS_REGISTRY.json` and any project's own `*_REGISTRY.json`
-- **@devpulse** — the owner check behind admin dispatch, through `door_owner`
-- **@aipass**, **@sentry** — the citizen classes and their refusals, through `door_class_registry`
+- **@devpulse** — the owner check behind admin dispatch, through the package door
+- **@aipass**, **@sentry** — the citizen classes and their refusals, through the package door
 
 ---
 

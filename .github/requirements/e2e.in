@@ -1,19 +1,9 @@
 # Outer build tooling for e2e-wheel.yml, hash-pinned (Scorecard:
 # Pinned-Dependencies).
 #
-# Target env: ubuntu-latest + windows-latest + macos-latest, Python 3.12.
+# Target env: ubuntu-latest, Python 3.12.
 # conftest.py builds the wheel + a clean venv internally; the outer env only
 # needs build + pytest.
-#
-# WHY colorama IS LISTED EXPLICITLY (do not "clean up"):
-# both build and pytest depend on colorama behind a platform marker
-# (`os_name == "nt"` / `sys_platform == "win32"`). pip-compile evaluates markers
-# against the machine it runs on, so compiling on Linux DROPS colorama from the
-# lock — and the windows-latest leg then dies under --require-hashes with
-# "In --require-hashes mode, all requirements must have their versions pinned".
-# Listing it as a direct requirement forces it into the lock with hashes.
-# colorama is a pure-python universal wheel (py2.py3-none-any, zero deps), so
-# installing it on the Linux/macOS legs is inert.
 #
 # Python 3.12 is likewise load-bearing: pytest's `exceptiongroup`/`tomli` and
 # build's `tomli` are gated on python_version < "3.11" and are absent here. If
@@ -23,4 +13,3 @@
 #   pip-compile --allow-unsafe --generate-hashes --no-emit-index-url --output-file=e2e.txt e2e.in
 build==1.6.1
 pytest==9.2.0
-colorama==0.4.6

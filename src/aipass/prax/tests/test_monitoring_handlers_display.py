@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitoring_handlers_display.py
 # Description: Unit tests for the monitor's command parsing and stream display
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/monitoring/interactive_filter.py and unified_stream.py, the command and display."""
@@ -16,9 +16,8 @@
 # sentry: no-test-needed(through_the_command) — print_hook_event(), covered by tests/test_display_resilience.py
 
 import io
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 from rich.console import Console
 
 from aipass.prax.apps.handlers.monitoring import interactive_filter, unified_stream
@@ -133,16 +132,6 @@ class TestGetHelpText:
 # =============================================
 
 
-@pytest.fixture
-def stream_log(monkeypatch) -> MagicMock:
-    """unified_stream is imported once at the top and prints through the real
-    console, read with capsys (prax, leg 11). Its logger is doubled where it
-    binds it, so no test writes live state."""
-    log = MagicMock()
-    monkeypatch.setattr(unified_stream, "logger", log)
-    return log
-
-
 def _colour_console(monkeypatch) -> io.StringIO:
     """A real Console on a buffer with colour forced, for this test alone.
 
@@ -154,7 +143,6 @@ def _colour_console(monkeypatch) -> io.StringIO:
     return buffer
 
 
-@pytest.mark.usefixtures("stream_log")
 class TestPrintEvent:
     """Tests for print_event()."""
 
@@ -195,7 +183,6 @@ class TestPrintEvent:
         assert "\x1b[37mXYZUNKNOWN " in buffer.getvalue()
 
 
-@pytest.mark.usefixtures("stream_log")
 class TestPrintCommandSeparator:
     """Tests for print_command_separator()."""
 

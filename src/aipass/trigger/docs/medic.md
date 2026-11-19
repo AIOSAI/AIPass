@@ -17,9 +17,9 @@ Error monitoring subsystem. Watches branch and system logs for errors, fingerpri
 2. **Branch not muted** — per-branch suppression
 3. **Count >= 2** — first occurrence suppressed, dispatch on recurrence
 4. **Recipient is not `@devpulse`** — the manager is protected from self-dispatch. The code gates on the literal recipient string `@devpulse` in `error_detected.py`
-5. **Branch in the declared fleet** — the target's email is in `fleet_branches()` from memory's door: core, resident and external citizens, re-read at most every 60 s (`REGISTERED_TTL_SECONDS`)
+5. **Branch in the declared fleet** — the target's email is in `fleet_branches()` from memory's door: core, resident and external citizens, re-read at most every 60 s (`REGISTERED_TTL_SECONDS`). An unreadable or absent registry holds every dispatch, records each in `medic_suppressed.jsonl`, and dispatches @spawn once per failure; a readable census re-arms that
 6. **Not suppressed + backoff elapsed** — `should_dispatch()` checks registry status first, then exponential backoff
-7. **Circuit breaker closed** — trips after 10 errors in 60s, 300s cooldown. It runs after the backoff check, so a half-open breaker's one probe goes to a fingerprint that would be sent. Every error past gate 3 still counts toward tripping, including one gate 6 refuses
+7. **Breaker gate** — `breaker_gate()`, shared with the CI red lane: a per-recipient cap of 5 distinct faults in 10 minutes and a fleet trip at 10 distinct mails in 60 s. It runs last, so it counts only mails that would go; a held mail rides in the recipient's next mail, and an opening mails @devpulse one summary. Rules in [error_registry.md](error_registry.md)
 
 Gates 6 and 7 are the Medic v2 path and run only when the error registry is available
 *and* the event carried a fingerprint. When it is not, the handler takes the **legacy
@@ -42,7 +42,7 @@ On successful dispatch: sends email via `deliver_email_to_branch()` then calls `
 - `errors stats` prints a **Silenced** count so the silent set is never invisible.
 - Only `suppressed` gates. `resolved` deliberately does **not** — a resolved error that recurs means the fix did not hold, which is genuine signal.
 - Wrong-suppress risk is handled by fingerprint precision, not by periodic re-wake machinery.
-- The status read fails open: a registry read error allows dispatch rather than silencing a real error.
+- An unreadable registry raises from the status read and from `report()`, and the file is left as found: a guess either way would silence or flood, and a blank answer written back would erase the registry.
 
 **Two mute classes, deliberately independent:**
 

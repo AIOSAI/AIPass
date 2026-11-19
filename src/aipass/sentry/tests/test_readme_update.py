@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_readme_update.py
 # Description: Template v1 model — readme_update module, readme_generator and readme_ops
-# Version: 2.3.1
+# Version: 2.3.3
 # Created: 2026-09-20
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/readme_update.py and the handlers it drives."""
@@ -17,7 +17,6 @@
 
 import json
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -28,13 +27,12 @@ from aipass.sentry.apps.modules import CommandRefused, readme_update
 
 
 # A read-only file is the only route a command has to a write failure, and it is
-# not one everywhere: Windows ignores the bit and root writes through it.
-_WRITE_BIT_HOLDS = sys.platform != "win32" and getattr(os, "geteuid", lambda: 1)() != 0
+# not one everywhere: root writes through it.
+_WRITE_BIT_HOLDS = os.geteuid() != 0
 
 
 def _set_writable(path: Path, writable: bool) -> None:
-    if sys.platform != "win32":
-        os.chmod(path, 0o644 if writable else 0o444)
+    os.chmod(path, 0o644 if writable else 0o444)
 
 
 @pytest.fixture
@@ -146,7 +144,7 @@ class TestUpdateRun:
         assert "Updated" in printed and "TREE" in printed
         assert "main.py" in (registered / "README.md").read_text(encoding="utf-8")
 
-    @pytest.mark.skipif(not _WRITE_BIT_HOLDS, reason="the write cannot be made to fail on this platform")
+    @pytest.mark.skipif(not _WRITE_BIT_HOLDS, reason="root writes through the write bit")
     def test_a_write_failure_is_reported_on_stderr_and_no_section_is_claimed(self, capsys, registered):
         """A run that errored must not also claim the sections it had already rendered."""
         readme = registered / "README.md"
@@ -321,7 +319,7 @@ class TestMarkerReplacement:
         """The replacement went to re.sub as a string, so C:\\Users read as the escape \\U (PR#774)."""
         # Joined, not written whole: this is a directory NAME carrying a
         # backslash-U, not a path anything opens, and a literal would read to
-        # the hardcoded_path checker as a real Windows home.
+        # the hardcoded_path checker as a real home directory.
         branch = tmp_path / "\\".join(("C:", "Users", "runner"))
         (branch / "apps").mkdir(parents=True)
         (branch / "apps" / "main.py").write_text("# entry\n", encoding="utf-8")

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch1.py
 # Description: Unit tests for 8 aipass_standards checkers
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py and seven batch-1 sibling checkers."""
@@ -21,6 +21,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from aipass.sentry.apps.handlers.bypass import utils as _bypass_utils
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE
 from aipass.sentry.apps.handlers.aipass_standards.architecture_check import (
     check_module as check_architecture,
 )
@@ -105,7 +106,7 @@ def test_cli_check_clean_passes(tmp_path):
     clean_file = modules_dir / "display.py"
     clean_file.write_text(
         '"""Display module."""\n\n'
-        "from aipass.cli.apps.modules.display import console\n\n"
+        "from aipass.cli import console\n\n"
         "def show():\n"
         '    """Show output."""\n'
         '    console.print("hello")\n',
@@ -460,3 +461,98 @@ def test_encapsulation_check_bypass_respected(tmp_path):
     bypass_rules = [{"standard": "encapsulation", "file": "bypassed.py"}]
     result = check_encapsulation(str(f), bypass_rules=bypass_rules)
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
+
+
+_DEEP_BODY = (
+    "    if x:\n        for a in x:\n            while a:\n"
+    "                with a:\n                    if a:\n                        return 1\n"
+)
+_TWO_DEEP = f'"""Doc."""\n\n\ndef deep_one(x):\n{_DEEP_BODY}\n\ndef deep_two(x):\n{_DEEP_BODY}'
+
+
+def _deep_nesting(tmp_path, **scope) -> dict:
+    """deep_nesting on apps/handlers/deep.py (depth-5 functions at lines 4 and 13) under one row of this scope."""
+    target = tmp_path / "apps" / "handlers" / "deep.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_TWO_DEEP, encoding="utf-8")
+    rules = [{"file": "apps/handlers/deep.py", "standard": "deep_nesting", "reason": "t", **scope}] if scope else []
+    return check_deep_nesting(str(target), bypass_rules=rules)
+
+
+def test_deep_nesting_a_line_row_waives_its_function_and_the_other_still_convicts(tmp_path):
+    """Mutant: the per-site ask drops line= in deep_nesting_check.py — killed."""
+    check = _deep_nesting(tmp_path, lines=[4])["checks"][0]
+    assert (check["passed"], check["message"]) == (
+        False,
+        "1 function exceed nesting limit: deep_two() depth 5 line 13",
+    )
+
+
+def test_deep_nesting_a_function_row_waives_the_functions_it_lists_only(tmp_path):
+    """Mutant: the per-site ask drops name= in deep_nesting_check.py — killed."""
+    one = _deep_nesting(tmp_path, functions=["deep_two"])["checks"][0]
+    both = _deep_nesting(tmp_path, functions=["deep_one", "deep_two"])
+    assert one["message"] == "1 function exceed nesting limit: deep_one() depth 5 line 4"
+    assert (both["checks"][0]["passed"], both["score"]) == (True, 100)
+
+
+def test_deep_nesting_with_no_row_names_every_site_and_a_whole_file_row_waives_all(tmp_path):
+    """Mutant: one waived site waives every site in deep_nesting_check.py — killed by the line-row pin."""
+    assert _deep_nesting(tmp_path)["checks"][0]["message"].endswith(
+        "deep_one() depth 5 line 4, deep_two() depth 5 line 13"
+    )
+    assert _deep_nesting(tmp_path, lines=None)["score"] == 100
+
+
+_TWO_COMMENTED = '"""Doc."""\n# logger.info("a")\ndef work():\n    """W."""\n    # logger.warning("b")\n    return 1\n'
+
+
+def _commented_logger(tmp_path, **scope) -> dict:
+    """commented_logger on apps/mod.py (commented calls at line 2, module level, and line 5, in work) under one row."""
+    target = tmp_path / "apps" / "mod.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_TWO_COMMENTED, encoding="utf-8")
+    rules = [{"file": "apps/mod.py", "standard": "commented_logger", "reason": "t", **scope}] if scope else []
+    return check_commented_logger(str(target), bypass_rules=rules)
+
+
+def _commented_message(tmp_path, **scope) -> tuple:
+    result = _commented_logger(tmp_path, **scope)
+    return result["passed"], result["checks"][0]["message"]
+
+
+def test_commented_logger_with_no_row_names_both_sites(tmp_path):
+    assert _commented_message(tmp_path) == (
+        False,
+        "2 commented-out logger call(s) on lines 2, 5 -- restore or remove",
+    )
+
+
+def test_commented_logger_a_line_row_waives_its_line_and_the_other_still_convicts(tmp_path):
+    assert _commented_message(tmp_path, lines=[2]) == (
+        False,
+        "1 commented-out logger call(s) on lines 5 -- restore or remove",
+    )
+
+
+def test_commented_logger_a_function_row_waives_the_lines_inside_it_only(tmp_path):
+    in_work = _commented_message(tmp_path, functions=["work"])
+    at_module = _commented_message(tmp_path, functions=[FILE_SCOPE])
+    assert in_work[1].startswith("1 commented-out logger call(s) on lines 2 ")
+    assert at_module[1].startswith("1 commented-out logger call(s) on lines 5 ")
+
+
+def test_commented_logger_every_site_waived_passes_and_a_whole_file_row_still_waives_all(tmp_path):
+    every = _commented_logger(tmp_path, lines=[2, 5])
+    assert (every["passed"], every["score"]) == (True, 100)
+    assert _commented_logger(tmp_path, lines=None)["checks"][0]["name"] == "Bypassed"
+
+
+def test_commented_logger_in_an_unparseable_file_only_a_line_row_reaches_a_site(tmp_path):
+    target = tmp_path / "apps" / "mod.py"
+    target.parent.mkdir(parents=True)
+    target.write_text('# logger.info("a")\ndef broken(\n', encoding="utf-8")
+    row = {"file": "apps/mod.py", "standard": "commented_logger", "reason": "t"}
+    by_scope = check_commented_logger(str(target), bypass_rules=[{**row, "functions": [FILE_SCOPE]}])
+    by_line = check_commented_logger(str(target), bypass_rules=[{**row, "lines": [1]}])
+    assert (by_scope["passed"], by_line["passed"]) == (False, True)

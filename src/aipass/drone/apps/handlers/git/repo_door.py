@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.12.0
+# Version: 1.13.0
 # Created: 2026-09-13
-# Modified: 2026-11-08
+# Modified: 2026-11-10
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -33,8 +33,7 @@ from aipass.drone.apps.handlers.router_handler import caller_cwd, caller_stamp
 
 REPO_FLAG = "--repo"
 
-# Nothing that encodes AIPass's own dev->PR->main train (merge, pr, smart-sync):
-# a project's PR flow is the project's choice, not this door's.
+# pr and merge read the repo's own branches; AIPass's lock, sync and pr_merged event never come through.
 DOOR_VERBS = (
     "status",
     "diff",
@@ -54,6 +53,8 @@ DOOR_VERBS = (
     "alerts",
     "remote",
     "init",
+    "pr",
+    "merge",
 )
 
 # gh's run, read side only; rerun, cancel, delete and download stay home-only.
@@ -171,6 +172,8 @@ def help_block() -> str:
         "  merge-upstream  --repo <path> [--theirs <path> ...]\n"
         "  tracked <path ...> | untrack [--recursive] <path ...>  --repo <path>  (paths repo-relative)\n"
         "  init --repo <path>  a new directory outside AIPass becomes a repo on main (init --help)\n"
+        "  pr <title> --repo <path>  push the checked-out branch, open its PR to the default branch (pr --help)\n"
+        "  merge <PR#> --repo <path> [--confirm]  merge it as a merge commit, no branch deleted (merge --help)\n"
         "  Runs the verb in another git repo (projects/baud, a clone outside the tree).\n"
         "  fetch fetches origin and prints ahead/behind against the branch's upstream, with\n"
         "  the commits on each side; nothing local moves. With no upstream configured it\n"
@@ -271,7 +274,7 @@ def admin_verdict() -> AdminVerdict:
     """
     try:
         # Lazy, so a dark lane refuses instead of breaking @git.
-        from aipass.ai_mail.apps.modules import door_verified_caller as rail
+        from aipass.ai_mail import is_verified_admin_caller, resolve_verified_caller
     except Exception as exc:
         logger.warning("git repo door: admin lane dark — verified-caller rail unavailable: %s", exc)
         return AdminVerdict(
@@ -281,8 +284,8 @@ def admin_verdict() -> AdminVerdict:
     # Stamped again here: the module route stamps, and a direct caller of the door gets the same rail.
     with caller_stamp():
         try:
-            caller = rail.resolve_verified_caller()
-            granted = bool(rail.is_verified_admin_caller())
+            caller = resolve_verified_caller()
+            granted = bool(is_verified_admin_caller())
         except Exception as exc:
             logger.warning("git repo door: admin verification raised, refusing: %s", exc)
             return AdminVerdict(

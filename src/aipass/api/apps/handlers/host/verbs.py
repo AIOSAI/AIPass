@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: verbs.py
 # Description: Host API Verb Handler — wake, kill, lock and new-project, each a proxy
-# Version: 1.1.2
+# Version: 1.2.1
 # Created: 2026-08-14
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -24,11 +24,8 @@ from aipass.api.apps.handlers.host import reads as host_reads
 from aipass.api.apps.handlers.host import fleet as host_fleet
 
 import aipass.drone as drone
-
-# @skills' published in-process door; lib/ is their public shape, not internals.
-from aipass.skills.lib.screen_lock import handler as screen_lock
-
-from aipass.aipass.apps.modules import new_project as project_door
+import aipass.skills as skills
+import aipass.aipass as project_door
 
 WAKE_TIMEOUT_SECONDS = 120
 
@@ -143,9 +140,9 @@ def kill_room(branch: str, project: str) -> Dict[str, Any]:
 
 
 def lock_screen() -> Dict[str, Any]:
-    """Lock the machine's screen. Never gated."""
-    # @skills' doctrine: lock must work from anywhere, so nothing is checked first.
-    result = screen_lock.lock_screen()
+    """Lock the machine's screen. The verb checks nothing; @skills refuses it while screen_lock is switched off."""
+    # The gate is @skills' off switch alone: a check here would be a second answer to whether lock may run.
+    result = skills.lock_screen()
 
     locked = bool(result.get("locked"))
     method = result.get("method")
@@ -153,8 +150,14 @@ def lock_screen() -> Dict[str, Any]:
     json_handler.log_operation("host_api_verb_lock", {"locked": locked, "method": method})
 
     if locked:
-        logger.info("[host_api] screen locked via %s", method)
         detail = f"Screen locked via {method}" if method else "Screen locked"
+        if result.get("reason") == skills.SCREEN_LOCK_REASON_SWITCHED_OFF:
+            logger.error("[host_api] screen locked via %s although @skills reports screen_lock switched off", method)
+        else:
+            logger.info("[host_api] screen locked via %s", method)
+    elif result.get("reason") == skills.SCREEN_LOCK_REASON_SWITCHED_OFF:
+        detail = _sentence(result.get("error")) or "The skill reported no detail"
+        logger.info("[host_api] screen lock refused, the skill is switched off: %s", detail)
     else:
         detail = _sentence(result.get("error")) or "The skill reported no detail"
         logger.error("[host_api] screen lock failed: %s", detail)
@@ -171,7 +174,7 @@ PROJECT_NAME_RULE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 PROJECT_NAME_SENTENCE = "A project name is a letter, then up to 63 more letters, digits, underscores or hyphens"
 PROJECT_EXISTS_PREFIX = "Project already exists"
 REGISTRY_SUFFIX = "_REGISTRY.json"
-SEAM_MISSING = "aipass.aipass.apps.modules.new_project publishes no create_project and TEMPLATES"
+SEAM_MISSING = "aipass.aipass publishes no create_project and TEMPLATES"
 
 
 class ProjectRefused(VerbRefused):

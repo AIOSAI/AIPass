@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runaway_handler.py
 # Description: Runaway log event handler with per-file cooldown gating
-# Version: 1.6.0
+# Version: 1.8.0
 # Created: 2026-07-14
-# Modified: 2026-10-24
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -21,16 +21,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from aipass.trigger.apps.config import TRIGGER_ROOT, append_trail, atomic_write_json, json_file_lock, trail_logger
+from aipass.prax import append_jsonl, logger
+from aipass.trigger.apps.config import TRIGGER_LOGS_DIR, atomic_write_json, json_file_lock
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers import medic_state
 from aipass.trigger.apps.handlers.json import json_handler
 
-DECISION_LOG = TRIGGER_ROOT / "logs" / "runaway_suppressed.jsonl"
-
-
-# Not prax: the watchers would read its line and fire it back; they skip `.jsonl`.
-logger = trail_logger(TRIGGER_ROOT / "logs" / "runaway_handler.jsonl")
+DECISION_LOG = TRIGGER_LOGS_DIR / "runaway_suppressed.jsonl"
 
 
 _REPO_ROOT = find_repo_root(caller="runaway_handler")
@@ -78,38 +75,32 @@ def _write_decision_log(outcome: str, reason: str, file_path: str, branch: str) 
         "file": file_path,
         "branch": branch,
     }
-    if not append_trail(DECISION_LOG, entry):
-        logger.warning(f"decision log write failed ({outcome}/{reason})")
+    append_jsonl(DECISION_LOG, entry)
 
 
 def _write_alert(
     file_path: str, severity: str, branch: str, rate: float, duration: float, forever: bool = False
 ) -> None:
     """Write an alert entry to .aipass/alerts.json."""
-    try:
-        expires_at = None if forever else (datetime.now() + timedelta(seconds=DEFAULT_ALERT_TTL_SECONDS)).isoformat()
-        alert = {
-            "id": str(uuid.uuid4()),
-            "source": "prax",
-            "severity": severity,
-            "title": f"Runaway log: {Path(file_path).name}",
-            "body": (
-                f"Log file {file_path} producing {rate:.0f} lines/min sustained {duration:.0f}s. Branch: {branch}."
-            ),
-            "created_at": datetime.now().isoformat(),
-            "expires_at": expires_at,
-        }
-        ALERTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with json_file_lock(ALERTS_FILE):
-            existing = {"alerts": []}
-            if ALERTS_FILE.exists():
-                raw = ALERTS_FILE.read_text(encoding="utf-8").strip()
-                if raw:
-                    existing = json.loads(raw)
-            existing.setdefault("alerts", []).append(alert)
-            atomic_write_json(ALERTS_FILE, existing)
-    except Exception as exc:
-        logger.warning(f"_write_alert failed: {exc}")
+    expires_at = None if forever else (datetime.now() + timedelta(seconds=DEFAULT_ALERT_TTL_SECONDS)).isoformat()
+    alert = {
+        "id": str(uuid.uuid4()),
+        "source": "prax",
+        "severity": severity,
+        "title": f"Runaway log: {Path(file_path).name}",
+        "body": (f"Log file {file_path} producing {rate:.0f} lines/min sustained {duration:.0f}s. Branch: {branch}."),
+        "created_at": datetime.now().isoformat(),
+        "expires_at": expires_at,
+    }
+    ALERTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with json_file_lock(ALERTS_FILE):
+        existing = {"alerts": []}
+        if ALERTS_FILE.exists():
+            raw = ALERTS_FILE.read_text(encoding="utf-8").strip()
+            if raw:
+                existing = json.loads(raw)
+        existing.setdefault("alerts", []).append(alert)
+        atomic_write_json(ALERTS_FILE, existing)
 
 
 def handle_runaway_log_detected(
@@ -196,7 +187,7 @@ def handle_runaway_log_detected(
 
         try:
             # Through ai_mail's published door, never its handlers.
-            from aipass.ai_mail.apps.modules.door_wake import wake_branch
+            from aipass.ai_mail import wake_branch
 
             wake_branch(recipient, fresh=False, sender="@trigger")
         except Exception as exc:

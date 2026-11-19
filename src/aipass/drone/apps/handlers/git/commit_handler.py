@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commit_handler.py
 # Description: Commit handler with scoped staging
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-05-12
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Commit handler with scoped staging."""
@@ -13,12 +13,13 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from aipass.prax import logger
 
 # Commit and plan subjects are the same glance, so one number: read prax's, never copy it.
-from aipass.prax.apps.modules.dashboard import SUBJECT_CAP
+from aipass.prax import SUBJECT_CAP
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 
@@ -76,10 +77,21 @@ def _find_branch_for_path(filepath: str, repo_root: Path) -> tuple[str, Path] | 
     return found
 
 
-def _ruff_bin(repo_root: Path) -> str | None:
-    """ruff on PATH, else the repo's own venv copy, else None."""
+# Read by the gate's refusal and by the tests, so the message and the lookup cannot drift apart.
+RUFF_MISSING = (
+    "Lint gate cannot run: ruff was not found beside the running Python, on PATH, or in {venv}.\n"
+    "Install the dev extra (setup.sh does: pip install -e '.[dev]'), then commit again.\n"
+    "Nothing was committed."
+)
+
+
+def find_ruff(repo_root: Path) -> str | None:
+    """ruff beside the running Python (drone's own venv), else on PATH, else the repo's venv copy, else None."""
+    beside = Path(sys.executable).parent / "ruff"
+    if beside.is_file():
+        return str(beside)
     venv_ruff = repo_root / ".venv" / "bin" / "ruff"
-    return shutil.which("ruff") or (str(venv_ruff) if venv_ruff.exists() else None)
+    return shutil.which("ruff") or (str(venv_ruff) if venv_ruff.is_file() else None)
 
 
 def _changed_python_files(repo_root: Path) -> list[str]:
@@ -99,10 +111,14 @@ def _lint_gate(repo_root: Path) -> tuple[dict | None, list[str]]:
 
     Returns the refusal (None when the gate passed) and the files ruff rewrote.
     """
-    ruff_bin = _ruff_bin(repo_root)
     targets = [p for p in ("src", "tests") if (repo_root / p).is_dir()]
-    if not ruff_bin or not targets:
+    if not targets:
         return None, []
+    ruff_bin = find_ruff(repo_root)
+    if not ruff_bin:
+        refusal = RUFF_MISSING.format(venv=repo_root / ".venv" / "bin")
+        logger.error("[commit] %s", refusal.splitlines()[0])
+        return {"stdout": "", "stderr": refusal, "exit_code": 1}, []
     lint_check = subprocess.run([ruff_bin, "check", *targets], capture_output=True, text=True, cwd=str(repo_root))
     if lint_check.returncode != 0:
         refusal = f"Lint errors — fix before committing (nothing was changed):\n{lint_check.stdout.strip()}"

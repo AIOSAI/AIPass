@@ -3,7 +3,7 @@
 # Description: Module orchestrator for the drone-broker daemon
 # Version: 1.0.1
 # Created: 2026-06-09
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Module orchestrator for the drone-broker daemon.
@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Optional
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.broker.daemon import BrokerDaemon
 
@@ -81,13 +81,7 @@ def _show_status() -> bool:
 
 def print_introspection() -> None:
     """Display module overview (no args)."""
-    try:
-        from aipass.cli.apps.modules.display import console as c
-    except ImportError:
-        logger.warning("CLI console not available, using fallback")
-        from rich.console import Console
-
-        c = Console()
+    from aipass.cli import console as c
 
     c.print()
     c.print("[bold cyan]broker Module[/bold cyan]")

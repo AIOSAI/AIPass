@@ -1,19 +1,20 @@
 # =================== AIPass ====================
 # Name: testwrite_targets.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Which write targets are NEW test files — the classification behind the test-write gate
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """Decides one question: is this path a test file that does not exist yet?"""
 
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 CONSOLE = err_console
 
@@ -81,6 +82,7 @@ def classify(paths: list[Path]) -> tuple[list[Path], list[Path]]:
         if not is_test_file(path):
             continue
         (created if is_new(path) else edited).append(path)
+    json_handler.log_operation("classify", {"targets": len(paths), "created": len(created), "edited": len(edited)})
     return created, edited
 
 

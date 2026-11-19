@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_gh_door.py
 # Description: Tests for the gh passthrough verbs, release edit, restore and the external-repo door (--repo)
-# Version: 1.9.0
+# Version: 1.9.2
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/git/repo_door.py, the gh verbs and release edit of apps/modules/git_module.py."""
@@ -94,10 +94,11 @@ class TestGhPassthroughRouting:
     @pytest.mark.parametrize(
         ("args", "argv"),
         [
-            (["watch", "1"], ["gh", "run", "watch", "1", "--interval", "60"]),
-            (["watch", "1", "-i", "5"], ["gh", "run", "watch", "1", "-i", "5"]),
-            (["watch", "1", "--interval", "5"], ["gh", "run", "watch", "1", "--interval", "5"]),
-            (["watch", "1", "--interval=5"], ["gh", "run", "watch", "1", "--interval=5"]),
+            (["watch", "1"], ["gh", "run", "watch", "1", "--interval", "60", "--exit-status"]),
+            (["watch", "1", "-i", "5"], ["gh", "run", "watch", "1", "-i", "5", "--exit-status"]),
+            (["watch", "1", "--interval", "5"], ["gh", "run", "watch", "1", "--interval", "5", "--exit-status"]),
+            (["watch", "1", "--interval=5"], ["gh", "run", "watch", "1", "--interval=5", "--exit-status"]),
+            (["watch", "1", "--exit-status"], ["gh", "run", "watch", "1", "--exit-status", "--interval", "60"]),
         ],
     )
     @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
@@ -180,7 +181,8 @@ class TestGhPassthroughHelp:
 # External-repo door — --repo <path>, admin seat only (DPLAN-0344)
 # ===========================================================================
 
-_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
+# The door: repo_door imports the rail through it at call time, so a patch on the package reaches it.
+_RAIL = "aipass.ai_mail"
 
 
 def _git(cwd: Path, *argv: str) -> str:
@@ -345,7 +347,7 @@ class TestRepoDoorRefusals:
     @pytest.mark.parametrize(
         ("command", "args", "expected"),
         [
-            ("merge", ["12", "--confirm", "--repo", "projects/ext"], repo_door.REFUSE_VERB.format(verb="merge")),
+            ("dev-pr", ["Title", "--repo", "projects/ext"], repo_door.REFUSE_VERB.format(verb="dev-pr")),
             ("status", ["--repo"], repo_door.REFUSE_NO_VALUE),
             ("status", ["--repo", "projects/ext", "--repo=projects/ext"], repo_door.REFUSE_TWICE),
             ("push", ["--force", "--repo", "projects/ext"], repo_door.REFUSE_PUSH_ARGS),
@@ -922,7 +924,10 @@ class TestRepoDoorRunReads:
         [
             (["list"], ["gh", "run", "list", "--repo", "AIOSAI/ext"]),
             (["view", "123", "--log-failed"], ["gh", "run", "view", "123", "--log-failed", "--repo", "AIOSAI/ext"]),
-            (["watch", "123"], ["gh", "run", "watch", "123", "--repo", "AIOSAI/ext", "--interval", "60"]),
+            (
+                ["watch", "123"],
+                ["gh", "run", "watch", "123", "--repo", "AIOSAI/ext", "--interval", "60", "--exit-status"],
+            ),
         ],
     )
     def test_the_door_hands_gh_the_origins_owner_name(

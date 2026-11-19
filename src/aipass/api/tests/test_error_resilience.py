@@ -3,7 +3,7 @@
 # Description: Error Resilience Tests (from sentry template)
 # Version: 1.0.0
 # Created: 2026-03-27
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py under missing, corrupt and empty files."""
@@ -59,35 +59,29 @@ def test_missing_file(tmp_path: Path) -> None:
 
 
 def test_corrupt_json(tmp_path: Path) -> None:
-    """Corrupt JSON on disk is handled gracefully — file is regenerated."""
+    """Corrupt JSON on disk raises InvalidDocument and the file is left untouched."""
     json_dir = _json_dir_as_path(tmp_path)
     json_dir.mkdir(parents=True, exist_ok=True)
     target = json_dir / "corrupt_data.json"
     target.write_bytes(b"\x00\x01NOT-JSON{{{broken")
 
-    result = JSON_HANDLER.ensure_json_exists("corrupt", "data")
-    assert result is True
+    with pytest.raises(JSON_HANDLER.InvalidDocument):
+        JSON_HANDLER.ensure_json_exists("corrupt", "data")
 
-    raw = target.read_text(encoding="utf-8")
-    data = json.loads(raw)
-    assert isinstance(data, dict)
-    assert "created" in data
-    assert "last_updated" in data
+    assert target.read_bytes() == b"\x00\x01NOT-JSON{{{broken"
 
 
 def test_empty_file(tmp_path: Path) -> None:
-    """An empty file (0 bytes) is handled gracefully."""
+    """An empty file (0 bytes) raises InvalidDocument and stays empty: no document is invented over it."""
     json_dir = _json_dir_as_path(tmp_path)
     json_dir.mkdir(parents=True, exist_ok=True)
     target = json_dir / "empty_log.json"
     target.write_text("", encoding="utf-8")
 
-    result = JSON_HANDLER.ensure_json_exists("empty", "log")
-    assert result is True
+    with pytest.raises(JSON_HANDLER.InvalidDocument):
+        JSON_HANDLER.ensure_json_exists("empty", "log")
 
-    raw = target.read_text(encoding="utf-8")
-    data = json.loads(raw)
-    assert isinstance(data, list)
+    assert target.read_bytes() == b""
 
 
 def test_nonexistent_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

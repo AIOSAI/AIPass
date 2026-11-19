@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: admin_grant.py
 # Description: Birth-certificate admin grant — keygen, mint (sign), verify (FPLAN-0401)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-12
-# Modified: 2026-10-17
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -25,12 +25,11 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.devpulse.apps.handlers.json import json_handler
-from aipass.devpulse.apps.handlers.module_root import module_file
 
-_BRANCH_ROOT = module_file(__file__).parents[3]
+_BRANCH_ROOT = Path(__file__).resolve().parents[3]
 
 DEFAULT_KEY_PATH = Path.home() / ".aipass" / "admin_grant.key"
-DEFAULT_CERT_PATH = _BRANCH_ROOT / "artifacts" / "birth_certificate.json"
+_CERT_REL = Path("artifacts") / "birth_certificate.json"
 
 ADMIN_HOLDER = "devpulse"  # constant by design — the grant is not parameterizable
 SIGNATURE_ALGO = "hmac-sha256"
@@ -72,15 +71,23 @@ def generate_key(key_path: Path = DEFAULT_KEY_PATH, force: bool = False) -> tupl
 
 
 def mint_grant(
-    cert_path: Path = DEFAULT_CERT_PATH,
+    cert_path: Path | None = None,
     key_path: Path = DEFAULT_KEY_PATH,
     granted_by: str = "owner",
+    registry_path: Path | None = None,
 ) -> tuple[bool, str]:
-    """Add the admin privilege block to devpulse's existing birth certificate and sign it; never creates one."""
+    """Add the admin privilege block to devpulse's existing birth certificate and sign it; never creates one.
+
+    With no ``cert_path`` the certificate is the one at devpulse's registry-recorded home, where verify reads it."""
     key = _read_key(key_path)
     if key is None:
         return False, f"no signing key at {key_path} — run keygen first"
 
+    if cert_path is None:
+        try:
+            cert_path = _holder_home(registry_path)[1] / _CERT_REL
+        except LookupError as exc:
+            return False, f"birth certificate not located: {exc}"
     if not cert_path.exists():
         return False, f"birth certificate not found at {cert_path}"
 
@@ -142,6 +149,30 @@ def _find_registry(start: Path) -> Path | None:
     return None
 
 
+def _holder_home(registry_path: Path | None = None) -> tuple[dict, Path]:
+    """devpulse's registry entry and its recorded home; LookupError, carrying the reason, when there is none.
+
+    The certificate's place is the registry's answer, never the caller's and never this file's own location."""
+    registry_file = registry_path or _find_registry(_BRANCH_ROOT)
+    if registry_file is None or not registry_file.exists():
+        raise LookupError("AIPASS_REGISTRY.json not found")
+    try:
+        registry = json.loads(registry_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("[admin_grant] registry unreadable: %s", exc)
+        raise LookupError(f"registry unreadable: {exc}") from exc
+
+    entry = next(
+        (b for b in registry.get("branches", []) if b.get("name", "").lower() == ADMIN_HOLDER),
+        None,
+    )
+    if entry is None:
+        raise LookupError(f"no {ADMIN_HOLDER} entry in registry")
+
+    home = Path(entry.get("path", ""))
+    return entry, home if home.is_absolute() else registry_file.parent / home
+
+
 def verify_admin_grant(
     key_path: Path = DEFAULT_KEY_PATH,
     registry_path: Path | None = None,
@@ -151,27 +182,11 @@ def verify_admin_grant(
     if caller != ADMIN_HOLDER:
         return False, f"leg1 caller: verified caller is {caller or 'unverifiable'!r}, not {ADMIN_HOLDER}"
 
-    # The cert path comes from the registry entry, never from the caller.
-    registry_file = registry_path or _find_registry(_BRANCH_ROOT)
-    if registry_file is None or not registry_file.exists():
-        return False, "leg2 cert-path: AIPASS_REGISTRY.json not found"
     try:
-        registry = json.loads(registry_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("[admin_grant] verify refused — registry unreadable: %s", exc)
-        return False, f"leg2 cert-path: registry unreadable: {exc}"
-
-    entry = next(
-        (b for b in registry.get("branches", []) if b.get("name", "").lower() == ADMIN_HOLDER),
-        None,
-    )
-    if entry is None:
-        return False, f"leg2 cert-path: no {ADMIN_HOLDER} entry in registry"
-
-    entry_path = Path(entry.get("path", ""))
-    if not entry_path.is_absolute():
-        entry_path = registry_file.parent / entry_path
-    cert_path = entry_path / "artifacts" / "birth_certificate.json"
+        entry, entry_path = _holder_home(registry_path)
+    except LookupError as exc:
+        return False, f"leg2 cert-path: {exc}"
+    cert_path = entry_path / _CERT_REL
     if not cert_path.exists():
         return False, f"leg2 cert-path: no birth certificate at registry-recorded home {entry_path}"
 
@@ -201,11 +216,23 @@ def verify_admin_grant(
 
 
 def grant_status(
-    cert_path: Path = DEFAULT_CERT_PATH,
+    cert_path: Path | None = None,
     key_path: Path = DEFAULT_KEY_PATH,
     registry_path: Path | None = None,
 ) -> dict:
     """Ceremony/lane state at a glance. Never exposes key material."""
+    if cert_path is None:
+        try:
+            cert_path = _holder_home(registry_path)[1] / _CERT_REL
+        except LookupError as exc:
+            return {
+                "key_present": key_path.exists(),
+                "cert_present": False,
+                "privileges": {},
+                "signed": False,
+                "verified": False,
+                "verify_reason": f"leg2 cert-path: {exc}",
+            }
     cert: dict = {}
     if cert_path.exists():
         try:

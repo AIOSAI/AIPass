@@ -3,7 +3,7 @@
 # Description: Tests for the escalation digest: sending, the mail it carries, reporting and the CLI
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/escalation.py's digest (send, mail, reporting) and apps/modules/escalation.py."""
@@ -11,20 +11,18 @@
 # Split from test_escalation.py (oversize_test_file, 2026-10-08): that file keeps
 # the signature, the counting and the windows; this one holds what the lane does
 # once a signature is due: the send and its failures, the digest mail, what an
-# operator sees through get_signatures, get_stats and the CLI, and the trail
-# logger the lane writes through.
+# operator sees through get_signatures, get_stats and the CLI, and a failed
+# trail write raising.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(covered_elsewhere) — the upsert key the digest carries to ai_mail: test_escalation_upsert.py
 # sentry: no-test-needed(external) — ai_mail delivery of the digest; AIPass tests only its own files
 
-import json
 from types import SimpleNamespace
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytest
-from aipass.trigger.apps.config import trail_logger
 from aipass.trigger.apps.modules import escalation as escalation_cli
 from aipass.trigger.tests.support_escalation import (
     WARNING_EVENT,
@@ -388,7 +386,7 @@ class TestReporting:
         assert len(rows) == 2
 
     def test_ordering_holds_when_last_seen_ties(self, lane, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The Windows CI flake: identical last_seen must still list newest first."""
+        """Identical last_seen must still list newest first."""
         _freeze_clock(monkeypatch, lane)
         _fire_warning(lane, times=1, message="older warning")
         newest = _fire_warning(lane, times=1, message="newer warning")["signature"]
@@ -479,7 +477,7 @@ class TestCliCommand:
     """The CLI claims its own module name and nothing else."""
 
     def test_bare_status_is_left_to_core(self, cli) -> None:
-        """`drone @trigger status` belongs to core.py — claiming it would hijack it."""
+        """Bare `status` is not escalation's — claiming it would hijack it."""
         assert cli.module.handle_command("status", []) is False
 
     def test_bare_list_is_left_to_core(self, cli) -> None:
@@ -667,51 +665,16 @@ class TestDigestBody:
         assert f"and {25 - lane.MAX_ROSTER_LINES} more" in body
 
 
-class TestTrailLogger:
-    """The recursion-safe sidecar every trigger handler logs through."""
+class TestTrailWriteFailure:
+    """The lane's trail has no drop counter: a lost line is an error the caller sees."""
 
-    def test_writes_level_message_and_fields(self, tmp_path) -> None:
-        """A trail line carries the structured fields the caller passed."""
-        path = tmp_path / "trail.jsonl"
+    def test_a_failed_trail_write_raises_through_the_lane(self, lane) -> None:
+        (lane.STATE_FILE.parent / "logs").write_text("a file where the logs/ directory should be", encoding="utf-8")
+        # A wrong-shape state still warns into the trail; a torn one now raises before any trail line.
+        lane.STATE_FILE.write_text("[1, 2, 3]", encoding="utf-8")
 
-        trail_logger(path).warning("state unreadable", signature="abc123", branch="BACKUP")
-
-        line = json.loads(path.read_text(encoding="utf-8").strip())
-        assert line["level"] == "WARNING"
-        assert line["msg"] == "state unreadable"
-        assert line["signature"] == "abc123"
-        assert line["branch"] == "BACKUP"
-
-    def test_a_broken_sink_is_counted_never_raised(self, tmp_path, monkeypatch) -> None:
-        """A dead trail must not take the error path down with it — it is counted."""
-        trail = trail_logger(tmp_path / "trail.jsonl")
-        monkeypatch.setattr(
-            "aipass.trigger.apps.config._append_jsonl",
-            MagicMock(side_effect=OSError("read-only filesystem")),
-        )
-
-        trail.error("digest send raised")
-
-        assert trail.dropped == 1
-
-    def test_absent_prax_is_counted_too(self, tmp_path, monkeypatch) -> None:
-        """No prax means no sidecar — the loss is still visible as a count."""
-        trail = trail_logger(tmp_path / "trail.jsonl")
-        monkeypatch.setattr("aipass.trigger.apps.config._append_jsonl", None)
-
-        trail.info("digest sent")
-
-        assert trail.dropped == 1
-
-    def test_dropped_trail_lines_reach_the_operator_in_stats(self, lane, monkeypatch) -> None:
-        """A silent sink would be invisible; get_stats() is where it surfaces."""
-        monkeypatch.setattr(
-            "aipass.trigger.apps.config._append_jsonl",
-            MagicMock(side_effect=OSError("disk full")),
-        )
-        lane.logger.warning("something the trail could not keep")
-
-        assert lane.get_stats()["trail_writes_dropped"] >= 1
+        with pytest.raises(OSError):
+            lane.get_stats()
 
 
 # ---------------------------------------------------------------------------

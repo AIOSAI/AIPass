@@ -3,7 +3,7 @@
 # Description: Curation Operations Handler
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -12,10 +12,10 @@ Curation Operations Handler
 
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
-from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
+from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 from aipass.commons.apps.handlers.curation.reaction_queries import (
     add_reaction,
     remove_reaction,

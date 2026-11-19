@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: string_imports.py
 # Description: Import targets written as string literals, read from the parse tree
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-07
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Import targets a file names as a STRING, for the cross-branch handler rule.
@@ -77,8 +77,8 @@ def _literal_of(arg: ast.expr, constants: Dict[str, str]) -> Optional[str]:
     return None
 
 
-def iter_string_imports(content: str) -> Iterator[Tuple[int, str]]:
-    """Yield (line, target) for every handlers target named as a call's string.
+def iter_string_imports(content: str, marker: str = HANDLERS_MARKER) -> Iterator[Tuple[int, str]]:
+    """Yield (line, target) for every ``aipass.`` target holding ``marker``, named as a call's string.
 
     An unparseable file yields nothing, as the import-node readers beside it do.
     """
@@ -94,5 +94,5 @@ def iter_string_imports(content: str) -> Iterator[Tuple[int, str]]:
         if not isinstance(node, ast.Call) or not node.args or not _reads_a_target(node, aliases):
             continue
         target = _literal_of(node.args[0], constants)
-        if target and target.startswith("aipass.") and HANDLERS_MARKER in target:
+        if target and target.startswith("aipass.") and marker in target:
             yield node.lineno, target

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: job_reference.py
 # Description: The job-authoring reference printed by drone @daemon run --help
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-11
-# Modified: 2026-11-09
+# Modified: 2026-11-15
 # =============================================
 
 """The job-authoring reference that ``drone @daemon run --help`` prints: schema, schedule
@@ -52,6 +52,11 @@ _REFERENCE_LINES = [
     "              [dim]Never run and no slot -> fires IMMEDIATELY (warned in run.log).[/dim]",
     "    [cyan]daily[/cyan]     time: HH:MM",
     "              [dim]+/-15 min window, once per day.[/dim]",
+    "    [cyan]weekly[/cyan]    weekday: monday..sunday, time: HH:MM",
+    "              [dim]Daily window, on that weekday only.[/dim]",
+    "    [cyan]monthly[/cyan]   day: 1-31, time: HH:MM",
+    "              [dim]Daily window, on that day of the month only. A day past[/dim]",
+    "              [dim]the month's end runs on its last day: 31 fires Nov 30.[/dim]",
     "    [cyan]hourly[/cyan]    time: M  [dim](minute of hour)[/dim]",
     "              [dim]+/-15 min window, once per hour.[/dim]",
     "    [cyan]once[/cyan]      due_date: YYYY-MM-DD",
@@ -78,7 +83,7 @@ _REFERENCE_LINES = [
     "              [dim]lands on the next slot instead of the next tick. Without it,[/dim]",
     "              [dim]enabling a weekly job at 01:34 locks it to 01:34 forever.[/dim]",
     "              [dim]A past slot keeps its phase — it is rolled forward, not used raw.[/dim]",
-    "    [cyan]catch_up[/cyan]  false                   [dim](daily, rotation and hourly jobs)[/dim]",
+    "    [cyan]catch_up[/cyan]  false                   [dim](every type but interval and once)[/dim]",
     "              [dim]ON UNLESS YOU SET false (DPLAN-0332, 2026-09-08). When a[/dim]",
     "              [dim]window closed with no run, the job fires once afterwards and[/dim]",
     "              [dim]stamps caught_up on the runstate row. Set false when a late[/dim]",

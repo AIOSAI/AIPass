@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trinity_push.py
 # Description: The trinity push — frame rebuild, vectorize-verify-prune, todos to the backlog file
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-08-27
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Trinity Push Handler
@@ -28,10 +28,9 @@ from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data,
 from aipass.memory.apps.handlers.templates import receipt
 from aipass.memory.apps.handlers.rollover import todo_roll
 from aipass.memory.apps.handlers.tracking import tab_renderer
-from aipass.memory.apps.handlers.repo_root import module_file
 
 
-_MEMORY_ROOT = module_file(__file__).parents[3]
+_MEMORY_ROOT = Path(__file__).resolve().parents[3]
 _TEMPLATES_DIR = _MEMORY_ROOT / "templates"
 
 
@@ -531,11 +530,8 @@ def _plan_file(branch_name: str, trinity: Path, file_key: str, config: dict, bac
 
 def _backlog_display(path: Path) -> str:
     """The backlog path relative to the repo root when it sits inside it, else in full - posix separators either way."""
-    try:
-        return Path(path).relative_to(_REPO_ROOT).as_posix()
-    except ValueError:
-        logger.debug(f"[trinity_push] {path} sits outside the repo root - shown in full")
-        return Path(path).as_posix()
+    path = Path(path)
+    return (path.relative_to(_REPO_ROOT) if path.is_relative_to(_REPO_ROOT) else path).as_posix()
 
 
 def plan_branch(branch_name: str, branch_path: Path, config: dict, backlog_path: Path | None = None) -> dict:
@@ -650,6 +646,7 @@ def _verify_ingestion(store_client, collection: str, texts: list[str], ids: list
     wanted = dict(zip(ids, texts))
     reply = store_client.get_by_ids_subprocess(collection, sorted(set(ids)), db_path=db_path)
     if not reply.get("success"):
+        logger.warning(f"[trinity_push] {collection}: read-back failed: {reply.get('error')}")
         return {"verified": False, "error": f"read-back failed: {reply.get('error')}", "checked": 0}
 
     found = reply.get("documents", {})
@@ -690,6 +687,7 @@ def archive_prunes(store_client, branch_name: str, prunes: list[dict], destinati
                 branch=branch_name, memory_type=memory_type, texts=texts, metadatas=metadatas, db_path=db_path
             )
             if not stored.get("success"):
+                logger.warning(f"[trinity_push] {label}/{memory_type}: store refused — {stored.get('error')}")
                 return {
                     "verified": False,
                     "error": f"{label}/{memory_type}: store refused — {stored.get('error')}",

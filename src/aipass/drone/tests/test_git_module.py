@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
-# Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack, release, label, alerts
+# Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack, release
 # Version: 1.6.1
 # Created: 2026-04-21
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/git_module.py: command routing, help, the auth gate and the verbs it fronts."""
@@ -39,7 +39,6 @@ from aipass.drone.apps.modules.git_module import (
     handle_command,
 )
 from aipass.drone.tests.support_git_module import _done
-from aipass.trigger.apps.modules import core as trigger_core
 
 from .conftest import GITHUB_SLUG, chore_ledger, github_stand_in, make_owner_project
 
@@ -366,10 +365,10 @@ class TestTriggerFireIntegration:
         monkeypatch.chdir(tmp_path)
 
         mock_trigger = MagicMock()
-        monkeypatch.setattr(trigger_core, "trigger", mock_trigger)
-
-        with patch(
-            "aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run", side_effect=_run_merge_success
+        # patch, not monkeypatch.setattr: its undo would store the name on trigger's package for the whole run.
+        with (
+            patch("aipass.trigger.trigger", mock_trigger),
+            patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run", side_effect=_run_merge_success),
         ):
             result = merge_pr("42", "devpulse")
 
@@ -512,7 +511,7 @@ class TestScopeFooter:
         monkeypatch.chdir(tmp_path)
         fake = _sp.CompletedProcess(args=["git"], returncode=128, stdout="", stderr="fatal: not a git repository")
         with patch("aipass.drone.apps.handlers.git.status_handler.subprocess.run", return_value=fake):
-            result = get_branch_status(tmp_path)
+            result = get_branch_status(tmp_path, repo_root=tmp_path)
 
         assert result["ok"] is False
         assert "git status error" in result["message"]

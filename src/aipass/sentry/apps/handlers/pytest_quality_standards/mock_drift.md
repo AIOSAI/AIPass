@@ -95,7 +95,7 @@ Same family — a patch whose replacement does not match its target:
 ```python
 from mypkg import finder          # finder.py: return Path.cwd() / "REGISTRY.json"
 
-def _windows_spelled(self, monkeypatch):
+def _patch_path(self, monkeypatch):
     monkeypatch.setattr(finder, "Path", lambda *a: Path(*a))   # CLASS-STANDIN
 ```
 

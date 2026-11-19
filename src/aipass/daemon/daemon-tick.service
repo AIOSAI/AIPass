@@ -9,7 +9,10 @@
 #   systemctl --user start daemon-tick      # manual single tick
 #   systemctl --user list-timers            # check timer schedule
 #   systemctl --user status daemon-tick     # last tick result
-#   journalctl --user -u daemon-tick        # journal entries
+#
+# Output: the tick logs through prax (daemon/logs/run.log). stdout is the hand run's console, so it goes
+# nowhere here. stderr is the crash record, ~/.aipass/daemon-tick.err: written by systemd, because a broken
+# prax kills the tick at import, before any prax line exists. See docs/scheduler_tick.md.
 
 [Unit]
 Description=AIPass Daemon Scheduler Tick — discover and fire due .daemon/ jobs
@@ -18,5 +21,5 @@ Description=AIPass Daemon Scheduler Tick — discover and fire due .daemon/ jobs
 Type=oneshot
 ExecStart=%h/Projects/AIPass/.venv/bin/python3 -m aipass.daemon.apps.daemon run
 WorkingDirectory=%h/Projects/AIPass
-StandardOutput=append:%h/.aipass/daemon-tick.log
-StandardError=append:%h/.aipass/daemon-tick.log
+StandardOutput=null
+StandardError=append:%h/.aipass/daemon-tick.err

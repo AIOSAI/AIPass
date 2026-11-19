@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch6.py
 # Description: Unit tests for checker sub-functions in architecture, cli, cli_flags, documentation
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for the sub-functions of apps/handlers/aipass_standards/architecture_check.py and 3 siblings."""
@@ -14,7 +14,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that the four checker modules under test parse and import
 
-from pathlib import Path, PureWindowsPath
 from typing import List
 
 import pytest
@@ -30,11 +29,6 @@ from aipass.sentry.apps.handlers.bypass import utils as _bypass_utils
 def _lines(text: str) -> List[str]:
     """Split text into lines, widening LiteralString to str for pyright."""
     return text.split("\n")
-
-
-def _windows_form(tmp_path: Path, *parts: str) -> str:
-    """The tmp_path-rebuilt path as Windows spells it: a drive letter and backslashes."""
-    return str(PureWindowsPath("C:/", *tmp_path.parts[1:], *parts))
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +172,7 @@ class TestArchHandlerIndependence:
         """Handler without parent module imports passes."""
         lines: list[str] = [
             "from aipass.prax import logger",
-            "from aipass.cli.apps.modules import display",
+            "from aipass.cli import console",
             "",
             "def do_work():",
             "    return True",
@@ -214,10 +208,10 @@ class TestArchHandlerIndependence:
         assert result["passed"] is False
 
     def test_allowed_service_imports_pass(self, tmp_path):
-        """Prax and CLI service imports are allowed in handlers."""
+        """Prax and CLI services through their front doors are allowed in handlers."""
         lines: list[str] = [
-            "from prax.apps.modules.logger import info",
-            "from cli.apps.modules.display import header",
+            "from aipass.prax import logger",
+            "from aipass.cli import header",
         ]
         result = architecture_check.check_handler_independence(
             lines, str(tmp_path / "sentry" / "apps" / "handlers" / "json" / "j.py")
@@ -415,7 +409,7 @@ class TestCheckHandlerSeparation:
 
     def test_cli_import_fails(self):
         """Handler importing CLI services fails separation check."""
-        content = "from aipass.cli.apps.modules.display import header\ndef show():\n    pass\n"
+        content = "from aipass.cli import header\ndef show():\n    pass\n"
         result = cli_check.check_handler_separation(content)
         assert result["passed"] is False
         assert "CLI services" in result["message"]
@@ -441,7 +435,7 @@ class TestCheckCliImports:
 
     def test_has_cli_imports_passes(self, tmp_path):
         """Module with CLI service imports passes."""
-        content = "from aipass.cli.apps.modules.display import header\n"
+        content = "from aipass.cli import header\n"
         result = cli_check.check_cli_imports(content, str(tmp_path / "sentry" / "apps" / "modules" / "audit.py"))
         assert result is not None
         assert result["passed"] is True
@@ -450,17 +444,6 @@ class TestCheckCliImports:
         """CLI branch itself is exempt from this check."""
         content = "from .display import header\n"
         result = cli_check.check_cli_imports(content, str(tmp_path / "cli" / "apps" / "modules" / "something.py"))
-        assert result is not None
-        assert result["passed"] is True
-        assert "CLI branch exempt" in result["message"]
-
-    def test_cli_branch_exempt_on_a_windows_path(self, tmp_path):
-        """A drive letter and backslashes still name the CLI branch (compass 458).
-
-        Mutant: check_cli_imports' `module_path.replace("\\", "/")` back to `module_path` — killed.
-        """
-        content = "from .display import header\n"
-        result = cli_check.check_cli_imports(content, _windows_form(tmp_path, "cli", "apps", "modules", "something.py"))
         assert result is not None
         assert result["passed"] is True
         assert "CLI branch exempt" in result["message"]
@@ -480,13 +463,6 @@ class TestCheckCliImports:
         assert result is not None
         assert result["passed"] is True
         assert "No CLI output needed" in result["message"]
-
-    def test_shortcut_import_passes(self, tmp_path):
-        """Shortcut import via cli __init__ passes."""
-        content = "from aipass.cli import header\n"
-        result = cli_check.check_cli_imports(content, str(tmp_path / "sentry" / "apps" / "modules" / "audit.py"))
-        assert result is not None
-        assert result["passed"] is True
 
 
 # -- check_print_usage -------------------------------------------------------
@@ -705,33 +681,11 @@ class TestCheckDuplicateDisplayFunctions:
         )
         assert result is None
 
-    def test_cli_branch_exempt_on_a_windows_path(self, tmp_path):
-        """A drive letter and backslashes still name the CLI branch (compass 458).
-
-        Mutant: the "/cli/apps/" test's `module_path.replace("\\", "/")` back to `module_path` — killed.
-        """
-        content = "def header(title):\n    print(title)\n"
-        result = cli_check.check_duplicate_display_functions(
-            content, _windows_form(tmp_path, "cli", "apps", "modules", "display.py")
-        )
-        assert result is None
-
     def test_prax_logger_exempt(self, tmp_path):
         """Prax logger module is exempt (it is the logging system)."""
         content = "def error(msg):\n    pass\n"
         result = cli_check.check_duplicate_display_functions(
             content, str(tmp_path / "prax" / "apps" / "modules" / "logger" / "log.py")
-        )
-        assert result is None
-
-    def test_prax_logger_exempt_on_a_windows_path(self, tmp_path):
-        """A drive letter and backslashes still name the prax logger (compass 458).
-
-        Mutant: the "/prax/apps/modules/logger" test's `module_path.replace("\\", "/")` back to `module_path` — killed.
-        """
-        content = "def error(msg):\n    pass\n"
-        result = cli_check.check_duplicate_display_functions(
-            content, _windows_form(tmp_path, "prax", "apps", "modules", "logger", "log.py")
         )
         assert result is None
 
@@ -925,3 +879,46 @@ class TestCheckFunctionDocstrings:
         lines = _lines(content)
         result = documentation_check.check_function_docstrings(content, lines)
         assert result["passed"] is True
+
+
+class TestArchitectureScopedBypassRows:
+    """Each module import in a handler is a site (line, enclosing function); every other finding is file-level."""
+
+    _TWO_IMPORTS = (
+        '"""Doc."""\n\n\ndef load():\n    from aipass.demo.apps.modules import a\n    return a\n\n\n'
+        "def save():\n    from aipass.demo.apps.modules import b\n    return b\n"
+    )
+
+    @staticmethod
+    def _verdicts(tmp_path, domain: str, **scope) -> dict:
+        """architecture check_module on demo/apps/handlers/<domain>/thing.py under one row of the scope given."""
+        target = tmp_path / "demo" / "apps" / "handlers" / domain / "thing.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(TestArchitectureScopedBypassRows._TWO_IMPORTS, encoding="utf-8")
+        row = {"file": f"apps/handlers/{domain}/thing.py", "standard": "architecture", "reason": "t", **scope}
+        result = architecture_check.check_module(str(target), bypass_rules=[row] if scope else [])
+        return {"score": result["score"], **{check["name"]: check for check in result["checks"]}}
+
+    def test_a_line_row_waives_its_import_and_the_other_still_convicts(self, tmp_path):
+        """Mutant: the per-site ask drops line= — killed."""
+        message = self._verdicts(tmp_path, "work", lines=[5])["Handler independence"]["message"]
+        assert message == "Handler importing from parent module on line 10 (violates independence)"
+
+    def test_a_function_row_waives_the_imports_inside_that_function_only(self, tmp_path):
+        """Mutant: the per-site ask drops name= — killed."""
+        message = self._verdicts(tmp_path, "work", functions=["load"])["Handler independence"]["message"]
+        assert message == "Handler importing from parent module on line 10 (violates independence)"
+
+    def test_every_site_is_named_and_rows_on_all_of_them_pass(self, tmp_path):
+        """Mutant: the message names the first site only; one waived site waives all — killed."""
+        message = self._verdicts(tmp_path, "work")["Handler independence"]["message"]
+        assert message == "Handler importing from parent module on line 5, line 10 (violates independence)"
+        assert self._verdicts(tmp_path, "work", functions=["load", "save"])["score"] == 100
+        assert self._verdicts(tmp_path, "work", lines=None)["score"] == 100
+
+    def test_a_file_level_finding_is_waived_by_the_file_scope_name_and_not_by_a_line(self, tmp_path):
+        """Mutant: the file-level waiver drops name=FILE_SCOPE — killed."""
+        by_scope = self._verdicts(tmp_path, "utils", functions=[_bypass_utils.FILE_SCOPE])
+        by_line = self._verdicts(tmp_path, "utils", lines=[1])
+        assert (by_scope["Domain organization"]["passed"], by_line["Domain organization"]["passed"]) == (True, False)
+        assert by_scope["Handler independence"]["passed"] is False

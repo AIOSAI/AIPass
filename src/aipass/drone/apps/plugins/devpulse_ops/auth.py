@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.14.0
+# Version: 1.14.1
 # Created: 2026-03-30
-# Modified: 2026-11-08
+# Modified: 2026-11-17
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -22,11 +22,9 @@ from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.repo_context import AIPASS_REGISTRY_NAME
 from aipass.drone.apps.handlers.git import release_handler, repo_door, session_home
 from aipass.drone.apps.modules.router import caller_cwd
-from aipass.drone.apps.modules.registry import (
-    RegistryMismatchError,
-    get_registry_path,
-    load_registry,
-)
+from aipass.drone.apps.modules import RegistryMismatchError
+from aipass.drone.apps.modules.config import get_registry_path
+from aipass.drone.apps.modules.registry import load_registry
 
 GIT_ACCESS_TIERS: dict[str, dict] = {
     "global": {

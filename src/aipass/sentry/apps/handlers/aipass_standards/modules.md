@@ -19,17 +19,11 @@ Standards specific to modules (orchestration layer). Modules coordinate workflow
 - **handle_command(args) -> bool pattern** - Standard entry point for drone routing
 - **Each module accepts ONE primary command - no aliases (Session 14 standard)** - Simplify routing logic
 
-### Doors — `apps/modules/door_<subject>.py` (DPLAN-0404, 2026-10-07)
+### Second doors are retired
 
-A door is how another branch reaches this branch's handlers. It is a thin re-export and nothing else: it imports only from its OWN branch's `apps.handlers` (plus the stdlib) — a handlers package nested anywhere under the branch's tree is its own, so skills' door may re-export `aipass.skills.lib.telegram.apps.handlers` while `aipass.daemon.lib.x.apps.handlers` stays foreign (2026-10-08) — defines no function or class, carries `__all__`, and every name in `__all__` is one it imported. The checker reads it as a "Door shape" row in place of `handle_command`, and introspection does not ask a door for `print_introspection`. A handler in another branch may import `aipass.<owner>.apps.modules.door_<subject>`: a branch's modules are its public gateway.
+A module that exists to hand this branch's handler names to other branches is a second door: a `door_*.py`, or a module whose whole body re-exports its own handlers with `__all__`. A branch has one door, its package top file (`src/aipass/<branch>/__init__.py`), so the `front_door` row convicts a second door and this row does not judge it again. The cure: the package top file hands out the name, `from aipass.<branch> import <name>`, and the module is retired once no other branch imports it.
 
-```python
-"""Door: memory's entry limits, for other branches."""
-
-from aipass.memory.apps.handlers.json.entry_limits import check_file_budget, load_entry_limits
-
-__all__ = ["load_entry_limits", "check_file_budget"]
-```
+A module's `__all__` lists what the module defines. A real module whose `__all__` also names something it imported from its own branch's handlers is the mixed kind of second door, and `front_door` convicts it at the `__all__` line, naming each handed-out name and its handler. The cure: the package door hands those names out from their homes, and the module drops them from `__all__` once no other branch imports them from here; it keeps the names it defines.
 
 ---
 
@@ -86,9 +80,9 @@ def handle_command(command: str, args: List[str]) -> bool:
 Modules are the aggregation point for functionality:
 
 ```python
-# Service imports (shared infrastructure)
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, header, success, error
+# Service imports (shared infrastructure, through each branch's front door)
+from aipass.prax import logger
+from aipass.cli import console, header, success, error
 
 # Domain handler imports (business logic)
 from aipass.sentry.apps.handlers.json import json_handler
@@ -729,7 +723,7 @@ If using error handling decorators, test they work:
 
 ```python
 # tests/test_decorators.py
-from aipass.cli.apps.modules import track_operation
+from aipass.<branch> import track_operation  # through the front door of the branch that hands it out
 
 def test_track_operation_success():
     """Test decorator handles success"""
@@ -759,6 +753,14 @@ def test_track_operation_exception():
 4. **Test edge cases** - Empty args, invalid input, missing files
 5. **Integration over unit** - Modules orchestrate, so integration tests are primary
 6. **Fast tests** - Mock slow operations (file I/O, network calls)
+
+---
+
+## Bypass Rows
+
+Each direct file operation, hardcoded structure and long function is its own site, with a line and its enclosing function, and the message names every open site. A row with `"lines": [n]` waives the site on line n; a row with `"functions": ["name"]` waives the sites inside that function. Other sites in the file still convict.
+
+The size, `handle_command` and door findings are file-level: their function name is `<file>`, so a row with `"functions": ["<file>"]` waives them and a line row does not. A row with no `lines` or `functions` waives the whole file.
 
 ---
 

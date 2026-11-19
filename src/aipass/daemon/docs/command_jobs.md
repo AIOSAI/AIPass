@@ -65,8 +65,8 @@ interval, daily, slot and backoff logic is unchanged, because due-ness never rea
 `drone @daemon queue` shows `command: <the command>` in the preview column. The frozen `--json`
 keys are unchanged.
 
-**Two log lines every fire, pass or fail**, written to both the tick log
-(`~/.aipass/daemon-tick.log`) and `logs/run.log`:
+**Two log lines every fire, pass or fail**, written through prax to `logs/run.log` (and its
+system copy, `system_logs/daemon_run.log`):
 
 ```
 FIRE: @daemon/dplan-0338-proof -> command: drone @daemon --help
@@ -94,12 +94,11 @@ measured reasons:
   the moment it is created, so it leaves no `.tmp` litter behind.
 - **A timeout stops the whole process tree.** Drone runs every `@branch` verb in a child of its own
   (`drone/apps/handlers/executor.py`), so killing drone alone would orphan exactly the work that
-  overran. On POSIX the command gets its own session, and the timeout sends SIGTERM to the group,
+  overran. The command gets its own session, and the timeout sends SIGTERM to the group,
   waits up to 2 s, then sends SIGKILL to the group, and only then reaps the leader. The wait polls
   `os.waitid` with `WNOWAIT`, so a leader that exits on SIGTERM stays an unreaped zombie and still
   holds the group id: a reaped pid can be reissued, and a SIGKILL to its group would reach a
-  stranger. Windows has no process group to signal: the direct child is killed and a grandchild
-  may outlive it. That is the known residual.
+  stranger.
 
 stdin is `/dev/null`: a scheduled command has no human to answer a prompt.
 

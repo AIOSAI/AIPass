@@ -3,7 +3,7 @@
 # Description: Pins the template, verbs and healing for AIPASS_ROOTS.json
 # Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/roots.py and apps/handlers/monitor/roots_file.py."""
@@ -17,15 +17,15 @@
 # sentry: no-test-needed(shared) — json_handler.log_operation() audit line on each roots command
 
 import json
-import pathlib
 from pathlib import Path
 
 import pytest
 
-from aipass.cli.apps.modules import reset_command_state, resolve_exit
+import aipass.memory as door
+from aipass.cli import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.monitor import registry_scope as rs
 from aipass.memory.apps.handlers.monitor import roots_file as rf
-from aipass.memory.apps.modules import fleet, roots
+from aipass.memory.apps.modules import roots
 
 
 TODAY = "2026-08-30"
@@ -360,35 +360,14 @@ class TestTheOperatorLane:
         assert "needs a path" in captured.out + captured.err
 
     def test_the_module_is_discovered_but_the_gateway_is_not_this(self):
-        """The write verbs stay off the read-only ``fleet`` gateway."""
+        """The write verbs stay off the package door, which hands out read names only."""
         assert hasattr(roots, "handle_command")
-        assert not hasattr(fleet, "add_root"), "the write lane leaked onto the read gateway"
-
-
-class _WindowsFlavour(pathlib.PureWindowsPath):
-    """A path that spells itself the way Windows does, on any machine, so the ``_spell`` pin has teeth on Linux."""
-
-    def resolve(self):
-        return self
+        assert "add_root" not in door.__all__, "the write lane leaked onto the door"
+        assert not hasattr(door, "add_root"), "the write lane leaked onto the door"
 
 
 class TestTheDeclaredSpellingIsPosixOnEveryMachine:
-    """One declaration, one spelling: forward slashes, the only spelling both platforms read."""
-
-    def test_a_sibling_is_spelled_with_forward_slashes(self, monkeypatch):
-        monkeypatch.setattr(rf, "Path", _WindowsFlavour)
-
-        spelled = rf._spell(_WindowsFlavour(r"C:\proj\AIPass"), _WindowsFlavour(r"C:\proj\wren"))
-
-        assert spelled == "../wren"
-
-    def test_an_absolute_declaration_is_spelled_with_forward_slashes_too(self, monkeypatch):
-        """The other return path. A contract honoured on one branch is a coincidence."""
-        monkeypatch.setattr(rf, "Path", _WindowsFlavour)
-
-        spelled = rf._spell(_WindowsFlavour(r"C:\proj\AIPass"), _WindowsFlavour(r"D:\elsewhere\wren"))
-
-        assert spelled == "D:/elsewhere/wren"
+    """One declaration, one spelling: forward slashes."""
 
     def test_no_declaration_this_verb_writes_can_carry_a_backslash(self, home):
         """The end-to-end guard, in the file that ships."""

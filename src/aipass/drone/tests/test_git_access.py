@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access — the tiers, the owner gate and its log severity
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-05-12
-# Modified: 2026-11-03
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py: the git tiers and how owner tier is earned per repo."""
@@ -25,7 +25,8 @@ from aipass.drone.apps.plugins.devpulse_ops.auth import (
     external_owner_verbs,
     verify_git_access,
 )
-from aipass.ai_mail.apps.modules.door_session_pointer import transcript_dir
+from aipass.drone.apps.plugins.devpulse_ops import auth
+from aipass.ai_mail import transcript_dir
 from aipass.drone.apps.handlers.git import help_pages, repo_door, session_home
 from aipass.drone.apps.modules.git_module import handle_command
 
@@ -80,9 +81,10 @@ class TestGitAccessTiers:
         assert "smart-sync" in cmds
         assert "fix" in cmds
 
-    def test_owner_tier_names_no_branch(self) -> None:
-        """Owner-tier must not carry a hardcoded allowlist: authority is earned per repo, not by name."""
-        assert "allowed_callers" not in GIT_ACCESS_TIERS["owner"]
+    def test_no_tier_and_no_module_name_holds_a_caller_list(self) -> None:
+        """Authority is earned per repo, never granted by name: no ALLOWED_CALLERS, no tier's allowed_callers."""
+        assert not hasattr(auth, "ALLOWED_CALLERS")
+        assert [tier for tier, spec in GIT_ACCESS_TIERS.items() if "allowed_callers" in spec] == []
 
     def test_prune_temp_in_owner_tier(self) -> None:
         """prune-temp deletes merged remote citizen/* branches — delete-branch class."""
@@ -608,7 +610,6 @@ def start_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[
     user_home = tmp_path / "user_home"
     user_home.mkdir()
     monkeypatch.setenv("HOME", str(user_home))
-    monkeypatch.setenv("USERPROFILE", str(user_home))
     monkeypatch.setenv(session_home.SESSION_ENV, _SESSION)
 
     def start(directory: Path) -> None:

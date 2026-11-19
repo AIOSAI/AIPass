@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Registry configuration management
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-03-09
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -16,37 +16,33 @@ import shlex
 from typing import List, Optional
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.drone.apps.handlers.registry_handler import (
-    get_registry_path,
-    missing_home_tip,
-    passport_fault,
-    resolve_aipass_home,
-    set_registry_path,
-    reset_registry_path,
-)
+from aipass.drone.apps.handlers import registry_handler
+from aipass.drone.apps.handlers.registry_handler import get_registry_path
 from aipass.drone.apps.handlers.help_flags import wants_help
 
-__all__ = [
-    "get_registry_path",
-    "missing_home_tip",
-    "passport_fault",
-    "resolve_aipass_home",
-    "set_registry_path",
-    "reset_registry_path",
-]
+__all__ = ["missing_home_tip", "passport_fault", "resolve_aipass_home"]
+
+
+def resolve_aipass_home() -> "registry_handler.AipassHome":
+    """The AIPass home and how it was found (``.path`` is None when none resolved)."""
+    return registry_handler.resolve_aipass_home()
+
+
+def missing_home_tip() -> str:
+    """The tip printed under "Branch not found", or "" when an AIPass home resolved."""
+    return registry_handler.missing_home_tip()
+
+
+def passport_fault() -> Optional[str]:
+    """The line naming a passport the credential checks could not read, or None."""
+    return registry_handler.passport_fault()
 
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    except ImportError:
-        logger.warning("CLI console not available, using fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]config Module[/bold cyan]")
@@ -98,7 +94,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
 
 def print_help() -> None:
     """Print help for the config module."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("config — Registry configuration management")
     console.print()

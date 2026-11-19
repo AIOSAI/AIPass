@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: send.py
 # Description: Email Send Handler
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -100,6 +100,7 @@ def send_to_broadcast(
     deliver_email_to_branch_fn,
     log_operation_fn,
     update_central_fn,
+    kind: Optional[str] = None,
 ) -> Tuple[bool, int, int, Any]:
     """Execute broadcast send to all branches.
 
@@ -121,6 +122,8 @@ def send_to_broadcast(
         delivery_data["auto_execute"] = auto_execute
         if no_memory_save:
             delivery_data["no_memory_save"] = True
+        if kind:
+            delivery_data["kind"] = kind
 
         success, error_msg = deliver_email_to_branch_fn(branch["email"], delivery_data)
         results.append((branch.get("name", branch["email"]), success, error_msg))
@@ -134,7 +137,7 @@ def send_to_broadcast(
 
     if success_count > 0:
         try:
-            from aipass.trigger.apps.modules.core import trigger
+            from aipass.trigger import trigger
 
             trigger.fire("email_broadcast_sent", recipients=len(branches), successful=success_count, subject=subject)
         except ImportError as e:
@@ -164,6 +167,7 @@ def send_to_single(
     on_delivered_callback,
     log_operation_fn,
     upsert_key: Optional[str] = None,
+    kind: Optional[str] = None,
 ) -> Tuple[bool, Optional[str]]:
     """Execute single-recipient email send.
 
@@ -187,6 +191,8 @@ def send_to_single(
     # On email_data, not a kwarg: the delivery function here is injected.
     if upsert_key:
         email_data["upsert_key"] = upsert_key
+    if kind:
+        email_data["kind"] = kind
 
     success, error_msg = deliver_email_to_branch_fn(to_branch, email_data, on_delivered=on_delivered_callback)
 
@@ -197,7 +203,7 @@ def send_to_single(
         log_operation_fn("email_sent", payload)
 
         try:
-            from aipass.trigger.apps.modules.core import trigger
+            from aipass.trigger import trigger
 
             trigger.fire("email_sent", to=to_branch, subject=subject, auto_execute=auto_execute)
         except ImportError as e:

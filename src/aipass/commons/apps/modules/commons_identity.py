@@ -1,52 +1,26 @@
 # =================== AIPass ====================
 # Name: commons_identity.py
 # Description: Branch identity detection module
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """
 Branch Identity Detection for The Commons
 
-Re-exports identity_ops for the callers that import from here; handles whoami.
+Handles whoami; the identity names live in handlers/identity/identity_ops.
 """
 
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
+from aipass.cli import console, error
 
-try:
-    from aipass.cli.apps.modules import console, error, warning
-except (ImportError, OSError):
-    logger.warning("[commons_identity] CLI console unavailable, using fallback")
-    from rich.console import Console
-
-    console = Console()
-    error = console.print  # type: ignore[assignment]
-    warning = console.print  # type: ignore[assignment]
-
-from aipass.commons.apps.handlers.identity.identity_ops import (
-    CallerLookupFailed,
-    find_branch_root,
-    get_branch_info_from_registry,
-    get_branch_info_by_name,
-    get_caller_branch,
-    extract_mentions,
-    resolve_display_name,
-)
+from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch, resolve_display_name
 from aipass.commons.apps.handlers.json import json_handler
 
-__all__ = [
-    "CallerLookupFailed",
-    "find_branch_root",
-    "get_branch_info_from_registry",
-    "get_branch_info_by_name",
-    "get_caller_branch",
-    "extract_mentions",
-    "resolve_display_name",
-    "handle_command",
-]
+__all__ = ["handle_command"]
 
 
 def print_introspection():

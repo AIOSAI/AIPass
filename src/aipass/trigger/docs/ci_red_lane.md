@@ -34,13 +34,13 @@ step. A green run sends nothing. The verbs are in `drone @trigger ci --help`, an
    component = owner, message = workflow and step). So suppression, backoff and the digest
    apply to it the same way they apply to a repeating log error. Then medic's gates run, in
    medic's order, by calling the same functions in `error_detected.py`: medic enabled, branch
-   not muted, registered citizen, suppression and backoff, then circuit breaker. A refusal goes
+   not muted, registered citizen, suppression and backoff, then medic's `breaker_gate`. A refusal goes
    to `logs/medic_suppressed.jsonl` and the cure becomes `gated`, with the refusal as its
    reason. Every poll fires `ci_red` again for each `gated` and `queued` cure. The gates run
    again and the refusal is logged once per poll, until a gate opens (the mute expires or is
    lifted, the breaker closes, the backoff ends) and the owner is dispatched. Only the first
-   fire counts the red in the escalation lane and feeds the circuit breaker; a retry is not a
-   new error. The handler claims the cure as `dispatching` under the ledger lock before the
+   fire counts the red in the escalation lane; the breaker counts a red where its mail would
+   go, and a retry of the same red is the same (owner, fingerprint), never a new distinct one. The handler claims the cure as `dispatching` under the ledger lock before the
    gates, so two fires at once wake the owner once; a `dispatching` claim older than an hour is
    retried like a `queued` one. Gate four still holds: an owner that is @devpulse is mailed and never woken.
 4. **Owner.** The owner gets a dispatch: the mail, then a wake with @trigger as sender. The

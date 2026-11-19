@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
-# Regression test for setup.sh's git-identity + user-name flow
+# Regression test for setup.sh's git-identity + user-name flow and the
+# machine-changes question
 # (round-2 install UX: a0f2351e Catch 1 / 43ff5873 Catch 3).
 #
 # Sources the real is_valid_git_email / is_interactive / resolve_git_identity /
-# resolve_user_name / print_action_needed functions out of setup.sh (single
+# resolve_user_name / confirm_machine_changes / print_action_needed functions out of setup.sh (single
 # source of truth — no copy) and drives them against a stubbed `git` so no
 # real global git config is ever touched. Exits 0 on all-pass, non-zero on
 # any regression.
@@ -21,10 +22,10 @@ cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
 
 FN="$TMP/fn.sh"
-for fn in print_action_needed is_valid_git_email is_interactive resolve_git_identity resolve_user_name; do
+for fn in print_action_needed is_valid_git_email is_interactive resolve_git_identity resolve_user_name confirm_machine_changes; do
     sed -n "/^${fn}() {/,/^}/p" "$SETUP" >> "$FN"
 done
-for fn in print_action_needed is_valid_git_email is_interactive resolve_git_identity resolve_user_name; do
+for fn in print_action_needed is_valid_git_email is_interactive resolve_git_identity resolve_user_name confirm_machine_changes; do
     if ! grep -q "${fn}()" "$FN"; then
         echo "FAIL: could not extract $fn from $SETUP"
         exit 1
@@ -155,36 +156,54 @@ assert "interactive valid: garbage email never written to git config" "" "$(grep
 assert "interactive valid: no ACTION_NEEDED item" "0" "${#ACTION_NEEDED[@]}"
 
 # ============================================================
-# resolve_user_name
+# resolve_user_name — never asks: git user.name, else $USER
 # ============================================================
-unset -f is_interactive
-is_interactive() { return 0; }
-
 GIT_NAME="tom"
-resolve_user_name < <(printf '\n')
-assert "blank input defaults to GIT_NAME" "tom" "$USER_NAME"
-
-GIT_NAME="tom"
-resolve_user_name < <(printf 'skip\n')
-assert "explicit skip with a GIT_NAME default clears USER_NAME" "" "$USER_NAME"
-
-GIT_NAME="tom"
-resolve_user_name < <(printf 'Tommy\n')
-assert "custom name overrides the GIT_NAME default" "Tommy" "$USER_NAME"
+USER="tomuser"
+resolve_user_name < /dev/null
+assert "GIT_NAME is the stored name" "tom" "$USER_NAME"
 
 GIT_NAME=""
-resolve_user_name < <(printf 'Someone\n')
-assert "no GIT_NAME default: entered name is stored" "Someone" "$USER_NAME"
+resolve_user_name < /dev/null
+assert "no GIT_NAME: falls back to \$USER" "tomuser" "$USER_NAME"
 
-GIT_NAME=""
-resolve_user_name < <(printf 'skip\n')
-assert "no GIT_NAME default: skip stays empty" "" "$USER_NAME"
+# ============================================================
+# confirm_machine_changes — one yes/no on a tty, unasked otherwise
+# ============================================================
+SCRIPT_DIR="/opt/AIPass"
+unset CI
 
 is_interactive() { return 1; }
-GIT_NAME="tom"
-USER_NAME="stale"
-resolve_user_name
-assert "non-interactive: USER_NAME stays empty, no prompt" "" "$USER_NAME"
+ACTION_NEEDED=()
+confirm_machine_changes < /dev/null > /dev/null
+assert "non-interactive: changes made unasked" "yes" "$MACHINE_CHANGES"
+assert "non-interactive: no ACTION_NEEDED item" "0" "${#ACTION_NEEDED[@]}"
+
+is_interactive() { return 0; }
+CI=1
+ACTION_NEEDED=()
+confirm_machine_changes < <(printf 'n\n') > /dev/null
+assert "CI set: changes made unasked, input not read" "yes" "$MACHINE_CHANGES"
+unset CI
+
+ACTION_NEEDED=()
+confirm_machine_changes < <(printf '\n') > /dev/null
+assert "interactive Enter: yes" "yes" "$MACHINE_CHANGES"
+assert "interactive Enter: no ACTION_NEEDED item" "0" "${#ACTION_NEEDED[@]}"
+
+ACTION_NEEDED=()
+out="$(confirm_machine_changes < <(printf 'n\n'))"
+confirm_machine_changes < <(printf 'n\n') > /dev/null
+assert "interactive no: skipped" "no" "$MACHINE_CHANGES"
+assert "interactive no: one ACTION_NEEDED item" "1" "${#ACTION_NEEDED[@]}"
+echo "${ACTION_NEEDED[0]}" | grep -q "/opt/AIPass/setup.sh" && r=pass || r=fail
+assert "interactive no: the item names setup.sh to run later" "pass" "$r"
+echo "$out" | grep -q "without AIPass hooks" && r=pass || r=fail
+assert "interactive no: says what will not work" "pass" "$r"
+
+ACTION_NEEDED=()
+confirm_machine_changes < /dev/null > /dev/null
+assert "interactive EOF: treated as no" "no" "$MACHINE_CHANGES"
 
 echo ""
 if [ "$FAILURES" -eq 0 ]; then

@@ -3,7 +3,7 @@
 # Description: Tests for the caller identity fence (no branch under caller = refuse)
 # Version: 1.0.2
 # Created: 2026-08-21
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/users/branch_detection.py and the fence it enforces fleetwide."""
@@ -12,7 +12,6 @@
 # every verb refuses, and a claim in AIPASS_CALLER_BRANCH cannot outvote it.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(windows_compat) — the sys.platform == "win32" stdout/stderr reconfigure block
 
 from pathlib import Path
 
@@ -145,7 +144,7 @@ class TestEveryVerbIsFenced:
         assert entry.main() != 0
 
     def test_help_still_works_from_anywhere(self, tmp_path, monkeypatch):
-        """Help is never fenced: a cross-OS preflight runs `drone @ai_mail --help` as a routing probe."""
+        """Help is never fenced: a preflight runs `drone @ai_mail --help` as a routing probe."""
 
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "aipass")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(_non_branch_dir(tmp_path)))

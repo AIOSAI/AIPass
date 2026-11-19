@@ -6,36 +6,6 @@
   },
   "bypass": [
     {
-      "file": "apps/handlers/aipass_standards/cli_content.py",
-      "standard": "cli",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example ('from aipass.cli... import console' as the import to use). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/encapsulation_content.py",
-      "standard": "cli",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (the cli import a module should use). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/imports_content.py",
-      "standard": "cli",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (cli imports in the import-order example). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/modules_content.py",
-      "standard": "cli",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (the cli import a module should use). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/output_routing_content.py",
-      "standard": "cli",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (the cli helpers output should route through). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/stderr_routing_content.py",
-      "standard": "cli",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (the err_console import to use). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
-    },
-    {
       "file": "apps/handlers/aipass_standards/architecture_content.py",
       "standard": "help_text",
       "lines": [
@@ -66,11 +36,6 @@
         39
       ],
       "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (python3 shebang/run lines). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard)."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/encapsulation_content.py",
-      "standard": "architecture",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (a modules import as the allowed pattern (line 42)). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: this checker passes no line= to is_bypassed."
     },
     {
       "file": "apps/handlers/aipass_standards/handlers_content.py",
@@ -116,24 +81,9 @@
       "reason": "Console(stderr=True) appears only in documentation strings and comments, not executable code. False positive from text-matching checker."
     },
     {
-      "file": "apps/handlers/aipass_standards/help_text_check.py",
-      "standard": "help_text",
-      "reason": "Docstring explains what the checker detects (python3 command references). Documentation of violation patterns, not actual help text."
-    },
-    {
       "file": "apps/handlers/aipass_standards/introspection_check.py",
       "standard": "help_text",
       "reason": "Docstring in check_content_references() explains that help text should use drone commands instead of python3. Documentation of violation patterns, not actual help text."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/shebang_check.py",
-      "standard": "help_text",
-      "reason": "Docstrings explain that shebangs are unnecessary because execution goes through python3 -m. Documentation of technical context, not user-facing command instructions."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/todo_check.py",
-      "standard": "todo",
-      "reason": "Checker file references TODO/FIXME/HACK/XXX in its own comments and regex pattern as documentation of what it detects. False positive from self-referential detection logic."
     },
     {
       "file": "apps/handlers/audit/audit_display.py",
@@ -173,7 +123,7 @@
     {
       "file": "apps/handlers/bypass/bypass_handler.py",
       "standard": "logged_fallback",
-      "lines": [78],
+      "lines": [77],
       "reason": "Devpulse's ruling (c), fleet green leg 15: no raise here, the verdict path stays as it is. The failure is made loud instead: it is recorded in UNREADABLE_REGISTRIES, and the checklist and the audit each print one note naming the unreadable registry (registry_notes; pinned in test_checklist and test_standards_audit)."
     },
     {
@@ -212,11 +162,6 @@
       "reason": "Content functions (get_*_standards, get_*_proof) are discovered and called dynamically by standards_query.py via naming convention. The checker cannot trace convention-based dynamic dispatch."
     },
     {
-      "file": "templates/",
-      "standard": "unused_function",
-      "reason": "Template files are reference implementations for other branches to copy. They contain function definitions that are not called within sentry itself."
-    },
-    {
       "file": "apps/modules/permissions.py",
       "standard": "unused_function",
       "reason": "is_trusted_caller() and identify_caller() are public API consumed by pre_edit_gate.py (hook layer) and drone auth.py. Checker cannot trace cross-file dynamic dispatch to the hook scripts."
@@ -229,116 +174,53 @@
     {
       "file": "tests/test_checkers_batch10.py",
       "standard": "hardcoded_path",
-      "lines": [52, 57, 67, 72, 77, 82, 87, 97, 102, 107, 125, 132, 140, 149, 161, 167, 187, 192, 197, 202, 207, 611, 613, 681, 695, 696, 697, 1274, 1276, 1277, 1279, 1309, 1322, 1323, 1324, 1330, 1334, 1343, 1353, 1360, 1381, 1400, 1435, 1446, 1466, 1499, 1503],
+      "lines": [64, 69, 79, 84, 89, 94, 99, 109, 114, 119, 137, 144, 152, 161, 173, 179, 199, 204, 209, 214, 219, 621, 623, 691, 705, 706, 707, 1282, 1284, 1285, 1287, 1317, 1330, 1331, 1332, 1338, 1342, 1351, 1361, 1368, 1389, 1408, 1443, 1454, 1474, 1507, 1511],
       "reason": "Test input, not paths the tests use: the hardcoded_path and literal-path cases hold home-path strings (/home/<user>/, /Users/carol/, C:\\Users\\...) as checker input. Line-level; replaces the no-standard rule removed 2026-09-25 (survey row #12). Lines re-pinned in fleet green leg 15 and again 2026-10-04 (one import added above them): the list is _scan_file's own answer for the file, every hit a fixture. Extended 2026-10-04 (dispatch 79b012ed item 4) with _scan_file's answer for the appended developer_home classes (L1601 on): that standard's own inputs. Extended leg 19 (L1838, L1842): the docstring-table pins' inputs."
     },
     {
       "file": "tests/test_checkers_batch10.py",
       "standard": "developer_home",
-      "lines": [1274, 1275, 1276, 1277, 1279, 1280, 1309, 1313, 1343, 1353, 1355, 1360, 1381, 1386, 1400, 1404, 1435, 1440, 1446, 1466, 1473],
+      "lines": [1282, 1283, 1284, 1285, 1287, 1288, 1317, 1321, 1351, 1361, 1363, 1368, 1389, 1394, 1408, 1412, 1443, 1448, 1454, 1474, 1481],
       "reason": "The standard's own inputs, not anybody's home: the developer_home classes (L1601 on) write each home spelling with an invented login into tmp_path files for the checker, the tree runner, the checklist and the verb to convict. The list is developer_home's own scan_text answer for the file, computed by calling it (2026-10-04, dispatch 79b012ed item 4)."
-    },
-    {
-      "file": "tests/test_checkers_batch10.py",
-      "standard": "windows_compat",
-      "lines": [1333],
-      "reason": "A control, not a path the test touches: '/tmp/pytest-of-.../x' is a string written into a tmp_path file to pin that a pytest temp path is not a home path (developer_home, 2026-10-04); nothing opens it."
-    },
-    {
-      "file": "tests/test_checkers_batch8.py",
-      "standard": "permission_flags",
-      "lines": [1039, 1052, 1066, 1078, 1091, 1097, 1103],
-      "reason": "Test input (fleet green leg 15; re-pinned 10-08 from 1182/1209/1221, the file grew above them): 'cmd = \"--dangerously-skip-permissions\"' and its sibling are strings written into tmp files as the permission_flags checker's own input; no command is ever built from them. Extended 2026-10-18: 1052 and the prose-lines pins' inputs (1091, 1097, 1103) are line-list fixtures, code once a docstring toggle stopped hiding them."
-    },
-    {
-      "file": "tests/test_host_portability_check.py",
-      "standard": "windows_compat",
-      "lines": [186, 188],
-      "reason": "Test input (fleet green leg 15; moved with host_portability's tests 2026-11-01): the 'aplay' lines are a quoted specimen of hooks apps/sound.py written to tmp as host_portability's input; nothing here runs aplay."
-    },
-    {
-      "file": "tests/test_posix_literal_nominator.py",
-      "standard": "windows_compat",
-      "lines": [44, 45, 47, 49, 50, 51, 52, 64, 176],
-      "reason": "The subject, not a path the test uses (fleet green leg 15): '/tmp' is the rooted literal the posix_literal nominator is about, handed only to ntpath/posixpath string functions to measure the hazard, or written as source text into tmp_path for the nominator to read (69) and as a parametrize case of the rooted-literal predicate (201); nothing touches the filesystem at it."
-    },
-    {
-      "file": "tests/test_posix_literal_nominator.py",
-      "standard": "literal_path",
-      "lines": [44, 45, 52],
-      "reason": "The subject, not a path the test uses (fleet green leg 15): the rooted literal is the nominator's own species, handed to ntpath.splitdrive/posixpath.splitdrive/posixpath.abspath, which are string functions; no host reads it."
-    },
-    {
-      "file": "tests/test_posix_literal_nominator.py",
-      "standard": "no_product_call",
-      "reason": "One test, test_ntpath_does_not_call_a_rooted_literal_absolute (fleet green leg 15): the measured platform premise the nominator rests on, a control of the library behaviour the rule exists for, not a test of the product. File-wide because no_product_call passes no line to is_bypassed; every other test here calls the nominator."
     },
     {
       "file": "tests/test_audit_tests_lane_gate.py",
       "standard": "literal_path",
-      "lines": [135],
+      "lines": [117],
       "reason": "Data, not a host path (fleet green leg 15): plugin._split_path splits a STRING on separators and never touches disk; '/weird/back\\\\slash.txt' is the input whose backslash must survive on POSIX."
-    },
-    {
-      "file": "tests/test_json_handler_contract.py",
-      "standard": "no_product_call",
-      "reason": "One test, test_the_divergence_tables_only_name_branches_that_still_exist (fleet green leg 15): it guards this file's own xfail tables against the discovered branch set, a meta-test of the file's apparatus. File-wide because no_product_call passes no line to is_bypassed; every other test here runs a shim."
-    },
-    {
-      "file": "tests/test_json_handler_contract_durability.py",
-      "standard": "weak_oracle",
-      "reason": "Three tests, 312/455/888 (fleet green leg 15; moved from test_json_handler_contract.py 1613/1756/2184 by the 2026-10-08 split): each runs over EVERY branch's copy, whose constants differ per branch, so the claim is a bound (attempts > 1, backoff > 0, a floor of two implementations, no success answer) and no exact value exists to pin; the 1108 test was cured to == []. File-wide because weak_oracle passes no line to is_bypassed."
     },
     {
       "file": "tests/test_audit_tests_static.py",
       "standard": "stdlib_patch",
-      "reason": "One patch, line 672 (fleet green leg 15): monkeypatch.setattr(sys, 'executable', ...) moves the interpreter's own table, as sys.argv and sys.path are acquitted for; the lookup under test reads sys.executable and a test that did not move it would measure the host. File-wide because stdlib_patch passes no line to is_bypassed."
+      "reason": "Eight patches (fleet green leg 15): line 626 monkeypatch.setattr(sys, 'executable', ...) moves the interpreter's own table, as sys.argv and sys.path are acquitted for; lines 652, 659, 667, 675, 682, 692 and 705 replace ruff_pt_check.shutil.which to put ruff on or off PATH. The lookup under test reads sys.executable and PATH, and a test that did not move them would measure the host. File-wide because stdlib_patch passes no line to is_bypassed."
     },
     {
       "file": "tests/test_checkers_batch10.py",
       "standard": "stdlib_patch",
-      "reason": "One patch, line 1004 (fleet green leg 15): Path.read_bytes is replaced only for 'locked.md' and delegates otherwise, to make one file unreadable; the portable alternatives (chmod, a lock) are not cross-platform. File-wide because stdlib_patch passes no line to is_bypassed."
+      "reason": "Two patches, lines 837 and 1415 (fleet green leg 15): Path.read_bytes is replaced only for 'locked.md' and delegates otherwise, to make one file unreadable; chmod 000 cannot make a file unreadable when the suite runs as root. File-wide because stdlib_patch passes no line to is_bypassed."
     },
     {
       "file": "tests/test_coverage_audit.py",
       "standard": "stdlib_patch",
-      "reason": "One patch, line 92 (fleet green leg 15; line 1007 before the 2026-10-08 split): importlib.util.spec_from_file_location answering None drives discover_checkers' 'no spec' branch, which no real *_check.py on disk can reach. File-wide because stdlib_patch passes no line to is_bypassed."
+      "reason": "Ten patches (fleet green leg 15): line 92 importlib.util.spec_from_file_location answering None drives discover_checkers' 'no spec' refusal, which no real *_check.py on disk can reach; lines 400-444 patch pathlib.Path.exists, spec_from_file_location and module_from_spec to drive _load_diagnostics_checker's absent, no-spec, load-failure and success answers without a second diagnostics_check.py on disk. File-wide because stdlib_patch passes no line to is_bypassed."
     },
     {
       "file": "tests/test_aipass_standards.py",
       "standard": "through_the_command",
-      "lines": [727],
+      "lines": [696],
       "reason": "No public route (fleet green leg 15; re-pinned +3 leg 16, +1 2026-10-26, -1 2026-11-01): json_handler_check._is_canonical_shim is the sha256 gate itself; check_branch reaches it only through a whole branch tree. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_audit_tests_core.py",
       "standard": "through_the_command",
-      "lines": [631, 651, 665, 677, 690, 701, 711, 719, 726],
+      "lines": [630, 650, 664, 676, 689, 700, 710, 718, 725],
       "reason": "No public route (fleet green leg 15): runner._m10_proof is reached by the lane only after a full suite run under the gate. Named in the leg 15 reply to @devpulse as the checker asks."
-    },
-    {
-      "file": "tests/test_audit_tests_lane_adapter.py",
-      "standard": "through_the_command",
-      "lines": [565],
-      "reason": "No public route (fleet green leg 15; moved with its test by the 10-08 split, re-pinned after the fire_canary tests): m10._fingerprint is reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_audit_tests_lane_statement_deletion.py",
       "standard": "through_the_command",
       "lines": [426],
       "reason": "No public route (fleet green leg 15; moved with its test by the 10-08 split): statement_deletion._mutant_text, the unparseable-mutant answer, is reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
-    },
-    {
-      "file": "tests/test_checkers_batch8.py",
-      "standard": "through_the_command",
-      "lines": [20],
-      "reason": "No public route (fleet green leg 15): handlers_check._branch_before is the path splitter check_module uses; its cases (Windows separators, nested apps) need no tree. Named in the leg 15 reply to @devpulse as the checker asks."
-    },
-    {
-      "file": "tests/test_coverage_arch_checklist.py",
-      "standard": "through_the_command",
-      "lines": [617],
-      "reason": "Fleet green leg 15 (line moved by devpulse's landing edit, which imports the checklist scope helpers from their public home in verdicts): architecture_check._relative_spelling is fed PureWindowsPath so the Windows spelling is pinned on any host; check_module would ask the host's own Path. Named in the leg 15 reply to @devpulse."
     },
     {
       "file": "tests/test_coverage_audit.py",
@@ -352,31 +234,6 @@
       "reason": "Pure constants module \u2014 defines SOURCE_SKIP_DIRS frozenset only, no operations to log."
     },
     {
-      "file": "tests/test_windows_compat.py",
-      "standard": "windows_compat",
-      "reason": "Test file for this standard: its cases write deliberate POSIX patterns ('/tmp/output.log', '/tmp/cache', aplay, shell=True) into tmp_path files as checker input. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
-    },
-    {
-      "file": "tests/test_windows_compat.py",
-      "standard": "log_structure",
-      "reason": "Test input, not a log sink: L383 writes the string Path('/tmp/output.log') into a tmp_path file so windows_compat can flag it. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
-    },
-    {
-      "file": "apps/handlers/aipass_standards/exclusive_create_race.py",
-      "standard": "json_structure",
-      "reason": "Pure AST detector \u2014 takes a parsed tree and returns (line, text) pairs: no I/O, no operation to log. Its one caller, windows_compat_check.check_branch_info, logs windows_compat_advisory_lines per branch. Same shape as skip_dirs.py above."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/mock_repr_path.py",
-      "standard": "json_structure",
-      "reason": "Pure AST detector, same shape as exclusive_create_race.py above: a parsed tree in, (line, text) pairs out, no I/O. Its one caller, windows_compat_check.check_branch_info, logs windows_compat_advisory_lines per branch."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/text_fixture_bytes_oracle.py",
-      "standard": "json_structure",
-      "reason": "Pure AST detector, same shape as mock_repr_path.py above (2026-10-15): a parsed tree in, (line, text) pairs out, no I/O. Its one caller, windows_compat_check.check_branch_info, logs windows_compat_advisory_lines per branch (text_bytes count)."
-    },
-    {
       "file": "apps/handlers/cli/help_flags.py",
       "standard": "json_structure",
       "reason": "Pure predicate \u2014 wants_help() answers a question about a list of strings and returns a bool: no state, no I/O, no operation to log. Measured 2026-08-13: checklist reports 'Missing json_handler import \u2014 add: from aipass.<branch>.apps.handlers.json import json_handler (+1 more)', i.e. the standard wants an import AND a log_operation() call. This predicate runs before EVERY sentry command, so satisfying it would write 'a help flag was looked for' on every invocation and bury the operation log the standard exists to serve. Same shape as skip_dirs.py above."
@@ -385,11 +242,6 @@
       "file": "handlers/aipass_proof/",
       "standard": "dead_code",
       "reason": "Proof handlers are discovered via iterdir() + importlib in sentry_proof.py \u2014 dead_code checker only recognizes glob() patterns. [branch-level standard: dead_code reports through checks[].message prose, not a *_violations list, so a raw re-audit that scans violation keys shows this rule as dead \u2014 it is not. Canary branch-level standards with check_branch(), not with the audit's violation lists.]"
-    },
-    {
-      "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
-      "standard": "log_visibility",
-      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** \u2014 granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import \u2014 so this exemption cannot widen without a machine refusing the pack. prax's logger is an aipass import; the payload uses stdlib logging. This standard is NAMED in the grant's recorded terms."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
@@ -464,7 +316,38 @@
     {
       "file": "apps/handlers/pytest_quality_standards/corpus.py",
       "standard": "silent_catch",
-      "reason": "NOT A SILENT CATCH - a third disposition the standard does not model. `_parse` catches OSError/SyntaxError/UnicodeDecodeError/ValueError and RETURNS the reason as `(None, \"SyntaxError: ...\")`; `build` records it in `Corpus.unparseable_reasons` and `no_oracle_check` renders it as a check line naming the file as NOT measured. The error reaches the human READING THE REPORT, which is strictly louder than a log entry. The standard accepts 'log or re-raise'; a logger is exactly what a stdlib-only generic pack cannot import, and re-raising would let one broken test file abort a whole project's score. STANDARD GAP LOGGED for the v5 campaign - returning a named reason to a caller that must handle it deserves to be a recognised disposition."
+      "lines": [134, 233],
+      "reason": "Stdlib-only generic pack: no prax logger to import. 134: _relpath's ValueError means the path is outside root, and the absolute path is the documented answer. 233: an unparseable production file goes in Corpus.production_unparseable, and the report names it as not measured. One broken file must not abort a project's score."
+    },
+    {
+      "file": "apps/handlers/bypass/dead_rules.py",
+      "standard": "fallback",
+      "functions": ["_line_count"],
+      "reason": "None is 'line count unknown' and the caller never convicts a rule on it (the docstring says so). The warning names the file, so a dead rule is kept, never deleted on a guess."
+    },
+    {
+      "file": "apps/handlers/bypass/dead_rules.py",
+      "standard": "fallback",
+      "functions": ["bypass_markers"],
+      "reason": "A file outside the branch root is named by its whole path, which is the documented answer, not a stand-in. The marker is still reported."
+    },
+    {
+      "file": "apps/handlers/audit/branch_audit.py",
+      "standard": "fallback",
+      "functions": ["_rel_path"],
+      "reason": "Docstring contract: a path outside root is shown as its absolute path. The finding is still reported, only its label changes."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/imports_check.py",
+      "standard": "fallback",
+      "functions": ["filter_docstrings"],
+      "reason": "Unparseable source is returned unblanked (docstring contract) and check_prax_logger fails it as 'Unparseable source', so nothing reads as passed."
+    },
+    {
+      "file": "apps/modules/checklist.py",
+      "standard": "logged_fallback",
+      "lines": [200],
+      "reason": "A file outside its branch root cannot be on that branch's audit ignore list, so None (not ignored) is the true answer, not a stand-in. The info line names both paths."
     },
     {
       "file": "apps/handlers/context_standards/startup_budget_check.py",
@@ -480,36 +363,15 @@
       "reason": "The POSIX home literals are INPUT to plugin.classify(), whose job is to judge a path SHAPE. The literal is the fixture; this file never opens it. Replacing it with pathlib would delete the test."
     },
     {
-      "file": "tests/test_audit_tests_lane_gate.py",
-      "standard": "windows_compat",
-      "reason": "The /tmp literals are INPUT to plugin.classify_sqlite(), which parses sqlite connection strings. The string shape is the subject under test, never a location this file touches."
-    },
-    {
-      "file": "tests/test_audit_tests_lane.py",
-      "standard": "windows_compat",
-      "lines": [693],
-      "reason": "An argv token, not a location (surfaced by the 10-08 split, hidden until then under the file-wide classify_sqlite row): '/tmp/some_project' is a documented `audit-tests <path>` invocation handed to the verb's parser, whose runner is a recorder; nothing opens it."
-    },
-    {
-      "file": "tests/test_audit_tests_static.py",
-      "standard": "windows_compat",
-      "reason": "The /tmp literals are FIELD VALUES inside a hand-built artifact dict fed to the law checkers. Nothing opens them; they stand in for paths a run would have recorded, and the laws judge the document's shape, not the filesystem."
-    },
-    {
-      "file": "apps/handlers/tests_pytest_standards/gutting.py",
-      "standard": "unused_function",
-      "reason": "TRUE FINDING, RECORDED NOT DENIED. discover_functions(), run_campaign() and summarize() are the pseudo_tested engine's public surface and nothing calls them, because the group is declared not_applicable: the adapter's nominate(spec) seam carries no options channel to opt a campaign in per run, and the campaign costs one suite execution per function (projected 35.6h on sentry, 58.8h ceiling) so it may not run by default. The engine is built and proven on .sentry/fixtures/canary_6500dce9. Tracked as sentry todo 120; the bypass goes when the run loop lands, and until then the audit is right and this entry is the record of why."
-    },
-    {
       "file": "apps/handlers/audit/incremental_cache.py",
       "standard": "logged_fallback",
-      "lines": [249, 280, 291],
-      "reason": "A cache, and the checker is wrong on these lines (fleet green leg 14). An unreadable legacy doc migrates 0 entries (migrate_legacy_cache), and an unreadable or corrupt entry is a cache miss (load_branch_entry). Every caller needs the same answer to both: run the full audit and write the entry fresh, which is the documented fail-open. The corrupt entry is renamed aside to .corrupt and each failure is logged, so nothing is lost and nothing is silent."
+      "lines": [229, 240],
+      "reason": "A cache, and the checker is wrong on these lines (fleet green leg 14). An unreadable or a corrupt entry is a cache miss (load_branch_entry, two lines). Every caller needs the same answer to both: run the full audit and write the entry fresh, which is the documented fail-open. The corrupt entry is renamed aside to .corrupt and each failure is logged, so nothing is lost and nothing is silent."
     },
     {
       "file": "apps/handlers/audit_tests/artifact.py",
       "standard": "logged_fallback",
-      "lines": [57],
+      "lines": [56],
       "reason": "The checker is wrong on this line (fleet green leg 14). An unreadable previous artifact is no baseline, the same as an absent one, and load_previous's docstring says so: the caller records a missing baseline and skips the S3 diff, never 'nothing vanished'. The failure is logged as a warning and as the json op previous_artifact_unreadable."
     },
     {
@@ -523,18 +385,6 @@
       "standard": "logged_fallback",
       "lines": [52, 190],
       "reason": "The checker is wrong on these lines (fleet green leg 14): each failure answer is the STRICT answer. An unparseable file gets no console-import window (86) and no stderr-directed print lines (317), so it keeps every finding; ignorance never buys an exemption, as the comment at 86 says."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/handlers_check.py",
-      "standard": "logged_fallback",
-      "lines": [353, 407],
-      "reason": "The checker is wrong on these lines (fleet green legs 14 and 15): each parse-failure answer is the STRICT one. 'module_name is optional' (353) keeps the auto-detection check running, where 'required' would return None and acquit; 'walks no caller frame' (407) buys no exemption. Together they convict an unparseable file that names module_name. test_auto_detection_judges_an_unparseable_file_strictly pins it, and its mutant (353 answers False) dies at the assert."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/json_structure_check.py",
-      "standard": "logged_fallback",
-      "lines": [328, 346],
-      "reason": "The checker is wrong on these lines (fleet green leg 14; re-pinned +3 10-08, resolve_relative's docstring grew): each failure answer is the STRICT answer. An unparseable file is not eligible for the bootstrap exemption (441, logged). A path outside the source root has no branch root (459): that is the true answer, and its one caller, _seam_logging, then finds no seam and grants nothing."
     },
     {
       "file": "apps/handlers/aipass_standards/ruff_check.py",
@@ -551,31 +401,25 @@
     {
       "file": "apps/handlers/aipass_standards/architecture_check.py",
       "standard": "logged_fallback",
-      "lines": [322],
+      "lines": [325],
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. The caller sees the passport still exists and fails Template baseline ('No citizen_class in ...passport.json'); only an absent passport skips, and that path never reaches this except."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/json_handler_check.py",
-      "standard": "logged_fallback",
-      "lines": [51],
-      "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. check_branch reads None as 'Handler exists' failed, so an unreadable handler fails the row; the read error is logged as a warning."
     },
     {
       "file": "apps/handlers/audit/discovery.py",
       "standard": "logged_fallback",
-      "lines": [235],
+      "lines": [237],
       "reason": "No verdict reads this value (fleet green leg 15): measure_pack_corpus feeds the corpus banner only, its docstring says a raising measurer answers None so the caller keeps its own count rather than print a fabricated 0, and the failure is logged as a warning naming the measurer."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/envdiff.py",
       "standard": "logged_fallback",
-      "lines": [657],
+      "lines": [652],
       "reason": "The checker is wrong on these lines (fleet green leg 15): the failure answer is the strict one. read_records' docstring names both: an unreadable log is an empty list and its emptiness produces the refusal; an undecodable line is dropped with a warning naming the file and line, and the missing session record it leaves is refused upstream."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
       "standard": "logged_fallback",
-      "lines": [248],
+      "lines": [236],
       "reason": "Named, not silent (fleet green leg 15): the hook must never raise inside the suite it measures, and _note_error carries the realpath failure to the artifact, where Law M10 reports it. Only reachable in symlink-sibling mode, off by default."
     },
     {
@@ -607,12 +451,6 @@
       "standard": "logged_fallback",
       "lines": [992],
       "reason": "The checker is wrong on this line (fleet green leg 14): an impossible date is no date, and both callers make None a violation. _newest_entry_date lists the entry as bad, and the last_updated check fails by name with the value found. The value is logged as a warning."
-    },
-    {
-      "file": "tests/test_checkers_batch3.py",
-      "standard": "permission_flags",
-      "lines": [369, 385],
-      "reason": "Test input (2026-10-18): 'CMD = \"--dangerously-skip-permissions\"' sits in textwrap.dedent fixture strings written to tmp files as the permission_flags checker's own input; a triple-quoted literal is code since the prose-lines helper, so the old toggle no longer hides them. No command is built from them."
     },
     {
       "file": "tests/test_checkers_batch3.py",
@@ -649,12 +487,6 @@
       "standard": "logged_fallback",
       "lines": [74],
       "reason": "The checker is wrong on this line (2026-10-24): decode_line answers None only for a line that holds no record (blank, not JSON, not an object), as its docstring says; the success path returns a dict, never None. The broken line is logged as a warning naming the file and line, and read_gate_log counts it as malformed."
-    },
-    {
-      "file": "apps/modules/checklist.py",
-      "standard": "logged_fallback",
-      "lines": [198],
-      "reason": "The checker is wrong on this line (2026-10-24): relative_to raises ValueError only when the file is not under the branch root, and such a file is truly not audit-ignored, since a branch's ignore rules govern its own tree only. None here is the answer, not a failure, and the case is logged (same ruling as ignore_handler.py)."
     },
     {
       "file": "tests/test_audit_tests_lane_adapter.py",

@@ -1,14 +1,12 @@
 # =================== AIPass ====================
 # Name: router_handler.py
 # Description: Handler for command routing implementation; the caller stamp for routed children and in-process modules
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-09
-# Modified: 2026-11-03
+# Modified: 2026-11-17
 # =============================================
 
-"""
-Handler for command routing implementation.
-"""
+"""Handler for command routing implementation."""
 
 import json
 import os
@@ -17,9 +15,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, List, NamedTuple, Optional
 
-from aipass.prax.apps.modules.logger import system_logger
+from aipass.prax import logger as system_logger
 from .exceptions import CommandExecutionError
 from .executor import DEFAULT_TIMEOUT, CommandResult, execute_command
+from .registry_name import REGISTRY_SUFFIX, is_registry_filename
 from aipass.drone.apps.handlers.json import json_handler
 
 logger = system_logger
@@ -59,25 +58,21 @@ def find_entry_point(branch_path: str, branch_name: str) -> Path:
     return entry_point
 
 
-_REGISTRY_SUFFIX = "_REGISTRY.json"
-_REGISTRY_GLOB = f"*{_REGISTRY_SUFFIX}"
-
-
 def _registry_candidates(directory: Path) -> List[Path]:
     """What the FILESYSTEM answers for ``*_REGISTRY.json`` in *directory* — untrusted.
 
     Test seam: Linux cannot produce a case-folding listing, so tests supply one here.
     """
-    return list(directory.glob(_REGISTRY_GLOB))
+    return list(directory.glob(f"*{REGISTRY_SUFFIX}"))
 
 
-def registries_in(directory: Path) -> List[Path]:
-    """Every ``*_REGISTRY.json`` in *directory*, exact-case, sorted.
+def registry_named_entries(directory: Path) -> List[Path]:
+    """Every entry in *directory* whose name passes is_registry_filename, directories included, sorted.
 
-    The glob is not the filter: case-insensitive filesystems also match ``*_registry.json``
-    (drone_command_registry.json), and a registry is a trust anchor. Suffix only, never the stem.
+    The glob is not the filter: case-insensitive filesystems also match drone_command_registry.json.
+    A directory is kept on purpose: the load that follows fails loud on it rather than skip to the next.
     """
-    return sorted(p for p in _registry_candidates(directory) if p.name.endswith(_REGISTRY_SUFFIX))
+    return sorted(p for p in _registry_candidates(directory) if is_registry_filename(p.name))
 
 
 def _project_name_from_registry(reg_file: Path) -> str | None:
@@ -94,7 +89,7 @@ def _project_name_from_registry(reg_file: Path) -> str | None:
     if declared:
         return str(declared).lower().replace(" ", "-")
 
-    derived = reg_file.name[: -len(_REGISTRY_SUFFIX)].lower().replace(" ", "-")
+    derived = reg_file.name[: -len(REGISTRY_SUFFIX)].lower().replace(" ", "-")
     if not derived:
         logger.warning("Caller detection: registry %s yields no usable project name", reg_file)
         return None
@@ -110,7 +105,7 @@ def _project_name_from_registry(reg_file: Path) -> str | None:
 def _working_directory() -> Path:
     """The one raw read of where this process stands. Raises ENOENT when that is gone.
 
-    Unguarded test seam beneath ``caller_cwd``: Windows cannot stand in a deleted directory.
+    Unguarded test seam beneath ``caller_cwd``.
     """
     return Path.cwd()
 
@@ -131,12 +126,12 @@ def find_project_root() -> Path | None:
     """
     cwd = caller_cwd()
     for parent in [cwd, *cwd.parents] if cwd is not None else []:
-        if registries_in(parent):
+        if registry_named_entries(parent):
             return parent.resolve()
     aipass_home = os.environ.get("AIPASS_HOME")
     if aipass_home:
         home = Path(aipass_home)
-        if home.is_dir() and registries_in(home):
+        if home.is_dir() and registry_named_entries(home):
             return home.resolve()
     return None
 
@@ -168,7 +163,7 @@ def detect_caller_signal(cwd: Path) -> CallerSignal:
 
     current = cwd.resolve()
     for _ in range(10):
-        for reg_file in registries_in(current):
+        for reg_file in registry_named_entries(current):
             project_name = _project_name_from_registry(reg_file)
             if project_name:
                 return CallerSignal(project_name, "project")
@@ -301,7 +296,7 @@ def execute_branch_command(
     caller_env = {"AIPASS_BRANCH_NAME": branch_name, **caller_stamp_values()}
     caller_branch = caller_env.get("AIPASS_CALLER_BRANCH", "")
 
-    # Lazy: registry_handler imports this module for caller_cwd and registries_in.
+    # Lazy: registry_handler imports this module for caller_cwd and registry_named_entries.
     from aipass.drone.apps.handlers.registry_handler import branch_interpreter
 
     result = execute_command(

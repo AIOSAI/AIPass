@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sleep_in_test_check.py
 # Description: Sleep In Test Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -17,9 +17,15 @@ import ast
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.aipass_standards.check_support import parse, read_text, result, tail_name
+from aipass.sentry.apps.handlers.aipass_standards.check_support import (
+    find_enclosing_function,
+    parse,
+    read_text,
+    result,
+    tail_name,
+)
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -64,6 +70,20 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
     return [{"name": "Sleep in test", "passed": passed, "message": message}]
 
 
+def _open_sites(found: List[Tuple[int, str]], source: str, module_path: str, bypass_rules: list | None) -> List:
+    """The sleeps no row waives; a sleep's function is the def holding it, FILE_SCOPE at module level."""
+    if not bypass_rules:
+        return found
+    tree = ast.parse(source)  # every sleep came from this source's own parse
+    open_sites = []
+    for line, spelling in found:
+        holder = find_enclosing_function(tree, line)
+        name = holder.name if holder else FILE_SCOPE
+        if not is_bypassed(module_path, STANDARD_KEY, line=line, bypass_rules=bypass_rules, name=name):
+            open_sites.append((line, spelling))
+    return open_sites
+
+
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """Check a test file for sleeps standing in for a clock or a condition."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
@@ -77,9 +97,12 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if source is None:
         return _result(False, _one_check(False, f"Error reading file: {module_path}"), 0)
 
-    findings = scan(source)
-    if not findings:
+    found = scan(source)
+    if not found:
         return _result(True, _one_check(True, "Nothing here waits on the clock"), 100)
+    findings = _open_sites(found, source, module_path, bypass_rules)
+    if not findings:
+        return _result(True, _one_check(True, f"All {len(found)} sleeps waived by scoped bypass rows"), 100)
 
     # One check for every hit: checklist._format_failure prints only the first failed check plus "(+N more)".
     detail = "\n".join(

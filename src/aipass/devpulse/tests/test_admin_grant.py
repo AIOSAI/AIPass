@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_admin_grant.py
 # Description: Tests for the birth-cert admin grant handler (FPLAN-0401)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-12
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/owner/admin_grant.py: keygen, mint, and every named refusal of the 5-leg verify."""
@@ -13,7 +13,6 @@
 # sentry: no-test-needed(stdlib) — hmac's digest arithmetic and secrets.token_hex's randomness
 
 import json
-import os
 import stat
 
 import pytest
@@ -87,11 +86,8 @@ def test_keygen_creates_600_hex_key(world):
     content = world["key"].read_text(encoding="utf-8").strip()
     assert len(content) == 64
     bytes.fromhex(content)  # valid hex or raises
-    if os.name == "posix":
-        # Windows chmod only drives the read-only bit — st_mode reads 0o666
-        # there no matter what keygen asks for, so 600 is a POSIX-only promise.
-        mode = stat.S_IMODE(world["key"].stat().st_mode)
-        assert mode == 0o600
+    mode = stat.S_IMODE(world["key"].stat().st_mode)
+    assert mode == 0o600
     assert content not in msg  # key material never surfaces in messages
 
 
@@ -252,6 +248,31 @@ def test_corrupt_key_file_fails_closed(world):
     ok, reason = _verify(world)
     assert not ok
     assert reason.startswith("leg4")
+
+
+def test_mint_with_no_path_signs_the_certificate_at_the_registry_recorded_home(world):
+    """Mint and verify must agree on one certificate: the registry's, not the one beside this code."""
+    admin_grant.generate_key(key_path=world["key"])
+    ok, msg = admin_grant.mint_grant(key_path=world["key"], registry_path=world["registry"])
+    assert ok, msg
+    assert json.loads(world["cert"].read_text(encoding="utf-8"))["signature"]["value"]
+    assert admin_grant.verify_admin_grant(key_path=world["key"], registry_path=world["registry"]) == (
+        True,
+        "admin grant verified",
+    )
+
+
+def test_mint_and_status_refuse_when_the_registry_names_no_home(world, tmp_path):
+    """No registry, no certificate to sign or show: the reason is handed on, nothing is guessed."""
+    admin_grant.generate_key(key_path=world["key"])
+    nowhere = tmp_path / "no_registry.json"
+    assert admin_grant.mint_grant(key_path=world["key"], registry_path=nowhere) == (
+        False,
+        "birth certificate not located: AIPASS_REGISTRY.json not found",
+    )
+    state = admin_grant.grant_status(key_path=world["key"], registry_path=nowhere)
+    assert (state["cert_present"], state["verified"]) == (False, False)
+    assert state["verify_reason"] == "leg2 cert-path: AIPASS_REGISTRY.json not found"
 
 
 # =============================================================================

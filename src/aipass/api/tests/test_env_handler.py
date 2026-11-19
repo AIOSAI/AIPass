@@ -3,24 +3,21 @@
 # Description: Tests for .env template creation handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/auth/env.py -- .env template creation, and keys.py's no-key diagnosis."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(windows_compat) — the 0o600 / 0o700 modes on Windows, which has no Unix permission bits
 # sentry: no-test-needed(ruff) — that env.py and keys.py parse and import
 
 from __future__ import annotations
 
 import os
 import stat
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from aipass.api.apps.handlers.auth import keys
 from aipass.api.apps.handlers.auth.env import create_env_template
@@ -58,7 +55,6 @@ class TestCreateEnvTemplate:
         assert result is True
         assert target.read_text(encoding="utf-8") == "EXISTING=content\n"
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="Windows does not support Unix file permissions")
     def test_file_permissions(self, tmp_path: Path) -> None:
         """Created file has owner-only read/write (0o600)."""
         target = tmp_path / "secrets" / ".env"
@@ -67,7 +63,6 @@ class TestCreateEnvTemplate:
         file_mode = stat.S_IMODE(os.stat(target).st_mode)
         assert file_mode == 0o600
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="Windows does not support Unix file permissions")
     def test_directory_permissions(self, tmp_path: Path) -> None:
         """Parent directory has owner-only access (0o700)."""
         secrets_dir = tmp_path / "secrets"

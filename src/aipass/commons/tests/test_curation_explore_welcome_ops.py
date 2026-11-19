@@ -5,7 +5,7 @@
 # Date: 2026-04-03
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -696,7 +696,7 @@ def test_show_trending_empty(
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.close_db")
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db")
 @patch(
-    "aipass.commons.apps.modules.commons_identity.get_caller_branch",
+    "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch",
     return_value={"name": "TEST_BRANCH"},
 )
 def test_explore_rooms_no_hidden_rooms(
@@ -725,7 +725,7 @@ def test_explore_rooms_no_hidden_rooms(
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.close_db")
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db")
 @patch(
-    "aipass.commons.apps.modules.commons_identity.get_caller_branch",
+    "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch",
     return_value={"name": "TEST_BRANCH"},
 )
 def test_explore_rooms_with_hidden_rooms_no_reveal(
@@ -756,7 +756,7 @@ def test_explore_rooms_with_hidden_rooms_no_reveal(
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.close_db")
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db")
 @patch(
-    "aipass.commons.apps.modules.commons_identity.get_caller_branch",
+    "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch",
     return_value={"name": "TEST_BRANCH"},
 )
 def test_explore_rooms_reveals_after_3_rooms(
@@ -791,7 +791,7 @@ def test_explore_rooms_reveals_after_3_rooms(
 
 
 @patch(
-    "aipass.commons.apps.modules.commons_identity.get_caller_branch",
+    "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch",
     return_value=None,
 )
 def test_explore_rooms_no_caller(mock_caller: MagicMock) -> None:
@@ -809,7 +809,7 @@ def test_explore_rooms_no_caller(mock_caller: MagicMock) -> None:
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.close_db")
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db")
 @patch(
-    "aipass.commons.apps.modules.commons_identity.get_caller_branch",
+    "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch",
     return_value={"name": "TEST_BRANCH"},
 )
 def test_list_secrets_none_discovered(
@@ -837,7 +837,7 @@ def test_list_secrets_none_discovered(
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.close_db")
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db")
 @patch(
-    "aipass.commons.apps.modules.commons_identity.get_caller_branch",
+    "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch",
     return_value={"name": "TEST_BRANCH"},
 )
 def test_list_secrets_with_discovered_room(
@@ -867,7 +867,7 @@ def test_list_secrets_with_discovered_room(
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.close_db")
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db")
 @patch(
-    "aipass.commons.apps.modules.commons_identity.get_caller_branch",
+    "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch",
     return_value={"name": "TEST_BRANCH"},
 )
 def test_list_secrets_discovered_via_comment(
@@ -898,7 +898,7 @@ def test_list_secrets_discovered_via_comment(
 
 
 @patch(
-    "aipass.commons.apps.modules.commons_identity.get_caller_branch",
+    "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch",
     return_value=None,
 )
 def test_list_secrets_no_caller(mock_caller: MagicMock) -> None:

@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch monitor's session-pointer aware retry loop
 # Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's session-pointer aware retry loop and reconciliation, Claude, Codex and OpenCode."""
@@ -37,12 +37,11 @@ pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_si
 @pytest.fixture
 def pointer_home(tmp_path, monkeypatch):
     """Point the home directory at tmp_path so transcript paths land under the sandbox.
-    Path.home() answers from HOME on POSIX and USERPROFILE on Windows, so no pathlib patch is needed.
+    Path.home() answers from HOME, so no pathlib patch is needed.
     """
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
     assert Path.home() == home, "this platform must answer Path.home() from the environment"
     return home
 

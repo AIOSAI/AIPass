@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_ownership.py
-# Version: 2.7.0
+# Version: 2.8.0
 # Description: Who may write whose files: project roots and branch owners read from the registries
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-18
-# Modified: 2026-11-04
+# Modified: 2026-11-17
 # =============================================
 
 """Answers, for the edit gate's two lanes, whose file a write lands in and whether this seat may make it.
@@ -23,10 +23,11 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules import admin_seat
 from aipass.hooks.apps.modules.bash_writes import HELD_BY_INTERPRETER
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 CONSOLE = err_console
 
@@ -37,8 +38,6 @@ PROJECT_MARKER = "*_REGISTRY.json"
 # A landing with no registry is the git work tree it sits in; its .git stands in as the marker.
 GIT_MARKER = ".git"
 
-# Windows has no pathconf, so its long-path ceiling stands in.
-_WINDOWS_PATH_MAX = 32767
 _SHOWN_CHARS = 120
 
 _WHO = (
@@ -88,7 +87,7 @@ def _resolved(path: Path) -> Path | None:
     try:
         return path.resolve()
     except (OSError, RuntimeError) as exc:
-        logger.info("[HOOKS] write_ownership: unresolvable path %s: %s", path, exc)
+        logger.warning("[HOOKS] write_ownership: unresolvable path %s: %s", path, exc)
         return None
 
 
@@ -96,7 +95,7 @@ def _read(marker: Path) -> object:
     try:
         return json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        logger.info("[HOOKS] write_ownership: registry unreadable, still a boundary: %s: %s", marker, exc)
+        logger.warning("[HOOKS] write_ownership: registry unreadable, still a boundary: %s: %s", marker, exc)
         return None
 
 
@@ -172,12 +171,9 @@ def landing_of(target: Path) -> Project | None:
 
 
 def _path_max() -> int:
-    """The host's PATH_MAX; Windows publishes none, so its long-path ceiling. 0 when unknown: the probe alone judges."""
-    pathconf = getattr(os, "pathconf", None)
-    if pathconf is None:
-        return _WINDOWS_PATH_MAX
+    """The host's PATH_MAX. 0 when unknown: the probe alone judges."""
     try:
-        return pathconf("/", "PC_PATH_MAX")
+        return os.pathconf("/", "PC_PATH_MAX")
     except (OSError, ValueError) as exc:
         logger.info("[HOOKS] write_ownership: PATH_MAX unpublished here, the probe alone judges length: %s", exc)
         return 0
@@ -262,7 +258,15 @@ def ownership_refusal(
 
     Crossings are the caller's to refuse. The admin grant is asked last: the rail does file I/O.
     Interpreter-held paths pass: a read cannot be told from a write, and reading is allowed.
+    Each call leaves one json trail entry.
     """
+    refusal = _ownership_refusal(caller, landing, cwd, target, how)
+    json_handler.log_operation("ownership_refusal", {"seat": cwd, "refused": refusal is not None})
+    return refusal
+
+
+def _ownership_refusal(caller: Project | None, landing: Project | None, cwd: str, target: Path, how: str) -> str | None:
+    """ownership_refusal's ruling, untrailed."""
     if HELD_BY_INTERPRETER in how:
         return None
     if caller is not None and (landing is None or landing.root != caller.root):

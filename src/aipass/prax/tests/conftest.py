@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for prax tests
-# Version: 2.6.0
+# Version: 2.7.0
 # Created: 2025-11-08
-# Modified: 2026-11-08
+# Modified: 2026-11-16
 # =============================================
 
 """Shared pytest fixtures for prax tests."""
@@ -25,9 +25,10 @@ from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock
 
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.prax.apps.handlers import fleet as fleet_handler
 from aipass.prax.apps.handlers.config import load as config_load
+from aipass.prax.apps.handlers.logging import trail as trail_mod
 from aipass.prax.apps.handlers.monitoring import branch_detector, filesystem_handler
 from aipass.prax.apps.handlers.registry import load as registry_load
 from aipass.prax.apps.handlers.registry import save as registry_save
@@ -87,7 +88,7 @@ def _resync_module_attrs() -> Generator[None, None, None]:
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Pin the consoles past any tmp_path line (macOS's passed 200): unpinned, Rich sizes per print."""
+    """Pin the consoles past any tmp_path line: unpinned, Rich sizes per print."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 1000
 
@@ -117,6 +118,8 @@ def mock_prax_infrastructure(monkeypatch, tmp_path) -> Path:
     root = tmp_path / "aipass_test_logs"
     json_dir = root / "prax" / "prax_json"
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(root))
+    # A test that clears the variable must still not reach the live prax/logs trails.
+    monkeypatch.setattr(trail_mod, "PRAX_LOGS", root / "prax" / "logs")
     monkeypatch.setattr(config_load, "PRAX_JSON_DIR", json_dir)
     # Fixed at import to the live git-ignored prax_json: dev seats and CI read different formats.
     monkeypatch.setattr(config_load, "PRAX_LOGGER_CONFIG_FILE", json_dir / "prax_logger_config.json")

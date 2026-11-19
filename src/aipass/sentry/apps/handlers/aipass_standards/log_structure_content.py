@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_structure_content.py
 # Description: Log Structure Standards Content Handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-06
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -45,8 +45,8 @@ def get_log_structure_standards() -> str:
         "",
         "[bold cyan]LOG PATH PATTERN:[/bold cyan]",
         "  [green]CORRECT:[/green]  Use prax's system_logger (auto-routes to correct tier)",
-        "  [dim]  from aipass.prax.apps.modules.logger import system_logger[/dim]",
-        "  [dim]  system_logger.info('message')  # prax handles tier routing[/dim]",
+        "  [dim]  from aipass.prax import logger[/dim]",
+        "  [dim]  logger.info('message')  # prax handles tier routing[/dim]",
         "",
         "  [green]ALSO OK:[/green]  Relative path to branch-root logs/",
         "  [dim]  LOG_DIR = Path(__file__).resolve().parents[2] / 'logs'[/dim]",

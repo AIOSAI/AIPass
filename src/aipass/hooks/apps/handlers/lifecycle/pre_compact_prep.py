@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: pre_compact_prep.py
-# Version: 1.6.0
+# Version: 1.7.0
 # Description: Stamps a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-20
-# Modified: 2026-11-10
+# Modified: 2026-11-17
 # =============================================
 
 """Mechanical /prep AT compact time (DPLAN-0253).
@@ -29,7 +29,8 @@ from pathlib import Path
 
 from aipass.hooks.apps.handlers.config.loader import fleet_rows
 from aipass.hooks.apps.handlers.json import files as json_files
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 _DEFAULT_SUMMARY_CAP = 300
 
@@ -64,19 +65,19 @@ def _count_active_dispatch_locks(repo_root: Path | None) -> int | None:
     try:
         rows = fleet_rows(repo_root)
     except Exception as exc:
-        logger.info("[HOOKS] pre_compact_prep: registry read failed: %s", exc)
+        logger.warning("[HOOKS] pre_compact_prep: registry read failed: %s", exc)
         return None
     return sum(1 for row in rows if (Path(row["path"]) / ".ai_mail.local" / ".dispatch.lock").is_file())
 
 
 def _count_open_plans(branch_dir: Path) -> int | None:
     try:
-        from aipass.flow.apps.modules.door_open_plans import get_open_plans
+        from aipass.flow import get_open_plans
 
         target = str(branch_dir.resolve())
         return sum(1 for _num, info in get_open_plans() if info.get("location") == target)
     except Exception as exc:
-        logger.info("[HOOKS] pre_compact_prep: open plans read failed: %s", exc)
+        logger.warning("[HOOKS] pre_compact_prep: open plans read failed: %s", exc)
         return None
 
 
@@ -104,7 +105,7 @@ def _git_snapshot(branch_dir: Path) -> str | None:
             cwd=str(branch_dir),
         )
     except Exception as exc:
-        logger.info("[HOOKS] pre_compact_prep: git snapshot failed: %s", exc)
+        logger.warning("[HOOKS] pre_compact_prep: git snapshot failed: %s", exc)
         return None
 
     bits: list[str] = []
@@ -127,7 +128,7 @@ def _inbox_unread(branch_dir: Path) -> int | None:
         unread = data.get("unread_count")
         return unread if isinstance(unread, int) else None
     except (OSError, json.JSONDecodeError) as exc:
-        logger.info("[HOOKS] pre_compact_prep: inbox read failed: %s", exc)
+        logger.warning("[HOOKS] pre_compact_prep: inbox read failed: %s", exc)
         return None
 
 
@@ -144,13 +145,14 @@ def _summary_cap(branch: str) -> int:
         fleet going around it.
     """
     try:
-        el = importlib.import_module("aipass.memory.apps.modules.door_entry_limits")
-        limits = el.load_entry_limits(branch)
+        from aipass.memory import load_entry_limits
+
+        limits = load_entry_limits(branch)
         cap = limits["entry_types"]["sessions"]["max_chars"]
         if isinstance(cap, int) and cap > 0:
             return cap
     except (ImportError, KeyError, TypeError) as exc:
-        logger.info("[HOOKS] pre_compact_prep: entry_limits read failed, using default: %s", exc)
+        logger.warning("[HOOKS] pre_compact_prep: entry_limits read failed, using default: %s", exc)
     return _DEFAULT_SUMMARY_CAP
 
 
@@ -187,11 +189,8 @@ def _stamp_session_entry(branch_dir: Path, summary: str, cap: int) -> bool:
     if not local_path.is_file():
         logger.info("[HOOKS] pre_compact_prep: no local.json at %s — skipping stamp", local_path)
         return False
-    try:
-        import fcntl
-    except ImportError:  # shortcut: Windows has no fcntl and stamps unlocked; use msvcrt.locking if that races
-        logger.info("[HOOKS] pre_compact_prep: no fcntl here, stamping %s unlocked", local_path)
-        return _stamp_locked(local_path, summary, cap)
+    import fcntl
+
     # The lock is on .trinity/ itself: a sidecar file there is a stray to @memory's push.
     try:
         folder = os.open(local_path.parent, os.O_RDONLY)
@@ -250,32 +249,35 @@ def _stamp_locked(local_path: Path, summary: str, cap: int) -> bool:
 
 
 def handle(hook_data: dict) -> dict:
-    """Stamp a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory."""
-    try:
-        cwd = hook_data.get("cwd", "") or str(Path.cwd())
-        context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
-        branch_dir = context_window.find_branch_dir(cwd)
-        if branch_dir is None:
-            logger.info("[HOOKS] pre_compact_prep: no branch dir resolved from cwd=%s", cwd)
-            return {"stdout": "", "exit_code": 0}
+    """Stamp the AUTO-COMPACT SNAPSHOT; each call leaves one json trail entry. A raise is the engine's."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
 
-        repo_root = _find_repo_root(branch_dir)
-        cap = _summary_cap(branch_dir.name)
-        snapshot = _build_snapshot(hook_data, branch_dir, repo_root)
 
-        stamped = _stamp_session_entry(branch_dir, snapshot, cap)
-        # Full path, not just the name: the test runner aims this handler at a
-        # throwaway skeleton named after the real branch, so "branch=hooks"
-        # alone cannot tell a probe stamp from a real one.
-        logger.info(
-            "[HOOKS] pre_compact_prep: snapshot stamped=%s branch=%s at=%s",
-            stamped,
-            branch_dir.name,
-            branch_dir,
-        )
-
-        return {"stdout": snapshot, "exit_code": 0, "sound": "pre compact prep"}
-
-    except Exception as exc:
-        logger.info("[HOOKS] pre_compact_prep: unexpected error: %s", exc)
+def _handle(hook_data: dict) -> dict:
+    """Stamp a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory. A raise is the engine's."""
+    cwd = hook_data.get("cwd", "") or str(Path.cwd())
+    context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
+    branch_dir = context_window.find_branch_dir(cwd)
+    if branch_dir is None:
+        logger.info("[HOOKS] pre_compact_prep: no branch dir resolved from cwd=%s", cwd)
         return {"stdout": "", "exit_code": 0}
+
+    repo_root = _find_repo_root(branch_dir)
+    cap = _summary_cap(branch_dir.name)
+    snapshot = _build_snapshot(hook_data, branch_dir, repo_root)
+
+    stamped = _stamp_session_entry(branch_dir, snapshot, cap)
+    # Full path, not just the name: the test runner aims this handler at a
+    # throwaway skeleton named after the real branch, so "branch=hooks"
+    # alone cannot tell a probe stamp from a real one.
+    logger.info(
+        "[HOOKS] pre_compact_prep: snapshot stamped=%s branch=%s at=%s",
+        stamped,
+        branch_dir.name,
+        branch_dir,
+    )
+
+    return {"stdout": snapshot, "exit_code": 0, "sound": "pre compact prep"}

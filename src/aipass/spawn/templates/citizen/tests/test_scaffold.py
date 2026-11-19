@@ -57,11 +57,7 @@ def _inspect_stack_calls(source: str) -> list:
 
 
 def test_the_handler_guard_never_walks_inspect_stack():
-    """This branch's import guard must not call ``inspect.stack()``.
-
-    On Windows it reads os.getcwd() per frame, so a dead cwd kills every handler import; only Windows shows it,
-    so the pin reads the source.
-    """
+    """This branch's import guard must not call ``inspect.stack()``; the pin reads the source."""
     guard = Path(__file__).resolve().parents[1] / "apps" / "handlers" / "__init__.py"
 
     if not guard.exists():
@@ -75,9 +71,7 @@ def test_the_handler_guard_never_walks_inspect_stack():
     )
 
     assert _inspect_stack_calls(source) == [], (
-        "inspect.stack() is back in this branch's handler guard. It reads the "
-        "current working directory on Windows before any of the guard's own code "
-        "runs, so a process with a dead cwd cannot import this branch at all. "
+        "inspect.stack() is back in this branch's handler guard. "
         "Walk frames with sys._getframe(1) and read frame.f_code.co_filename."
     )
 

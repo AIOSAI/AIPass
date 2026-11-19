@@ -3,7 +3,7 @@
 # Description: Named Encoding Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-09-21
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -20,10 +20,10 @@ def get_named_encoding_standards() -> str:
         "  Every file read or write in a test [green]names its encoding[/green].",
         "",
         "  open(), Path.read_text() and Path.write_text() fall back to the",
-        "  LOCALE's encoding. That is UTF-8 on this fleet's Linux and macOS",
-        "  hosts and cp1252 on Windows through Python 3.12 -- so an unnamed",
+        "  LOCALE's encoding. That is UTF-8 on this fleet's own hosts and not",
+        "  under a non-UTF-8 locale (latin-1, EUC-JP) -- so an unnamed",
         "  encoding passes on the machine the test was written on and raises",
-        "  UnicodeDecodeError in the Windows CI lane.",
+        "  UnicodeDecodeError on a host whose locale differs.",
         "",
         "  [bold]The product's output is not ASCII. A test that cannot read it is broken,[/bold]",
         "  [bold]not the product.[/bold]",
@@ -60,7 +60,7 @@ def get_named_encoding_standards() -> str:
         "  tuning: the argument is one keyword and it is always the same one.",
         "",
         "[bold cyan]WHY IT EXISTS:[/bold cyan]",
-        "  PR#774's Windows leg. Measured 2026-09-21 over 553 fleet test files:",
+        "  PR#774's CI. Measured 2026-09-21 over 553 fleet test files:",
         "  918 hits in 82 files -- 703 write_text and 215 read_text. Zero bare",
         "  open() calls are missing an encoding; the fleet already learned that",
         "  half of the lesson.",

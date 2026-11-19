@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: nominators.py
 # Description: discovers and runs the pack's static nominators over one corpus
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-29
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """The static tier's orchestrator. Discovers nominators, parses once, runs each.
@@ -22,9 +22,8 @@ from typing import Dict, List, Tuple
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.tests_pytest_standards import corpus
-from aipass.sentry.apps.handlers.module_root import module_file
 
-PACK_DIR = module_file(__file__).parent
+PACK_DIR = Path(__file__).resolve().parent
 NOMINATOR_GLOB = "*_check.py"
 
 REQUIRED_ATTRIBUTES: tuple = ("GROUP", "SPECIFICATION", "nominate")

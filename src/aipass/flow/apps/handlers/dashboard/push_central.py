@@ -3,7 +3,7 @@
 # Description: Push to Plans Central Handler
 # Version: 1.3.0
 # Created: 2025-11-21
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Push to Plans Central Handler"""
@@ -15,11 +15,11 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 from aipass.flow.apps.handlers.json import json_handler
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
-from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
+from aipass.flow.apps.handlers.repo_root import find_repo_root
 
-_PKG_ROOT = module_file(__file__).parents[4]
+_PKG_ROOT = Path(__file__).resolve().parents[4]
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 # The sibling handler, never the module: a handler must not import a module.

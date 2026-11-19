@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: architecture_check.py
 # Description: Architecture Standards Checker Handler
-# Version: 1.2.1
+# Version: 1.4.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Architecture Standards Checker Handler
@@ -12,30 +12,33 @@ Checks 3-layer pattern, handler independence, file size, domain organization; fo
 primary entry point, also the branch structure against spawn's template baseline.
 """
 
+import ast
 import json
+import re
 from pathlib import Path, PurePath
 from typing import Dict, List, Optional
 
 from aipass.sentry.apps.handlers.bypass.ignore_handler import get_template_ignore_patterns
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
+from aipass.sentry.apps.handlers.aipass_standards.check_support import find_enclosing_function
+from aipass.sentry.apps.handlers.aipass_standards.handlers_check import is_foundation_service
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
-# Spawn's modules gateway is the ONLY source for the class->template question. No
-# fallback on purpose: if this door moves, the checker must die at import with spawn's
-# name in the traceback, not quietly score the fleet against a guess.
-from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
-from aipass.sentry.apps.handlers.module_root import module_file
+# Spawn is the ONLY source for the class->template question. No fallback on purpose: if
+# these names move, the checker must die at import with spawn's name in the traceback, not
+# quietly score the fleet against a guess.
+from aipass.spawn import get_template_dir, refuse_legacy_class
 
 AUDIT_SCOPE = "all_files"
 # Applies to production source only: a test file has no apps/handlers/modules layering.
 APPLIES_TO = "production"
 
-PACK_ROOT = module_file(__file__).parent.parent.parent  # aipass_standards/ -> handlers/ -> apps/ -> sentry/
+PACK_ROOT = Path(__file__).resolve().parent.parent.parent  # aipass_standards/ -> handlers/ -> apps/ -> sentry/
 
 # Spawn templates root. The SUBDIRECTORY under it is never guessed from citizen_class
-# (the class does not name a directory); only spawn's gateway may answer it. The ROOT
+# (the class does not name a directory); only spawn may answer it. The ROOT
 # stays here as the seam tests/test_citizen_class_resolution.py points at a fixture tree.
 _SRC_PKG_ROOT = PACK_ROOT.parent.parent  # apps/ -> sentry/ -> src/aipass/
 SPAWN_TEMPLATES_DIR = _SRC_PKG_ROOT / "spawn" / "templates"
@@ -55,7 +58,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks = []
     path = Path(module_path)
 
-    # Normalize to forward slashes so string matching works on Windows too
     module_path = Path(module_path).as_posix()
 
     if is_bypassed(module_path, "architecture", bypass_rules=bypass_rules):
@@ -95,20 +97,20 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     if not is_init:
         layer_check = check_layer_location(is_entry_point, is_module, is_handler, is_library)
-        checks.append(layer_check)
+        checks.append(_waive_file_level(layer_check, module_path, bypass_rules))
 
-    size_check = check_file_size(lines, module_path)
+    size_check = _waive_file_level(check_file_size(lines, module_path), module_path, bypass_rules)
     checks.append(size_check)
 
     if is_handler:
-        independence_check = check_handler_independence(lines, module_path)
+        independence_check = check_handler_independence(lines, module_path, bypass_rules)
         if independence_check:
             checks.append(independence_check)
 
     if is_handler:
         domain_check = check_domain_organization(module_path)
         if domain_check:
-            checks.append(domain_check)
+            checks.append(_waive_file_level(domain_check, module_path, bypass_rules))
 
     # Check 5: Template baseline, primary entry point only ({branch}.py); secondary
     # entry points skip it to avoid duplicate branch-level template checks.
@@ -116,7 +118,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         branch_dir = path.parent.parent  # apps/ -> branch/
         if path.stem == branch_dir.name:
             baseline_checks = check_template_baseline(module_path, bypass_rules=bypass_rules)
-            checks.extend(baseline_checks)
+            checks.extend(_waive_file_level(check, module_path, bypass_rules) for check in baseline_checks)
 
     passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
@@ -180,8 +182,11 @@ def check_file_size(lines: List[str], module_path: str) -> Dict:
         }
 
 
-def check_handler_independence(lines: List[str], module_path: str) -> Optional[Dict]:
-    """Check that handlers don't import from parent branch modules (prax and cli services allowed)"""
+def check_handler_independence(lines: List[str], module_path: str, bypass_rules: list | None = None) -> Optional[Dict]:
+    """Handlers don't import from parent branch modules; each import is a site.
+
+    prax's logger and cli's display are allowed by handlers_check's reading (is_foundation_service).
+    """
     parent_branch = None
     if module_path:
         path_parts = Path(module_path).parts
@@ -198,6 +203,7 @@ def check_handler_independence(lines: List[str], module_path: str) -> Optional[D
         logger.info("architecture: unparseable, every non-# line read as code: %s", exc)
         prose = hash_lines(source)
 
+    sites = []
     for i, line in enumerate(lines, 1):
         if i in prose or not line.strip():
             continue
@@ -209,24 +215,21 @@ def check_handler_independence(lines: List[str], module_path: str) -> Optional[D
                 code_part = line
 
             if ".apps.modules" in code_part:
-                if "prax.apps.modules" in code_part or "cli.apps.modules" in code_part:
+                if any(is_foundation_service(target) for target in re.findall(r"aipass(?:\.\w+)+", code_part)):
                     continue
 
-                if parent_branch and f"{parent_branch}.apps.modules" in code_part:
-                    return {
-                        "name": "Handler independence",
-                        "passed": False,
-                        "message": f"Handler importing from parent module on line {i} (violates independence)",
-                    }
+                if not parent_branch or f"{parent_branch}.apps.modules" in code_part:
+                    sites.append(i)
 
-                if not parent_branch:
-                    return {
-                        "name": "Handler independence",
-                        "passed": False,
-                        "message": f"Handler importing from branch module on line {i} (violates independence)",
-                    }
+    open_sites = _open_sites(sites, source, module_path, bypass_rules)
+    if not open_sites:
+        message = f"All {len(sites)} sites waived by rows" if sites else "No forbidden module imports detected"
+        return {"name": "Handler independence", "passed": True, "message": message}
 
-    return {"name": "Handler independence", "passed": True, "message": "No forbidden module imports detected"}
+    kind = "parent module" if parent_branch else "branch module"
+    where = ", ".join(f"line {i}" for i in open_sites)
+    message = f"Handler importing from {kind} on {where} (violates independence)"
+    return {"name": "Handler independence", "passed": False, "message": message}
 
 
 def check_domain_organization(module_path: str) -> Optional[Dict]:
@@ -323,7 +326,7 @@ def _get_citizen_class(branch_path: Path) -> Optional[str]:
 
 
 def _resolve_template_dir(citizen_class: str) -> tuple[Optional[str], str]:
-    """Ask spawn's gateway which template directory a citizen_class mints from.
+    """Ask spawn which template directory a citizen_class mints from.
 
     ``refuse_legacy_class`` is asked FIRST and alone: a retired name is a passport waiting
     on the migration, not a typo. Everything else goes to ``get_template_dir``; spawn's
@@ -346,8 +349,8 @@ def _resolve_template_dir(citizen_class: str) -> tuple[Optional[str], str]:
 def _relative_spelling(item: PurePath, root: PurePath) -> str:
     """One template entry's path relative to the template root, spelled in posix.
 
-    Always forward slashes on every platform: this string is the check name a branch reads
-    and the text a bypass rule (written with forward slashes) is matched against.
+    This string is the check name a branch reads and the text a bypass rule
+    (written with forward slashes) is matched against.
     """
     return item.relative_to(root).as_posix()
 
@@ -531,3 +534,29 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
     )
 
     return checks
+
+
+def _open_sites(sites: List[int], source: str, module_path: str, bypass_rules: list | None) -> List[int]:
+    """The site lines no row waives; a site's function is the def holding it, FILE_SCOPE at module level."""
+    if not sites or not bypass_rules:
+        return sites
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError) as exc:
+        # An unparseable file has no functions to read: every site sits at file level.
+        logger.info("architecture: unparseable, sites read at file level: %s", exc)
+        tree = None
+    open_sites = []
+    for line in sites:
+        holder = find_enclosing_function(tree, line) if tree else None
+        name = holder.name if holder else FILE_SCOPE
+        if not is_bypassed(module_path, "architecture", line=line, bypass_rules=bypass_rules, name=name):
+            open_sites.append(line)
+    return open_sites
+
+
+def _waive_file_level(check: Dict, module_path: str, bypass_rules: list | None) -> Dict:
+    """A failing file-level check passed by a row naming FILE_SCOPE under functions."""
+    if check["passed"] or not is_bypassed(module_path, "architecture", bypass_rules=bypass_rules, name=FILE_SCOPE):
+        return check
+    return {**check, "passed": True, "message": f"Waived by a {FILE_SCOPE} bypass row: {check['message']}"}

@@ -1,23 +1,23 @@
 # =================== AIPass ====================
 # Name: scaffold_manifest.py
 # Description: Scaffold manifest + the conffile rule that decides what an update may overwrite
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-09
-# Modified: 2026-10-27
+# Modified: 2026-11-15
 # =============================================
 
 """Scaffold manifest: which AIPass version wrote which file, and its hash. Conffile rule (dpkg's):
 overwrite a managed file only when absent or unedited, else write ``<name>.aipass-new`` beside it.
-Keys are a contract (@hooks release_notice reads ``aipass_version``); pure Python, bootstrap imports it."""
+Keys are a contract (@hooks release_notice reads ``aipass_version``); bootstrap imports it."""
 
 import fnmatch
 import hashlib
 import json
-import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+import aipass
+from aipass.prax import logger
 
 MANIFEST_REL: Path = Path(".aipass") / "scaffold_manifest.json"
 
@@ -57,32 +57,21 @@ def sha256_text(text: str) -> str:
 
 
 def write_text_lf(path: Path, content: str) -> None:
-    """Write a scaffold file with LF endings on every platform.
-
-    The one writer for managed files: Windows' default CRLF makes the manifest hash never match."""
+    """Write a scaffold file with LF endings: the one writer for managed files."""
     path.write_text(content, encoding="utf-8", newline="\n")
 
 
 def hash_file(path: Path) -> str | None:
-    """Hash a file's bytes, or None when it is absent or unreadable."""
+    """Hash a file's bytes, or None when it is absent; an unreadable file raises (absent would plan its overwrite)."""
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
-    except (OSError, ValueError) as exc:
-        logger.info("[scaffold] unreadable, treating as absent: %s (%s)", path, exc)
+    except FileNotFoundError:
         return None
 
 
 def installed_version() -> str:
-    """The AIPass version running right now, or 'unknown' if it cannot be read.
-
-    Imported lazily: the plan must still compute where the package will not import."""
-    try:
-        import aipass
-
-        return str(getattr(aipass, "__version__", "unknown"))
-    except Exception as exc:  # pragma: no cover - defensive, package always imports here
-        logger.info("[scaffold] version unreadable: %s", exc)
-        return "unknown"
+    """The AIPass version running right now: this module is inside the package it reports."""
+    return aipass.__version__
 
 
 def manifest_path(target: Path) -> Path:

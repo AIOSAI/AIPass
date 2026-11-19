@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_adopt.py
 # Description: Tests for aipass adopt — project adoption handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-07-20
-# Modified: 2026-11-08
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/new_project/adopt.py and apps/modules/adopt.py."""
@@ -16,6 +16,7 @@
 
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -49,9 +50,10 @@ def host_env(tmp_path):
 
 
 def _no_home():
+    """A home with no templates, no .venv, under the temp dir: adopt copies nothing and writes no settings.local."""
     return patch(
         "aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home",
-        return_value=None,
+        return_value=str(Path(tempfile.gettempdir()) / "aipass_home_without_templates"),
     )
 
 
@@ -646,12 +648,32 @@ def test_a_framework_dry_run_names_a_present_file_as_skip_rather_than_omitting_i
     assert _actions(result)[".gitignore"] == "create"
 
 
+def test_a_framework_adopt_with_no_aipass_home_refuses_naming_it_and_writes_nothing(host_env):
+    _, target = host_env
+    before = sorted(p.name for p in target.iterdir())
+    with (
+        patch("aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home", return_value=None),
+        pytest.raises(RuntimeError, match="AIPASS_HOME"),
+    ):
+        adopt_project(target, no_agent=True)
+    assert sorted(p.name for p in target.iterdir()) == before
+
+
 # ---------------------------------------------------------------------------
 # contractor mode: no tracked file changes, local state in .git/info/exclude
 # ---------------------------------------------------------------------------
 
 
 class TestContractorMode:
+    def test_no_aipass_home_refuses_naming_it_and_writes_nothing(self, client_repo):
+        before = _tree(client_repo)
+        with (
+            patch("aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home", return_value=None),
+            pytest.raises(RuntimeError, match="AIPASS_HOME"),
+        ):
+            adopt_project(client_repo, mode="contractor", no_agent=True)
+        assert _tree(client_repo) == before
+
     def test_a_dry_run_writes_nothing_and_names_every_path_with_its_action(self, client_repo, tmp_path):
         home = _fake_home(tmp_path)
         before = _tree(client_repo)
@@ -677,6 +699,19 @@ class TestContractorMode:
         assert (client_repo / ".aipass" / "hooks.json").read_text(encoding="utf-8") == '{"hooks_enabled": true}\n'
         assert result["gitignore_action"] == "untouched"
         enroll.assert_called_once_with(client_repo.resolve())
+
+    @pytest.mark.parametrize("enrolled", [False, True])
+    def test_an_enrolment_that_did_not_take_is_a_note(self, client_repo, tmp_path, enrolled):
+        """Mutant: _enroll_project's answer ignored -> a False enrolment leaves no note -> red."""
+        home = _fake_home(tmp_path)
+        with (
+            patch("aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home", return_value=str(home)),
+            patch("aipass.aipass.apps.handlers.new_project.adopt.is_throwaway_path", return_value=False),
+            patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project", return_value=enrolled),
+        ):
+            result = adopt_project(client_repo, mode="contractor", no_agent=True)
+        note = f"Not in the trust registry, so its hooks stay inactive: aipass trust {client_repo.resolve()}"
+        assert result["notes"] == ([] if enrolled else [note])
 
     def test_a_rerun_appends_no_exclude_line_twice(self, client_repo, tmp_path):
         home = _fake_home(tmp_path)

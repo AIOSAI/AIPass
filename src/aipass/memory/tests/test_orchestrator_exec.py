@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_orchestrator_exec.py
 # Description: Tests for the orchestrator execute_rollover pipeline
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # Category: memory/tests
 # =============================================
 
@@ -20,14 +20,14 @@
 
 import json
 import subprocess
-import sys
 import types
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover import orchestrator
-from aipass.trigger.apps.modules import core as trigger_core
+from aipass.trigger import Trigger
+from aipass.trigger import trigger as trigger_bus
 
 # The real lookup, held before any test replaces it at orchestrator's name.
 _REAL_LOCAL_CHROMA_PATH = orchestrator.get_branch_local_chroma_path
@@ -39,18 +39,23 @@ _CENTRAL_UPDATE = "aipass.memory.apps.handlers.central_writer.update_central"
 _POOL_PROCESS = "aipass.memory.apps.handlers.intake.pool_processor.process_memory_pool"
 
 
-def _stub_the_bus(monkeypatch, recorder):
-    """Stand the recorder's two fire doors on the real trigger core: the instance and the class.
+class TestNoMemoryTestFiresTheRealBus:
+    """The conftest's autouse ``bus`` patches fire on the real class; both doors reach the recorder."""
 
-    The fire imports ``trigger`` at call time, through sys.modules, where the
-    conftest's autouse fixture stands a whole mock module (conftest line HELD
-    with the large graphs). So the real core imported at the top is registered
-    there for the test and its two doors are replaced: the published instance
-    and the class form, which reaches the same bus.
-    """
-    monkeypatch.setitem(sys.modules, trigger_core.__name__, trigger_core)
-    monkeypatch.setattr(trigger_core, "trigger", recorder.trigger)
-    monkeypatch.setattr(trigger_core.Trigger, "fire", recorder.Trigger.fire)
+    def test_the_instance_and_the_class_both_reach_the_recorder(self, bus):
+        assert trigger_bus.fire is bus
+        assert Trigger.fire is bus
+
+    def test_a_fire_never_reaches_the_real_bus_machinery(self, monkeypatch, bus):
+        """The real fire initialises handlers first; that step raising proves the real fire never ran."""
+
+        def _real_bus_ran():
+            raise AssertionError("the real Trigger.fire ran inside a memory test")
+
+        monkeypatch.setattr(Trigger, "_ensure_initialized", staticmethod(_real_bus_ran))
+
+        assert trigger_bus.fire("rollover_complete", triggers_count=0) == {}
+        bus.assert_called_once_with("rollover_complete", triggers_count=0)
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +66,7 @@ def _stub_the_bus(monkeypatch, recorder):
 def _import_orchestrator(monkeypatch):
     """Patch orchestrator's handler dependencies at the edge; return it and the mocks."""
     mock_detector = MagicMock()
-    mock_detector._read_registry = MagicMock(return_value=[])
+    mock_detector.write_scope = MagicMock(return_value=[])
     mock_detector.check_all_branches = MagicMock(return_value={"success": True, "triggers": []})
 
     mock_extractor = MagicMock()
@@ -389,8 +394,6 @@ class TestExecuteRolloverFullPipeline:
         self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
 
         # Mock post-rollover imports so they don't error
-        mock_trigger_core = MagicMock()
-        _stub_the_bus(monkeypatch, mock_trigger_core)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -417,7 +420,7 @@ class TestExecuteRolloverFullPipeline:
         self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
         monkeypatch.setattr(orch, "get_branch_local_chroma_path", _REAL_LOCAL_CHROMA_PATH)
         registry = tmp_path / "AIPASS_REGISTRY.json"
-        mocks["detector"]._read_registry.side_effect = detector.RegistryUnreadable(f"Unreadable registry {registry}: x")
+        mocks["detector"].write_scope.side_effect = detector.RegistryUnreadable(f"Unreadable registry {registry}: x")
         stored = []
         monkeypatch.setattr(orch, "store_vectors_subprocess", lambda **kw: stored.append(kw) or {"success": True})
 
@@ -427,15 +430,11 @@ class TestExecuteRolloverFullPipeline:
         assert [call.get("db_path") for call in stored] == [None]
         assert any(str(registry) in c.args[0] for c in orch.logger.error.call_args_list)
 
-    def test_post_rollover_trigger_fires(self, monkeypatch, tmp_path):
-        """After success, the event goes through the published door, the instance ``trigger``."""
+    def test_post_rollover_trigger_fires(self, monkeypatch, tmp_path, bus):
+        """After success, the event reaches the bus once (fire is a classmethod: instance and class are one bus)."""
         orch, mocks = _import_orchestrator(monkeypatch)
         self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
 
-        mock_trigger_mod = MagicMock()
-        mock_trigger_bus = MagicMock()
-        mock_trigger_mod.trigger = mock_trigger_bus
-        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -445,18 +444,13 @@ class TestExecuteRolloverFullPipeline:
 
         orch.execute_rollover()
         # Mutant: success_count dropped from the rollover_complete payload — killed.
-        mock_trigger_bus.fire.assert_called_once_with(
-            "rollover_complete", triggers_count=1, success_count=1, failed_count=0
-        )
-        mock_trigger_mod.Trigger.fire.assert_not_called()
+        bus.assert_called_once_with("rollover_complete", triggers_count=1, success_count=1, failed_count=0)
 
     def test_post_rollover_central_update(self, monkeypatch, tmp_path):
         """After success, central_writer.update_central is called."""
         orch, mocks = _import_orchestrator(monkeypatch)
         self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
 
-        mock_trigger_mod = MagicMock()
-        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -474,8 +468,6 @@ class TestExecuteRolloverFullPipeline:
         orch, mocks = _import_orchestrator(monkeypatch)
         self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
 
-        mock_trigger_mod = MagicMock()
-        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -488,14 +480,12 @@ class TestExecuteRolloverFullPipeline:
         mock_pool.process_memory_pool.assert_called_once_with()
         orch.logger.info.assert_any_call("[rollover] Memory pool: 2 files processed")
 
-    def test_post_rollover_trigger_exception(self, monkeypatch, tmp_path):
+    def test_post_rollover_trigger_exception(self, monkeypatch, tmp_path, bus):
         """trigger.fire raises but does not crash the pipeline."""
         orch, mocks = _import_orchestrator(monkeypatch)
         self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
 
-        mock_trigger_mod = MagicMock()
-        mock_trigger_mod.trigger.fire.side_effect = ImportError("trigger missing")
-        _stub_the_bus(monkeypatch, mock_trigger_mod)
+        bus.side_effect = ImportError("trigger missing")
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -512,8 +502,6 @@ class TestExecuteRolloverFullPipeline:
         orch, mocks = _import_orchestrator(monkeypatch)
         self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
 
-        mock_trigger_mod = MagicMock()
-        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value=None)
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -569,8 +557,6 @@ class TestExecuteRolloverMultiple:
         mocks["extractor"].commit_trimmed.return_value = {"success": True, "new_lines": 50}
 
         # Mock post-rollover chain (success_count > 0 triggers it)
-        mock_trigger_mod = MagicMock()
-        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -614,8 +600,6 @@ class TestExecuteRolloverMultiple:
         mocks["extractor"].commit_trimmed.return_value = {"success": False, "error": "permission denied"}
 
         # Mock post-rollover chain
-        mock_trigger_mod = MagicMock()
-        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -660,8 +644,6 @@ class TestExecuteRolloverMultiple:
         mocks["extractor"].commit_trimmed.return_value = {"success": True, "new_lines": 50}
 
         # Mock post-rollover chain
-        mock_trigger_mod = MagicMock()
-        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -739,7 +721,6 @@ class TestAnEditDuringStorageSurvivesTheTrim:
         monkeypatch.setattr(orchestrator, "store_vectors_subprocess", the_edit_lands_while_storing)
         monkeypatch.setattr(_CENTRAL_UPDATE, MagicMock(return_value={"success": True}))
         monkeypatch.setattr(_POOL_PROCESS, MagicMock(return_value={"files_processed": 0}))
-        _stub_the_bus(monkeypatch, MagicMock())
 
         result = orchestrator.execute_rollover()
 

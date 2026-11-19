@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: new_project.py
 # Description: aipass new — create projects inside the AIPass installation
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-07-17
-# Modified: 2026-11-01
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.cli.apps.modules import console, error, success, warning
+from aipass.cli import console, error, success, warning
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
@@ -120,7 +120,8 @@ def _prompt_template(templates: list[str]) -> str:
         try:
             choice = input("Template [1]: ").strip()
         except EOFError:
-            logger.info("template prompt at end of input, defaulting to %s", templates[0])
+            logger.warning("template prompt at end of input, defaulting to %s", templates[0])
+            warning(f"No answer (end of input): using the default template, {templates[0]}")
             return templates[0]
         if not choice:
             return templates[0]

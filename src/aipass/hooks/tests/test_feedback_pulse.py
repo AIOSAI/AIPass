@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-18
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/prompt/feedback_pulse.py and apps/modules/feedback.py."""
@@ -242,8 +242,7 @@ class TestFeedbackPulseToggle:
         return result["stdout"]
 
     def test_no_aipass_dir_is_disabled(self, tmp_path):
-        # The walk climbs to the drive root, so a real .aipass in any ancestor
-        # (e.g. the CI runner's home after windows-setup installs AIPass) leaks
+        # The walk climbs to the root, so a real .aipass in any ancestor leaks
         # into the result — the no-dir case is only constructible by patching.
         with patch.object(feedback_pulse, "_find_aipass_dir", return_value=None):
             assert self._fired_turn(tmp_path, tmp_path) == ""

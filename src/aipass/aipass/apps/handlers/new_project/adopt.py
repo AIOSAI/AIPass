@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adopt.py
 # Description: aipass adopt — bring an existing directory anywhere on disk into AIPass
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-07-20
-# Modified: 2026-11-08
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -44,6 +44,7 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
 )
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.project_home import (
+    NO_HOME,
     claude_local_settings,
     _claude_settings,
     _detect_aipass_home,
@@ -51,6 +52,7 @@ from aipass.aipass.shared.project_home import (
     agents_md_seed,
     is_projects_child,
     is_throwaway_path,
+    not_enrolled_note,
 )
 from aipass.prax import logger
 
@@ -175,6 +177,8 @@ def _adopt_framework(target: Path, *, no_agent: bool, dry_run: bool, citizen: st
             raise RuntimeError(f"@spawn adopt-citizen {citizen} refused: {citizen_result['reason']}")
 
     aipass_home = _detect_aipass_home()
+    if aipass_home is None:
+        raise RuntimeError(NO_HOME)
     files: list[str] = []
     rows: list[dict] = []
     notes: list[str] = []
@@ -215,8 +219,8 @@ def _adopt_framework(target: Path, *, no_agent: bool, dry_run: bool, citizen: st
             if hooks_template.is_file():
                 hooks_created = not (target / ".aipass" / "hooks.json").exists()
                 _write_if_missing(target, ".aipass/hooks.json", hooks_template.read_text(encoding="utf-8"), **write)
-                if hooks_created and not dry_run:
-                    _enroll_project(target)
+                if hooks_created and not dry_run and _enroll_project(target) is not True:
+                    notes.append(not_enrolled_note(target))
         rows.append(_trust_row(hooks_created))
 
         _write_if_missing(target, "AGENTS.md", agents_md_seed(reg, aipass_home), **write)
@@ -334,10 +338,13 @@ def _adopt_contractor(target: Path, *, no_agent: bool, dry_run: bool, citizen: s
         )
     tracked = _tracked_files(target)
     aipass_home = _detect_aipass_home()
+    if aipass_home is None:
+        raise RuntimeError(NO_HOME)
     name = target.name
     reg = _registry_name(name)
     registry_filename = f"{reg}_REGISTRY.json"
     rows: list[dict] = []
+    notes: list[str] = []
     writes: list[tuple[Path, str]] = []
     excludes: list[str] = []
 
@@ -411,8 +418,8 @@ def _adopt_contractor(target: Path, *, no_agent: bool, dry_run: bool, citizen: s
             exclude.parent.mkdir(parents=True, exist_ok=True)
             head = current if current.endswith("\n") or not current else current + "\n"
             sm.write_text_lf(exclude, head + "".join(f"{line}\n" for line in new_lines))
-        if hooks_created:
-            _enroll_project(target)
+        if hooks_created and _enroll_project(target) is not True:
+            notes.append(not_enrolled_note(target))
         if citizen:
             citizen_result = _spawn_adopt_citizen(citizen, target, apply=True)
             if not citizen_result["ok"]:
@@ -435,5 +442,5 @@ def _adopt_contractor(target: Path, *, no_agent: bool, dry_run: bool, citizen: s
         "agent_home": None,
         "spawn_result": None,
         "citizen": citizen_result,
-        "notes": [],
+        "notes": notes,
     }

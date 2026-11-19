@@ -3,7 +3,7 @@
 # Description: Tests for apps/handlers/plan/project_scope.py — project root resolution and register discrimination
 # Version: 1.0.1
 # Created: 2026-08-22
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/plan/project_scope.py."""
@@ -271,37 +271,13 @@ class TestDescribeProject:
 
 
 class TestTheRegisterGlobIsNotCaseFolded:
-    """The round-3 case-fold species, in the two flow lanes that carry it.
-
-    Glob folds case on Windows/macOS; the listing is widened here so the pin also runs on Linux.
-    """
+    """The round-3 case-fold species, in the two flow lanes that carry it."""
 
     def _project_dir(self, tmp_path: Path) -> Path:
         root = tmp_path / "proj"
         root.mkdir()
         (root / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": [{"name": "flow"}]}), encoding="utf-8")
         return root
-
-    def test_a_lowercase_register_shaped_decoy_does_not_make_a_directory_a_project(self, tmp_path, monkeypatch):
-        """The harm, if a decoy were ever armed: a subdirectory becomes a project."""
-        sub = tmp_path / "proj" / "sub"
-        self._project_dir(tmp_path)
-        sub.mkdir()
-        (sub / "other_registry.json").write_text(json.dumps({"branches": [{"name": "nobody"}]}), encoding="utf-8")
-
-        real_glob = Path.glob
-
-        def folded_glob(self, pattern):
-            if pattern == project_scope.REGISTER_GLOB:
-                return iter(sorted(p for p in real_glob(self, "*.json") if p.name.lower().endswith("_registry.json")))
-            return real_glob(self, pattern)
-
-        monkeypatch.setattr(Path, "glob", folded_glob)
-
-        assert project_scope.find_project_root(sub) == (tmp_path / "proj").resolve(), (
-            "a lowercase *_registry.json was accepted as a project register — "
-            "on Windows this makes any directory holding one its own project root"
-        )
 
     def test_the_exact_case_register_is_still_found(self, tmp_path):
         """Negative control: the narrowing must not refuse the real thing.
@@ -310,21 +286,3 @@ class TestTheRegisterGlobIsNotCaseFolded:
         """
         root = self._project_dir(tmp_path)
         assert project_scope.find_project_root(root) == root.resolve()
-
-    def test_the_emulation_actually_widens_the_listing(self, tmp_path, monkeypatch):
-        """Control for the control: a folded glob that matches nothing proves nothing."""
-        sub = tmp_path / "sub"
-        sub.mkdir()
-        (sub / "other_registry.json").write_text("{}", encoding="utf-8")
-
-        real_glob = Path.glob
-
-        def folded_glob(self, pattern):
-            if pattern == project_scope.REGISTER_GLOB:
-                return iter(sorted(p for p in real_glob(self, "*.json") if p.name.lower().endswith("_registry.json")))
-            return real_glob(self, pattern)
-
-        monkeypatch.setattr(Path, "glob", folded_glob)
-        assert list(sub.glob(project_scope.REGISTER_GLOB)) == [sub / "other_registry.json"], (
-            "the bait is not reaching the code under test — every assertion above would be vacuous"
-        )

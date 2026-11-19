@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_compact.py
-# Version: 1.0.2
+# Version: 1.1.0
 # Description: Tests for compact lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/lifecycle/compact.py."""
@@ -19,18 +19,14 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.hooks.apps.handlers.lifecycle import compact
 from aipass.hooks.apps.handlers.lifecycle.compact import handle
-from aipass.hooks.apps.modules import cadence
+from aipass.hooks.apps.modules import cadence, context_window
 
 
 @pytest.fixture(autouse=True)
 def _isolate_cadence_state(tmp_path, monkeypatch):
-    """handle() calls cadence.reset_counter() for real. Without isolation each
-    test mints a regroup token into the system temp dir's aipass-cadence-<live-session>.json —
-    the developer's OWN session inherits CLAUDE_CODE_SESSION_ID — and the
-    re-ground backstop then fires in that live session on its next tool call
-    (the DPLAN-0278 "ghost re-arm": pytest swallows the arm log line, so the
-    fire looks sourceless). Every suite run re-armed it."""
+    """handle() resets cadence for real: unisolated, each test re-armed the developer's own session's re-ground."""
     monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path)
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "test-compact-session")
 
@@ -56,7 +52,6 @@ class TestCompactHandler:
         assert "POST-COMPACT RECOVERY" in result["stdout"]
         assert "Git branch: dev" in result["stdout"]
         assert "did stuff" in result["stdout"]
-        assert "STATUS.local.md" not in result["stdout"]
         assert result["sound"] == "pre compact"
 
     def test_returns_recovery_when_no_branch_dir(self, tmp_path):
@@ -76,7 +71,6 @@ class TestCompactHandler:
                 result = handle({"cwd": str(tmp_path)})
 
         assert "SAVE STATE NOW" in result["stdout"]
-        assert "STATUS.local.md" not in result["stdout"]
 
     def test_interactive_gets_recovery_protocol(self, tmp_path):
         trinity = tmp_path / ".trinity"
@@ -87,7 +81,6 @@ class TestCompactHandler:
                 result = handle({"cwd": str(tmp_path)})
 
         assert "Recovery Protocol" in result["stdout"]
-        assert "STATUS.local.md" not in result["stdout"]
 
     def test_empty_hook_data(self, tmp_path, monkeypatch):
         # No cwd in the hook data: the real cwd is read, an empty directory (fleet green leg 7).
@@ -96,3 +89,13 @@ class TestCompactHandler:
             result = handle({})
 
         assert result["exit_code"] == 0
+
+
+class TestARaiseIsTheEnginesFault:
+    def test_an_unexpected_raise_is_one_engine_fault_line_and_compaction_goes_on(self, engine_fault, tmp_path):
+        handler = f"{compact.__name__}.handle"
+        with patch.object(context_window, "find_branch_dir", side_effect=RuntimeError("boom")):
+            faults, (stdout, code) = engine_fault("PreCompact", "pre_compact", handler, {"cwd": str(tmp_path)})
+
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1 and f"fault[PreCompact.pre_compact.{handler}.RuntimeError@" in faults[0]

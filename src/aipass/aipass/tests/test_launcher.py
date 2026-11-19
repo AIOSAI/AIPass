@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_launcher.py
 # Description: Tests for the repo-root ./aipass cold-clone launcher
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-05
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for the repo-root ./aipass launcher (bash), which forwards to apps/aipass.py once installed."""
@@ -16,12 +16,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
-
-import pytest
-
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="bash launcher requires Unix")
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 LAUNCHER = REPO_ROOT / "aipass"
@@ -144,13 +139,28 @@ class TestPreSetupInstall:
         _make_executable(setup)
 
         result = subprocess.run(
-            ["bash", str(launcher), "install", "--no-chat"],
+            ["bash", str(launcher), "install", "--no-finish"],
             capture_output=True,
             text=True,
             encoding="utf-8",
             timeout=5,
         )
-        assert "--no-chat" in result.stdout
+        assert "--no-finish" in result.stdout
+
+    def test_setup_takes_yes_as_consent_before_the_venv_exists(self):
+        """Pre-setup the launcher hands --yes straight to setup.sh: its flag block is the only place it can land."""
+        text = (REPO_ROOT / "setup.sh").read_text(encoding="utf-8")
+        start = text.index("# --- Args ---")
+        block = text[start : text.index("\ndone\n", start)] + "\ndone\n"
+        result = subprocess.run(
+            ["bash", "-c", block + 'echo "YES:${AIPASS_YES:-unset}"', "setup.sh", "--yes"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=5,
+            env={k: v for k, v in os.environ.items() if k != "AIPASS_YES"},
+        )
+        assert result.stdout.strip() == "YES:1"
 
     def test_install_passes_path_flag(self, tmp_path):
         """--path and its value pass through to setup.sh."""

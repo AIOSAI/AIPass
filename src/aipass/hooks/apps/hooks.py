@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hooks.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Hook infrastructure — drone entry point
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-18
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -20,15 +20,8 @@ from typing import Any
 
 os.environ.setdefault("AIPASS_BRANCH_NAME", "hooks")
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, err_console
+from aipass.prax import logger
+from aipass.cli import console, err_console
 
 MODULES_DIR = Path(__file__).parent / "modules"
 _DISABLED_MARK = "(disabled)"
@@ -50,29 +43,14 @@ def discover_modules() -> list[Any]:
             logger.info("[HOOKS] Skipping retired module %s", file_path.name)
             continue
 
-        module_names = [
-            f"aipass.hooks.apps.modules.{file_path.stem}",
-            f"apps.modules.{file_path.stem}",
-        ]
-
-        loaded = False
-        for module_name in module_names:
-            try:
-                module = importlib.import_module(module_name)
-                if hasattr(module, "handle_command"):
-                    modules.append(module)
-                loaded = True
-                break
-            except (ImportError, ModuleNotFoundError) as e:
-                logger.info("[HOOKS] Module %s not found: %s", module_name, e)
-                continue
-            except Exception as e:
-                logger.error("[HOOKS] Failed to load module %s: %s", module_name, e)
-                loaded = True
-                break
-
-        if not loaded:
-            logger.error("[HOOKS] Could not import module %s", file_path.stem)
+        module_name = f"aipass.hooks.apps.modules.{file_path.stem}"
+        try:
+            module = importlib.import_module(module_name)
+        except Exception as e:  # one broken module costs its own verbs, never the rest of the menu
+            logger.error("[HOOKS] Failed to load module %s: %s", module_name, e)
+            continue
+        if hasattr(module, "handle_command"):
+            modules.append(module)
 
     return modules
 
@@ -102,7 +80,7 @@ def print_help():
     """Print CLI help — usage instructions and available commands."""
     modules = discover_modules()
     console.print()
-    console.print("[bold cyan]HOOKS[/bold cyan] [dim]v1.3.0[/dim] — Hook Infrastructure for AIPass")
+    console.print("[bold cyan]HOOKS[/bold cyan] [dim]v1.3.1[/dim] — Hook Infrastructure for AIPass")
     console.print()
     console.print("[dim]Dispatches hooks across platforms with per-project config, logging, and crash isolation.[/dim]")
     console.print()
@@ -136,7 +114,7 @@ def print_help():
     console.print("[bold cyan]BRIDGES:[/bold cyan]")
     console.print()
     console.print(
-        "  [green]claude[/green]                     [dim]Claude Code bridge (provider settings entry point)[/dim]"
+        "  [green]claude[/green]                     [dim]Claude Code bridge entry point (not a drone verb)[/dim]"
     )
     console.print()
     console.print("─" * 70)
@@ -170,6 +148,7 @@ def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
                 return True
         except Exception as e:
             logger.error("[HOOKS] Module %s error: %s", module.__name__, e)
+            err_console.print(f"Module {module.__name__} error: {e}", markup=False)
     return False
 
 
@@ -182,7 +161,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command in ["--version", "-V"]:
-        console.print("hooks 1.3.0")
+        console.print("hooks 1.3.1")
         return True
 
     return route_command(command, args, modules)

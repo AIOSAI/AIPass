@@ -3,7 +3,7 @@
 # Description: Gold-source template lane — spawn scaffold propagation, receipt status, and the bump site
 # Version: 1.0.0
 # Created: 2026-02-14
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """Template Lane
@@ -12,23 +12,15 @@ Reference: docs/templates_and_tabs.md
 """
 
 import json
-import os
-import sys
 from typing import List
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 from rich.panel import Panel
 from rich import box
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.templates.spawn_pusher import push_to_spawn_templates
 from aipass.memory.apps.handlers.templates import template_bump
@@ -108,13 +100,21 @@ def _announce_retired(verb: str) -> None:
     console.print("[bold]Run instead:[/bold]")
     console.print(f"  {replacement}")
     console.print()
-    console.print("[dim]Handlers archived at tests/parked/dead_template_lane_20260827/ with the measurement.[/dim]")
+    console.print("[dim]Its handlers scanned a pre-.trinity layout: zero real memory files matched.[/dim]")
     console.print()
     json_handler.log_operation("retired_verb_called", {"verb": verb}, module_name="templates")
 
 
 def _run_spawn_push(dry_run: bool) -> None:
     """Propagate the gold templates into @spawn's scaffold sets."""
+    refusal = (
+        None
+        if dry_run
+        else caller_gate.other_branch_refusal("templates spawn-templates", "@spawn", "@spawn's scaffold templates")
+    )
+    if refusal:
+        error(refusal)
+        return
     console.print()
     mode = "DRY RUN" if dry_run else "PUSH"
     console.print(
@@ -204,15 +204,11 @@ def _show_status() -> None:
 def _announce_bump(outcome: dict) -> None:
     """Announce a bump on @trigger's bus. Best effort — the bus never gates a heal.
 
-    ImportError (trigger absent) and any other raise (our bug) log differently on purpose.
+    @trigger ships in the same package, so a failed import is a broken install: logged as the failure it is.
     """
     try:
-        from aipass.trigger.apps.modules.core import trigger
-    except ImportError as exc:
-        logger.info(f"[templates] Event bus unavailable, bump not announced: {exc}")
-        return
+        from aipass.trigger import trigger
 
-    try:
         trigger.fire(
             template_bump.BUMP_EVENT,
             pending=outcome.get("pending", False),
@@ -226,6 +222,14 @@ def _announce_bump(outcome: dict) -> None:
 
 def _run_bump(confirm: bool) -> None:
     """The bump site: announce the template bump and heal the fleet."""
+    refusal = (
+        caller_gate.other_branch_refusal("templates bump --confirm", None, "every branch's .trinity memory")
+        if confirm
+        else None
+    )
+    if refusal:
+        error(refusal)
+        return
     console.print()
     mode = "EXECUTE" if confirm else "DRY RUN"
     console.print(
@@ -318,6 +322,6 @@ def print_help() -> None:
     console.print("[bold]NOT THIS LANE:[/bold] a branch's own memory files are pushed by")
     console.print("  [cyan]drone @memory push[/cyan]. This module owns the TEMPLATES they are built from.")
     console.print()
-    console.print("[bold]RETIRED:[/bold] push-templates, diff-templates (2026-08-27) — see")
-    console.print("  tests/parked/dead_template_lane_20260827/README.md for the measurement.")
+    console.print("[bold]RETIRED:[/bold] push-templates, diff-templates (2026-08-27) — they scanned a")
+    console.print("  pre-.trinity layout and could match no real memory file.")
     console.print()

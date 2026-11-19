@@ -3,7 +3,7 @@
 # Description: Unit tests for medic module handle_command
 # Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-11-10
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for the medic toggle module (apps/modules/medic.py)."""
@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 
 from rich.text import Text
 
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.trigger.apps.handlers import service_control
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.medic_state import parse_duration
@@ -43,6 +43,7 @@ _STATE_NAMES = (
     "unmute_branch_volume",
     "get_suppression_stats",
     "get_rate_limit_stats",
+    "get_failing_handlers",
     "parse_duration",
     "DEFAULT_MUTE_SECONDS",
     "DEFAULT_OFF_SECONDS",
@@ -83,6 +84,7 @@ def _mock_infrastructure(monkeypatch):
             "last_rate_limited": "never",
         }
     )
+    medic_state_mod.get_failing_handlers = MagicMock(return_value=[])
     # The real parser: a stub answering None let no test pin --for (sentry flag_never_passed).
     medic_state_mod.parse_duration = parse_duration
     medic_state_mod.DEFAULT_MUTE_SECONDS = 86400
@@ -579,6 +581,29 @@ def test_output_capture_status_contains_all_fields(capsys):
         assert field in output, f"Status output missing field: {field}"
 
 
+def test_status_names_each_failing_handler_and_its_branch(capsys):
+    """Pins the hidden disable: a handler the bus gave up on appeared nowhere in medic status."""
+    medic = _import_medic()
+    state = _get_medic_state()
+    state.get_failing_handlers.return_value = [
+        {
+            "handler": "handle_error_detected",
+            "branch": "DRONE",
+            "event": "error_detected",
+            "error": "branch registry unreadable",
+            "since": "2026-11-15T13:40:00",
+            "pid": 4242,
+        },
+    ]
+
+    with patch.object(medic, "is_service_active", return_value=True):
+        medic.handle_command("status", [])
+
+    output = "\n".join(_printed(capsys))
+    assert "Failing handlers:" in output
+    assert "handle_error_detected" in output and "DRONE" in output and "branch registry unreadable" in output
+
+
 def test_help_flag_after_a_branch_operand_does_not_mute(monkeypatch):
     """`medic mute @branch --help` must describe muting, never mute.
 
@@ -721,10 +746,9 @@ def systemctl_never_answers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     Only an inert stub on PATH and subprocess.run replaced at service_control, so no real systemctl runs."""
     bin_dir = tmp_path / "systemd_bin"
     bin_dir.mkdir()
-    for name in ("systemctl", "systemctl.exe"):  # the .exe is what which() finds on Windows
-        stub = bin_dir / name
-        stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        stub.chmod(0o755)
+    stub = bin_dir / "systemctl"
+    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir))
     calls: list = []
 

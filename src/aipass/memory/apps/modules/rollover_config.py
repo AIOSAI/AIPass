@@ -3,7 +3,7 @@
 # Description: The `config` verb surface over rollover limits - get / set / set-default
 # Version: 1.4.0
 # Created: 2026-09-15
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -19,11 +19,11 @@ from rich.panel import Panel
 from rich import box
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.cli.json_flag import strip_json_flag, wants_json
-from aipass.memory.apps.handlers.cli import config_content
+from aipass.memory.apps.handlers.cli import caller_gate, config_content
 from aipass.memory.apps.handlers.monitor import detector
 
 # rollover_json imports nothing from here, so the entry-type tuples live there and come back in.
@@ -56,6 +56,9 @@ _VERB_CONFIG_SET = "config set"
 _VERB_CONFIG_SET_DEFAULT = "config set-default"
 
 
+_CONFIG_VERBS = {"get": _VERB_CONFIG_GET, "set": _VERB_CONFIG_SET, "set-default": _VERB_CONFIG_SET_DEFAULT}
+
+
 def _handle_config(args: List[str]) -> bool:
     """Route the `config` verb. Always returns True — this module owns the word."""
     if not args:
@@ -75,17 +78,20 @@ def _handle_config(args: List[str]) -> bool:
         return True
 
     sub = args[0]
+    if sub in _CONFIG_VERBS:
+        from aipass.memory.apps.handlers.json import config_loader
 
-    if sub == "get":
-        handle_config_get(args[1:], _Json(_VERB_CONFIG_GET, json_mode))
-        return True
-
-    if sub == "set":
-        handle_config_set(args[1:], _Json(_VERB_CONFIG_SET, json_mode))
-        return True
-
-    if sub == "set-default":
-        handle_config_set_default(args[1:], _Json(_VERB_CONFIG_SET_DEFAULT, json_mode))
+        ctx = _Json(_CONFIG_VERBS[sub], json_mode)
+        try:
+            if sub == "get":
+                handle_config_get(args[1:], ctx)
+            elif sub == "set":
+                handle_config_set(args[1:], ctx)
+            else:
+                handle_config_set_default(args[1:], ctx)
+        except config_loader.ConfigUnreadable as exc:
+            # A corrupt operator file is refused by name; the bytes stay theirs to fix.
+            _refuse(ctx, str(exc))
         return True
 
     _refuse(
@@ -281,6 +287,10 @@ def handle_config_set(args: List[str], ctx: _Json) -> None:
     branch = _resolve_branch(args[0], ctx)
     if branch is None:
         return
+    refusal = caller_gate.other_branch_refusal(_VERB_CONFIG_SET, branch, f"@{branch}'s per_branch limits")
+    if refusal:
+        _refuse(ctx, refusal)
+        return
 
     entry_type = args[1]
     if not _validate_type(entry_type, ctx):
@@ -331,6 +341,11 @@ def handle_config_set_default(args: List[str], ctx: _Json) -> None:
             "config set-default needs: <type> <count>",
             suggestion="Example: drone @memory config set-default sessions 12",
         )
+        return
+
+    refusal = caller_gate.other_branch_refusal(_VERB_CONFIG_SET_DEFAULT, None, "the fleet's default limits")
+    if refusal:
+        _refuse(ctx, refusal)
         return
 
     entry_type = args[0]

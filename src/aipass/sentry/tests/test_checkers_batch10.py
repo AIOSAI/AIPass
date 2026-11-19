@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch10.py
 # Description: Tests for hardcoded_path, developer_home, startup_budget, the ratchets, router_assert, oversize_test_file
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-06-18
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/hardcoded_path_check.py and batch-10 checkers."""
@@ -20,14 +20,15 @@ import json
 import pytest
 
 # THE CONTEXT PACK IS IMPORTED AT MODULE SCOPE, AND THAT IS LOAD-BEARING.
-# startup_budget_check reads its caps off @hooks' and @prax' REAL modules, so
+# startup_budget_check reads its caps off @hooks' and @prax' REAL doors, so
 # importing it inside a test body would bind those owners to mocks: every cap
 # would come back a MagicMock, every row would read ERROR, and the tests that
 # prove a cap is READ from its owner would be passing against nothing. Imported
-# here, at collection time, the owners are real -- and a monkeypatch on one of
-# their constants is then what moves a row. hardcoded_path_check joins them for
-# the same reason: its own infrastructure (logger, json_handler, is_bypassed) is
-# real too, so no mock stands between a test and the code it measures.
+# here, at collection time, the owners are real -- and a _Door standing in the
+# checker's own door binding is then what moves a row (a door package is never
+# patched: a name set on it would shadow its lazy read for every later caller).
+# hardcoded_path_check joins them for the same reason: its own infrastructure
+# (logger, json_handler, is_bypassed) is real too.
 from aipass.sentry.apps.handlers.context_standards import startup_budget_check as sb
 from aipass.sentry.apps.handlers.context_standards import startup_ratchet as ratchet
 from aipass.sentry.apps.handlers.context_standards import name_ratchet as names
@@ -36,6 +37,17 @@ from aipass.sentry.apps.handlers.aipass_standards import router_assert_check as 
 from aipass.sentry.apps.handlers.aipass_standards import oversize_test_file_check as oversize
 from aipass.sentry.apps.handlers.aipass_standards import hardcoded_path_check
 from aipass.sentry.apps.handlers.audit import branch_audit
+
+
+class _Door:
+    """Stands where an owner's door stands: the names it is built with; any other read raises *error*."""
+
+    def __init__(self, error: Exception | None = None, **names) -> None:
+        self.__dict__.update(names)
+        self._error = error or AttributeError("not handed out")
+
+    def __getattr__(self, name: str):
+        raise self._error
 
 
 def _scanned(tmp_path, content: str) -> str:
@@ -268,9 +280,9 @@ class TestStartupBudgetCapsAreRead:
         """@hooks owns BRANCH_CHAR_BUDGET; sentry must never carry a copy of 9,000."""
         root = _branch(tmp_path / "b", **{"README.md": "x", ".aipass/aipass_local_prompt.md": "y" * 100})
 
-        monkeypatch.setattr(sb.hooks_grounding, "BRANCH_CHAR_BUDGET", 40)
+        monkeypatch.setattr(sb, "hooks_door", _Door(BRANCH_CHAR_BUDGET=40))
         over = _cells(sb.check_branch(str(root)))["PROMPT"]
-        monkeypatch.setattr(sb.hooks_grounding, "BRANCH_CHAR_BUDGET", 500)
+        monkeypatch.setattr(sb, "hooks_door", _Door(BRANCH_CHAR_BUDGET=500))
         under = _cells(sb.check_branch(str(root)))["PROMPT"]
 
         assert (over["cap"], over["state"]) == (40, "over")
@@ -278,12 +290,12 @@ class TestStartupBudgetCapsAreRead:
         assert over["chars"] == under["chars"] == 100, "the file never changed; only the owner's cap did"
 
     def test_the_dashboard_cap_moves_when_prax_moves_it(self, monkeypatch, tmp_path):
-        """@prax owns DASHBOARD_CHAR_BUDGET, exported from apps/modules/dashboard."""
+        """@prax owns DASHBOARD_CHAR_BUDGET, handed out by its door."""
         root = _branch(tmp_path / "b", **{"README.md": "x", "DASHBOARD.local.json": "{}" + " " * 98})
 
-        monkeypatch.setattr(sb.prax_dashboard, "DASHBOARD_CHAR_BUDGET", 50)
+        monkeypatch.setattr(sb, "prax_door", _Door(DASHBOARD_CHAR_BUDGET=50))
         over = _cells(sb.check_branch(str(root)))["DASH"]
-        monkeypatch.setattr(sb.prax_dashboard, "DASHBOARD_CHAR_BUDGET", 5000)
+        monkeypatch.setattr(sb, "prax_door", _Door(DASHBOARD_CHAR_BUDGET=5000))
         under = _cells(sb.check_branch(str(root)))["DASH"]
 
         assert (over["cap"], over["state"]) == (50, "over")
@@ -349,8 +361,7 @@ class TestStartupBudgetFailsHonestly:
     def test_an_unimportable_owner_module_is_an_error_row_naming_it(self, monkeypatch, tmp_path):
         """@hooks unimportable: the row says hooks, and the standard does not vanish."""
         root = _branch(tmp_path / "b", **{"README.md": "x", ".aipass/aipass_local_prompt.md": "y"})
-        monkeypatch.setattr(sb, "hooks_grounding", None)
-        monkeypatch.setattr(sb, "_HOOKS_IMPORT_ERROR", "ModuleNotFoundError: no aipass.hooks")
+        monkeypatch.setattr(sb, "hooks_door", _Door(ModuleNotFoundError("no aipass.hooks")))
 
         result = sb.check_branch(str(root))
         prompt = _group(result, "Branch prompt")
@@ -363,8 +374,7 @@ class TestStartupBudgetFailsHonestly:
     def test_a_missing_cap_is_an_error_even_when_the_file_is_absent(self, monkeypatch, tmp_path):
         """'we do not know the limit' and 'there is no file' are different facts."""
         root = _branch(tmp_path / "b", **{"README.md": "x"})
-        monkeypatch.setattr(sb, "prax_dashboard", None)
-        monkeypatch.setattr(sb, "_PRAX_IMPORT_ERROR", "ImportError: boom")
+        monkeypatch.setattr(sb, "prax_door", _Door(ImportError("boom")))
 
         assert _cells(sb.check_branch(str(root)))["DASH"]["state"] == "error"
 
@@ -561,7 +571,7 @@ class TestRatchetRed:
 
     def test_an_over_cap_branch_prompt_is_red_and_names_hooks(self, monkeypatch, tmp_path):
         """The prompt is gated too, and its cap belongs to another branch."""
-        monkeypatch.setattr(sb.hooks_grounding, "BRANCH_CHAR_BUDGET", 10)
+        monkeypatch.setattr(sb, "hooks_door", _Door(BRANCH_CHAR_BUDGET=10))
         root = _branch(tmp_path / "b", **{"README.md": "x", ".aipass/aipass_local_prompt.md": "y" * 30})
 
         result = _gate(root)
@@ -710,9 +720,9 @@ class TestRatchetReadsTheOwnersCap:
         """The gate holds @hooks' number, not a remembered 9,000."""
         root = _branch(tmp_path / "b", **{"README.md": "x", ".aipass/aipass_local_prompt.md": "y" * 100})
 
-        monkeypatch.setattr(sb.hooks_grounding, "BRANCH_CHAR_BUDGET", 50)
+        monkeypatch.setattr(sb, "hooks_door", _Door(BRANCH_CHAR_BUDGET=50))
         red = _gate(root)
-        monkeypatch.setattr(sb.hooks_grounding, "BRANCH_CHAR_BUDGET", 500)
+        monkeypatch.setattr(sb, "hooks_door", _Door(BRANCH_CHAR_BUDGET=500))
         green = _gate(root)
 
         assert red["passed"] is False and green["passed"] is True
@@ -779,8 +789,7 @@ class TestRatchetFailsHonestly:
 
     def test_an_unimportable_owner_is_red_and_names_hooks(self, monkeypatch, tmp_path):
         """@hooks gone: the prompt row says hooks, and it does not pass."""
-        monkeypatch.setattr(sb, "hooks_grounding", None)
-        monkeypatch.setattr(sb, "_HOOKS_IMPORT_ERROR", "ModuleNotFoundError: no aipass.hooks")
+        monkeypatch.setattr(sb, "hooks_door", _Door(ModuleNotFoundError("no aipass.hooks")))
         root = _branch(tmp_path / "b", **{"README.md": "x", ".aipass/aipass_local_prompt.md": "y"})
 
         result = _gate(root)
@@ -844,8 +853,7 @@ class TestRatchetFailsHonestly:
 
     def test_an_unreadable_cap_is_red_even_when_the_file_is_absent(self, monkeypatch, tmp_path):
         """'We do not know the limit' and 'there is no file' are different facts."""
-        monkeypatch.setattr(sb, "hooks_grounding", None)
-        monkeypatch.setattr(sb, "_HOOKS_IMPORT_ERROR", "ImportError: boom")
+        monkeypatch.setattr(sb, "hooks_door", _Door(ImportError("boom")))
         root = _branch(tmp_path / "b", **{"README.md": "x"})
 
         assert _gated_row(_gate(root), ".aipass/aipass_local_prompt.md")["state"] == "error"
@@ -922,7 +930,7 @@ class TestRatchetScope:
             ".claude/hooks/engine_test.log",
             ".claude/settings.json",
             "src/aipass/sentry/tests/test_checkers_batch10.py",
-            "src/aipass/skills/tools/suspend/deep/run.py",
+            ".claude/hooks/deep/engine.jsonl",
         ]
 
         result = _names(tmp_path, {rel: f"{NAME}\n" for rel in exempt})
@@ -938,7 +946,7 @@ class TestRatchetScope:
             "AGENTS.md",
             "src/aipass/probe/.claude/settings.json",
             "src/aipass/sentry/tests/test_checkers_batch11.py",
-            "src/aipass/skills/tools/suspended.md",
+            ".claude/hooks_old/engine.jsonl",
             "docs/PLAN.md",
             "docs/CHANGELOG.md.txt",
         ]

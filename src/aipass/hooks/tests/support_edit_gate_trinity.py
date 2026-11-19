@@ -3,7 +3,7 @@
 # Description: Helpers shared by the edit_gate .trinity test files: cap tables, hook data, the import seam routers
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Helpers for the edit_gate .trinity tests (no test_ prefix: never collected)."""
@@ -15,7 +15,7 @@ import importlib
 from unittest.mock import MagicMock, patch
 
 from aipass.hooks.apps.handlers.security import edit_gate
-from aipass.memory.apps.modules import door_entry_limits as memory_entry_limits
+from aipass import memory as memory_entry_limits
 
 
 _TEST_LIMITS_WARN = {
@@ -131,7 +131,7 @@ def _fence_real(mock):
 
 def _mock_importlib_modules(limits, rollover_cfg=None):
     """Return a side_effect for importlib.import_module supporting both modules."""
-    el_real = _REAL_IMPORT_MODULE("aipass.memory.apps.modules.door_entry_limits")
+    el_real = _REAL_IMPORT_MODULE("aipass.memory")
 
     entry_limits_mock = MagicMock()
     entry_limits_mock.load_entry_limits.return_value = limits
@@ -140,22 +140,20 @@ def _mock_importlib_modules(limits, rollover_cfg=None):
     entry_limits_mock.fields_for = el_real.fields_for
     entry_limits_mock.check_file_budget = el_real.check_file_budget
 
-    config_loader_mock = MagicMock()
+    # One door hands out both modules' names, so one mock answers for both.
+    config_loader_mock = entry_limits_mock
     cfg = rollover_cfg if rollover_cfg is not None else _ROLLOVER_CONFIG_10
     config_loader_mock.load.return_value = cfg
     config_loader_mock.section.side_effect = lambda name: cfg.get(name, {})
     # memory's real resolver over the test's rollover section: no I/O when the
     # section is passed, so the pad count is exactly what memory's roll applies.
-    cl_real = _REAL_IMPORT_MODULE("aipass.memory.apps.modules.door_config_loader")
-    config_loader_mock.get_todos_count.side_effect = lambda branch: cl_real.get_todos_count(
+    config_loader_mock.get_todos_count.side_effect = lambda branch: el_real.get_todos_count(
         branch, cfg.get("rollover", {})
     )
 
     def side_effect(name):
-        if "entry_limits" in name:
+        if name == "aipass.memory":
             return entry_limits_mock
-        if "config_loader" in name:
-            return config_loader_mock
         return _REAL_IMPORT_MODULE(name)
 
     return side_effect

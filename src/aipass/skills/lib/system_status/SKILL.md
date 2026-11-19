@@ -31,8 +31,8 @@ An in-process read for callers that want data, not text - the host API's
 `/v1/machine` route proxies it verbatim and BAUD's phone draws it (FPLAN-0561).
 
 ```python
-from aipass.skills.lib.system_status import handler
-vitals = handler.machine_vitals()
+from aipass.skills import machine_vitals
+vitals = machine_vitals()
 ```
 
 - `{"ok": True, "schema": 2, "sampled_at": ...}` plus nine sections: `cpu`,
@@ -41,11 +41,14 @@ vitals = handler.machine_vitals()
   `available`, `reason`, `sentence`, `detail` beside its values. Never raises
   for a reading; a value the host cannot give is `None`, never a zero.
 - Whole-function refusal: `{"ok": False, "reason", "detail"}` with
-  `psutil_missing` or `switched_off` (the off-switch is consulted, and an
-  unreadable switch state fails closed).
+  `psutil_missing`, `switched_off` (switched off on purpose, logged as INFO)
+  or `switch_unreadable` (the switch state cannot be read, so the skill counts
+  as off and fails closed, logged as ERROR). The package door serves the two
+  as `SYSTEM_STATUS_REASON_SWITCHED_OFF` and
+  `SYSTEM_STATUS_REASON_SWITCH_UNREADABLE`.
 - Reason codes (closed set, one sentence each in `REASONS`): `platform`,
   `no_sensor`, `no_allowlisted_sensor`, `read_failed`, `warming`, `no_range`,
-  `switched_off`, `psutil_missing`.
+  `switched_off`, `switch_unreadable`, `psutil_missing`.
 - `cpu` carries `percent` and `window_s`, plus `cores` (busy percent per
   logical CPU, in index order), `logical` and `physical` (the counts) and `mhz`
   / `mhz_max` (frequency now and its ceiling). One `cpu_times(percpu=True)`
@@ -79,8 +82,8 @@ The busiest processes on the host, for "the fan is loud and no agent is
 running - what is?" (contract C-B, DPLAN-0414 theme 3).
 
 ```python
-from aipass.skills.lib.system_status import handler
-top = handler.machine_processes(20)
+from aipass.skills import machine_processes
+top = machine_processes(20)
 ```
 
 - `{"sampled_at", "window_ms", "total", "sort": "cpu", "processes": [...]}`;
@@ -124,10 +127,7 @@ All actions return structured dicts:
 
 - Disk usage uses `shutil.disk_usage()` -- stdlib, portable
 - Memory, uptime and process count use `psutil` (`psutil>=5.9`, a declared
-  dependency of this project), which answers them on Linux, macOS and Windows
-- Until 2026-09-12 those three read `/proc` directly, so every one of them
-  returned `success: False` on macOS and `summary` reported `success: True`
-  over a disk line and an Errors trailer (FPLAN-0554)
+  dependency of this project)
 - `summary` is `success: False` whenever any section fails, and `error` names
   the sections that are missing; the sections that did answer are still in
   `output`

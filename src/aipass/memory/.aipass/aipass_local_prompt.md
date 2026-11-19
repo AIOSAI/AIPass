@@ -29,13 +29,13 @@ memory/
 │   │   ├── rollover.py          # Rollover orchestration, status, config verbs
 │   │   ├── roots.py             # Declared repository roots — list/init/add/remove/heal
 │   │   ├── search.py            # Semantic query routing
-│   │   ├── symbolic.py          # PARKED — refusal stub, impl in tests/parked/
+│   │   ├── symbolic.py          # PARKED — refusal stub only, the code is out of the tree
 │   │   ├── templates.py         # Gold templates — spawn scaffolds, receipt status, bump
 │   │   ├── todo.py              # The pad and its backlog — count, list, restore
 │   │   ├── verify.py            # Plan vectorization check
 │   │   └── watch.py             # Auto-rollover watcher
 │   └── handlers/
-│       ├── cli/                 # help_flags.py, json_flag.py, branch_flag.py
+│       ├── cli/                 # help_flags.py, json_flag.py, branch_flag.py, caller_gate.py
 │       ├── governance/          # engine.py
 │       ├── intake/              # plans_processor.py, pool_processor.py, auto_process.py
 │       ├── json/                # json_handler.py (fleet shim), memory_files.py (the write gate),
@@ -56,7 +56,7 @@ memory/
 ├── docs/                        # Tracked depth, one file per handler group, indexed from README
 ├── docs.local/                  # Untracked scratch and research
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json — gold source
-├── tests/  └── parked/          # parked/conftest.py is the collection barrier
+├── tests/                       # one file per subject, conftest.py holds the shared stand-ins
 ├── .chroma/                     # ChromaDB vector store
 └── memory_json/                 # Operation logs + custom_config/memory.config.json
 ```

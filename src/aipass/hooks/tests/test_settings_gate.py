@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-10-25
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/security/settings_gate.py."""
@@ -17,7 +17,6 @@
 
 import json
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -282,7 +281,6 @@ class TestDirectories:
         assert _decision(_bash(seat, command)) == "ask"
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
 class TestSymlink:
     def test_a_link_elsewhere_landing_on_codex_config_is_denied(self, seat, tmp_path):
         target = seat["home"] / ".codex" / "config.toml"

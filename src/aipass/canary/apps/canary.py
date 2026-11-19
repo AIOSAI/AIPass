@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @canary — permanent test citizen
 # Version: 2.7.0
 # Created: 2026-08-20
-# Modified: 2026-10-17
+# Modified: 2026-11-18
 # =============================================
 
 """CANARY Branch - Main Orchestrator
@@ -21,16 +21,7 @@ from typing import Any, List
 # so a later setdefault would name the wrong branch in every log line.
 os.environ.setdefault("AIPASS_BRANCH_NAME", "canary")
 
-# Rich markup below is non-ASCII; a cp1252 Windows console raises
-# UnicodeEncodeError mid-render, so force UTF-8 before any console use.
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
-from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
+from aipass.cli import console, error, reset_command_state, resolve_exit
 from aipass.prax import logger
 
 __version__ = "2.7.0"
@@ -109,8 +100,6 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]Commands:[/yellow]")
-    console.print("  [cyan]note add TEXT[/cyan]      Append one note to the branch-local store")
-    console.print("  [cyan]note list[/cyan]          Print notes in order, with index and timestamp")
     console.print("  [cyan]span TEXT[/cyan]          Print a written duration as a total in seconds")
     console.print('  [cyan]span --json TEXT[/cyan]   The same total as {"seconds": N}, nothing on stdout')
     console.print("  [cyan]top N FILE[/cyan]         Print the N highest counts in a name/count file")
@@ -136,8 +125,6 @@ def print_help() -> None:
 
     console.print("[yellow]Examples:[/yellow]")
     console.print("  $ drone @canary")
-    console.print('  $ drone @canary note add "check the tick-5 interrupt"')
-    console.print("  $ drone @canary note list")
     console.print("  $ drone @canary span '2d 4h'")
     console.print("  $ drone @canary span --json 1h30m")
     console.print("  $ drone @canary top 3 scores.txt")

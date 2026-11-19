@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_check_rollover.py
 # Description: trinity_check rollover tabs: meta composing, todos pad, draft percent (split from test_trinity_check.py)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/trinity_check.py and trinity_groups.py."""
@@ -29,15 +29,15 @@ from aipass.sentry.tests.support_trinity_check import (
 
 pytestmark = pytest.mark.usefixtures("_mock_infrastructure")
 
-# @memory's renderer is imported at module scope, before the autouse mock swaps aipass.prax, and found by file
-# rather than by catching ImportError, so a real breakage there is never swallowed as "unavailable".
-_RENDERER_RELATIVE = ("src", "aipass", "memory", "apps", "modules", "door_tab_renderer.py")
+# @memory's renderer is imported through its door at module scope, before the autouse mock swaps aipass.prax, and
+# found by file rather than by catching ImportError, so a real breakage there is never swallowed as "unavailable".
+_DOOR_RELATIVE = ("src", "aipass", "memory", "__init__.py")
 _compose_meta = None
-_COMPOSE_META_IMPORT_ERROR = "@memory door_tab_renderer.py is not on disk"
+_COMPOSE_META_IMPORT_ERROR = "@memory's door, memory/__init__.py, is not on disk"
 
 for _parent in Path(__file__).resolve().parents:
-    if _parent.joinpath(*_RENDERER_RELATIVE).is_file():
-        from aipass.memory.apps.modules.door_tab_renderer import compose_meta as _compose_meta
+    if _parent.joinpath(*_DOOR_RELATIVE).is_file():
+        from aipass.memory import compose_meta as _compose_meta
 
         _COMPOSE_META_IMPORT_ERROR = ""
         break

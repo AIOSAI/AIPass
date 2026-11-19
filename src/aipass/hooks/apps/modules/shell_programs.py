@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: shell_programs.py
-# Version: 1.5.1
+# Version: 1.8.0
 # Description: Which programs only read, and which only take data — the default-deny tables (DPLAN-0356 phase 4)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """The tables that invert the gates: what is KNOWN safe, so everything else is not (DPLAN-0356 phase 4).
@@ -18,8 +18,9 @@ import os
 import re
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 CONSOLE = err_console
 
@@ -43,6 +44,18 @@ _SED_LONG_FLAGS = frozenset(
 
 #: A sed script of addresses and p, d, q, = only: no s, w, W, e, r or R, so it neither writes nor runs.
 _SED_PRINT_SCRIPT = re.compile(r"[0-9$,;!~pdq= ]+")
+
+#: A /regex/ address; cut before the print-script test, so what is left must still be addresses and p, d, q, =.
+_SED_REGEX_ADDRESS = re.compile(r"/(?:[^/\\\n]|\\.)*/")
+
+#: What lets an awk program write or run: an output redirect, a pipe, system(), getline, gawk's @load and @include.
+_AWK_WRITES = (">", "|", "system", "getline", "@load", "@include")
+
+#: gawk's indirect call (@f(...)): the name is built at run time, so it may be system.
+_AWK_INDIRECT_CALL = re.compile(r"@\s*[A-Za-z_]\w*\s*\(")
+
+#: awk flags that take a value and only shape the read; -f, -i and any other flag keep awk off the read list.
+_AWK_VALUED = ("-F", "-v")
 
 # Launchers: the program they run comes after their own flags (the valued ones take the next
 # word) and, for a few, a fixed number of operands of their own (timeout's duration).
@@ -113,8 +126,38 @@ OWN_GATED = frozenset({"git", "gh"})
 #: Programs that delete every operand (rm_gate's verbs, the protected lane's delete role).
 DELETE_PROGRAMS = frozenset({"rm", "rmdir", "unlink", "shred", "srm", "wipe", "trash", "trash-put", "rimraf"})
 
+#: The provider CLIs this fleet launches; edit_gate judges where each would run (modules/provider_launch).
+PROVIDER_CLIS = frozenset({"claude", "codex", "opencode"})
+
+#: Each provider CLI's directory flags, read from its --help (codex -C/--cd, --add-dir): modules/provider_launch
+#: judges their values, where a session runs.
+PROVIDER_DIR_FLAGS = ("-C", "--cd", "--add-dir")
+
+#: Per provider CLI, the flags whose next word is no value to judge: switches (from each CLI's --help), so the
+#: word after them is the prompt, and the prompt flags. Any other flag's value is judged: codex -o writes its file.
+_PROVIDER_FREE_NEXT = {
+    "claude": frozenset({
+        "-p", "--print", "-c", "--continue", "-h", "--help", "-v", "--version", "--verbose", "--bare", "--bg",
+        "--background", "--brief", "--chrome", "--no-chrome", "--ide", "--tmux", "--desktop", "--restricted",
+        "--safe-mode", "--fork-session",
+        "--include-partial-messages", "--include-hook-events", "--no-session-persistence", "--strict-mcp-config",
+        "--replay-user-messages", "--disable-slash-commands", "--ax-screen-reader", "--forward-subagent-text",
+        "--exclude-dynamic-system-prompt-sections", "--system-prompt", "--append-system-prompt",
+    }),
+    "codex": frozenset({
+        "-h", "--help", "-V", "--version", "--json", "--oss", "--search", "--ephemeral", "--worktree",
+        "--skip-git-repo-check", "--strict-config", "--ignore-rules", "--ignore-user-config", "--no-alt-screen",
+        "--no-daemon", "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+    }),
+    "opencode": frozenset({
+        "-c", "--continue", "-h", "--help", "-v", "--version", "--auto", "--fork", "--thinking", "--standalone",
+        "--wizard", "--print-logs", "--prompt",
+    }),
+}  # fmt: skip
+
 #: The command words a scan of an unknown wrapper's operands looks for (P3).
-WATCHED_VERBS = DELETE_PROGRAMS | OWN_GATED
+WATCHED_VERBS = DELETE_PROGRAMS | OWN_GATED | PROVIDER_CLIS
 
 
 def read_only(program: str, argv: tuple[str, ...]) -> bool:
@@ -123,6 +166,8 @@ def read_only(program: str, argv: tuple[str, ...]) -> bool:
         return not any(arg in _FIND_ACTIONS for arg in argv[1:])
     if program == "sed":
         return _sed_only_prints(argv)
+    if program in ("awk", "gawk"):
+        return _awk_only_reads(argv)
     if program in SHELL_PROGRAMS:
         return syntax_check_only(argv)
     if program == "aipass":
@@ -166,7 +211,23 @@ def _sed_only_prints(argv: tuple[str, ...]) -> bool:
             plain.append(arg)
     if script_next or not (scripts or plain):
         return False
-    return all(_SED_PRINT_SCRIPT.fullmatch(script) for script in (scripts or plain[:1]))
+    return all(_SED_PRINT_SCRIPT.fullmatch(_SED_REGEX_ADDRESS.sub("", script)) for script in (scripts or plain[:1]))
+
+
+def _awk_only_reads(argv: tuple[str, ...]) -> bool:
+    """True when awk's flags only shape the read and its program text cannot write or run anything."""
+    index = 1
+    while index < len(argv) and argv[index].startswith("-"):
+        arg = argv[index]
+        if arg in _AWK_VALUED:
+            index += 2
+        elif arg.startswith(_AWK_VALUED):
+            index += 1
+        else:
+            return False
+    if index >= len(argv) or _AWK_INDIRECT_CALL.search(argv[index]):
+        return False
+    return not any(token in argv[index] for token in _AWK_WRITES)
 
 
 def _sed_word(arg: str) -> str:
@@ -366,6 +427,28 @@ def _operand_texts(argv: tuple[str, ...], program: str = "") -> list[str]:
     return [text for text in texts if text]
 
 
+def _provider_flag_values(inv) -> list[str]:
+    """The value of every flag a provider CLI is given (-o x, --output-last-message=x, -ox); its prompt is no path."""
+    argv = inv.argv
+    free_next = _PROVIDER_FREE_NEXT[inv.program].union(PROVIDER_DIR_FLAGS)
+    values = []
+    for index, arg in enumerate(argv[1:], 1):
+        if arg == "--":
+            break
+        if len(arg) < 2 or not arg.startswith("-"):
+            continue
+        flag, equals, value = arg.partition("=")
+        if flag in free_next:
+            continue
+        if equals:
+            values.append(value)
+        elif not arg.startswith("--") and len(arg) > 2:
+            values.append(arg[2:])
+        elif index + 1 < len(argv):
+            values.append(argv[index + 1])
+    return [value for value in values if value]
+
+
 def _pytest_args_start(program: str, argv: tuple[str, ...]) -> int | None:
     """Where pytest's own arguments begin: after ``pytest``, or after an interpreter's ``-m pytest``; None otherwise."""
     if program == "pytest":
@@ -400,20 +483,24 @@ def named_operands(invocations: list, places=None) -> list[tuple[str, Path]]:
     """(program, path) for every operand of a program that does not only read (P2), resolved from its cwd.
 
     A nonexistent operand is kept only when places(its first existing ancestor) is true; None keeps every one.
+    Each call leaves one json trail entry.
     """
     carried = _carriers(invocations)
     found = []
     for index, inv in enumerate(invocations):
         if index in carried or not inv.program or read_only(inv.program, inv.argv) or inv.program in OWN_GATED:
             continue
-        for text in _operand_texts(inv.argv, inv.program):
+        texts = _provider_flag_values(inv) if inv.program in PROVIDER_CLIS else _operand_texts(inv.argv, inv.program)
+        for text in texts:
             if inv.text and text == inv.text:  # an interpreter's -c program text is read as a program, not a path
                 continue
             path = Path(os.path.expanduser(text))
             if not path.is_absolute() and inv.cwd:
                 path = Path(inv.cwd) / path
-            if places is None or _names_a_place(path, places):
+            # A provider flag's value is a value by name (codex -o new.py): kept even where no file is yet.
+            if places is None or inv.program in PROVIDER_CLIS or _names_a_place(path, places):
                 found.append((inv.program, path))
+    json_handler.log_operation("named_operands", {"programs": len(invocations), "operands": len(found)})
     return found
 
 

@@ -30,7 +30,6 @@ api/
 │   │   ├── host_serve.py           # host-api sub-router — serve/--detach, status, stop, autostart
 │   │   └── host_config_cli.py      # host-api sub-router — config, set-config
 │   ├── handlers/                   # Implementation
-│   │   ├── module_root.py          # module_file() — the one guarded __file__ resolve
 │   │   ├── auth/                   # env.py, keys.py, secrets.py
 │   │   ├── config/provider.py
 │   │   ├── google/                 # auth.py, service_factory.py, retry.py
@@ -49,7 +48,7 @@ api/
 
 # Design rules
 
- - Not auth, credentials, or a service factory → it does not belong here (the old Telegram anti-pattern).
+ - Not auth, credentials, or a service factory → it does not belong here.
  - One module per provider, one handler directory per provider. Module orchestrates, handlers implement.
  - No default models or configs — consumers provide their own. API provides the connection.
  - The server owns the pipe, never the meaning: a host route proxies the branch that owns the data (verbs.py D0).
@@ -62,8 +61,7 @@ api/
  - Secrets never reach stdout. `get-secret` prints a masked summary; programmatic reads go through `modules/secrets.py`.
  - The phone face is resolved once at `create_app` (restart to change it); the baud binary is resolved per request (no restart).
  - Expensive host reads go through `read_cache.py` — single-flight plus TTL. A refusal must be raised inside the producer, never returned, or the refusal gets cached.
- - `os.access(X_OK)` is always true on Windows; those tests carry a posix skip.
- - No module may need a working directory to import: route module-level path resolves through `module_root.module_file()`.
+ - No module may need a working directory to import: resolve absolute paths only (`Path(__file__).resolve()`); a resolve of a relative, caller-supplied path at import is the defect.
  - Server file cap is 1500 lines — the next host route splits into a router.
 
 # Habits

@@ -1,12 +1,12 @@
 # =================== META ====================
 # Name: test_error_resilience.py
-# Description: Tests for error resilience in snapshot.py, versioned.py, the document handlers and audit trail
-# Version: 1.1.5
+# Description: Tests for error resilience in snapshot.py, the document handlers and audit trail
+# Version: 1.2.1
 # Created: 2026-06-12
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
-"""Tests for error resilience in apps/modules/snapshot.py, versioned.py, the document handlers and audit trail."""
+"""Tests for error resilience in apps/modules/snapshot.py, the document handlers and audit trail."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that handlers/ and modules/ lint clean; the imports below prove only that they parse
@@ -14,11 +14,13 @@
 # sentry: no-test-needed(constant) — the message each InvalidDocument carries; the tests pin the type only
 # sentry: no-test-needed(stdlib) — json module parsing and dumps
 
+import importlib
 import json
 from pathlib import Path
 
 import pytest
 
+from aipass import prax
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.drive.tracker import load_tracker
 from aipass.backup.apps.handlers.json import json_handler
@@ -28,8 +30,7 @@ from aipass.backup.apps.handlers.state import timestamps
 from aipass.backup.apps.handlers.state.timestamps import load_timestamps
 from aipass.backup.apps.modules import snapshot
 from aipass.backup.apps.modules.snapshot import run_snapshot
-from aipass.backup.apps.modules.versioned import run_versioned
-from aipass.cli.apps.modules import command_failed
+from aipass.cli import command_failed
 
 
 # The live-tree race is reached through run_snapshot, at the two windows the
@@ -151,17 +152,6 @@ class TestMissingProjectRoot:
         assert result.errors, "expected an honest error, got a clean result"
         assert result.files_copied == 0
         assert not missing.exists(), "refused path must not be scaffolded"
-
-    def test_versioned_on_a_missing_root_errors_and_scaffolds_nothing(self, tmp_path: Path) -> None:
-        """run_versioned on a missing path errors and writes nothing."""
-
-        missing = tmp_path / "no_such_project"
-
-        result = run_versioned(str(missing), show_panels=False)
-
-        assert result.errors
-        assert result.files_copied == 0
-        assert not missing.exists()
 
     def test_snapshot_on_a_file_as_root_errors_and_copies_nothing(self, tmp_path: Path) -> None:
         """A file (not a directory) passed as the project root is refused."""
@@ -473,7 +463,7 @@ class TestAuditLog:
         absent = trail.log_path()
 
         assert absent.is_absolute(), f"an empty seam answered a relative path: {absent}"
-        assert absent == trail.branch_root(trail.__file__, 3) / "logs" / trail.LOG_FILENAME
+        assert absent == Path(trail.__file__).resolve().parents[3] / "logs" / trail.LOG_FILENAME
 
         redirected = tmp_path / "seam"
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(redirected))
@@ -527,3 +517,24 @@ class TestAuditLog:
             "save_timestamps",
         ], "a refused append stopped the run's later audit calls"
         assert warned.count("Failed to write operation log: audit stream unwritable") == len(attempted)
+
+
+class TestStateLocation:
+    """backup's state (logs/, backup_json/) comes from the branch state root, never from counting folders up."""
+
+    def test_the_audit_stream_comes_from_the_state_root(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Kills the folder-counting line: on a checkout that answers the package's own logs/ folder."""
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", "")
+        monkeypatch.setattr(trail, "branch_state_root", lambda branch: tmp_path / "state" / branch)
+
+        assert trail.log_path() == tmp_path / "state" / "backup" / "logs" / trail.LOG_FILENAME
+
+    def test_the_registry_comes_from_the_state_root(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Kills the folder-counting line: REGISTRY_PATH is set at import, so the module is reloaded under the patch."""
+        monkeypatch.setattr(prax, "branch_state_root", lambda branch: tmp_path / "state" / branch)
+        expected = tmp_path / "state" / "backup" / "backup_json" / "project_registry.json"
+        try:
+            assert importlib.reload(registry).REGISTRY_PATH == expected
+        finally:
+            monkeypatch.undo()
+            importlib.reload(registry)

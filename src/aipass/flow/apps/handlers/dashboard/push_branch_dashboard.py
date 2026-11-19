@@ -3,7 +3,7 @@
 # Description: Push flow section to branch dashboards
 # Version: 2.4.0
 # Created: 2026-03-01
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Push Flow Section to Branch Dashboard
@@ -20,14 +20,12 @@ from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
 from aipass.flow.apps.handlers.json import json_handler
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 # Import the caps, never retype them: `sections.flow` has two writers (prax's refresh and this push).
-from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET, cap_subject, dashboard_lock
+from aipass.prax import DASHBOARD_CHAR_BUDGET, cap_subject, dashboard_lock
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-_PKG_ROOT = module_file(__file__).parents[4]
+_PKG_ROOT = Path(__file__).resolve().parents[4]
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 FLOW_JSON_DIR = FLOW_ROOT / "flow_json"

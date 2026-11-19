@@ -14,7 +14,7 @@ from rich.table import Table
 
 from aipass.devpulse.apps.handlers.feedback.storage import inbox_lock, load_inbox, save_inbox
 
-from aipass.cli.apps.modules import err_console, error
+from aipass.cli import err_console, error
 from aipass.devpulse.apps.handlers.json import json_handler
 
 console = err_console

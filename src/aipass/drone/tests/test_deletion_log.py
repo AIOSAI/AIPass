@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_deletion_log.py
 # Description: Every drone delete, and every refused one, leaves a deletion record
-# Version: 1.1.1
+# Version: 1.5.0
 # Created: 2026-08-14
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
-"""Tests for apps/handlers/deletion_log.py, the safe_delete path writing it and apps/modules/door_deletion_log.py."""
+"""Tests for apps/handlers/deletion_log.py, the safe_delete path writing it and the package door handing it out."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(stdlib) — json's line encoding of a record; the tests read records back through json
@@ -15,7 +15,6 @@
 import json
 import os
 import shutil
-import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -25,18 +24,13 @@ import pytest
 from aipass.drone.apps.handlers import deletion_log
 from aipass.drone.apps.handlers.router_handler import CallerIdentity
 from aipass.drone.apps.handlers.rm_handler import safe_delete
-from aipass.drone.apps.modules.door_deletion_log import record_deletion as door_record_deletion
+import aipass.drone as door
 
 # ``drone rm`` is the only sanctioned delete; refusals are records too (a blocked attempt leaves no other trace).
 
-#: A mode-0 folder only stops a caller the kernel holds to permissions: not on
-#: Windows, not as root. ``or`` short-circuits, so geteuid is never read on nt.
-_PERMISSIONS_DO_NOT_BIND = sys.platform == "win32" or os.geteuid() == 0
-_PERMISSIONS_REASON = "needs POSIX permissions that bind the caller"
-
-#: Windows makes a symlink only with Developer Mode or elevation.
-_NO_SYMLINKS = sys.platform == "win32"
-_NO_SYMLINKS_REASON = "creating a symlink needs a privilege on Windows"
+#: A mode-0 folder only stops a caller the kernel holds to permissions: not as root.
+_PERMISSIONS_DO_NOT_BIND = os.geteuid() == 0
+_PERMISSIONS_REASON = "needs file permissions that bind the caller"
 
 
 @pytest.fixture()
@@ -52,6 +46,12 @@ def project(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture()
+def outside_project(tmp_path_factory):
+    """A temp folder outside the project: only a true delete there can take the cwd with it."""
+    return tmp_path_factory.mktemp("outside")
+
+
 def read_records(project_root: Path) -> list[dict]:
     """Return every record in the project's deletion log, oldest first."""
     log = deletion_log.deletion_log_path()
@@ -61,17 +61,17 @@ def read_records(project_root: Path) -> list[dict]:
 
 
 class TestDeletionIsRecorded:
-    def test_successful_delete_writes_a_record(self, project):
+    def test_a_successful_move_writes_a_record_naming_both_paths(self, project):
         target = project / "build"
         target.mkdir()
         (target / "a.txt").write_text("x", encoding="utf-8")
 
         safe_delete([str(target)])
 
-        records = read_records(project)
-        assert len(records) == 1
-        assert records[0]["outcome"] == "deleted"
-        assert records[0]["path"] == str(target.resolve())
+        (record,) = read_records(project)
+        assert record["outcome"] == "moved"
+        assert record["path"] == str(target.resolve())
+        assert record["moved_to"] == str(project.resolve() / ".archive" / "build")
 
     def test_refusal_writes_a_record(self, project, monkeypatch):
         """A guard refusal is the only trace that attempt leaves — record it."""
@@ -191,7 +191,6 @@ class TestRecordContents:
         assert record["kind"] == "symlink"
         assert real.exists(), "measuring must not follow the link"
 
-    @pytest.mark.skipif(_NO_SYMLINKS, reason=_NO_SYMLINKS_REASON)
     def test_a_symlink_record_names_the_link_and_its_target(self, project):
         real = project.resolve() / "real.txt"
         real.write_text("x", encoding="utf-8")
@@ -325,6 +324,93 @@ class TestSeverity:
 
         assert log.info.called
         assert not log.error.called
+
+
+def _line(call) -> str:
+    """A prax call rendered the way the logger renders it: format string % arguments."""
+    message, *args = call.args
+    return message % tuple(args)
+
+
+class TestEveryChannelTellsTheWholeStory:
+    def _moved(self, project) -> dict[str, Any]:
+        dest = project / ".archive" / "a.txt"
+        return dict(
+            lane=deletion_log.LANE_RM,
+            outcome=deletion_log.OUTCOME_MOVED,
+            requested="a.txt",
+            resolved=project / "a.txt",
+            reason="Moved",
+            caller="devpulse",
+            moved_to=dest,
+            exemption="admin",
+        )
+
+    def test_the_prax_line_of_a_move_names_outcome_destination_caller_and_exemption(self, project):
+        row = self._moved(project)
+        with patch("aipass.drone.apps.handlers.deletion_log.logger") as log:
+            deletion_log.record_deletion(**row)
+
+        line = _line(log.info.call_args)
+        assert "moved" in line
+        assert str(row["moved_to"]) in line
+        assert "devpulse" in line
+        assert "admin" in line
+        assert "deletion record" not in line
+
+    def test_the_json_entry_of_a_move_carries_moved_to_and_exemption(self, project):
+        row = self._moved(project)
+        with patch("aipass.drone.apps.handlers.deletion_log.json_handler") as service:
+            deletion_log.record_deletion(**row)
+
+        (operation, data), _ = service.log_operation.call_args
+        assert operation == "deletion_record"
+        assert (data["moved_to"], data["exemption"]) == (str(row["moved_to"]), "admin")
+
+    def test_a_refused_plain_file_is_recorded_with_its_kind(self, project):
+        target = project / ".aipass" / "notes.md"
+        target.parent.mkdir()
+        target.write_text("x", encoding="utf-8")
+
+        safe_delete([str(target)])
+
+        (record,) = read_records(project)
+        assert (record["outcome"], record["kind"], record["measured"]) == ("refused", "file", "none")
+
+
+class TestTheGateRecordsItsRefusalThroughTheDoor:
+    def test_a_gate_refusal_lands_with_its_lane_cwd_and_no_resolved_path(self, project):
+        standing = project / "src" / "aipass" / "canary"
+
+        door.record_gate_refusal(
+            caller="canary",
+            cwd=standing,
+            requested="../api/notes.md",
+            resolved=None,
+            reason="drone rm is the admin seat's alone",
+        )
+
+        (record,) = read_records(project)
+        assert door.record_gate_refusal is deletion_log.record_gate_refusal
+        assert (record["lane"], record["outcome"], record["caller"]) == ("rm_gate", "refused", "canary")
+        assert (record["cwd"], record["requested"], record["path"]) == (str(standing), "../api/notes.md", None)
+        assert record["reason"] == "drone rm is the admin seat's alone"
+
+    @pytest.mark.parametrize("field", ["caller", "requested", "reason"])
+    def test_an_empty_field_is_refused_and_writes_nothing(self, project, field):
+        row = {"caller": "canary", "cwd": project, "requested": "x", "resolved": None, "reason": "refused"}
+        with pytest.raises(ValueError, match=field):
+            deletion_log.record_gate_refusal(**{**row, field: " "})
+
+        assert read_records(project) == []
+
+    def test_an_unwritable_store_raises_so_the_gate_sees_it(self, project, monkeypatch):
+        blocked = project / "not_a_directory"
+        blocked.write_text("a file where a directory would have to be", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_DELETION_LOG", str(blocked / "d.jsonl"))
+
+        with pytest.raises(OSError):
+            door.record_gate_refusal(caller="canary", cwd=project, requested="x", resolved=None, reason="refused")
 
 
 class TestBounded:
@@ -469,10 +555,10 @@ class TestAnotherBranchRecordsThroughTheDoor:
         gone.write_text("x", encoding="utf-8")
         safe_delete([str(gone)])
 
-        door_record_deletion(**self.ROW, measurement=self.MEASURED)
+        door.record_foreign_deletion(**self.ROW, measurement=self.MEASURED)
 
         rm_row, door_row = read_records(project)
-        assert door_record_deletion is deletion_log.record_foreign_deletion
+        assert door.record_foreign_deletion is deletion_log.record_foreign_deletion
         assert set(TestRecordContents.REQUIRED) <= set(rm_row) & set(door_row)
         assert {k: door_row[k] for k in ("lane", "outcome", "caller", "target", "path", "reason")} == {
             "lane": "spawn_retire",
@@ -488,7 +574,7 @@ class TestAnotherBranchRecordsThroughTheDoor:
     @pytest.mark.parametrize("empty", ["", "  ", None])
     def test_an_empty_required_field_is_refused_and_writes_no_half_row(self, project, field, empty):
         with pytest.raises(ValueError, match=field):
-            door_record_deletion(**{**self.ROW, field: empty})
+            door.record_foreign_deletion(**{**self.ROW, field: empty})
 
         assert read_records(project) == []
 
@@ -520,13 +606,12 @@ class TestRecordFailureIsContained:
 
         assert log.error.called, "a lost deletion record must be loud"
 
-    @pytest.mark.deletable_cwd
-    def test_deleting_the_current_directory_still_reports_success(self, project, monkeypatch):
+    def test_deleting_the_current_directory_still_reports_success(self, outside_project, monkeypatch):
         """The delete worked. Losing cwd must not turn it into a failure.
 
         The rmtree leaves no cwd (``Path.cwd()`` raises ENOENT); the record absorbs that, not the result.
         """
-        doomed = project / "scratch"
+        doomed = outside_project / "scratch"
         doomed.mkdir()
         (doomed / "f.txt").write_text("x", encoding="utf-8")
         monkeypatch.chdir(doomed)
@@ -536,13 +621,12 @@ class TestRecordFailureIsContained:
         assert results[0][1] is True, "the delete succeeded; the result must say so"
         assert not doomed.exists()
 
-    @pytest.mark.deletable_cwd
-    def test_deleting_the_current_directory_does_not_raise(self, project, monkeypatch):
+    def test_deleting_the_current_directory_does_not_raise(self, outside_project, monkeypatch):
         """safe_delete returns per-path results. It must not become a crash.
 
         A record raising on the success path, then again in the except handler, must not escape.
         """
-        doomed = project / "scratch"
+        doomed = outside_project / "scratch"
         doomed.mkdir()
         monkeypatch.chdir(doomed)
 
@@ -552,9 +636,8 @@ class TestRecordFailureIsContained:
         ((path, ok, message),) = results
         assert path == str(doomed)
         assert ok is True, message
-        assert message.startswith("Deleted: ")
+        assert message.startswith("Deleted:")
 
-    @pytest.mark.deletable_cwd
     def test_record_deletion_does_not_raise_when_cwd_is_gone(self, project, monkeypatch):
         """The docstring says 'Never raises'. Two lines read cwd outside its try."""
         doomed = project / "scratch"
@@ -572,13 +655,12 @@ class TestRecordFailureIsContained:
 
         assert record["outcome"] == deletion_log.OUTCOME_DELETED
 
-    @pytest.mark.deletable_cwd
-    def test_a_successful_delete_is_never_logged_as_a_failure(self, project, monkeypatch):
+    def test_a_successful_delete_is_never_logged_as_a_failure(self, project, outside_project, monkeypatch):
         """The log said 'deleted' and 'delete failed' for one path, one second.
 
         Whoever reads the log next must not have to guess which line is true.
         """
-        doomed = project / "scratch"
+        doomed = outside_project / "scratch"
         doomed.mkdir()
         monkeypatch.chdir(doomed)
 
@@ -590,8 +672,7 @@ class TestRecordFailureIsContained:
         # Mutant killed: the success path writing its ledger record as outcome "failed".
         assert [r["outcome"] for r in read_records(project)] == [deletion_log.OUTCOME_DELETED]
 
-    @pytest.mark.deletable_cwd
-    def test_the_record_still_lands_when_the_cwd_is_deleted(self, project, monkeypatch):
+    def test_the_record_still_lands_when_the_cwd_is_deleted(self, project, outside_project, monkeypatch):
         """Losing cwd must not cost the durable half of the record.
 
         The store path walks up from cwd; with cwd gone the env override or tempdir home must still answer.
@@ -601,7 +682,7 @@ class TestRecordFailureIsContained:
         home.mkdir()
         monkeypatch.setattr(deletion_log, "_temp_dir", lambda: home)
         monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
-        doomed = project / "scratch"
+        doomed = outside_project / "scratch"
         doomed.mkdir()
         monkeypatch.chdir(doomed)
 
@@ -616,10 +697,9 @@ class TestRecordFailureIsContained:
 
 
 class TestTheRecordSurvivesAnAbsentCwdOnEveryOS:
-    """What the deletable-cwd tests above claim, built the portable way.
+    """What the cwd-deleting tests above claim, through a seam instead of a deleted directory.
 
-    Windows refuses deleting the cwd (WINDOWS_CWD_REASON in conftest), so here router_handler's
-    ``_working_directory`` seam beneath ``caller_cwd`` raises the real ENOENT instead. Weaker in one
+    Router_handler's ``_working_directory`` seam beneath ``caller_cwd`` raises the real ENOENT. Weaker in one
     way: it cannot catch an ``os.getcwd`` read inside C, as ``Path.resolve()`` does.
     """
 

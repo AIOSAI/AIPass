@@ -1,40 +1,44 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 2.6.0
+# Version: 2.8.0
 # Description: Hook engine — unified dispatcher; gates fail closed, injectors skip on error
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-10-30
+# Modified: 2026-11-17
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL.
 
 An injector that fails to import, raises or times out is skipped; a GATE (gates.FAIL_CLOSED) doing the
 same is answered with a block and logged at ERROR. Which hooks are gates is code, never config.
+A raising handler logs one ERROR line of identity, fault[<event>.<hook>.<handler>.<ExcType>@<file>], and
+its exception text on the next line at INFO, so the line's fingerprint never moves with the text.
 """
 
 import importlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import traceback
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import err_console
+from aipass.prax import logger
+from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config import gates
-from aipass.hooks.apps.handlers.config.diagnostics import log_entry as _log, tail_log
+from aipass.hooks.apps.handlers.config.diagnostics import log_entry as _log, tail_log, trail_event
 from aipass.hooks.apps.handlers.config.output_merge import combine_outputs
-from aipass.hooks.apps.handlers.module_root import module_file
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules import cadence
 
 CONSOLE = err_console
-BRANCH_ROOT = module_file(__file__).parent.parent.parent
+BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent
 
 HELP_COMMANDS = [
     ("log", "Tail recent hook activity (last 20 entries)"),
@@ -42,6 +46,8 @@ HELP_COMMANDS = [
 ]
 
 VERBOSE_LOG_ENV = "AIPASS_HOOKS_VERBOSE_LOG"
+#: A raising handler's text is logged at INFO, escaped to one line and cut here.
+FAULT_TEXT_CAP = 500
 
 
 def _log_detail(message: str, *args) -> None:
@@ -113,13 +119,41 @@ def _import_project_handler(module_path: str, project_src: str):
             sys.path.remove(project_src)
 
 
+def _fault_marker(event: str, hook: str, handler_path: str, kind: str, basename: str) -> str:
+    """fault[<event>.<hook>.<handler>.<kind>@<file>]: the identity trigger fingerprints, whitespace and ] made _."""
+    return "fault[" + re.sub(r"[\s\]]", "_", f"{event}.{hook}.{handler_path}.{kind}@{basename}") + "]"
+
+
+def _fault(event: str, hook: str, handler_path: str, exc: BaseException, start: float) -> dict:
+    """A raising handler: one ERROR line of identity (marker, function, line), its text one INFO line below."""
+    frames = traceback.extract_tb(exc.__traceback__)
+    where = f"in {frames[-1].name} line {frames[-1].lineno}" if frames else "with no frame"
+    basename = Path(frames[-1].filename).name if frames else "unknown"
+    kind = type(exc).__name__
+    logger.error("[HOOKS] handler raised %s %s", _fault_marker(event, hook, handler_path, kind, basename), where)
+    text = str(exc)
+    shown = text.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n")
+    if len(shown) > FAULT_TEXT_CAP:
+        shown = f"{shown[:FAULT_TEXT_CAP]}... ({len(shown) - FAULT_TEXT_CAP} more chars)"
+    logger.info("[HOOKS] handler raised, its text: %s %s: %s", handler_path, kind, shown)
+    elapsed_ms = (time.monotonic() - start) * 1000
+    return {"exit_code": -1, "stdout": "", "stderr": text, "elapsed_ms": round(elapsed_ms, 1)}
+
+
 def _run_handler(
-    handler_path: str, hook_data: dict, timeout_s: int = 30, namespace: str = "", project_src: str = ""
+    handler_path: str,
+    hook_data: dict,
+    timeout_s: int = 30,
+    namespace: str = "",
+    project_src: str = "",
+    event: str = "",
+    hook: str = "",
 ) -> dict:
     """Call a handler function directly (no subprocess). Module imports handler.
 
     *namespace* and *project_src* are the loader's stamps for a trusted project config (loader._stamp_namespace).
-    A daemon thread joined with a timeout: a hung handler never stalls the event nor blocks exit.
+    *event* and *hook* name the fault marker. A daemon thread joined with a timeout: a hung handler never
+    stalls the event nor blocks exit. A BaseException on this thread (KeyboardInterrupt) is never caught here.
     """
     start = time.monotonic()
     try:
@@ -145,9 +179,9 @@ def _run_handler(
         def _call():
             try:
                 outcome["result"] = handler_func(hook_data)
-            except Exception as exc:
-                logger.info("[HOOKS] handler %s raised on worker thread: %s", handler_path, exc)
-                outcome["error"] = exc  # re-raised on the calling thread below
+            except BaseException as exc:  # a SystemExit here would end only this thread, and leave no "result"
+                logger.debug("[HOOKS] handler %s raised on its worker thread", handler_path)
+                outcome["error"] = exc
 
         worker = threading.Thread(target=_call, daemon=True)
         worker.start()
@@ -155,7 +189,9 @@ def _run_handler(
 
         if worker.is_alive():
             elapsed_ms = (time.monotonic() - start) * 1000
-            logger.error("[HOOKS] handler timeout after %ds: %s", timeout_s, handler_path)
+            module_file = module_path.rsplit(".", 1)[-1] + ".py"
+            marker = _fault_marker(event, hook, handler_path, "HandlerTimeout", module_file)
+            logger.error("[HOOKS] handler timed out %s after %ds", marker, timeout_s)
             return {
                 "exit_code": -1,
                 "stdout": "",
@@ -164,7 +200,7 @@ def _run_handler(
             }
 
         if "error" in outcome:
-            raise outcome["error"]
+            return _fault(event, hook, handler_path, outcome["error"], start)
 
         result = outcome["result"]
         elapsed_ms = (time.monotonic() - start) * 1000
@@ -176,9 +212,7 @@ def _run_handler(
             "elapsed_ms": round(elapsed_ms, 1),
         }
     except Exception as exc:
-        elapsed_ms = (time.monotonic() - start) * 1000
-        logger.error("[HOOKS] handler error %s: %s", handler_path, exc)
-        return {"exit_code": -1, "stdout": "", "stderr": str(exc), "elapsed_ms": round(elapsed_ms, 1)}
+        return _fault(event, hook, handler_path, exc, start)
 
 
 def _matches(matcher: str, value: str) -> bool:
@@ -207,7 +241,7 @@ def _load_budget_state(session_id: str = "") -> dict:
     try:
         state = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:  # an unreadable budget starts every count afresh
-        logger.info("[HOOKS] budget: state read failed: %s", exc)
+        logger.warning("[HOOKS] budget: state read failed: %s", exc)
     return state
 
 
@@ -218,7 +252,7 @@ def _save_budget_state(state: dict, session_id: str = "") -> None:
     try:
         path.write_text(json.dumps(state), encoding="utf-8")
     except OSError as exc:
-        logger.info("[HOOKS] budget: state write failed: %s", exc)
+        logger.warning("[HOOKS] budget: state write failed: %s", exc)
 
 
 def _open_budget_window(hook_name: str, hs: dict, hook_data: dict) -> None:
@@ -315,17 +349,35 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 
     event_hooks = config.get(event_type, {})
 
-    match_value = ""
-    parsed = {}
     try:
         parsed = json.loads(stdin_data) if stdin_data.strip() else {}
-        match_value = parsed.get("tool_name", "") or parsed.get("compact_type", "") or parsed.get("type", "")
     except json.JSONDecodeError as exc:
-        logger.warning("[HOOKS] stdin parse error: %s", exc)
+        parsed = exc
+    if event_type == "PreToolUse" and not stdin_data.strip():
+        parsed = "empty stdin"
+    if not isinstance(parsed, dict):
+        why = f"the payload is not a JSON object: {str(parsed)[:120]}"
+        if event_type == "PreToolUse":  # a tool call the gates cannot read is refused, never waved through
+            logger.error("[HOOKS] PreToolUse refused: %s", why)
+            _log({"ts": time.time(), "event": event_type, "action": "payload_unreadable", "why": why})
+            return json.dumps({"decision": "block", "reason": f"AIPass hooks cannot read this tool call ({why})"}), 2
+        logger.warning("[HOOKS] %s %s, its hooks run on an empty payload", event_type, why)
+        parsed = {}
+    match_value = parsed.get("tool_name", "") or parsed.get("compact_type", "") or parsed.get("type", "")
     payload_session_id = parsed.get("session_id", "")
 
     if event_type == "UserPromptSubmit":
-        from aipass.hooks.apps.handlers.config.loader import never_enrolled_banner, trust_break_banner
+        from aipass.hooks.apps.handlers.config.loader import (
+            config_break_banner,
+            never_enrolled_banner,
+            trust_break_banner,
+        )
+
+        broken = config_break_banner()
+        if broken:
+            logger.error("[HOOKS] AIPass config unreadable — emitting loud banner")
+            _log({"ts": time.time(), "event": event_type, "action": "config_break_banner"})
+            return broken, 0
 
         banner = trust_break_banner()
         if banner:
@@ -421,7 +473,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
                 if config.get("_handler_namespace")
                 else {}
             )
-            result = _run_handler(handler, parsed, timeout_s=hook_timeout, **own)
+            result = _run_handler(handler, parsed, timeout_s=hook_timeout, event=event_type, hook=hook_name, **own)
         else:
             result = _run_hook(command, stdin_data, timeout_s=hook_timeout)
 
@@ -583,7 +635,10 @@ def run_event(arg: str, stdin_data: str) -> tuple[str, int]:
             config = {**settings, event_type: own_hooks(group, config.get("_handler_namespace", ""))}
         else:
             config = {**settings, event_type: {hook_filter: group.get(hook_filter, {})}}
-    return dispatch(event_type, stdin_data, config)
+    stdout, exit_code = dispatch(event_type, stdin_data, config)
+    trail_event(arg)
+    json_handler.log_operation("run_event", {"event": arg, "exit_code": exit_code})
+    return stdout, exit_code
 
 
 def own_hooks(group: dict, namespace: str) -> dict:
@@ -631,15 +686,18 @@ def handle_command(command: str, args: list) -> bool:
     if command in ("--help", "-h", "help") or (command == "engine" and wants_help(args)):
         CONSOLE.print("[bold cyan]engine[/bold cyan] — Hook dispatch engine")
         CONSOLE.print()
+        CONSOLE.print("  drone @hooks engine    The handler map: every handler the engine dispatches, by category")
         CONSOLE.print("  drone @hooks log       Tail recent hook activity")
         return True
 
     if command == "log":
         if wants_help(args):
-            CONSOLE.print("[bold cyan]engine[/bold cyan] — Hook dispatch engine")
+            CONSOLE.print("[bold cyan]log[/bold cyan] — the engine log's last 20 entries")
             CONSOLE.print()
-            CONSOLE.print("  drone @hooks log       Tail recent hook activity")
+            CONSOLE.print("  drone @hooks log       Tail recent hook activity (logs/engine.jsonl)")
             return True
+        if args:
+            return False
 
         lines = tail_log(20)
         if not lines:

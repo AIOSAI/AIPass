@@ -20,7 +20,7 @@ from aipass.memory.apps.handlers.monitor import roots_file
 
 
 def _report(ok: bool, message: str) -> None:
-    from aipass.cli.apps.modules import console, error
+    from aipass.cli import console, error
 
     if ok:
         console.print(f"[green]roots:[/green] {message}")
@@ -30,7 +30,7 @@ def _report(ok: bool, message: str) -> None:
 
 def show_roots() -> None:
     """Print every declared row and what it actually resolves to."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     rows = roots_file.list_roots()
     if not rows:
@@ -49,7 +49,7 @@ def show_roots() -> None:
 
 def print_introspection() -> None:
     """Display module introspection (sentry standard)."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]roots Module[/bold cyan]")
@@ -110,7 +110,7 @@ def handle_command(command: str, args: list) -> bool:
         ok, message, salvaged = roots_file.heal()
         _report(ok, message)
         if salvaged:
-            from aipass.cli.apps.modules import console, warning
+            from aipass.cli import console, warning
 
             # Printed, never written back: a salvaged path that installs itself is a declaration.
             # Heading to stderr, commands to stdout so they pipe into a shell.

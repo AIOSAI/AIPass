@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: baud.py
 # Description: aipass baud: install @baud's phone face and baud-cli from a release and point @api at them
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-09-13
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -75,7 +75,7 @@ from aipass.aipass.apps.modules._phone_print import (
     print_phone_ready,
     print_phone_tail,
 )
-from aipass.cli.apps.modules import console, error, success, warning
+from aipass.cli import console, error, success, warning
 from aipass.prax import logger
 
 COMMAND = "baud"
@@ -94,15 +94,15 @@ class UsageError(Exception):
 
 
 def _api_host_config() -> Any:
-    """@api's host-api module door (set_face_dir, face_dir, set_baud_bin, baud_bin, load_config), or None.
+    """@api's package door (set_face_dir, face_dir, set_baud_bin, baud_bin, load_config, ...), or None.
 
     The one cross-branch edge: @api validates each path at write time and aipass never
-    writes api's config. Import @api's module, never its handlers.
+    writes api's config. Read @api's names through its package top file, never under its apps.
     """
     try:
-        from aipass.api.apps.modules import host_api
+        import aipass.api as host_api
     except ImportError as exc:
-        logger.warning("[baud] @api host_api module not importable: %s", exc)
+        logger.warning("[baud] @api package not importable: %s", exc)
         return None
     return host_api
 
@@ -245,7 +245,7 @@ def install_phone_face(
 
 
 def install_best_effort(dry_run: bool = False, tag: str = LATEST) -> bool:
-    """aipass install's step 4 (phone face + baud-cli). Never raises, never fails the install."""
+    """aipass install's step 4 (phone face + baud-cli). Never raises; False fails the install's exit."""
     try:
         rc = install_phone_face(tag=tag, dry_run=dry_run, best_effort=True)
     except Exception as exc:  # best-effort by contract: the install must continue

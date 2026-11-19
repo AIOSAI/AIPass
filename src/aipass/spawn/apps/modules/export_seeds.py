@@ -1,21 +1,21 @@
 # =================== AIPass ====================
 # Name: export_seeds.py
 # Description: Passport seed export — thin CLI layer over seed_ops
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-11-09
+# Modified: 2026-11-18
 # =============================================
 
-"""Export every core citizen's passport seed (TDPLAN-0017).
+"""Export the passport seeds of the tree or project the registry names (TDPLAN-0017).
 
-Dry run is the default: this writes a tracked file into every core branch at once.
+Dry run is the default: this writes a tracked file into every citizen's branch at once.
 """
 
 import argparse
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, err_console, error, header
+from aipass.cli import console, err_console, error, header
 
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.seed_ops import SEED_RELATIVE_PATH, export_seeds
@@ -107,10 +107,11 @@ def print_help():
         "\\[--dry-run|--confirm] \\[--root <path>] \\[--only <branch>]"
     )
     console.print()
-    console.print(f"  Regenerate every core citizen's TRACKED seed at [cyan]{SEED_RELATIVE_PATH}[/cyan] from its")
-    console.print("  live (gitignored) passport, so identities ship with the repo. The seed is the")
-    console.print("  passport minus the machine-local facts: registered, registry_id, citizen_id,")
-    console.print("  and the seed stamp itself.")
+    console.print(f"  Regenerate the TRACKED seed at [cyan]{SEED_RELATIVE_PATH}[/cyan] from each citizen's")
+    console.print("  live (gitignored) passport, so identities ship with the repo. In the AIPass tree that")
+    console.print("  is every core citizen; in a project root, every citizen in that project's registry.")
+    console.print("  The seed is the passport minus the machine-local facts: registered, registry_id,")
+    console.print("  citizen_id, and the seed stamp itself. It is as fresh as its last write.")
     console.print()
     console.print(
         "  [green](no args)[/green]        Dry run — report every seed that would change, write nothing "
@@ -118,7 +119,7 @@ def print_help():
     )
     console.print("  [green]--dry-run[/green]        The same dry run, asked for by name")
     console.print("  [green]--confirm[/green]        Execute: write each new or changed seed")
-    console.print("  [green]--root[/green] <path>    Repo root to scan [dim](default: the live AIPass root)[/dim]")
+    console.print("  [green]--root[/green] <path>    Where to find the registry [dim](default: the current dir)[/dim]")
     console.print("  [green]--only[/green] <branch>  Restrict to one branch (@ optional)")
     console.print()
     console.print("[dim]Seeds are GENERATED, never hand-edited — edit the passport, then re-export.[/dim]")
@@ -137,7 +138,7 @@ def _print_receipt(receipt: dict) -> None:
     if receipt["only"]:
         console.print(f"  [bold]Only:[/bold] {receipt['only']}")
     console.print()
-    console.print(f"  Scanned:  {receipt['scanned']}  [dim](core citizens)[/dim]")
+    console.print(f"  Scanned:  {receipt['scanned']}  [dim]({receipt['scope']} citizens)[/dim]")
     console.print(f"  Created:  {receipt['created']}")
     console.print(f"  Updated:  {receipt['updated']}")
     console.print(f"  Current:  {receipt['current']}")
@@ -156,7 +157,7 @@ def _print_receipt(receipt: dict) -> None:
     if not receipt["confirm"] and receipt["changed"]:
         console.print("  [dim]No files were written. Add --confirm to execute.[/dim]")
     elif not receipt["scanned"]:
-        error(f"No core passports found under {receipt['root']} — nothing was scanned.")
+        error(f"No {receipt['scope']} passports found under {receipt['root']} — nothing was scanned.")
     elif not receipt["changed"] and not receipt["errors"]:
         console.print("  [green]Every seed is already current — nothing to export.[/green]")
     console.print()

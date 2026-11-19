@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_marker7_memory_lane.py
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-08-27
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/rollover.py, apps/modules/templates.py and the handlers they drive."""
@@ -17,7 +17,6 @@
 import hashlib
 import json
 import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -25,7 +24,7 @@ from _pytest.outcomes import Skipped  # what pytest.skip() raises — caught her
 from unittest.mock import MagicMock, patch
 
 # MODULE level on purpose: conftest swaps `handlers.json` for a MagicMock package inside each test.
-from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.cli import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.templates import trinity_push
@@ -36,6 +35,7 @@ from aipass.memory.apps.handlers.json import entry_limits
 from aipass.memory.apps.handlers.json import memory_files
 from aipass.memory.apps.handlers import write_fence
 from aipass.memory.apps.handlers.templates import spawn_pusher
+from aipass.memory.apps.handlers.tracking import tab_renderer
 from aipass.memory.apps.modules import rollover
 from aipass.memory.apps.modules import templates
 
@@ -59,6 +59,26 @@ def test_the_walk_skips_dropbox_archive_and_caches_below_its_root_only(tmp_path:
 
 _MEMORY_ROOT = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _MEMORY_ROOT.parents[2]
+
+
+def _run_rollover_that_rolled(monkeypatch, names: list) -> bool:
+    """The rollover verb's public run, its vector leg stubbed to report *names* as rolled; pads and tabs untouched."""
+    rolled = [
+        dict(branch=name, memories_count=1, global_collection=name, old_lines=2, new_lines=1, global_total=1)
+        for name in names
+    ]
+    monkeypatch.setattr(rollover.todo_report, "roll_pad", lambda branch: {"text": "pad untouched"})
+    monkeypatch.setattr(
+        rollover,
+        "_handler_execute_rollover",
+        lambda: {"success": True, "triggers_count": len(rolled), "success_count": len(rolled), "results": rolled},
+    )
+    monkeypatch.setattr(tab_renderer, "refresh_all_tabs", lambda branches: None)
+    recorder = MagicMock()
+    monkeypatch.setattr(rollover, "json_handler", recorder)
+    ran = rollover.run_rollover()
+    assert recorder.log_operation.call_args.args[0] == "rollover_execute"
+    return ran
 
 
 # =============================================================================
@@ -91,7 +111,7 @@ class TestOneFleetOneDefinition:
     def test_the_push_and_the_registry_lane_agree_on_the_fleet(self, live_fleet):
         """The push and the registry lane must agree on the fleet; guarded, as two empty sets agree on nothing."""
         push_names = {item["name"].lower() for item in trinity_push.resolve_scope()["branches"]}
-        registry_names = {Path(item["path"]).name.lower() for item in detector._read_registry()}
+        registry_names = {Path(item["path"]).name.lower() for item in detector.write_scope()}
         assert push_names <= registry_names, f"invisible to rollover/lint/health: {push_names - registry_names}"
 
     def test_the_push_never_reaches_into_another_repository(self, live_fleet):
@@ -132,7 +152,7 @@ class TestOneFleetOneDefinition:
         fleet = registry_scope.fleet_branches()
         every_name = [item["name"] for item in fleet]
         in_repo = {item["name"] for item in fleet if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL}
-        rollover._normalize_rolled(every_name)
+        _run_rollover_that_rolled(monkeypatch, every_name)
 
         assert {name for name, _ in seen} == in_repo, "every in-repo citizen that rolled heals, and nobody else"
         home = registry_scope.REPO_ROOT.resolve()
@@ -153,7 +173,7 @@ class TestOneFleetOneDefinition:
         said = []
         monkeypatch.setattr(rollover.logger, "warning", lambda msg, *a, **k: said.append(str(msg)))
 
-        rollover._normalize_rolled(["memory"])
+        _run_rollover_that_rolled(monkeypatch, ["memory"])
 
         joined = " ".join(said)
         assert "memory" in joined, joined
@@ -164,7 +184,7 @@ class TestOneFleetOneDefinition:
 
         Trap: repointing the detector at `fleet_branches` would pull the external tier into a write scope.
         """
-        rolled = {Path(item["path"]).resolve() for item in detector._read_registry()}
+        rolled = {Path(item["path"]).resolve() for item in detector.write_scope()}
         assert _MEMORY_ROOT.resolve() in rolled, "a scope without this branch proves nothing about what it excludes"
         home = registry_scope.REPO_ROOT.resolve()
         outside = [p for p in rolled if home not in p.parents and p != home]
@@ -199,7 +219,6 @@ class TestOneFleetOneDefinition:
         assert memory_files.write_memory_file_simple(foreign, {"sessions": []}) is False
         assert foreign.read_bytes() == before
         assert sorted(p.name for p in foreign.parent.iterdir()) == ["local.json"], "a temp file was left behind"
-        # The rendered messages, never str(call): a call's repr doubles every Windows backslash.
         errors = " ".join(str(arg) for call in said.error.call_args_list for arg in call.args)
         assert str(foreign.resolve()) in errors and str(home.resolve()) in errors, errors
 
@@ -231,10 +250,7 @@ class TestOneFleetOneDefinition:
         before = foreign.read_bytes()
         door = home / "src" / "door"
         door.parent.mkdir(parents=True)
-        try:
-            door.symlink_to(foreign.parent.parent, target_is_directory=True)
-        except OSError as exc:
-            pytest.skip(f"this filesystem cannot make a symlink ({exc}) -- nothing to pin")
+        door.symlink_to(foreign.parent.parent, target_is_directory=True)
 
         result = memory_files.write_memory_file(door / ".trinity" / "local.json", {"sessions": []})
 
@@ -271,9 +287,18 @@ class TestOneFleetOneDefinition:
         """The one .trinity writer that is not a branch: spawn's seed templates."""
         _home, foreign = self._fenced_world(tmp_path, monkeypatch)
         before = foreign.read_bytes()
+        # foreign is <templates>/x/.trinity/local.json, so set "x" is the one the push finds.
+        monkeypatch.setattr(spawn_pusher, "_find_spawn_templates_dir", lambda: foreign.parents[2])
+        recorder = MagicMock()
+        monkeypatch.setattr(spawn_pusher, "json_handler", recorder)
 
-        assert spawn_pusher._write_json(foreign, {"sessions": []}) is False
+        result = spawn_pusher.push_to_spawn_templates(dry_run=False)
+
+        assert recorder.log_operation.call_args.args[0] == "spawn_template_push"
+        assert result["template_sets_found"] == ["x"]
+        assert "x: Failed to write local.json" in result["errors"]
         assert foreign.read_bytes() == before
+        assert not (foreign.parent / "observations.json").exists()
 
     def test_the_push_and_the_scope_module_resolve_the_same_fleet(self, live_fleet):
         """The two LANES answer the same fleet; the external tier is subtracted here, in the expectation."""
@@ -531,6 +556,7 @@ class TestPushDefaultsWritesOnlyItsConfig:
         monkeypatch.setattr(config_loader, "_find_repo_root", lambda: tmp_path)
         assert sys.modules.get(config_loader.__name__) is config_loader, "the product would import an unpatched loader"
         live_before = hashlib.sha256(operator_file.read_bytes()).hexdigest() if operator_file.exists() else None
+        monkeypatch.setattr(rollover.caller_gate, "verified_caller", lambda: ("@memory", False))
 
         rollover.push_defaults()
 
@@ -708,38 +734,25 @@ class TestTemplateBumpFiresThePush:
         assert template_bump.BUMP_EVENT == "trinity_template_bumped"
         assert "aipass.trigger" not in source
 
-    def test_the_bump_announces_itself_on_the_bus(self, monkeypatch):
-        """Trigger-driven, never a poller: the bump ANNOUNCES what it did.
+    def test_the_bump_announces_itself_on_the_bus(self, bus, monkeypatch, capsys):
+        """Trigger-driven, never a poller: the bump verb ANNOUNCES what it did.
 
         The real call path: the payload is built inside a best-effort try, so a broken one is swallowed.
-        Real packages with `__path__`, not MagicMocks: on 3.10 the lazy import traverses the parent.
-        The reachability check runs first, so "never reached" and "chose not to fire" stay apart.
         """
-        fired = []
+        monkeypatch.setattr(template_bump, "_ledger_path", lambda: _MEMORY_ROOT / "no-such-ledger.json")
+        monkeypatch.setattr(
+            template_bump,
+            "_run_push",
+            lambda dry_run: {"success": True, "dry_run": dry_run, "scope": 0, "branches": [], "errors": []},
+        )
 
-        class _Bus:
-            @staticmethod
-            def fire(event, **data):
-                fired.append((event, data))
+        templates.handle_command("templates", ["bump"])
+        capsys.readouterr()
 
-        for name in ("aipass.trigger", "aipass.trigger.apps", "aipass.trigger.apps.modules"):
-            package = types.ModuleType(name)
-            package.__path__ = []  # type: ignore[attr-defined]
-            monkeypatch.setitem(sys.modules, name, package)
-        bus_module = types.ModuleType("aipass.trigger.apps.modules.core")
-        bus_module.trigger = _Bus  # type: ignore[attr-defined]
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", bus_module)
-
-        # Exactly what `from X import trigger` compiles to: no route the code under test does not take.
-        reached = __import__("aipass.trigger.apps.modules.core", fromlist=["trigger"])
-        assert reached.trigger is _Bus, "the bus stand-in is not reachable by the import _announce_bump uses"
-
-        templates._announce_bump({"pending": True, "dry_run": True, "stamped": False, "now": {"local": "3.0.0"}})
-
-        assert [event for event, _ in fired] == [template_bump.BUMP_EVENT]
-        payload = fired[0][1]
+        assert [c.args[0] for c in bus.call_args_list] == [template_bump.BUMP_EVENT]
+        payload = bus.call_args.kwargs
         assert payload["pending"] is True and payload["dry_run"] is True and payload["stamped"] is False
-        assert json.loads(payload["versions"]) == {"local": "3.0.0"}
+        assert json.loads(payload["versions"]) == template_bump.gold_versions()
 
     def test_a_dead_bus_never_blocks_the_heal(self, monkeypatch):
         """Best effort means best effort — a listener's absence cannot gate a push."""
@@ -761,6 +774,7 @@ class TestTemplateBumpFiresThePush:
             lambda dry_run: {"success": False, "dry_run": dry_run, "scope": 0, "branches": [], "errors": ["refused"]},
         )
         monkeypatch.setattr(templates, "_announce_bump", lambda outcome: seen.append(outcome))
+        monkeypatch.setattr(templates.caller_gate, "verified_caller", lambda: ("@memory", False))
 
         templates.handle_command("templates", ["bump", "--confirm"])
         capsys.readouterr()
@@ -795,26 +809,6 @@ class TestTheDeadTemplateLaneIsRetired:
         ]
 
         assert offenders == []
-
-    def test_the_park_keeps_them_with_the_measurement(self):
-        """Never a casual delete — the record of WHY outlives the code.
-
-        A TRACKED park, not `.archive/`: `.archive/` is gitignored and present in no clone.
-        """
-        parked = _MEMORY_ROOT / "tests" / "parked" / "dead_template_lane_20260827"
-
-        assert (parked / "pusher(disabled).py").is_file()
-        assert (parked / "differ(disabled).py").is_file()
-        assert not (_MEMORY_ROOT / ".archive" / "dead_template_lane_20260827").exists()
-        assert "zero real matches" in (parked / "README.md").read_text(encoding="utf-8").lower()
-
-    def test_the_parked_lane_is_never_collected_as_tests(self):
-        """Two of the parked files are named `test_*` — the barrier must hold."""
-        parked = _MEMORY_ROOT / "tests" / "parked" / "dead_template_lane_20260827"
-
-        assert (parked / "test_templates(disabled).py").is_file()
-        assert (parked / "test_templates_display(disabled).py").is_file()
-        assert (_MEMORY_ROOT / "tests" / "parked" / "conftest.py").is_file()
 
     def test_the_retired_verbs_refuse_and_name_the_live_lane(self, capsys):
         """A refusal that exits 0 is half a refusal: claimed, exit 2, and the live lane named."""
@@ -908,7 +902,8 @@ class TestTheLiveGuardRefusesAHalfPresentWorld:
         monkeypatch.setattr(registry_scope, "REPO_ROOT", root)
         monkeypatch.setattr(trinity_push, "_REPO_ROOT", root)
 
-    _CORE_ROWS = [{"name": "memory", "path": "src/aipass/memory"}]
+    # Active: the push lane resolves only active rows, and live_fleet asks it.
+    _CORE_ROWS = [{"name": "memory", "path": "src/aipass/memory", "status": "active"}]
 
     def test_a_registry_that_exists_but_holds_no_rows_is_not_a_fleet(self, request, monkeypatch, tmp_path):
         """The minted-empty case. `push_names <= registry_names` is true of nothing."""
@@ -980,10 +975,13 @@ class TestTheLiveGuardRefusesAHalfPresentWorld:
         assert "external" in str(skipped.value).lower()
 
     def test_a_dict_shaped_registry_is_read_not_called_empty(self, request, monkeypatch, tmp_path):
-        """Both registry shapes ship. A reader that knows one calls half the fleet empty."""
+        """Both registry shapes ship. A reader that knows one calls half the fleet empty.
+
+        The sibling's registry is dict-shaped; the core keeps its shipped list, the only shape the push lane reads.
+        """
         root = self._world(
             tmp_path,
-            rows={"memory": {"name": "memory", "path": "src/aipass/memory"}},
+            rows=self._CORE_ROWS,
             residents=True,
             roots=True,
             external_citizen=True,

@@ -15,8 +15,14 @@ is the behaviour behind them.
 
 ## What sync-registry does
 
-It compares `AIPASS_REGISTRY.json` against the filesystem and reports healthy, stale and
-unregistered branches. The scan is CWD-first, so it works inside an external project: it
+It compares `AIPASS_REGISTRY.json` against the filesystem and reports healthy, stale, damaged
+and unregistered branches. Stale means the folder is gone, and only a stale entry is ever removed.
+Damaged means the folder is on disk but its passport is missing: the entry stays, the report
+names it with the cure, `aipass doctor --fix`, and the command exits 1.
+
+A lost owner passport is never a vacancy. `--check` flags `owner_passport_missing`, naming the
+path, and the owner reconcile under `--fix` changes nothing, logs an error and names the same
+cure, so the seat never moves to another citizen. The scan is CWD-first, so it works inside an external project: it
 checks the project root, then `src/*`, then `src/*/*`, and a directory counts as a branch
 when it holds `.trinity/passport.json`. It is a stat-level walk — it never reads a README,
 a prompt or a dashboard.
@@ -33,8 +39,8 @@ but will not parse is refused by the sync, `--fix` and `--check` alike (`--check
 `unreadable_registry`): rebuilding it would re-mint the project. Under `--fix`, a stale entry
 whose branch is found elsewhere in the project has its `path` rewritten, so `owner`, `admin`
 and `registry_id` stay; directory names are keyed through `normalize_branch_name`, so
-`my-agent` on disk matches `MY_AGENT`. Every registry writer holds `registry_lock` (POSIX
-`flock` on `.<stem>.lock`, a no-op on Windows) and loads inside it.
+`my-agent` on disk matches `MY_AGENT`. Every registry writer holds `registry_lock` (`flock`
+on `.<stem>.lock`) and loads inside it.
 
 ---
 

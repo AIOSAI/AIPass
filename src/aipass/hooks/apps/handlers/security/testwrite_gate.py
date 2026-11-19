@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: testwrite_gate.py
-# Version: 1.4.1
+# Version: 1.5.0
 # Description: Blocks agent creation of NEW test files (PreToolUse) + the test template pointer (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-09-01
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Enforces the owner's 2026-09-01 ruling: agents do not create tests for now.
@@ -22,7 +22,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 # Log-line only; modules/admin_seat's verified rail decides WHO.
@@ -178,7 +179,17 @@ def _refuse_unreadable(targets: list[Path], policy: Any, lane: str) -> dict:
 
 
 def handle(hook_data: dict) -> dict:
-    """Apply the test-write policy and return a block or allow decision."""
+    """Apply the test-write policy and return a block or allow decision; each call leaves one json trail entry."""
+    result = _decide(hook_data)
+    payload = hook_data if isinstance(hook_data, dict) else {}
+    tool = payload.get("tool_name") or payload.get("hook_event_name", "")
+    verdict = "refuse" if result.get("exit_code") == 2 else "allow"
+    json_handler.log_operation("check", {"tool": tool, "verdict": verdict, "seat": payload.get("cwd", "")})
+    return result
+
+
+def _decide(hook_data: dict) -> dict:
+    """The verdict on one hook event."""
     tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
     if tool_name != "Bash" and tool_name not in EDIT_TOOLS:
         return _ALLOW
@@ -265,11 +276,7 @@ def _nearest_test_tree(path: Path) -> Path | None:
 
 def targets_module_test_dir() -> str:
     """The directory name that marks a test tree, read from the classifier."""
-    try:
-        return str(_module("testwrite_targets").TEST_DIR)
-    except Exception as exc:
-        logger.info("[HOOKS] testwrite_gate: classifier unread for TEST_DIR (%s)", exc)
-        return "tests"
+    return str(_module("testwrite_targets").TEST_DIR)
 
 
 def _template_version(tests_dir: Path) -> str:

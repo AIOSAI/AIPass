@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hook_test.py
-# Version: 1.5.0
+# Version: 1.6.1
 # Description: Portable hook test runner — every hook with mock data; provider parity and smoke with real sessions
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-10
-# Modified: 2026-10-28
+# Modified: 2026-11-18
 # =============================================
 
 """Portable hook test runner.
@@ -32,21 +32,21 @@ from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.loader import aipass_home, config_unavailable_reason, find_project_config
 from aipass.hooks.apps.handlers.config.trust_registry import read_registry
 from aipass.hooks.apps.handlers.json import files as json_files
-from aipass.hooks.apps.handlers.module_root import module_file
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.handlers.parity import runner, smoke
 from aipass.hooks.apps.modules.write_ownership import project_of
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, err_console
+from aipass.prax import branch_state_root, logger
+from aipass.cli import console, err_console
 
 CONSOLE = err_console
 
 HELP_COMMANDS = [
-    ("test [--verbose]", "Fire every hook with mock data and report results"),
+    ("test run [--verbose]", "Fire every hook with mock data and report results"),
     ("parity [--branch @x] [--lane A,..] [--json]", "Same prompts headless on Claude and Codex, hook by hook"),
     ("smoke [--provider ..] [--branch @x] [--json]", "One live turn per provider: pass, fail or skip, and why"),
 ]
 
-REPORTS_DIR = module_file(__file__).parents[2] / "artifacts" / "reports"
+REPORTS_DIR = branch_state_root("hooks") / "artifacts" / "reports"
 
 _SYNTHETIC_PATH = os.path.join(tempfile.gettempdir(), "hook_test_synthetic.txt")
 
@@ -237,7 +237,7 @@ def run_test(verbose: bool = False) -> dict:
         _restore_env("AIPASS_HOME", prior_home)
         _restore_env(PROBE_ENV_VAR, prior_probe)
         shutil.rmtree(workspace, ignore_errors=True)
-
+    json_handler.log_operation("run_test", {"events": len(results), "hooks": sum(map(len, results.values()))})
     return results
 
 
@@ -447,6 +447,8 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
+    if any(arg not in ("run", "--verbose", "-v") for arg in args):
+        return False
     verbose = "--verbose" in args or "-v" in args
 
     CONSOLE.print("[bold cyan]HOOKS Test Runner[/bold cyan]")

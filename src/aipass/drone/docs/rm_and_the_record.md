@@ -1,13 +1,46 @@
 [<- Back to the README](../README.md)
 
-# `rm` and the record — every delete leaves one
+# `rm` and the record — every move and delete leaves one
 
 **Branch** drone · **Code** `apps/modules/rm.py`, `apps/handlers/rm_handler.py`,
 `apps/handlers/deletion_log.py`
 
 `drone rm` is the fleet's only sanctioned delete path — raw recursive `rm` is gate-blocked — which
 makes it the choke point where the record belongs: if something deletes, there is a record of it.
-The rules and the flags are `drone rm --help`.
+Inside the project it deletes nothing; the target moves to the `.archive` beside it. The rules and
+the flags are `drone rm --help`.
+
+---
+
+## Inside the project, a move
+
+A target under the project root moves to `<its folder>/.archive/<its name>`, the `.archive` made if
+absent. From the caller's side it is gone and out of the way; nothing is lost.
+
+- **One rename, never a copy.** It moves whole or not at all: a directory goes whole, and a
+  target on another device fails with the error rather than a half-done copy. A failure is recorded
+  `failed` and logged at ERROR.
+- **Nothing is overwritten.** The rename is `renameat2(RENAME_NOREPLACE)`, so a taken name, even one
+  taken in the same instant by a twin move, is refused by the kernel, never replaced. A name already
+  in that `.archive` keeps both: the new one is
+  `<name>.<YYYYmmdd-HHMMSS>`, with `-2`, `-3` added if that is taken too.
+- **A target inside a `.archive`, or the `.archive` itself, is refused.** Emptying an archive is the
+  owner's, by hand.
+- **A symlinked `.archive` is refused**, because the rename would carry the target out of the tree.
+- **A symlink target moves as the link**; what it points at is untouched.
+- **The fences are the same** as for a delete: carve-outs, sibling branches, a folder holding a
+  citizen. A move is judged before it runs, exactly as a delete was.
+
+Truly deleted, and only where an archive keeps nothing worth having, each case named in
+`rm_handler.py`: files in the system temp dir (outside the project), Python bytecode
+(`__pycache__`, `*.pyc`, rebuilt on the next import) and stale-mode temps. Everything else is
+moved. The broker lane (`apps/handlers/broker/daemon.py`) takes the same decision through the same
+function, `rm_handler.judge()`, and moves through the same `move_into_archive()`; see below.
+
+Each result prints as a verdict line, then every path whole on a line of its own (a move shows the
+source, then `-> ` and the destination), unwrapped, so a long path copies intact. A refusal ends
+with a line saying the attempt is recorded, and a sibling-branch refusal names the next step: mail
+@devpulse the path and why.
 
 ---
 
@@ -23,7 +56,10 @@ still proceeds — losing the log must not turn into losing the delete, and the 
 reached the logs either way.
 
 A record carries: `timestamp`, `lane`, `outcome`, `caller`, `cwd`, `requested` (what was typed),
-`path` (resolved), `reason`, `kind`, `size_bytes`, `entry_count`, `measured`. A stale-mode record
+`path` (resolved), `reason`, `kind`, `size_bytes`, `entry_count`, `measured`. A move's record has
+outcome `moved` and one key more, `moved_to`, the path it now lives at; the admin seat's crossing
+of the sibling guard adds `exemption: "admin"`, its `--dot` lift `exemption: "dot"`, and both
+together `exemption: "admin+dot"`; a move in another project leads with `elsewhere`. A stale-mode record
 carries two more, `mode` and `age` (as typed), and its prax line names both; a plain delete's
 record keeps exactly the twelve, byte for byte.
 
@@ -31,13 +67,22 @@ Four things worth knowing:
 
 - **Refusals are records too.** A blocked delete leaves no other trace of what was attempted, which
   is exactly what makes it worth finding later. Refused paths are deliberately *not* measured — the
-  guard just said that tree is off-limits, so nothing goes and reads inside it.
-- **Measurement happens before the delete.** After `rmtree` there is nothing left to ask how big it
-  was. Directory walks stop at `_MEASURE_ENTRY_CAP` and say so via `measured: "capped"` rather than
+  guard just said that tree is off-limits, so nothing goes and reads inside it. Their `kind` comes
+  from one `lstat` of an absolute path (`file`, `directory`, `symlink`), which reads nothing inside;
+  sizes stay null and `measured` stays `none`.
+- **Measurement happens before the move or delete.** After a delete there is nothing left to ask
+  how big it was. Directory walks stop at `_MEASURE_ENTRY_CAP` and say so via `measured: "capped"` rather than
   paying an unbounded walk.
-- **Severity is INFO on both channels.** A deletion through the sanctioned path is
-  chosen behaviour, not a fault. The guards keep their own WARNING when they refuse — that is the
-  guard speaking, and it is a separate line from the record.
+- **Severity is INFO, ERROR only for a break.** A move, a delete and every deliberate refusal
+  (containment, carve-out, sibling, dot name, `.archive`, a symlinked `.archive`, stale-mode DIRs) log at
+  INFO: a refusal is the fence doing its job, already shown to the caller and kept in the ledger.
+  An operation that was tried and broke (an `OSError`) is outcome `failed` at ERROR. WARNING is kept
+  for a check that could not run: the admin rail dark, a kind or folder that could not be read.
+- **Each channel tells the whole story alone.** The ledger's prax line reads
+  `rm ledger: <outcome> <path>[ -> <moved_to>] by <caller>, lane <lane>[, exemption <name>] (kind, ...)`;
+  rm's own line reads `rm: <outcome> <path>[ -> <moved_to>] by <caller>[, <name> exemption] — <reason>`.
+  The json service's `deletion_record` entry carries `moved_to` and `exemption` when present, and
+  `rm_command` stores every target under `targets`.
 - **The record follows the deletion's project, not the process's.** `deletion_log_path()` takes an
   optional `project_root`, and the broker passes the `repo_root` it was constructed with. A daemon
   can serve a repository it is not standing in; resolving the store from cwd there files the record
@@ -54,18 +99,25 @@ Four things worth knowing:
 store is bounded at 2 MB with one rotation, because a delete log that grows forever becomes the
 runaway log the monitoring lane exists to catch.
 
-Both delete lanes feed it: `rm`, and the broker (`apps/handlers/broker/daemon.py`), which deletes on
+Both lanes feed it: `rm`, and the broker (`apps/handlers/broker/daemon.py`), which acts on
 behalf of an HMAC-authenticated requester and therefore passes that identity in rather than reading
 its own cwd. The broker's protocol audit log is unchanged — that records requests and error codes;
 this records deletions.
 
-Another branch's removals reach the same store through `apps/modules/door_deletion_log.py`, whose
-one export `record_deletion()` takes `lane`, `outcome`, `caller`, `requested`, `resolved`, `target`
+Another branch's removals reach the same store through the package door:
+`from aipass.drone import record_foreign_deletion`, which takes `lane`, `outcome`, `caller`, `requested`, `resolved`, `target`
 and `reason`, plus an optional `measurement` keyed like `measure()`'s and an optional
 `project_root`. Its row reads back beside `rm`'s, with `target` added. It raises `ValueError` on an
 empty `lane`, `outcome`, `caller`, `resolved` or `target`, or on a measurement with other keys, and
 writes nothing: a half row is refused. @spawn's branch and project retirements write through it
 under the `spawn_delete` and `spawn_retire` lanes.
+
+The door's `record_gate_refusal()` records a `drone rm` the hooks rm gate refused
+before drone ran. It writes lane `rm_gate`, outcome `refused`, and takes `caller`, `cwd`,
+`requested` (the text as typed), `resolved` (a path, or `None` when the gate could not resolve it;
+`path` is then null), `reason` and an optional `project_root`. An empty `caller`, `cwd`,
+`requested` or `reason` raises `ValueError` and writes nothing. A store that cannot be written raises the `OSError`
+after its ERROR line; the `drone rm` lanes log that failure and carry on.
 
 ---
 
@@ -83,6 +135,69 @@ standing in. The commit gate maps a file to its branch by the same outermost rul
 Safe because nothing above a branch carries `.trinity/` — not the project root, not `src/`, not
 `src/aipass/` — so the outermost hit inside the project *is* the citizen. The walk stops at the
 project boundary.
+
+### The admin seat crosses it
+
+The verified admin seat, and only it, works inside every branch: for it the sibling guard does not
+apply, and the target moves into the `.archive` beside it, in that branch. The record carries
+`exemption: "admin"` beside the caller, and the result line says the fence was crossed.
+
+- **Verified on @ai_mail's rail**, the one the hooks gates use: `repo_door.admin_verdict()` stamps
+  the caller and asks `aipass.ai_mail.is_verified_admin_caller()`, the 5-leg grant. Never a
+  name, a cwd string or an env var the caller sets.
+- **Fails closed.** An unimportable rail or a raising verifier is a refusal, logged at WARNING; a
+  plain no is logged at INFO. Either way the sibling refusal stands as it reads for everyone.
+- **Asked only when the guard would refuse**, per path, never cached.
+- **Still refused for the admin:** every carve-out (judged first), a target inside a `.archive`,
+  the sibling's branch root itself (retiring a citizen is @spawn's), and a folder that contains a
+  citizen, which is a separate guard below.
+
+### The admin seat reaches another project
+
+The allowed roots are the caller's project (`find_project_root()`, the walk up from the cwd) and
+the system temp dir (`get_allowed_roots()`). A target outside both is refused for every seat but
+the verified admin, which the same rail answers, asked only then. For the admin seat the target's
+location is no reason to refuse: `elsewhere_project()` finds the target's own project, the nearest
+folder below the owner's home holding a `*_REGISTRY.json` or `.git`, and `judge()` decides against
+that project exactly as inside the tree. The target moves into the `.archive` beside it, and
+crossing a citizen's tree there adds the sibling exemption too. The record lands in the caller's
+`.ai_central/deletions.jsonl` with `exemption: "elsewhere"` (`"elsewhere+admin"`,
+`"elsewhere+dot"`).
+
+- **Every other rule holds:** carve-outs, a `.archive` target, a citizen's branch root, a folder
+  holding a citizen, that project's root itself, the dot-name rule with `--dot`, no overwrite.
+- **Refused to every seat, the admin included:** the provider settings folders `~/.claude` and
+  `~/.codex`, a path in no project, the home itself and anything outside it.
+- **The command is the same one:** `drone rm <absolute path>`, with `--dot` for a dot name.
+
+---
+
+## Dot names — settings, identity and system files
+
+A dot name is a settings, identity or system file here (`.env`, `.claude`, `.backup`, `.daemon`,
+`.spawn`, `.github`, `.gitignore` and the like), and losing a whole dot folder, even into an
+archive, takes everything in it at once: a seat goes down or a prompt is lost. So an in-tree target
+is refused when its OWN name starts with a dot, file or folder, a dot folder nested in another dot
+folder included. What sits inside a dot folder is ordinary work: a file or a plain folder in
+`.daemon` or `.backup` moves into the `.archive` in that folder like any other. The name judged is
+the resolved path's last part; a target that is itself a link is judged by its own name, so a
+dot-named link to a plain file is refused too.
+
+- **Citizens: always refused.** The refusal names the dot name and the next step: mail @devpulse
+  the path and why. Passing `--dot` does not change that, and the message says `--dot` is the
+  admin's.
+- **The verified admin seat: refused by default too**, with the way through named: the same command
+  with `--dot`, in any slot, which says the move is deliberate. With `--dot` the target moves into
+  the `.archive` beside it, and the record carries the lift (`exemption: "dot"`, or `"admin+dot"`
+  across the sibling fence). The admin is the same rail as above, asked per path, failing closed.
+- **`--dot` lifts nothing else.** The carve-outs (`.git`, `.trinity`, `.aipass`, `.codex`,
+  `.agents`), a target inside a `.archive`, a branch root and a folder holding a citizen stay refused
+  for everyone, with their own reasons, judged before this guard.
+- **Only the target's own name is judged.** There is no downward walk: a plain folder that holds
+  dot files (`.gitkeep`, `.pytest_cache`) moves whole like any folder.
+- **Untouched:** the system temp dir keeps its true delete, bytecode (`__pycache__`, `*.pyc`) is
+  deleted wherever it sits, and `--stale` sweeps its dot-named atomic-write
+  leftovers (`.999558_87.tmp`) without `--dot`: its name, folder and age rules are its fence.
 
 ---
 
@@ -109,12 +224,8 @@ rmtree would take every branch, `.trinity/` and all, so a second guard looks the
 - **A symlink is not a citizen.** rmtree unlinks the link and never touches what it points at.
 - **A folder the walk cannot list refuses the delete.** A guard that could not look must not report
   clear.
-- **Whether you may delete the folder you are standing in is the host's call, not ours.** POSIX
-  allows it, so removing a folder of your own branch while standing in it completes. Windows holds the current directory open
-  without delete sharing and refuses with `WinError 32` — the fence's verdict is identical on both
-  hosts, and what fails there is the removal. The message and the record name where the process was
-  standing and say to run it from outside. The suite marks the end-to-end case `deletable_cwd`,
-  which Windows skips, and pins the verdict itself beside it on every OS.
+- **You may delete the folder you are standing in.** Removing a folder of your own branch while
+  standing in it completes.
 - Refusals are recorded like every other refusal. A caller standing outside every branch finds
   every citizen foreign.
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_plans_processor.py
 # Description: Tests for the plans_processor handler — chunking, manifest, memory python and process_plans
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/intake/plans_processor.py."""
@@ -18,6 +18,7 @@ import subprocess
 from unittest.mock import MagicMock, patch
 
 from aipass.memory.apps.handlers.intake import plans_processor
+from aipass.prax import branch_state_root
 
 
 def _sha(path):
@@ -196,6 +197,12 @@ class TestManifest:
         result = mod._load_manifest()
 
         assert result == {}
+
+    def test_the_manifest_sits_in_the_branch_state_root(self):
+        """A folder counted up from the file lands inside an installed wheel; this pins the state-root location."""
+        mod = plans_processor
+        expected = branch_state_root("memory") / "memory_json" / ".plans_processed.json"
+        assert mod._PROCESSED_MANIFEST == expected
 
     def test_save_manifest_creates_parent_dirs(self, monkeypatch, tmp_path):
         mod = plans_processor
@@ -520,6 +527,31 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
 
         assert mod.process_plans()["files_processed"] == 1
         assert seen == [plan.name]
+
+    def test_a_legacy_row_whose_stamp_will_not_parse_reprocesses_and_says_why(self, monkeypatch, tmp_path):
+        """An unparsable stamp is a failure the caller names, then re-processes: the manifest cannot vouch.
+
+        Mutant: the caller stops catching ValueError — the run raises, killed.
+        """
+        mod = plans_processor
+        plans = tmp_path / "plans"
+        plans.mkdir()
+        plan = plans / "APLAN-0019_branch_audit_flow_2026-08-13.md"
+        plan.write_text("## Summary\n\na row whose stamp is not a date\n", encoding="utf-8")
+        manifest_path = tmp_path / ".plans_processed.json"
+        manifest_path.write_text(json.dumps({plan.name: "not-a-date"}), encoding="utf-8")
+        monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", manifest_path)
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
+        self._mock_config(monkeypatch, mod, plans)
+        seen = []
+        self._stub_pipeline(monkeypatch, mod, seen)
+        recorder = MagicMock()
+        monkeypatch.setattr(mod, "logger", recorder)
+
+        assert mod.process_plans()["files_processed"] == 1
+        assert seen == [plan.name]
+        warned = " ".join(str(call.args[0]) for call in recorder.warning.call_args_list)
+        assert plan.name in warned and "not-a-date" in warned, warned
 
     def test_a_manifest_row_whose_file_is_gone_is_left_alone(self, monkeypatch, tmp_path):
         """A row whose file is gone is kept: pruning it would re-vectorize the plan in full on its return."""

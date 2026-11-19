@@ -155,7 +155,6 @@ Measured 2026-10-10 over 1,301 product files (`src/aipass/*/apps` and `*/lib`, t
 | api | arm 2: `auth/secrets.py` :62 :187 :216, `host/tokens.py` :324 :370 :432 :438 |
 | drone | arm 1: `modules/git_module.py` :988 |
 | hooks | arm 1: `security/git_gate.py` :373, `modules/bash_writes.py` :622 :626, `modules/cadence.py` :751 :828 :841 :946 |
-| skills | arm 1: `lib/telegram/apps/handlers/botfather_client.py` :445 (`token[:8]`; `lib/` is outside the audit corpus) |
 
 **The CodeQL rows.** CodeQL's "secret" class is the regex `secret|trusted|confidential`; its
 sources include an attribute read and a variable assignment so named. In the fleet, the warning
@@ -168,7 +167,7 @@ replayed here. Either way, both are convicted.
 ### Round nine (checker 1.1.0)
 
 PR #774 round eight: the alert stayed after @api's cure. The live path was @skills
-`lib/telegram/apps/handlers/config.py`, `load_bot_config`: `secret = _get_secret(bot_id)` (a
+`config.py`, `load_bot_config`: `secret = _get_secret(bot_id)` (a
 secret-named call into a local), `strays = non_secret_keys(secret)` (a same-file function returning
 `sorted(key for key in document if key not in SECRET_FIELDS)`), and `strays` on a warning. 1.0.0
 never seeded from the call. 1.1.0 convicts the pre-cure shape at the warning; the cure @skills
@@ -193,7 +192,7 @@ CodeQL source word, and admitting it convicted a false row. It is still arm 1 on
 ### Round ten (checker 1.2.0)
 
 PR #774 round nine, head e23f11ca: the same one alert, two sources, constant since round seven.
-Neither api's `SECRETS_BASE` cure nor skills' telegram cure moved the count, so CodeQL's live
+Neither api's `SECRETS_BASE` cure nor skills' `config.py` cure moved the count, so CodeQL's live
 sources here are secret-named CALL results. 1.1.0 seeded from the call and stopped one hop short:
 @api `host/tokens.py` `load_tokens` reads `stored = secrets_store.get_secret(...)` (:158), then
 `records = stored.get("tokens")` (:167, where the taint was lost), then the comprehension (:172);
@@ -226,13 +225,13 @@ CodeQL's own:
 
 | step | where | what |
 |---|---|---|
-| source 1 | @skills `lib/telegram/apps/handlers/config.py:412` | `_api_list_secrets("telegram")`, a secret-named call result |
+| source 1 | @skills `config.py:412` | `_api_list_secrets(provider)`, a secret-named call result |
 | source 2 | @api `apps/modules/secrets.py:136` | `_handler.list_secrets(provider)`, the same listing one frame deeper |
-| | @skills `lib/telegram/handler.py:155` | `targets = [...] or list_bot_configs()` |
+| | @skills `handler.py:155` | `targets = [...] or list_bot_configs()` |
 | | `handler.py:160` | `for bot_id in sorted(targets)` (list element) |
 | | `handler.py:161` | `migrate_bot_config(bot_id, ...)` |
 | | `config.py:197` -> `:215` | `def migrate_bot_config(bot_id)` -> `_get_secret(bot_id)` |
-| | `config.py:69` -> `:83` | `def _get_secret(bot_id)` -> `_api_get_secret("telegram", bot_id, as_json=True)` |
+| | `config.py:69` -> `:83` | `def _get_secret(bot_id)` -> `_api_get_secret(provider, bot_id, as_json=True)` |
 | | @api `apps/modules/secrets.py:82` -> `:97` | `def get_secret(provider, slug)` -> `_handler.get_secret(provider, slug, ...)` |
 | | @api `apps/handlers/auth/secrets.py:40` | `def get_secret(provider, slug)` |
 | the caller line | `auth/secrets.py:83` | `logger.warning(f"Secret not found: {provider}/{slug}")`: slug in the MESSAGE f-string |
@@ -240,7 +239,7 @@ CodeQL's own:
 
 **CodeQL's reach is the MESSAGE only.** The sink's columns are the message parameter; a value in
 the `%s` arguments never reached it through prax's two wrappers. That is why rounds eight, nine and
-ten (the `SECRETS_BASE` paths, the telegram strays, the token store: all `%s` arguments) never
+ten (the `SECRETS_BASE` paths, the `config.py` strays, the token store: all `%s` arguments) never
 moved the count. This is recorded as CodeQL's reach, **not** as this standard's rule: arms 1 and 2
 stay stricter (an argument is a row too), because the log line carries the value either way.
 
@@ -257,8 +256,7 @@ What it does with each line of the pre-cure file (HEAD 6c3aa9aa):
 
 @api's cure (83f812c9), `"Secret not found under provider %s: no JSON or raw document for the
 requested slug", provider`, acquits: the slug is gone and provider is a `%s` argument, which this
-arm does not read. The telegram `handler.py` loop crosses files and stays out of file-local reach;
-no change is asked there.
+arm does not read.
 
 Measured over 1,383 product files (`src/aipass/*/apps` and `*/lib`), the live fleet (api's cure on
 disk) at **0 rows** before and **0 rows** after. The variants, each against the fleet and the pre-cure
@@ -276,8 +274,7 @@ but guesses at position (a one-parameter reader such as @api `auth/keys.py`
 `_read_key_from_secrets(provider)` would be read as handed a document name), so the file's own
 lister rules. The reader defs in the fleet today: @api `auth/secrets.py` `get_secret`,
 `_read_json_secret`, `_read_raw_secret` and `modules/secrets.py` `get_secret` (both files define
-`list_secrets`), @api `auth/keys.py` `_read_key_from_secrets`, @skills telegram `config.py`
-`_get_secret` and `telethon_auth.py` `_get_secret` (no lister: out). The fixtures pin both shapes:
+`list_secrets`), @api `auth/keys.py` `_read_key_from_secrets`. The fixtures pin both shapes:
 the pre-cure cut convicts :83 and only it, the cured line acquits; disabling the arm turns
 `test_the_pre_cure_not_found_line_is_convicted_and_only_it` red.
 

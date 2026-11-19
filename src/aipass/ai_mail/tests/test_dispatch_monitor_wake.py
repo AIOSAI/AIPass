@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_wake.py
 # Description: Tests for the dispatch monitor's wake-back - the sender wake, its log, the manager mail and the decline
-# Version: 1.1.0
+# Version: 1.2.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
-"""Tests for apps/handlers/dispatch/dispatch_monitor.py's wake-back: wake_sender, log_wake_result, main()'s wake."""
+"""Tests for apps/handlers/dispatch/dispatch_monitor.py's wake-back: wake_sender, main()'s wake and its report."""
 
 # Split out of test_dispatch_monitor.py on 2026-10-08 to keep that file under the
 # 1,200-line target: who is woken or mailed when a dispatch completes.
@@ -14,6 +14,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
 
+import json
 import os
 import time
 import pytest
@@ -23,7 +24,6 @@ from unittest.mock import MagicMock
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
 from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
     MAX_WAKE_DEPTH,
-    log_wake_result,
     wake_sender,
     main,
 )
@@ -31,6 +31,13 @@ from aipass.ai_mail.apps.handlers.dispatch.wake import DispatchStatus
 from aipass.ai_mail.tests.support_dispatch_monitor import _assert_sent_as_ai_mail, _assert_sent_from, _foreign_project
 
 pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_silenced", "monitor_wake_stubbed")
+
+
+def _report() -> dict:
+    """The one completion report main() wrote, read back from disk."""
+    written = list(mod.report_mod.reports_dir().glob("*.json"))
+    assert len(written) == 1, f"expected one report, got {written}"
+    return json.loads(written[0].read_text(encoding="utf-8"))
 
 
 # === Wake-back tests (TDPLAN-0012) ==========================================
@@ -291,62 +298,30 @@ class TestWakeSender:
         )
 
 
-class TestLogWakeResult:
-    """log_wake_result writes to dispatch_wake.log."""
+class TestNoLogFileInTheTargetsLogs:
+    """Trigger's watcher reads every .log in a logs/ dir: the monitor leaves none there."""
 
-    def test_creates_log_file(self, tmp_path):
-        """Log file created under target's logs/ directory."""
-        lock = tmp_path / "branch" / ".ai_mail.local" / ".dispatch.lock"
-        lock.parent.mkdir(parents=True)
-        lock.write_text("{}", encoding="utf-8")
-        logs_dir = tmp_path / "branch" / "logs"
+    def test_a_finished_dispatch_leaves_no_log_file_and_reports_its_wake_result(self, monkeypatch, main_argv, tmp_path):
+        argv, lock_file, _ = main_argv
 
-        log_wake_result("@target", "@sender", 0, "success", str(lock))
+        def agent_ran(cmd, stdout_log, *args, **kwargs):
+            Path(stdout_log).write_text("{}", encoding="utf-8")
+            return (0, False)
 
-        log_file = logs_dir / "dispatch_wake.log"
-        assert log_file.exists()
-        content = log_file.read_text(encoding="utf-8")
-        assert "target=@target" in content
-        assert "sender=@sender" in content
-        assert "exit_code=0" in content
-        assert "wake_result=success" in content
+        monkeypatch.setattr("sys.argv", argv)
+        monkeypatch.setattr(mod, "run_with_startup_check", agent_ran)
+        monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+        monkeypatch.setattr(mod, "wake_sender", MagicMock(return_value="success"))
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.paths.find_repo_root", MagicMock(return_value=tmp_path / "repo")
+        )
 
-    def test_appends_to_existing(self, tmp_path):
-        """Subsequent calls append, not overwrite."""
-        lock = tmp_path / "branch" / ".ai_mail.local" / ".dispatch.lock"
-        lock.parent.mkdir(parents=True)
-        lock.write_text("{}", encoding="utf-8")
-        logs_dir = tmp_path / "branch" / "logs"
-        logs_dir.mkdir(parents=True)
-        log_file = logs_dir / "dispatch_wake.log"
-        log_file.write_text("existing line\n", encoding="utf-8")
+        with pytest.raises(SystemExit):
+            main()
 
-        log_wake_result("@target", "@sender", 0, "success", str(lock))
-
-        lines = log_file.read_text(encoding="utf-8").strip().split("\n")
-        assert len(lines) == 2
-        assert lines[0] == "existing line"
-        assert "wake_result=success" in lines[1]
-
-    def test_all_result_values(self, tmp_path):
-        """All result enum values are logged correctly."""
-        lock = tmp_path / "branch" / ".ai_mail.local" / ".dispatch.lock"
-        lock.parent.mkdir(parents=True)
-        lock.write_text("{}", encoding="utf-8")
-
-        for result_tag in (
-            "success",
-            "blocked_occupied",
-            "blocked_locked",
-            "blocked_depth",
-            "skipped_sender",
-            "failed",
-        ):
-            log_wake_result("@t", "@s", 0, result_tag, str(lock))
-
-        log_file = tmp_path / "branch" / "logs" / "dispatch_wake.log"
-        lines = log_file.read_text(encoding="utf-8").strip().split("\n")
-        assert len(lines) == 6
+        logs_dir = Path(lock_file).parent.parent / "logs"
+        assert sorted(p.name for p in logs_dir.iterdir()) == ["dispatch_stdout.out"]
+        assert _report()["wake_result"] == "success"
 
 
 class TestWakeBackIntegration:
@@ -363,13 +338,11 @@ class TestWakeBackIntegration:
             return "success"
 
         bounce = MagicMock()
-        log_result = MagicMock()
         monkeypatch.setattr("sys.argv", argv)
         monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(return_value=(0, False)))
         monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(mod, "wake_sender", track_wake)
-        monkeypatch.setattr(mod, "log_wake_result", log_result)
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
             MagicMock(return_value=tmp_path / "repo"),
@@ -382,7 +355,7 @@ class TestWakeBackIntegration:
         assert len(wake_calls) == 1
         assert wake_calls[0] == ("@sender", "@test_branch", 0, Path(lock_file).parent.parent)
         bounce.assert_not_called()
-        log_result.assert_called_once_with("@test_branch", "@sender", 0, "success", str(lock_file))
+        assert _report()["wake_result"] == "success"
 
     def test_wake_called_on_failure(self, monkeypatch, main_argv, tmp_path):
         """wake_sender called after all attempts fail (in addition to bounce)."""
@@ -400,8 +373,6 @@ class TestWakeBackIntegration:
         monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(mod, "wake_sender", track_wake)
-        log_result = MagicMock()
-        monkeypatch.setattr(mod, "log_wake_result", log_result)
         monkeypatch.setattr(
             mod,
             "time",
@@ -418,21 +389,18 @@ class TestWakeBackIntegration:
         mock_bounce.assert_called_once()
         assert len(wake_calls) == 1
         assert wake_calls[0][2] != 0
-        log_result.assert_called_once_with("@test_branch", "@sender", wake_calls[0][2], "success", str(lock_file))
+        reported = _report()
+        assert (reported["wake_result"], reported["exit_code"]) == ("success", wake_calls[0][2])
 
-    def test_log_wake_result_called(self, monkeypatch, main_argv, tmp_path):
-        """log_wake_result called with wake result after main completes."""
+    def test_the_report_names_target_sender_exit_code_and_wake_result(self, monkeypatch, main_argv, tmp_path):
         argv, lock_file, stderr_log = main_argv
-
-        log_calls = []
-        bounce = MagicMock()
 
         monkeypatch.setattr("sys.argv", argv)
         monkeypatch.setattr(mod, "run_with_startup_check", MagicMock(return_value=(0, False)))
+        bounce = MagicMock()
         monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(mod, "wake_sender", MagicMock(return_value="success"))
-        monkeypatch.setattr(mod, "log_wake_result", lambda *a: log_calls.append(a))
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
             MagicMock(return_value=tmp_path / "repo"),
@@ -441,12 +409,13 @@ class TestWakeBackIntegration:
         with pytest.raises(SystemExit):
             main()
 
-        assert len(log_calls) == 1
-        branch_email, sender, exit_code, result, lf = log_calls[0]
-        assert branch_email == "@test_branch"
-        assert sender == "@sender"
-        assert exit_code == 0
-        assert result == "success"
+        reported = _report()
+        assert (reported["target"], reported["sender"], reported["exit_code"], reported["wake_result"]) == (
+            "@test_branch",
+            "@sender",
+            0,
+            "success",
+        )
         bounce.assert_not_called()
 
 
@@ -564,6 +533,7 @@ class TestWakeBackManagerHonesty:
         argv = sent.call_args.args[0]
         assert argv[:3] == ["drone", "@ai_mail", "send"]
         assert argv[3] == "@devpulse"
+        assert argv[-2:] == ["--kind", "notice"]
         log.warning.assert_not_called()
 
     def test_manager_mail_names_target_and_exit_code(self, monkeypatch, tmp_path):
@@ -592,7 +562,7 @@ class TestWakeBackManagerHonesty:
 
         wake_sender("@devpulse", "@ai_mail", 0, run_line="run: codex · gpt-6.1-sol (observed; flag) session t1")
 
-        assert " ".join(sent.call_args.args[0][4:]).endswith("run: codex · gpt-6.1-sol (observed; flag) session t1")
+        assert " ".join(sent.call_args.args[0][4:6]).endswith("run: codex · gpt-6.1-sol (observed; flag) session t1")
 
     def test_manager_mail_failure_is_not_reported_as_delivered(self, monkeypatch, tmp_path):
         """If the send fails the manager still learns nothing — that must not wear
@@ -628,21 +598,6 @@ class TestWakeBackManagerHonesty:
         log.info.assert_called_once_with(
             "[monitor] Wake-back: %s woken after %s completed (exit %d)", "@prax", "@ai_mail", 0
         )
-
-    def test_skipped_manager_reaches_the_wake_log(self, monkeypatch, tmp_path):
-        """The honest tag is what lands in dispatch_wake.log, and a good write logs no failure."""
-        log = MagicMock()
-        monkeypatch.setattr(mod, "logger", log)
-        lock_file = tmp_path / ".ai_mail.local" / ".dispatch.lock"
-        lock_file.parent.mkdir(parents=True)
-        lock_file.write_text("{}", encoding="utf-8")
-
-        log_wake_result("@ai_mail", "@devpulse", 0, "skipped_manager", str(lock_file))
-
-        written = (tmp_path / "logs" / "dispatch_wake.log").read_text(encoding="utf-8")
-        assert "wake_result=skipped_manager" in written
-        log.info.assert_not_called()
-        assert "sender=@devpulse" in written
 
 
 # === Wake-back declined by the caller ========================================
@@ -692,8 +647,8 @@ class TestWakeBackDeclinedByCaller:
     def _run_main(monkeypatch, argv, wake_status, tmp_path, *, exit_code=0):
         """Drive main() to the end with the REAL wake-back chain behind it.
 
-        wake_sender, _mail_wake_back and log_wake_result are the real ones
-        (the autouse fixture mocks the first and last; restored here). Only the
+        wake_sender and _mail_wake_back are the real ones
+        (the autouse fixture mocks the first; restored here). Only the
         edges are faked: wake_branch, so nothing spawns, and subprocess.run, so
         no mail leaves. Whatever the monitor decides, those mocks record it.
         """
@@ -703,7 +658,6 @@ class TestWakeBackDeclinedByCaller:
         sent = MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
         monkeypatch.setattr(mod.subprocess, "run", sent)
         monkeypatch.setattr(mod, "wake_sender", wake_sender)
-        monkeypatch.setattr(mod, "log_wake_result", log_wake_result)
         log = MagicMock()
         monkeypatch.setattr(mod, "logger", log)
         bounce = MagicMock(return_value=True)
@@ -722,10 +676,6 @@ class TestWakeBackDeclinedByCaller:
             main()
 
         return {"exit": exc_info.value.code, "wake": wake, "sent": sent, "log": log, "bounce": bounce}
-
-    @staticmethod
-    def _wake_log(lock_file):
-        return (Path(lock_file).parent.parent / "logs" / "dispatch_wake.log").read_text(encoding="utf-8")
 
     def test_declined_completion_neither_wakes_nor_mails_the_sender(self, monkeypatch, main_argv, tmp_path):
         """The fix, red on the old monitor: it ignored the flag and ran the full
@@ -750,7 +700,7 @@ class TestWakeBackDeclinedByCaller:
         assert got["wake"].call_args.kwargs["sender"] == ""
         sends = _drone_sends(got["sent"])
         assert len(sends) == 1 and sends[0][3] == "@sender"
-        assert "wake_result=mailed_manager" in self._wake_log(lock_file)
+        assert _report()["wake_result"] == "mailed_manager"
 
     def test_the_wake_back_mail_is_sent_as_ai_mail(self, monkeypatch, main_argv, tmp_path):
         """The manager's wake-back mail is ai_mail's notice, under one claim (ai_mail, 2026-10-04).
@@ -775,7 +725,7 @@ class TestWakeBackDeclinedByCaller:
         got = self._run_main(monkeypatch, argv, self._manager_gate_status(), tmp_path)
 
         _assert_sent_from(got["sent"], Path(lock_file).parent.parent)
-        assert "wake_result=mailed_manager" in self._wake_log(lock_file)
+        assert _report()["wake_result"] == "mailed_manager"
 
     def test_without_the_flag_a_builder_sender_is_still_woken(self, monkeypatch, main_argv, tmp_path):
         argv, lock_file, _ = main_argv
@@ -785,7 +735,7 @@ class TestWakeBackDeclinedByCaller:
         got["wake"].assert_called_once()
         assert got["wake"].call_args.args == ("@sender",)
         assert _drone_sends(got["sent"]) == []
-        assert "wake_result=success" in self._wake_log(lock_file)
+        assert _report()["wake_result"] == "success"
 
     def test_a_declined_wake_back_logs_one_info_line_naming_target_and_sender(self, monkeypatch, main_argv, tmp_path):
         argv, _, _ = main_argv
@@ -797,17 +747,18 @@ class TestWakeBackDeclinedByCaller:
         assert "@test_branch" in declined[0].args[1:]
         assert "@sender" in declined[0].args[1:]
 
-    def test_a_declined_wake_back_is_recorded_as_declined_in_the_wake_log(self, monkeypatch, main_argv, tmp_path):
-        """dispatch_wake.log still gets its line — with `declined` in place of a
-        wake result, so a quiet sender reads as a choice, not a lost wake."""
-        argv, lock_file, _ = main_argv
+    def test_a_declined_wake_back_is_reported_as_declined(self, monkeypatch, main_argv, tmp_path):
+        """A quiet sender reads as a choice, not a lost wake."""
+        argv, _, _ = main_argv
 
         self._run_main(monkeypatch, _declining(argv), self._builder_status(), tmp_path)
 
-        written = self._wake_log(lock_file)
-        assert "wake_result=declined" in written
-        assert "target=@test_branch" in written
-        assert "sender=@sender" in written
+        reported = _report()
+        assert (reported["wake_result"], reported["target"], reported["sender"]) == (
+            "declined",
+            "@test_branch",
+            "@sender",
+        )
 
     def test_a_declined_wake_back_still_bounces_a_failure_to_the_sender(self, monkeypatch, main_argv, tmp_path):
         """The sender still rides argv because bounce mail reads it: declining
@@ -830,4 +781,4 @@ class TestWakeBackDeclinedByCaller:
 
         got["wake"].assert_called_once()
         assert got["wake"].call_args.args == ("@sender",)
-        assert "wake_result=success" in self._wake_log(lock_file)
+        assert _report()["wake_result"] == "success"

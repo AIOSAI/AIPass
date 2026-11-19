@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rm.py
-# Description: drone rm contained safe-delete: containment, carve-outs, stale sweep
-# Version: 1.0.5
+# Description: drone rm: containment, carve-outs, the sibling fence and the admin crossing
+# Version: 1.5.0
 # Created: 2026-06-02
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/rm.py and the rm_handler containment it drives."""
@@ -12,66 +12,35 @@
 # sentry: no-test-needed(covered_elsewhere) — the deletion record's contents, pinned in tests/test_deletion_log.py
 # sentry: no-test-needed(covered_elsewhere) — the broker lane of a sandboxed delete, pinned in tests/test_broker.py
 # sentry: no-test-needed(covered_elsewhere) — rm from a deleted working directory, pinned in tests/test_no_cwd_sweep.py
+# sentry: no-test-needed(covered_elsewhere) — the move to .archive, --stale and the dot guard, pinned in tests/test_rm_archive.py, tests/test_rm_stale.py and tests/test_rm_dot.py
 
-import errno
-import json
 import os
 import shutil
 import sys
 import tempfile
-import time
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from aipass.drone.apps import drone as drone_cli
 from aipass.drone.apps.handlers import rm_handler
 from aipass.drone.apps.handlers.rm_handler import (
+    DOT_FLAG,
     check_carveouts,
     check_containment,
-    format_age,
-    format_stale_summary,
     get_allowed_roots,
-    parse_age,
-    parse_stale_args,
     safe_delete,
-    stale_sweep,
 )
-from aipass.drone.apps.modules.rm import handle_command, print_help, print_introspection
 
-#: The POSIX temp root, spelled by the running platform: a rooted literal is drive-relative
-#: under ntpath (``D:\tmp``). ``os.sep`` is "/" wherever these tests run.
+from .conftest import RAIL, rail_answers, rm_ledger
+
 POSIX_TMP = Path(os.sep, "tmp")
+# Written here, not read from the product: a carve-out dropped there must fail a test.
+CARVEOUTS = (".agents", ".aipass", ".codex", ".git", ".trinity")
 
-_POSIX_CARVE_OUT_REASON = "POSIX-only carve-out: rm_handler adds /tmp on non-win32 platforms only"
-
-#: A mode-0 folder only stops a caller the kernel holds to permissions: not on
-#: Windows, not as root. ``or`` short-circuits, so geteuid is never read on nt.
-_PERMISSIONS_DO_NOT_BIND = sys.platform == "win32" or os.geteuid() == 0
-_PERMISSIONS_REASON = "needs POSIX permissions that bind the caller"
-
-#: Windows makes a symlink only with Developer Mode or elevation.
-_NO_SYMLINKS = sys.platform == "win32"
-_NO_SYMLINKS_REASON = "creating a symlink needs a privilege on Windows"
-
-
-@pytest.fixture()
-def project_dir(tmp_path):
-    """Fake project root with a registry file and src/aipass layout."""
-    (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
-    return tmp_path
-
-
-@pytest.fixture()
-def project_with_branches(project_dir):
-    """Project root with branch dirs containing .trinity/ markers."""
-    for branch in ("drone", "api", "flow"):
-        d = project_dir / "src" / "aipass" / branch
-        d.mkdir(parents=True)
-        (d / ".trinity").mkdir()
-        (d / "README.md").write_text(f"# {branch}", encoding="utf-8")
-    return project_dir
+#: A mode-0 folder only stops a caller the kernel holds to permissions: not as root.
+_PERMISSIONS_DO_NOT_BIND = os.geteuid() == 0
+_PERMISSIONS_REASON = "needs file permissions that bind the caller"
 
 
 @pytest.fixture()
@@ -80,11 +49,10 @@ def _patch_roots(project_dir):
     tmpdir = Path(tempfile.gettempdir()).resolve()
     roots = [project_dir.resolve()]
     seen = set(roots)
-    if sys.platform != "win32":
-        slash_tmp = POSIX_TMP.resolve()
-        if slash_tmp not in seen:
-            seen.add(slash_tmp)
-            roots.append(slash_tmp)
+    slash_tmp = POSIX_TMP.resolve()
+    if slash_tmp not in seen:
+        seen.add(slash_tmp)
+        roots.append(slash_tmp)
     if tmpdir not in seen:
         seen.add(tmpdir)
         roots.append(tmpdir)
@@ -101,9 +69,8 @@ class TestGetAllowedRoots:
         tmpdir = Path(tempfile.gettempdir()).resolve()
         assert tmpdir in roots
 
-    @pytest.mark.skipif(sys.platform == "win32", reason=_POSIX_CARVE_OUT_REASON)
     def test_includes_slash_tmp(self, tmp_path, monkeypatch):
-        """The POSIX carve-out puts the canonical tmp root in roots by itself.
+        """The /tmp carve-out puts the canonical tmp root in roots by itself.
 
         $TMPDIR is moved off /tmp first: left there, the system-temp root hides a deleted carve-out.
         """
@@ -127,7 +94,6 @@ class TestGetAllowedRoots:
         tmpdir = Path(tempfile.gettempdir()).resolve()
         assert tmpdir in roots
 
-    @pytest.mark.skipif(sys.platform == "win32", reason=_POSIX_CARVE_OUT_REASON)
     def test_tmpdir_and_slash_tmp_both_present_when_different(self, monkeypatch):
         """When $TMPDIR != /tmp, both must appear in roots."""
         fake_tmpdir = POSIX_TMP / "claude-9999"
@@ -163,7 +129,6 @@ class TestCheckContainment:
 
     def test_refuses_outside_path(self, tmp_path):
         root = tmp_path.resolve()
-        # A sibling of the root, not a rooted literal (drive-relative under ntpath).
         outside = (tmp_path.parent / f"{tmp_path.name}_outside" / "secret.txt").resolve()
         allowed, reason = check_containment(outside, [root])
         assert allowed is False
@@ -271,7 +236,6 @@ class TestAllowDeletion:
         results = safe_delete([str(target)])
         assert results[0][1] is True
 
-    @pytest.mark.skipif(sys.platform == "win32", reason=_POSIX_CARVE_OUT_REASON)
     @pytest.mark.usefixtures("_patch_roots")
     def test_slash_tmp_literal_allowed(self):
         """Literal POSIX tmp path must succeed even if $TMPDIR differs."""
@@ -375,7 +339,7 @@ class TestCarveouts:
         git_dir = project_dir / ".git"
         git_dir.mkdir()
         resolved = git_dir.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".git" in reason
 
@@ -384,7 +348,7 @@ class TestCarveouts:
         git_dir = project_dir / ".git" / "objects"
         git_dir.mkdir(parents=True)
         resolved = git_dir.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".git" in reason
 
@@ -392,7 +356,7 @@ class TestCarveouts:
         trinity = project_dir / ".trinity"
         trinity.mkdir()
         resolved = trinity.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".trinity" in reason
 
@@ -401,7 +365,7 @@ class TestCarveouts:
         passport.parent.mkdir(parents=True)
         passport.write_text("{}", encoding="utf-8")
         resolved = passport.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".trinity" in reason
 
@@ -409,7 +373,7 @@ class TestCarveouts:
         aipass_dir = project_dir / ".aipass"
         aipass_dir.mkdir()
         resolved = aipass_dir.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".aipass" in reason
 
@@ -417,7 +381,7 @@ class TestCarveouts:
         codex = project_dir / ".codex"
         codex.mkdir()
         resolved = codex.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".codex" in reason
 
@@ -425,7 +389,7 @@ class TestCarveouts:
         agents = project_dir / ".agents"
         agents.mkdir()
         resolved = agents.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".agents" in reason
 
@@ -434,7 +398,7 @@ class TestCarveouts:
         build = project_dir / "build"
         build.mkdir()
         resolved = build.resolve()
-        blocked, _reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, _reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is False
 
     def test_refuse_sibling_branch(self, project_with_branches, monkeypatch):
@@ -443,7 +407,7 @@ class TestCarveouts:
         monkeypatch.chdir(drone_dir)
         target = project_with_branches / "src" / "aipass" / "api"
         resolved = target.resolve()
-        blocked, reason = check_carveouts(resolved, project_with_branches.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_with_branches.resolve())
         assert blocked is True
         assert "sibling branch" in reason
         assert "api" in reason
@@ -455,7 +419,7 @@ class TestCarveouts:
         target = drone_dir / "build"
         target.mkdir()
         resolved = target.resolve()
-        blocked, _reason = check_carveouts(resolved, project_with_branches.resolve())
+        blocked, _reason, _exemption = check_carveouts(resolved, project_with_branches.resolve())
         assert blocked is False
 
     def test_refuse_all_branches_when_outside(self, project_with_branches, monkeypatch):
@@ -464,7 +428,7 @@ class TestCarveouts:
         for branch in ("drone", "api", "flow"):
             target = project_with_branches / "src" / "aipass" / branch
             resolved = target.resolve()
-            blocked, _reason = check_carveouts(resolved, project_with_branches.resolve())
+            blocked, _reason, _exemption = check_carveouts(resolved, project_with_branches.resolve())
             assert blocked is True, f"Expected {branch} to be blocked"
 
     def test_git_file_worktree_pointer(self, project_dir):
@@ -474,7 +438,7 @@ class TestCarveouts:
         git_file = project_dir / ".git"
         git_file.write_text(f"gitdir: {real_git}", encoding="utf-8")
         resolved = git_file.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".git" in reason
 
@@ -505,14 +469,14 @@ class TestTemplateSkeletonIsNotACitizen:
 
         assert ok is False, message
         assert "sibling branch spawn/" in message
-        assert "aipass_framework" not in message
+        assert "aipass_framework" not in message.splitlines()[0], "the verdict names the citizen; the path line follows"
         assert stray.is_dir()
 
     def test_refusal_names_the_citizen_not_the_skeleton(self, project_with_template, monkeypatch):
         """@devpulse's report: the refusal named a thing that is not a citizen."""
         monkeypatch.chdir(project_with_template / "src" / "aipass" / "drone")
         stray = project_with_template / "src" / "aipass" / "spawn" / "templates" / "aipass_framework" / ".pytest_cache"
-        blocked, reason = check_carveouts(stray.resolve(), project_with_template.resolve())
+        blocked, reason, _exemption = check_carveouts(stray.resolve(), project_with_template.resolve())
         assert blocked is True
         assert "spawn" in reason
         assert "aipass_framework" not in reason
@@ -522,7 +486,7 @@ class TestTemplateSkeletonIsNotACitizen:
         spawn = project_with_template / "src" / "aipass" / "spawn"
         monkeypatch.chdir(spawn)
         stray = spawn / "templates" / "aipass_framework" / ".pytest_cache"
-        blocked, reason = check_carveouts(stray.resolve(), project_with_template.resolve())
+        blocked, reason, _exemption = check_carveouts(stray.resolve(), project_with_template.resolve())
         assert blocked is False, f"spawn refused inside its own tree: {reason}"
 
     def test_standing_in_a_template_is_standing_in_the_citizen(self, project_with_template, monkeypatch):
@@ -532,7 +496,7 @@ class TestTemplateSkeletonIsNotACitizen:
         spawn = project_with_template / "src" / "aipass" / "spawn"
         monkeypatch.chdir(spawn / "templates" / "aipass_framework")
         outside_the_skeleton = spawn / "build"
-        blocked, reason = check_carveouts(outside_the_skeleton.resolve(), project_with_template.resolve())
+        blocked, reason, _exemption = check_carveouts(outside_the_skeleton.resolve(), project_with_template.resolve())
         assert blocked is False, f"a caller standing in spawn's template was refused spawn's own tree: {reason}"
 
     def test_ordinary_branch_path_is_unchanged(self, project_with_template, monkeypatch):
@@ -541,7 +505,7 @@ class TestTemplateSkeletonIsNotACitizen:
         Mutant killed: _find_branch_root answering None (a normal branch stopped mapping to itself)."""
         monkeypatch.chdir(project_with_template / "src" / "aipass" / "spawn")
         target = project_with_template / "src" / "aipass" / "drone" / "build"
-        blocked, reason = check_carveouts(target.resolve(), project_with_template.resolve())
+        blocked, reason, _exemption = check_carveouts(target.resolve(), project_with_template.resolve())
         assert blocked is True
         assert "sibling branch drone/" in reason
 
@@ -549,7 +513,7 @@ class TestTemplateSkeletonIsNotACitizen:
         """Outermost-wins must not accidentally unprotect anything."""
         monkeypatch.chdir(project_with_template / "src" / "aipass" / "drone")
         target = project_with_template / "src" / "aipass" / "spawn"
-        blocked, reason = check_carveouts(target.resolve(), project_with_template.resolve())
+        blocked, reason, _exemption = check_carveouts(target.resolve(), project_with_template.resolve())
         assert blocked is True
         assert "spawn" in reason
 
@@ -601,7 +565,7 @@ class TestContainedCitizens:
 
     def test_the_refusal_is_recorded(self, at_drone, tmp_path):
         safe_delete([".."])
-        (record,) = _ledger(tmp_path)
+        (record,) = rm_ledger(tmp_path)
         assert record["outcome"] == "refused"
         assert "contains citizen api/" in record["reason"]
 
@@ -627,43 +591,6 @@ class TestContainedCitizens:
         assert ok is False, message
         assert "your own branch spawn/" in message
         assert (only_my_own_tree / "spawn" / ".trinity").is_dir()
-
-    def test_a_host_that_refuses_to_delete_a_live_cwd_is_not_a_refusal_of_ours(
-        self, project_dir, tmp_path, monkeypatch
-    ):
-        """Windows' refusal of a tree the process stands in, manufactured here
-        rather than asked of this host.
-
-        The host's refusal, not a guard's: the message carries the way out and the ledger says failed.
-        It models the refusal only; a real rmtree empties what it can reach before raising.
-        Mutant killed: the `_standing_inside` suffix dropped from the failure message.
-        """
-        scratch = project_dir / "scratch"
-        (scratch / "inner").mkdir(parents=True)
-        monkeypatch.chdir(scratch / "inner")
-
-        def windows_remove_tree(path: Path) -> None:
-            here = Path.cwd()
-            if here == path or path in here.parents:
-                raise PermissionError(
-                    errno.EACCES,
-                    "[WinError 32] The process cannot access the file because it is being used by another process",
-                    str(path),
-                )
-            shutil.rmtree(path)
-
-        monkeypatch.setattr(rm_handler, "_remove_tree", windows_remove_tree)
-
-        ((_path, ok, message),) = safe_delete([".."])
-
-        assert ok is False
-        assert "WinError 32" in message
-        assert "Protected:" not in message, "no guard of ours refused this one"
-        assert f"run drone rm from outside {scratch.resolve()}" in message
-        (record,) = _ledger(tmp_path)
-        assert record["outcome"] == "failed"
-        assert "standing in" in record["reason"], "the durable half must carry the way out too"
-        assert scratch.exists()
 
     def test_a_temp_dir_target_is_unchanged(self, at_drone, tmp_path_factory):
         """Outside the project a .trinity is scaffolding, not a citizen."""
@@ -714,7 +641,6 @@ class TestContainedCitizens:
 # A symlink is guarded and reported where the LINK lives, never by its resolved target.
 
 
-@pytest.mark.skipif(_NO_SYMLINKS, reason=_NO_SYMLINKS_REASON)
 class TestASymlinkIsJudgedWhereItLives:
     @pytest.fixture()
     def aipass_dir(self, project_with_branches):
@@ -729,16 +655,25 @@ class TestASymlinkIsJudgedWhereItLives:
         assert "sibling branch flow/" in message
         assert link.is_symlink()
 
-    def test_a_link_in_my_branch_is_reported_as_the_link_and_its_target(self, aipass_dir, monkeypatch, tmp_path):
+    def test_a_link_in_my_branch_moves_as_the_link_and_is_reported_with_its_target(
+        self, aipass_dir, monkeypatch, tmp_path
+    ):
         monkeypatch.chdir(aipass_dir / "drone")
         link = aipass_dir / "drone" / "api_link"
         link.symlink_to(aipass_dir / "api", target_is_directory=True)
         ((_path, ok, message),) = safe_delete([str(link)])
-        assert message == f"Deleted: {link} (symlink to {aipass_dir / 'api'})"
+        moved = aipass_dir / "drone" / ".archive" / "api_link"
+        assert message.splitlines() == [
+            "Moved to .archive:",
+            str(link),
+            f"-> {moved}",
+            f"(the link only; it points at {aipass_dir / 'api'})",
+        ]
         assert ok is True
         assert not link.is_symlink()
+        assert moved.is_symlink()
         assert (aipass_dir / "api" / ".trinity").is_dir()
-        (record,) = _ledger(tmp_path)
+        (record,) = rm_ledger(tmp_path)
         assert (record["path"], record.get("target")) == (str(link), str(aipass_dir / "api"))
 
     def test_a_link_inside_a_carveout_is_refused_wherever_it_points(self, aipass_dir, monkeypatch):
@@ -861,384 +796,208 @@ class TestEdgeCases:
         assert results == []
 
 
-class TestRmModule:
-    def test_handle_command_help_prints_the_usage_and_deletes_nothing(self, capsys):
-        """Mutant killed: handle_command's --help branch returning True without print_help()."""
-        result = handle_command("--help")
+class TestTheVerifiedAdminCrossesTheSiblingFence:
+    def test_the_admin_moves_a_sibling_file_into_that_branchs_archive_and_the_record_says_so(
+        self, at_drone_beside_api, monkeypatch, tmp_path
+    ):
+        rail_answers(monkeypatch, True)
+        target = at_drone_beside_api / "README.md"
 
-        assert result is True
-        assert "Usage: drone rm" in capsys.readouterr().out
+        ((_, ok, message),) = safe_delete([str(target)])
 
-    def test_handle_command_with_no_arguments_prints_the_self_map(self, capsys):
-        """Mutant killed: handle_command's no-argument branch returning True without print_introspection()."""
-        result = handle_command(None, None)
+        assert ok is True, message
+        assert not target.exists()
+        assert (at_drone_beside_api / ".archive" / "README.md").read_text(encoding="utf-8") == "# api"
+        (record,) = rm_ledger(tmp_path)
+        assert (record["outcome"], record["exemption"]) == ("moved", "admin")
 
-        assert result is True
-        assert "Contained Safe-Delete" in capsys.readouterr().out
+    def test_a_caller_the_rail_says_is_not_admin_is_still_refused(self, at_drone_beside_api, monkeypatch, tmp_path):
+        rail_answers(monkeypatch, False)
+        target = at_drone_beside_api / "README.md"
 
-    def test_print_introspection(self, capsys):
-        """The self-map names the module and points at --help."""
-        print_introspection()
+        ((_, ok, message),) = safe_delete([str(target)])
 
-        printed = capsys.readouterr().out
-        assert "Contained Safe-Delete" in printed
-        assert "--help" in printed
+        assert ok is False
+        assert "sibling branch api/" in message
+        assert target.exists()
+        (record,) = rm_ledger(tmp_path)
+        assert "exemption" not in record
 
-    def test_print_help(self, capsys):
-        """--help states the usage line and the containment rule it enforces."""
-        print_help()
+    def test_a_raising_rail_fails_closed(self, at_drone_beside_api, monkeypatch):
+        rail_answers(monkeypatch, RuntimeError("passport unreadable"))
+        target = at_drone_beside_api / "README.md"
 
-        printed = capsys.readouterr().out
-        assert "Usage: drone rm" in printed
-        assert "Carve-outs" in printed
+        ((_, ok, message),) = safe_delete([str(target)])
 
-    def test_a_refusal_outside_every_root_is_a_failure_not_a_quiet_success(self, tmp_path):
-        """A refusal is an error: handle_command reports False, the CLI exits 1.
+        assert ok is False
+        assert "sibling branch api/" in message
+        assert target.exists()
 
-        The root and target are siblings under tmp_path with roots narrowed by hand: ``_patch_roots``
-        allows /tmp and ``project_dir`` IS ``tmp_path``, so either would put the target inside a root.
-        """
-        root = tmp_path / "the_only_allowed_root"
-        root.mkdir()
-        elsewhere = tmp_path / "elsewhere"
-        elsewhere.mkdir()
-        target = elsewhere / "keepme.txt"
-        target.write_text("must survive", encoding="utf-8")
+    def test_an_unimportable_rail_fails_closed(self, at_drone_beside_api, monkeypatch):
+        # Both: the door's import_module reads sys.modules; `from package import name` reads the package attribute.
+        monkeypatch.setitem(sys.modules, RAIL.__name__, None)
+        monkeypatch.delattr(sys.modules[RAIL.__name__.rpartition(".")[0]], RAIL.__name__.rpartition(".")[2])
+        target = at_drone_beside_api / "README.md"
 
-        with patch(
-            "aipass.drone.apps.handlers.rm_handler.get_allowed_roots",
-            return_value=[root.resolve()],
-        ):
-            assert handle_command(str(target)) is False
+        ((_, ok, _),) = safe_delete([str(target)])
 
-        assert target.exists(), "the refusal did not hold — the file was deleted"
+        assert ok is False
+        assert target.exists()
 
-    def test_the_cli_maps_a_refusal_to_a_non_zero_exit(self, monkeypatch, tmp_path):
-        """False is not flattened to 0 on the way out; mutant killed: _handle_rm returning 0 always."""
-        target = str(tmp_path / "refused")
-        calls = []
+    @pytest.mark.parametrize(
+        ("relative", "refusal"),
+        [
+            ((".trinity",), "inside .trinity/"),
+            ((".archive", "old.md"), "inside .archive/"),
+            ((), "sibling branch api/"),
+        ],
+    )
+    def test_the_admin_is_still_refused_a_carveout_an_archive_and_the_branch_itself(
+        self, at_drone_beside_api, monkeypatch, relative, refusal
+    ):
+        rail_answers(monkeypatch, True)
+        (at_drone_beside_api / ".archive").mkdir()
+        (at_drone_beside_api / ".archive" / "old.md").write_text("old", encoding="utf-8")
+        target = at_drone_beside_api.joinpath(*relative)
 
-        def answer(verdict):
-            def recorder(command, args=None):
-                calls.append((command, args))
-                return verdict
+        ((_, ok, message),) = safe_delete([str(target)])
 
-            return recorder
+        assert ok is False
+        assert refusal in message
+        assert target.exists()
 
-        monkeypatch.setattr("sys.argv", ["drone", "rm", target])
-        monkeypatch.setattr("aipass.drone.apps.modules.rm.handle_command", answer(False))
-        assert drone_cli.main() == 1
-        monkeypatch.setattr("aipass.drone.apps.modules.rm.handle_command", answer(True))
-        assert drone_cli.main() == 0
-        assert calls == [(target, None), (target, None)]
+    def test_the_admin_is_still_refused_a_folder_that_holds_citizens(self, at_drone_beside_api, monkeypatch):
+        rail_answers(monkeypatch, True)
+        fleet = at_drone_beside_api.parent
 
+        ((_, ok, message),) = safe_delete([str(fleet)])
 
-# Stale mode crosses the sibling fence on purpose: the fixture stands in @drone and sweeps @api,
-# so a lost crossing turns the whole block red, not one test.
-
-_DAY = 86_400
-
-#: The twelve keys a plain delete record has always carried.
-_PLAIN_RECORD_KEYS = {
-    "timestamp",
-    "lane",
-    "outcome",
-    "caller",
-    "cwd",
-    "requested",
-    "path",
-    "reason",
-    "kind",
-    "size_bytes",
-    "entry_count",
-    "measured",
-}
-
-
-def _aged(path: Path, age_seconds: float, body: str = "x") -> Path:
-    """Write *path* and backdate its mtime by *age_seconds*."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body, encoding="utf-8")
-    then = time.time() - age_seconds
-    os.utime(path, (then, then))
-    return path
-
-
-def _ledger(tmp_path: Path) -> list[dict]:
-    """Every record the autouse deletion-log fixture captured in this test."""
-    store = tmp_path / "deletions.jsonl"
-    if not store.exists():
-        return []
-    return [json.loads(line) for line in store.read_text(encoding="utf-8").splitlines()]
-
-
-def _sweep(*tokens: str):
-    return stale_sweep(parse_stale_args(list(tokens)))
+        assert ok is False
+        assert "contains citizen" in message
+        assert (at_drone_beside_api / ".trinity").is_dir()
 
 
 @pytest.fixture()
-def stale_tree(project_with_branches, monkeypatch):
-    """@drone stands at home; @api's tree holds one stale temp and one of each skip."""
-    monkeypatch.chdir(project_with_branches / "src" / "aipass" / "drone")
-    api = project_with_branches / "src" / "aipass" / "api"
-    return {
-        "api": api,
-        "stale": _aged(api / "api_json" / "tmpab12cd.tmp", 11 * _DAY, "abc"),
-        "young": _aged(api / "api_json" / ".4242_7.tmp", 9 * _DAY),
-        "not_tmp": _aged(api / "api_json" / "api_log.json", 11 * _DAY),
-        "not_json_folder": _aged(api / "scratch" / "old.tmp", 11 * _DAY),
-    }
+def other_project(at_drone_beside_api, project_dir, tmp_path_factory, monkeypatch):
+    """A second project under the owner's home, outside every allowed root; it holds a citizen."""
+    home = tmp_path_factory.mktemp("home").resolve()
+    monkeypatch.setenv("HOME", str(home))
+    other = home / "Projects" / "Other"
+    citizen = other / "src" / "vera"
+    (citizen / ".trinity").mkdir(parents=True)
+    (other / "OTHER_REGISTRY.json").write_text("{}", encoding="utf-8")
+    for relative in ("logs/run.log", "src/vera/notes.md", ".ai_mail.local/x.json", ".archive/old.md"):
+        (other / relative).parent.mkdir(parents=True, exist_ok=True)
+        (other / relative).write_text(relative, encoding="utf-8")
+    for carveout in CARVEOUTS:
+        # Below the root: a .trinity at the root would make the project itself a citizen.
+        (other / "work" / carveout).mkdir(parents=True)
+        (other / "work" / carveout / "kept").write_text("kept", encoding="utf-8")
+    with patch.object(rm_handler, "get_allowed_roots", return_value=[project_dir.resolve()]):
+        yield other
 
 
-class TestStaleAge:
-    @pytest.mark.parametrize(("text", "seconds"), [("10d", 864_000), ("36h", 129_600), ("90m", 5_400)])
-    def test_the_three_forms(self, text, seconds):
-        assert parse_age(text) == seconds
+class TestTheVerifiedAdminIsNotRefusedByLocation:
+    def test_the_admin_moves_a_file_in_another_project_into_the_archive_beside_it(
+        self, other_project, monkeypatch, tmp_path
+    ):
+        rail_answers(monkeypatch, True)
+        target = other_project / "logs"
 
-    @pytest.mark.parametrize("text", ["10", "10s", "2w", "d", "-5d", "10D", "1.5d", "10d ", "", "0d", "٣d"])
-    def test_anything_else_is_refused_naming_the_three_forms(self, text):
-        """Includes zero (a write in flight is younger than any real age) and a
-        non-ASCII digit, which ``\\d`` would have matched and ``int()`` read."""
-        with pytest.raises(ValueError) as caught:
-            parse_age(text)
-        message = str(caught.value)
-        assert "10d" in message
-        assert "36h" in message
-        assert "90m" in message
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is True, message
+        assert not target.exists()
+        assert (other_project / "logs" / ".archive").exists() is False
+        assert (other_project / ".archive" / "logs" / "run.log").read_text(encoding="utf-8") == "logs/run.log"
+        (record,) = rm_ledger(tmp_path)
+        assert (record["outcome"], record["exemption"]) == ("moved", "elsewhere")
+
+    def test_the_admin_crosses_into_a_citizen_there_and_both_exemptions_are_recorded(
+        self, other_project, monkeypatch, tmp_path
+    ):
+        rail_answers(monkeypatch, True)
+
+        ((_, ok, message),) = safe_delete([str(other_project / "src" / "vera" / "notes.md")])
+
+        assert ok is True, message
+        assert (other_project / "src" / "vera" / ".archive" / "notes.md").is_file()
+        assert rm_ledger(tmp_path)[0]["exemption"] == "elsewhere+admin"
+
+    def test_a_citizen_is_still_refused_there_by_location(self, other_project, monkeypatch, tmp_path):
+        rail_answers(monkeypatch, False)
+        target = other_project / "logs"
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is False
+        assert "outside allowed roots" in message
+        assert target.is_dir()
+        assert "exemption" not in rm_ledger(tmp_path)[0]
 
     @pytest.mark.parametrize(
-        ("seconds", "shown"), [(11 * _DAY + 3 * 3600 + 120, "11d3h"), (5_400, "1h30m"), (59, "0m")]
-    )
-    def test_format_age(self, seconds, shown):
-        assert format_age(seconds) == shown
-
-
-class TestStaleArgs:
-    def test_flags_ride_in_any_slot(self):
-        request = parse_stale_args(["a", "--dry-run", "--stale", "36h", "b"])
-        assert (request.age, request.age_seconds, request.dry_run, request.dirs) == ("36h", 129_600, True, ("a", "b"))
-
-    def test_the_equals_spelling_is_read(self):
-        request = parse_stale_args(["--stale=90m", "a"])
-        assert (request.age, request.dry_run, request.dirs) == ("90m", False, ("a",))
-
-    @pytest.mark.parametrize(
-        "tokens",
+        ("relative", "refusal"),
         [
-            ["--stale"],
-            ["--stale", "10d"],
-            ["--stale", "10d", "--dryrun", "a"],
-            ["--stale", "10d", "--stale", "5d", "a"],
-            ["--staleness", "a"],
-            ["--stale", "--dry-run", "a"],
+            *((("work", name, "kept"), f"inside {name}/") for name in CARVEOUTS),
+            ((".archive", "old.md"), "inside .archive/"),
+            (("src", "vera"), "sibling branch vera/"),
+            (("src",), "contains citizen vera/"),
+            ((), "root directory itself"),
+            ((".ai_mail.local",), "dot name"),
         ],
-        ids=["no-age", "no-dir", "typo-dry-run", "twice", "unknown-spelling", "flag-in-age-slot"],
     )
-    def test_malformed_requests_are_refused(self, tokens):
-        with pytest.raises(ValueError):
-            parse_stale_args(tokens)
+    def test_every_other_rule_still_holds_for_the_admin_outside_the_tree(
+        self, other_project, monkeypatch, relative, refusal
+    ):
+        rail_answers(monkeypatch, True)
+        target = other_project.joinpath(*relative)
 
+        ((_, ok, message),) = safe_delete([str(target)])
 
-class TestStaleSweep:
-    def test_the_stale_tmp_in_a_json_folder_is_deleted(self, stale_tree):
-        report = _sweep("--stale", "10d", str(stale_tree["api"]))
-        assert not stale_tree["stale"].exists()
-        assert (report.deleted, report.refusals) == (1, [])
-
-    @pytest.mark.parametrize("survivor", ["young", "not_tmp", "not_json_folder"])
-    def test_the_three_skip_rules(self, stale_tree, survivor):
-        """Younger than AGE, not named .tmp, not inside a _json folder: untouched."""
-        _sweep("--stale", "10d", str(stale_tree["api"]))
-        assert stale_tree[survivor].exists()
-
-    def test_the_parent_folder_is_the_one_that_counts(self, stale_tree):
-        """A _json GRANDPARENT is not enough — the rule reads the parent's name."""
-        deeper = _aged(stale_tree["api"] / "api_json" / "sub" / "old.tmp", 11 * _DAY)
-        _sweep("--stale", "10d", str(stale_tree["api"]))
-        assert deeper.exists()
-
-    @pytest.mark.skipif(os.utime not in os.supports_follow_symlinks, reason="needs lutimes to age the link itself")
-    def test_a_symlink_named_tmp_is_skipped(self, stale_tree):
-        """The LINK is aged too, so only the regular-file rule can spare it."""
-        target = _aged(stale_tree["api"] / "elsewhere" / "real.tmp", 11 * _DAY)
-        link = stale_tree["api"] / "api_json" / "link.tmp"
-        link.symlink_to(target)
-        then = time.time() - 11 * _DAY
-        os.utime(link, (then, then), follow_symlinks=False)
-
-        report = _sweep("--stale", "10d", str(stale_tree["api"]))
-
-        assert link.is_symlink()
+        assert ok is False
+        assert refusal in message
         assert target.exists()
-        assert report.matched == 1
 
-    def test_a_directory_named_tmp_is_skipped(self, stale_tree):
-        folder = stale_tree["api"] / "api_json" / "held.tmp"
-        folder.mkdir()
-        then = time.time() - 11 * _DAY
-        os.utime(folder, (then, then))
-        _sweep("--stale", "10d", str(stale_tree["api"]))
-        assert folder.is_dir()
+    def test_the_admin_moves_a_dot_name_there_with_dot(self, other_project, monkeypatch, tmp_path):
+        rail_answers(monkeypatch, True)
 
-    def test_the_walk_never_enters_a_carve_out(self, stale_tree):
-        hidden = _aged(stale_tree["api"] / ".trinity" / "trinity_json" / "old.tmp", 11 * _DAY)
-        _sweep("--stale", "10d", str(stale_tree["api"]))
-        assert hidden.exists()
+        ((_, ok, message),) = safe_delete([DOT_FLAG, str(other_project / ".ai_mail.local")])
 
-    @pytest.mark.parametrize("sandbox", [".archive", "dropbox"])
-    def test_the_walk_never_enters_a_sandbox_and_the_stale_temp_beside_it_goes(self, stale_tree, sandbox):
-        """Nothing looks into a dropbox or an .archive (owner ruling).
+        assert ok is True, message
+        assert (other_project / ".archive" / ".ai_mail.local" / "x.json").is_file()
+        assert rm_ledger(tmp_path)[0]["exemption"] == "elsewhere+dot"
 
-        Mutant killed: _find_stale's sandbox prune dropped (both ids)."""
-        kept = _aged(stale_tree["api"] / sandbox / "api_json" / "old.tmp", 11 * _DAY)
-        _sweep("--stale", "10d", str(stale_tree["api"]))
-        assert kept.exists()
-        assert not stale_tree["stale"].exists()
+    def test_an_empty_dot_git_folder_does_not_make_a_project(self, other_project, monkeypatch):
+        """A sandbox mounts an empty .git in each writable root: that is no repository."""
+        rail_answers(monkeypatch, True)
+        loose = Path.home() / "mounted"
+        (loose / ".git").mkdir(parents=True)
+        target = loose / "file.txt"
+        target.write_text("stays", encoding="utf-8")
 
-    def test_a_carve_out_dir_is_refused_and_recorded(self, stale_tree, tmp_path):
-        trinity = stale_tree["api"] / ".trinity"
-        hidden = _aged(trinity / "trinity_json" / "old.tmp", 11 * _DAY)
+        ((_, ok, message),) = safe_delete([str(target)])
 
-        report = _sweep("--stale", "10d", str(trinity))
+        assert ok is False
+        assert "in no project" in message
+        assert target.read_text(encoding="utf-8") == "stays"
 
-        assert hidden.exists()
-        assert len(report.refusals) == 1
-        assert "Protected directory" in report.refusals[0]
-        (record,) = _ledger(tmp_path)
-        assert (record["outcome"], record["mode"], record["age"]) == ("refused", "stale", "10d")
+    @pytest.mark.parametrize("where", ["provider", "loose", "outside_home"])
+    def test_the_admin_is_refused_provider_folders_a_path_in_no_project_and_beyond_the_home(
+        self, other_project, monkeypatch, tmp_path_factory, where
+    ):
+        rail_answers(monkeypatch, True)
+        home = Path.home()
+        spots = {
+            "provider": (home / ".claude" / "settings.json", "provider settings"),
+            "loose": (home / "loose" / "file.txt", "in no project"),
+            "outside_home": (tmp_path_factory.mktemp("beyond") / "file.txt", "outside the owner's home"),
+        }
+        target, refusal = spots[where]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("stays", encoding="utf-8")
 
-    def test_a_dir_outside_the_project_is_refused(self, stale_tree, tmp_path_factory):
-        """Outside the project but inside the system temp dir: the plain lane's
-        temp roots are not swept here."""
-        outside = tmp_path_factory.mktemp("outside")
-        litter = _aged(outside / "x_json" / "old.tmp", 11 * _DAY)
+        ((_, ok, message),) = safe_delete([str(target)])
 
-        report = _sweep("--stale", "10d", str(outside))
-
-        assert litter.exists()
-        assert "outside allowed roots" in report.refusals[0]
-
-    def test_a_missing_dir_is_a_refusal(self, stale_tree, tmp_path):
-        report = _sweep("--stale", "10d", str(stale_tree["api"] / "nope"))
-        assert "does not exist" in report.refusals[0]
-        assert _ledger(tmp_path)[0]["outcome"] == "not_found"
-
-    @pytest.mark.parametrize("dry_run", [False, True])
-    @pytest.mark.parametrize("nested_first", [False, True])
-    def test_overlapping_dirs_walk_each_folder_once(self, stale_tree, nested_first, dry_run):
-        """A real run hides a double walk — the first pass already unlinked what
-        the second would list — so the folder count and the dry run carry it."""
-        dirs = [str(stale_tree["api"]), str(stale_tree["api"] / "api_json")]
-        if nested_first:
-            dirs.reverse()
-        report = _sweep("--stale", "10d", *(["--dry-run"] if dry_run else []), *dirs)
-        assert (report.folders_scanned, report.matched, report.refusals) == (3, 1, [])
-
-
-class TestStaleCrossesTheSiblingFence:
-    def test_stale_mode_deletes_inside_a_sibling_branch(self, stale_tree):
-        assert handle_command("--stale", ["10d", str(stale_tree["api"])]) is True
-        assert not stale_tree["stale"].exists()
-
-    def test_the_plain_verb_still_refuses_the_same_file(self, stale_tree, tmp_path):
-        assert handle_command(str(stale_tree["stale"])) is False
-        assert stale_tree["stale"].exists()
-        assert "sibling branch api" in _ledger(tmp_path)[0]["reason"]
-
-
-class TestStaleDryRun:
-    def test_dry_run_lists_every_candidate_and_deletes_nothing(self, stale_tree, capsys, tmp_path):
-        assert handle_command("--stale", ["10d", "--dry-run", str(stale_tree["api"])]) is True
-
-        out = capsys.readouterr().out
-        assert stale_tree["stale"].exists()
-        candidate_lines = [line for line in out.splitlines() if "would delete" in line]
-        assert len(candidate_lines) == 1
-        assert str(stale_tree["stale"].resolve()) in candidate_lines[0]
-        assert "11d0h" in candidate_lines[0]
-        assert "3 B" in candidate_lines[0]
-        assert "files deleted 0" in out.splitlines()[-1]
-        assert _ledger(tmp_path) == [], "a dry run deletes nothing, so it records nothing"
-
-    def test_a_dry_run_refusal_prints_and_fails_but_is_not_recorded(self, stale_tree, tmp_path):
-        """No delete was attempted, so the ledger has nothing to say about it."""
-        assert handle_command("--stale", ["10d", "--dry-run", str(stale_tree["api"] / "nope")]) is False
-        assert _ledger(tmp_path) == []
-
-
-class TestStaleRecord:
-    def test_a_stale_delete_is_recorded_with_mode_and_age(self, stale_tree, tmp_path):
-        _sweep("--stale", "10d", str(stale_tree["api"]))
-
-        (record,) = _ledger(tmp_path)
-        assert record["path"] == str(stale_tree["stale"].resolve())
-        assert (record["lane"], record["outcome"], record["mode"], record["age"]) == ("rm", "deleted", "stale", "10d")
-        assert record["requested"] == str(stale_tree["api"])
-        assert record["size_bytes"] == 3
-
-    def test_a_plain_delete_keeps_its_twelve_keys(self, project_dir, monkeypatch, tmp_path):
-        """Without --stale the record is byte-for-byte what it was: no mode key."""
-        monkeypatch.chdir(project_dir)
-        target = project_dir / "build.log"
-        target.write_text("x", encoding="utf-8")
-        safe_delete([str(target)])
-        (record,) = _ledger(tmp_path)
-        assert set(record) == _PLAIN_RECORD_KEYS
-
-
-class TestStaleSummary:
-    def test_the_summary_line_counts(self, stale_tree, capsys):
-        """api, api_json and scratch are walked; .trinity is not."""
-        _aged(stale_tree["api"] / "api_json" / "tmpzz99.tmp", 30 * _DAY, "defg")
-
-        assert handle_command("--stale", ["10d", str(stale_tree["api"])]) is True
-
-        assert capsys.readouterr().out.splitlines()[-1] == (
-            "rm --stale 10d (swept): folders scanned 3, files matched 2 (7 bytes), "
-            "files deleted 2, bytes freed 7, refusals 0"
-        )
-
-    def test_the_summary_is_rendered_from_the_report(self, stale_tree):
-        request = parse_stale_args(["--stale", "10d", "--dry-run", str(stale_tree["api"])])
-        assert format_stale_summary(request, stale_sweep(request)) == (
-            "rm --stale 10d (dry run): folders scanned 3, files matched 1 (3 bytes), "
-            "files deleted 0, bytes freed 0, refusals 0"
-        )
-
-    def test_nothing_matched_is_a_success(self, stale_tree, capsys):
-        assert handle_command("--stale", ["10d", str(stale_tree["api"] / "scratch")]) is True
-        assert "files matched 0" in capsys.readouterr().out
-
-    def test_a_refusal_fails_the_run(self, stale_tree):
-        assert handle_command("--stale", ["10d", str(stale_tree["api"] / "nope")]) is False
-
-    @pytest.mark.skipif(_PERMISSIONS_DO_NOT_BIND, reason=_PERMISSIONS_REASON)
-    def test_an_unreadable_folder_is_a_refusal_not_a_silence(self, stale_tree):
-        locked = stale_tree["api"] / "locked_json"
-        locked.mkdir()
-        locked.chmod(0)
-        try:
-            report = _sweep("--stale", "10d", str(stale_tree["api"]))
-        finally:
-            locked.chmod(0o700)
-        assert any("Cannot scan" in message for message in report.refusals)
-
-
-class TestStaleNeverFallsIntoThePlainLane:
-    def test_a_stale_flag_after_the_dir_still_selects_stale_mode(self, stale_tree, monkeypatch):
-        """Standing in @api, the plain lane would remove api_json whole."""
-        monkeypatch.chdir(stale_tree["api"])
-        assert handle_command("api_json", ["--stale", "10d"]) is True
-        assert not stale_tree["stale"].exists()
-        assert stale_tree["young"].exists()
-
-    @pytest.mark.parametrize(
-        "tokens",
-        [["--stale=", "api_json"], ["--staleness", "api_json"], ["--stale", "10d", "--dryrun", "api_json"]],
-        ids=["empty-age", "unknown-spelling", "typo-dry-run"],
-    )
-    def test_a_malformed_stale_request_deletes_nothing(self, stale_tree, monkeypatch, tokens):
-        monkeypatch.chdir(stale_tree["api"])
-        assert handle_command(tokens[0], tokens[1:]) is False
-        assert stale_tree["stale"].exists()
-        assert stale_tree["young"].exists()
+        assert ok is False
+        assert refusal in message
+        assert target.read_text(encoding="utf-8") == "stays"

@@ -1,40 +1,32 @@
 # =================== AIPass ====================
 # Name: project_home.py
 # Description: Shared AIPass-home detection, project-path validation, and settings content
-# Version: 1.3.0
+# Version: 1.5.0
 # Created: 2026-07-21
-# Modified: 2026-10-27
+# Modified: 2026-11-17
 # =============================================
 
 """Project home — AIPASS_HOME detection, path validation, settings content.
 
-One copy per helper for init, new and adopt. Stdlib only: importable before drone/prax exist.
+One copy per helper for init, new and adopt. Logs through prax; no branch but prax loads at import.
 """
 
-import importlib.util
 import json
-import logging
 import os
 import tempfile
 from pathlib import Path
 
 from aipass.aipass.shared.scaffold_content import agents_md
-
-logger = logging.getLogger(__name__)
+from aipass.prax import logger
 
 
 def is_throwaway_path(path: str | Path) -> bool:
     """True if path is under a temp dir or Claude Code scratchpad."""
     resolved = str(Path(path).resolve())
     tmp_roots = [tempfile.gettempdir()]
-    if os.name == "posix":
-        tmp_roots.append("/tmp")
+    tmp_roots.append("/tmp")
     for root in tmp_roots:
-        try:
-            r = str(Path(root).resolve())
-        except OSError:
-            logger.info("is_throwaway_path: could not resolve %s", root)
-            continue
+        r = str(Path(root).resolve())
         if resolved == r or resolved.startswith(r + os.sep):
             return True
     if "scratchpad" in resolved.lower():
@@ -43,14 +35,12 @@ def is_throwaway_path(path: str | Path) -> bool:
 
 
 def _detect_aipass_home() -> str | None:
-    """Detect the AIPass installation root from the aipass package location."""
-    try:
-        spec = importlib.util.find_spec("aipass")
-        if spec and spec.origin:
-            return str(Path(spec.origin).resolve().parent.parent.parent)
-    except Exception as exc:
-        logger.info("AIPASS_HOME detection skipped: %s", exc)
-    return None
+    """The AIPass home drone's resolve_aipass_home names; None, logged as an ERROR, and every caller refuses."""
+    from aipass.drone import resolve_aipass_home
+
+    if (home := resolve_aipass_home()).path is None:
+        logger.error("No AIPass home found (tried: %s); set AIPASS_HOME=/path/to/AIPass", "; ".join(home.tried))
+    return None if home.path is None else str(home.path)
 
 
 def _claude_settings() -> str:
@@ -141,25 +131,26 @@ def merge_local_settings(existing: dict, generated: dict) -> dict:
     return merged
 
 
-def _enroll_project(target: Path) -> bool | None:
-    """Enroll a project in the trusted-project registry (DPLAN-0244).
+def _enroll_project(target: Path) -> bool:
+    """Enroll a project in the trusted-project registry: True enrolled, False skipped (throwaway) or refused.
 
-    True enrolled, False skipped (throwaway path) or refused, None when hooks' registry
-    cannot be imported (a clone before install), so the caller can say 'unavailable'."""
+    hooks is imported here, not at the top, so @spawn's process never loads it; it ships in the same
+    wheel, so an ImportError is a broken install and raises."""
     if is_throwaway_path(target):
         logger.info("Skipping trust enrollment for throwaway path: %s", target)
         return False
-    try:
-        from aipass.hooks.apps.modules.door_trust_registry import enroll
+    from aipass.hooks import enroll
 
-        if enroll(str(target)):
-            logger.info("Enrolled project in trust registry: %s", target)
-            return True
-        logger.warning("Trust enrollment failed for %s", target)
-        return False
-    except ImportError as exc:
-        logger.info("Trust registry unavailable, skipping enrollment: %s", exc)
-        return None
+    if enroll(str(target)):
+        logger.info("Enrolled project in trust registry: %s", target)
+        return True
+    logger.warning("Trust enrollment failed for %s", target)
+    return False
+
+
+def not_enrolled_note(target: Path) -> str:
+    """What a caller shows when _enroll_project did not return True: the project's hooks stay off."""
+    return f"Not in the trust registry, so its hooks stay inactive: aipass trust {target}"
 
 
 def is_projects_child(target: Path) -> bool:
@@ -180,7 +171,7 @@ def is_projects_child(target: Path) -> bool:
 def find_fenceless_projects(aipass_home: str) -> list[Path]:
     """Nested ``<aipass_home>/projects/<name>`` dirs missing the instruction-file ancestor fence.
 
-    Fenceless: ``.claude/settings.local.json`` missing, unparseable, or lacking the excludes."""
+    Fenceless: ``.claude/settings.local.json`` missing, unparseable or lacking the excludes; unreadable raises."""
     projects_dir = Path(aipass_home) / "projects"
     if not projects_dir.is_dir():
         return []
@@ -192,8 +183,8 @@ def find_fenceless_projects(aipass_home: str) -> list[Path]:
         try:
             is_project = any(f.is_file() and f.name.endswith("_REGISTRY.json") for f in child.iterdir())
         except OSError as exc:
-            logger.info("find_fenceless_projects: could not read %s: %s", child, exc)
-            continue
+            logger.warning("find_fenceless_projects: could not read %s: %s", child, exc)
+            raise RuntimeError(f"Could not read {child} to tell whether it is fenced: {exc}") from exc
         if not is_project:
             continue
         local_settings = child / ".claude" / "settings.local.json"
@@ -210,3 +201,6 @@ def find_fenceless_projects(aipass_home: str) -> list[Path]:
         if not {_normalize_exclude(e) for e in expected}.issubset(present):
             fenceless.append(child)
     return fenceless
+
+
+NO_HOME = "No AIPass home found, so nothing was written: set AIPASS_HOME=/path/to/AIPass and run it again"

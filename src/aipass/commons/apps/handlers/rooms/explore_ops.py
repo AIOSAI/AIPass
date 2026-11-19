@@ -3,14 +3,14 @@
 # Description: Secret Room Exploration Handler
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """
 Secret Room Exploration Handler
 """
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
@@ -18,7 +18,7 @@ from aipass.commons.apps.handlers.json import json_handler
 
 def explore_rooms() -> dict:
     """Show discovery hints for hidden rooms; a caller who has visited 3+ rooms gets one revealed."""
-    from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
     try:
         caller = get_caller_branch()
@@ -75,7 +75,7 @@ def explore_rooms() -> dict:
 
 def list_secrets() -> dict:
     """List secret rooms the caller has discovered (posted or commented in)."""
-    from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
     try:
         caller = get_caller_branch()

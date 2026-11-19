@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_broker.py
 # Description: Tests for the drone-broker daemon, identity, and allowlist
-# Version: 2.0.9
+# Version: 2.1.1
 # Created: 2026-06-09
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/broker/daemon.py, its path resolver, protocol, client and rm routing."""
@@ -14,9 +14,9 @@
 
 from __future__ import annotations
 
-import sys
 import hashlib
 import hmac as hmac_mod
+import fcntl
 import json
 import socket
 import os
@@ -25,11 +25,6 @@ import threading
 from pathlib import Path
 
 import pytest
-
-if os.name == "posix":
-    import fcntl
-else:
-    fcntl = None
 
 from aipass.drone.apps.handlers.broker.protocol import BrokerRequest, BrokerResponse
 from aipass.drone.apps.handlers.broker import daemon as broker_daemon
@@ -42,7 +37,7 @@ from aipass.drone.apps.handlers.broker.client import (
     is_sandboxed,
     BROKER_FD_ENV,
 )
-from aipass.drone.apps.handlers import deletion_log
+from aipass.drone.apps.handlers import deletion_log, rm_handler
 from aipass.drone.apps.modules.rm import safe_delete
 
 # Tests for the drone-broker daemon (Phase 3 + Phase 6a FPLAN-0250).
@@ -52,14 +47,8 @@ from aipass.drone.apps.modules.rm import safe_delete
 # policy (identity-scoped), denylist backstop, confused-deputy attacks,
 # client broker_delete / create_identified_connection, and rm broker routing.
 
-pytestmark = pytest.mark.skipif(
-    sys.platform != "linux",
-    reason="broker is Linux-only: AF_UNIX sockets + openat2 RESOLVE_BENEATH",
-)
-
 #: A mode-0 folder does not stop root: the walk would list it and the test would prove nothing.
-#: The platform is read first because a skipif does not stop the import, and Windows' os has no geteuid.
-_RUNS_AS_ROOT = sys.platform == "linux" and os.geteuid() == 0
+_RUNS_AS_ROOT = os.geteuid() == 0
 
 
 # ---------------------------------------------------------------------------
@@ -291,15 +280,13 @@ class TestPathResolver:
         with pytest.raises(OSError):
             resolve_beneath(base, "does_not_exist.txt")
 
-    # -- the walk fallback: the lane every non-Linux host takes ---------------
+    # -- the walk fallback: the lane a host without openat2 takes ------------
 
     @pytest.fixture()
     def walk_host(self, monkeypatch: pytest.MonkeyPatch) -> list[bool]:
         """Stand the resolver on a host with no openat2 and no /proc to read.
 
-        That is macOS, and it is the lane that used to raise FileNotFoundError
-        on every call: the fallback asked /proc for the fd's own path, and /proc
-        is Linux furniture. A walk that reaches for it at all fails here.
+        A walk that asks /proc for the fd's own path fails here.
         """
 
         def no_proc(fd: int) -> Path:
@@ -327,7 +314,7 @@ class TestPathResolver:
         assert resolve_beneath(base, ".") == base.resolve()
 
     def test_both_lanes_return_the_same_path(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The portable walk answers what the kernel lane answers, or it is a
+        """The walk answers what the kernel lane answers, or it is a
         different resolver wearing the same name."""
         base = repo_root / "src" / "aipass" / "testbranch"
         by_kernel = resolve_beneath(base, "subdir/nested.txt")
@@ -336,9 +323,7 @@ class TestPathResolver:
         assert asked == [False], "the second resolve never asked for the lane, so both answers may be one lane's"
 
     def test_walk_refuses_a_symlinked_directory(self, repo_root: Path, walk_host: list[bool], tmp_path: Path) -> None:
-        """O_NOFOLLOW comes from `os`, so it is the host's own value: 0o0400000
-        is O_NOFOLLOW on Linux and O_NOCTTY on macOS, and the second one would
-        have opened this link instead of refusing it."""
+        """O_NOFOLLOW comes from `os`, so the walk opens no link."""
         base = repo_root / "src" / "aipass" / "testbranch"
         link = base / "link"
         link.symlink_to(tmp_path)
@@ -395,16 +380,6 @@ class TestPathResolver:
         with pytest.raises(OSError, match="went away mid-walk"):
             resolve_beneath(base, "subdir/nested.txt")
 
-    def test_walk_refuses_a_host_without_nofollow(
-        self, repo_root: Path, walk_host: list[bool], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Windows has neither O_NOFOLLOW nor dir_fd, so the walk cannot hold
-        its contract there and says so instead of resolving unverified."""
-        base = repo_root / "src" / "aipass" / "testbranch"
-        monkeypatch.setattr(path_resolver, "_WALK_SUPPORTED", False)
-        with pytest.raises(OSError, match="refusing rather than resolving"):
-            resolve_beneath(base, "deleteme.txt")
-
 
 # ---------------------------------------------------------------------------
 # Daemon mechanism tests (identified connection)
@@ -415,7 +390,7 @@ class TestBrokerDaemon:
     """Test the broker daemon accept/delete/refuse logic with an identified connection."""
 
     def test_delete_allowed_file(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
-        """Broker deletes an allowed file under the identified branch tree."""
+        """Broker moves an allowed file under the identified branch tree into the .archive beside it."""
         target = repo_root / "src" / "aipass" / "testbranch" / "deleteme.txt"
         assert target.exists()
 
@@ -425,12 +400,12 @@ class TestBrokerDaemon:
             BrokerRequest(op="delete", path="deleteme.txt", request_id="t1"),
         )
         assert resp.ok is True
-        assert "Deleted" in resp.message
+        assert "Moved" in resp.message
         assert not target.exists()
 
         audit = running_broker.audit_path.read_text(encoding="utf-8").strip().split("\n")
         last = json.loads(audit[-1])
-        assert last["result"] == "DELETED"
+        assert last["result"] == "MOVED"
         assert last["identity"] == "testbranch"
 
     def test_delete_nested_file(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
@@ -719,13 +694,9 @@ class TestIdentity:
 
     def test_secret_file_0600(self, running_broker: BrokerDaemon) -> None:
         """Secret file is created with mode 0600."""
-        if os.name != "posix":
-            pytest.skip("POSIX permission check")
-        else:
-            mode = running_broker._secret_path.stat().st_mode
-            assert stat.S_IMODE(mode) == 0o600
+        mode = running_broker._secret_path.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
 
-    @pytest.mark.skipif(os.name != "posix", reason="POSIX: Windows refuses to replace a file another handle holds")
     def test_a_reader_holding_the_old_secret_file_never_sees_the_new_secret(self, broker: BrokerDaemon) -> None:
         """Mutant: the secret written in place — the old file's open handle reads the new secret."""
         broker._secret_path.write_bytes(b"old-secret")
@@ -800,7 +771,7 @@ class TestAllowlistPolicy:
     """Test identity-scoped allowlist policy."""
 
     def test_unidentified_tmp_allowed(self, running_broker: BrokerDaemon, tmp_path: Path) -> None:
-        """Unidentified connections can delete under /tmp."""
+        """Unidentified connections can delete under /tmp: outside the project, a true delete, never a move."""
         target = tmp_path / "unid_tmp.txt"
         target.write_text("tmp file", encoding="utf-8")
 
@@ -810,6 +781,7 @@ class TestAllowlistPolicy:
         )
         assert resp.ok is True
         assert not target.exists()
+        assert not (tmp_path / ".archive").exists()
 
     def test_a_relative_request_resolves_in_the_stand_in_temp_base(
         self, running_broker: BrokerDaemon, tmp_path: Path
@@ -927,7 +899,7 @@ class TestAllowlistPolicy:
         delete_entries = [json.loads(raw) for raw in lines if json.loads(raw).get("op") == "delete"]
         last = delete_entries[-1]
         assert last["identity"] == "testbranch"
-        assert last["result"] == "DELETED"
+        assert last["result"] == "MOVED"
 
     def test_audit_carries_identity_on_refusal(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
         """Audit entries for refusals include the identity."""
@@ -1104,7 +1076,7 @@ class TestBrokerFeedsDeletionRecord:
         assert resp.ok is True
         assert not target.exists()
 
-        deletions = [r for r in self._records() if r["outcome"] == "deleted"]
+        deletions = [r for r in self._records() if r["outcome"] == "moved"]
         assert len(deletions) == 1
         assert deletions[0]["lane"] == "broker"
         assert deletions[0]["path"] == str(target.resolve())
@@ -1153,7 +1125,7 @@ class TestBrokerFeedsDeletionRecord:
             BrokerRequest(op="delete", path="deleteme.txt", request_id="rec2"),
         )
 
-        deletions = [r for r in self._records() if r["outcome"] == "deleted"]
+        deletions = [r for r in self._records() if r["outcome"] == "moved"]
         assert deletions[0]["caller"] == "testbranch"
 
     def test_broker_measures_before_deleting(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
@@ -1166,7 +1138,7 @@ class TestBrokerFeedsDeletionRecord:
             BrokerRequest(op="delete", path="deleteme.txt", request_id="rec3"),
         )
 
-        deletions = [r for r in self._records() if r["outcome"] == "deleted"]
+        deletions = [r for r in self._records() if r["outcome"] == "moved"]
         assert deletions[0]["kind"] == "file"
         assert deletions[0]["size_bytes"] == expected
 
@@ -1199,6 +1171,54 @@ class TestBrokerFeedsDeletionRecord:
         refusals = [r for r in self._records() if r["outcome"] == "refused"]
         assert refusals, "an out-of-scope broker delete left no record"
         assert refusals[-1]["caller"] == "testbranch"
+
+
+class TestTheBrokerTakesRmsOneDecision:
+    """In the tree nothing is deleted: the broker lane moves, refuses dot names and records it, as drone rm does."""
+
+    def test_an_in_tree_file_moves_into_the_archive_beside_it_and_the_record_says_where(
+        self, running_broker: BrokerDaemon, repo_root: Path
+    ) -> None:
+        branch = repo_root / "src" / "aipass" / "testbranch"
+
+        resp = _send_identified(running_broker, "testbranch", BrokerRequest(op="delete", path="deleteme.txt"))
+
+        assert resp.ok is True, resp.message
+        assert "Moved" in resp.message
+        assert (branch / ".archive" / "deleteme.txt").read_text(encoding="utf-8") == "delete me"
+        (record,) = TestBrokerFeedsDeletionRecord._records()
+        assert (record["lane"], record["outcome"]) == ("broker", "moved")
+        assert record["moved_to"] == str(branch.resolve() / ".archive" / "deleteme.txt")
+
+    def test_a_dot_name_in_the_tree_is_refused_and_stays(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
+        target = repo_root / "src" / "aipass" / "testbranch" / ".env"
+        target.write_text("keep", encoding="utf-8")
+
+        resp = _send_identified(running_broker, "testbranch", BrokerRequest(op="delete", path=".env"))
+
+        assert (resp.ok, target.exists()) == (False, True)
+        assert ".env is a dot name" in resp.message
+        (record,) = TestBrokerFeedsDeletionRecord._records()
+        assert (record["lane"], record["outcome"]) == ("broker", "refused")
+
+    def test_bytecode_in_the_tree_is_still_truly_deleted(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
+        branch = repo_root / "src" / "aipass" / "testbranch"
+        (branch / "__pycache__").mkdir()
+        (branch / "__pycache__" / "m.pyc").write_bytes(b"\0")
+
+        resp = _send_identified(running_broker, "testbranch", BrokerRequest(op="delete", path="__pycache__"))
+
+        assert resp.ok is True, resp.message
+        assert not (branch / "__pycache__").exists()
+        assert not (branch / ".archive").exists()
+
+    def test_the_verdict_is_rms_own(self, running_broker: BrokerDaemon, monkeypatch: pytest.MonkeyPatch) -> None:
+        verdict = rm_handler.Verdict("judged by rm", None, False)
+        monkeypatch.setattr(rm_handler, "judge", lambda *_args, **_kwargs: verdict)
+
+        resp = _send_identified(running_broker, "testbranch", BrokerRequest(op="delete", path="deleteme.txt"))
+
+        assert (resp.ok, resp.message) == (False, "judged by rm")
 
 
 class TestAnUnreadFolderIsNotAnAbsentBranch:
@@ -1272,14 +1292,14 @@ class TestTheDeleteHoldsWhatItJudged:
         branch = repo_root / "src" / "aipass" / "testbranch"
         sibling_file = repo_root / "src" / "aipass" / "sibling" / "important.txt"
         (branch / "subdir" / "important.txt").write_text("mine", encoding="utf-8")
-        judge = running_broker._check_denylist
+        judge = rm_handler.judge
 
-        def swap_then_judge(resolved: Path, own: Path | None) -> str | None:
+        def swap_then_judge(*args, **kwargs) -> rm_handler.Verdict:
             os.rename(branch / "subdir", branch / "subdir_moved")
             (branch / "subdir").symlink_to(sibling_file.parent, target_is_directory=True)
-            return judge(resolved, own)
+            return judge(*args, **kwargs)
 
-        monkeypatch.setattr(running_broker, "_check_denylist", swap_then_judge)
+        monkeypatch.setattr(rm_handler, "judge", swap_then_judge)
         resp = _send_identified(
             running_broker, "testbranch", BrokerRequest(op="delete", path="subdir/important.txt", request_id="swap")
         )
@@ -1320,10 +1340,7 @@ class TestTheDeleteHoldsWhatItJudged:
 
     def test_the_socket_is_owner_only(self, running_broker: BrokerDaemon) -> None:
         """Mutant killed: no chmod after bind (the socket keeps the umask mode)."""
-        if os.name != "posix":
-            pytest.skip("POSIX permission check")
-        else:
-            assert stat.S_IMODE(os.stat(running_broker.socket_path).st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(running_broker.socket_path).st_mode) == 0o600
 
 
 class TestABadLineKeepsTheConnection:
@@ -1387,39 +1404,36 @@ class TestTheClientOwnsItsReply:
 
     def test_another_process_holding_the_fd_lock_makes_the_call_wait(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Mutant killed: no lockf around send+receive (the call does not wait its turn)."""
-        if os.name != "posix" or fcntl is None:
-            pytest.skip("POSIX: fork and fcntl locks")
-        else:
-            mine, broker_end = socket.socketpair()
-            monkeypatch.setenv(BROKER_FD_ENV, str(mine.fileno()))
-            # Warm the call once, so first-call setup is not mistaken for waiting on the lock.
+        mine, broker_end = socket.socketpair()
+        monkeypatch.setenv(BROKER_FD_ENV, str(mine.fileno()))
+        # Warm the call once, so first-call setup is not mistaken for waiting on the lock.
+        broker_end.sendall(BrokerResponse(ok=True, message="x", request_id="x").to_bytes())
+        broker_delete("anything")
+        ready_r, ready_w = os.pipe()
+        release_r, release_w = os.pipe()
+        child = os.fork()
+        if child == 0:
+            fcntl.lockf(mine.fileno(), fcntl.LOCK_EX)
+            os.write(ready_w, b"L")
+            os.read(release_r, 1)
+            os._exit(0)
+        try:
+            assert os.read(ready_r, 1) == b"L"
             broker_end.sendall(BrokerResponse(ok=True, message="x", request_id="x").to_bytes())
-            broker_delete("anything")
-            ready_r, ready_w = os.pipe()
-            release_r, release_w = os.pipe()
-            child = os.fork()
-            if child == 0:
-                fcntl.lockf(mine.fileno(), fcntl.LOCK_EX)
-                os.write(ready_w, b"L")
-                os.read(release_r, 1)
-                os._exit(0)
-            try:
-                assert os.read(ready_r, 1) == b"L"
-                broker_end.sendall(BrokerResponse(ok=True, message="x", request_id="x").to_bytes())
-                call = threading.Thread(target=broker_delete, args=("anything",))
-                call.start()
-                call.join(timeout=0.3)
-                waited_for_the_lock = call.is_alive()
-                os.write(release_w, b"R")
-                call.join(timeout=5)
-            finally:
-                os.waitpid(child, 0)
-                for fd in (ready_r, ready_w, release_r, release_w):
-                    os.close(fd)
-                mine.close()
-                broker_end.close()
-            assert waited_for_the_lock, "the call went ahead while another process held the fd lock"
-            assert not call.is_alive()
+            call = threading.Thread(target=broker_delete, args=("anything",))
+            call.start()
+            call.join(timeout=0.3)
+            waited_for_the_lock = call.is_alive()
+            os.write(release_w, b"R")
+            call.join(timeout=5)
+        finally:
+            os.waitpid(child, 0)
+            for fd in (ready_r, ready_w, release_r, release_w):
+                os.close(fd)
+            mine.close()
+            broker_end.close()
+        assert waited_for_the_lock, "the call went ahead while another process held the fd lock"
+        assert not call.is_alive()
 
     def test_a_malformed_identify_reply_closes_the_socket(self, tmp_path: Path) -> None:
         """Mutant killed: create_identified_connection leaking its socket on an unparsable reply."""

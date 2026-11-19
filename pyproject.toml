@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aipass"
-version = "2.8.37"
+version = "2.8.38"
 description = "A local multi-agent framework where your AI agents keep their memory, work together, and never ask you to re-explain context"
 readme = "README.md"
 license = "MIT"
@@ -33,6 +33,7 @@ dependencies = [
     "pathspec>=0.12",
     "segno>=1.6",
     "keyring>=25.0",
+    "pyyaml>=6.0",
     "tomli>=2; python_version < '3.11'",
 ]
 
@@ -104,6 +105,8 @@ aipass = "aipass.aipass.apps.aipass:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aipass"]
+# hatch reads only the root .gitignore; a branch's own ignore rules do not reach a local build.
+exclude = ["**/memory_pool_archive"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "src"]
@@ -114,18 +117,10 @@ testpaths = ["tests", "src"]
 # docs.local and dropbox are untracked scratch and inbound relays; the test files
 # they hold are snapshots, never a suite, and they import nothing on the path.
 norecursedirs = ["templates", "*.egg-info", ".*", "__pycache__", "my-project", "docs.local", "dropbox"]
-# Telegram is retired (the owner, 2026-09-14; out of the tree 2026-10-22). The
-# skill lib sits untracked in projects/telegram; what stayed in the tree is
-# renamed (disabled). Every file or directory whose name carries "telegram" is
-# left out of collection: prax's relay test, the disabled daemon notifier and
-# hooks response. CodeQL carries the same exclusion in
-# .github/workflows/security.yml; sentry's audit reads a .sentryignore in
-# daemon, prax and hooks.
-addopts = ["--ignore-glob=*telegram*"]
 
 [tool.coverage.run]
 source = ["src/aipass"]
-omit = ["*/tests/*", "*/templates/*", "*telegram*"]
+omit = ["*/tests/*", "*/templates/*"]
 
 [tool.coverage.report]
 show_missing = true

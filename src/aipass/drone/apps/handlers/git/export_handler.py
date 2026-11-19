@@ -3,7 +3,7 @@
 # Description: The tracked tree at a ref, written into an empty directory
 # Version: 1.0.0
 # Created: 2026-10-04
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """The tracked tree at a ref, written into an empty directory: the twin of ``git archive | tar -x``.
@@ -15,7 +15,6 @@ The destination must be empty and under the host temp dir or the caller's
 from __future__ import annotations
 
 import subprocess
-import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -25,11 +24,8 @@ from aipass.drone.apps.handlers.json import json_handler
 
 
 def temp_roots() -> list[Path]:
-    """The host's temp directories an export may write under: the temp dir, and /tmp on POSIX."""
-    roots = [Path(tempfile.gettempdir()).resolve()]
-    if sys.platform != "win32":
-        roots.append(Path("/tmp").resolve())
-    return roots
+    """The host's temp directories an export may write under: the temp dir, and /tmp."""
+    return [Path(tempfile.gettempdir()).resolve(), Path("/tmp").resolve()]
 
 
 def _refused(message: str) -> dict:

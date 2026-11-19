@@ -67,7 +67,7 @@ subprocess.run(["systemctl", "--user", "stop", "daemon-tick.timer"])   # flagged
 
 Read from the first element of a literal argv, or the first word of a literal
 command string, matched by basename against a fixed roster of host-control
-programs: `systemctl`, `launchctl`, `sc`, `service`, `systemd-run`, `crontab`,
+programs: `systemctl`, `service`, `systemd-run`, `crontab`,
 `shutdown`, `reboot`, `halt`, `killall`, `pkill`, `kill`, `update-rc.d`,
 `chkconfig`. `os.system` counts as a runner alongside `subprocess`.
 

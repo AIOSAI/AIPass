@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inert.py
 # Description: Detects bypass rules that can never match, for the audit info channel and the checklist
-# Version: 1.2.1
+# Version: 1.4.0
 # Created: 2026-08-09
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Detects bypass rules whose declared scope can never be evaluated.
@@ -21,9 +21,8 @@ from typing import Dict, Set, Tuple
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.aipass_standards import applicability
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.module_root import module_file
 
-HANDLERS_ROOT = module_file(__file__).parents[1]
+HANDLERS_ROOT = Path(__file__).resolve().parents[1]
 PACK_ROOT = HANDLERS_ROOT / "aipass_standards"
 
 
@@ -52,6 +51,29 @@ ADVISORY_CAVEAT = (
 # Info lines are stored and re-rendered one at a time, so each carries the doubt.
 _UNVERIFIED = "unverified: "
 UNREADABLE = "bypass.json unreadable, so none of its rules was judged: "
+
+#: Standards whose checker accepts bypass_rules and never reads them.
+RULE_BLIND_STANDARDS = frozenset({"diagnostics"})
+#: Standards whose waiver must name its site: one row per fallback, never a whole file.
+PER_SITE_STANDARDS = frozenset({"silent_catch", "logged_fallback", "fallback"})
+
+
+def ignored_field_notes(rule: dict) -> list[str]:
+    """Certain, not advisory: a field matching_rule never reads, or a standard that never reads rules."""
+    where = f"{rule.get('file', '?')} ({rule.get('standard') or 'all standards'})"
+    notes = []
+    if rule.get("pattern"):
+        notes.append(
+            f"{where}: 'pattern' {rule['pattern']!r} is ignored, matching_rule never reads it: this rule is file-wide"
+        )
+    if rule.get("standard") in RULE_BLIND_STANDARDS:
+        notes.append(f"{where}: {rule['standard']} never reads bypass rules, so this rule suppresses nothing")
+    if rule.get("standard") in PER_SITE_STANDARDS and not (rule.get("lines") or rule.get("functions")):
+        waives = "waives nothing" if rule["standard"] == "fallback" else "still waives the whole file, for now"
+        notes.append(
+            f"{where}: a whole-file row is outlawed for this standard, pin it per site (lines/functions); it {waives}"
+        )
+    return notes
 
 
 def _argument(call: ast.Call, param: str) -> ast.expr | None:
@@ -250,6 +272,7 @@ def check_branch_info(branch_path: str) -> list[str]:
         if not isinstance(rule, dict):
             continue
         standard = rule.get("standard") or "all standards"
+        lines.extend(ignored_field_notes(rule))
 
         if out_of_scope_reason(rule):
             out_of_scope.setdefault(standard, []).append(rule.get("file", "?"))

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-05-08
-# Modified: 2026-10-28
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -13,13 +13,14 @@ doctor_wire — auto-wire provider settings
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, List, NamedTuple, Optional
 
-from aipass.cli.apps.modules import console, success, warning
+from aipass.cli import console, success, warning
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
@@ -55,7 +56,7 @@ from aipass.aipass.apps.handlers.provider_wire import (
     settings_gaps,
 )
 from aipass.aipass.apps.handlers.opencode_cli import check_opencode_cli, cli_proc, first_line, opencode_binary
-from aipass.aipass.apps.handlers.settings_backup import DOOR_DOCTOR_FIX, DOOR_INSTALL, SettingsBackupError
+from aipass.aipass.apps.handlers.settings_backup import DOOR_DOCTOR_FIX, SettingsBackupError
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 
 
@@ -288,11 +289,15 @@ def check_opencode_side(manifest_path: Path) -> List[SettingsCheckResult]:
 SETTINGS_FIX_LABEL = "settings fix"
 YES_COMMAND = "aipass doctor --fix --yes"
 NOT_APPLIED_NO_TTY = f"not applied: no tty — {YES_COMMAND}"
+NOT_APPLIED_NON_INTERACTIVE = f"not applied: --non-interactive — {YES_COMMAND}"
+DECLINED_WARNING = (
+    "Provider settings not wired. Claude Code, Codex and OpenCode run without AIPass's hooks: "
+    "no memory or prompt injection, no safety gates on git, edits and rm, no standards checks on edits."
+)
 NOT_APPLIED_DECLINED = "not applied: declined"
 NOTHING_CHANGED = "Nothing changed. Re-run with --yes to apply without the question."
 CONSENT_TTY = "y (tty)"
 CONSENT_YES = "--yes"
-CONSENT_INSTALL = "install"
 
 
 def plan_settings_fix(manifest_path: Optional[Path], settings_path: Optional[Path] = None) -> List[SettingsPlan]:
@@ -366,11 +371,11 @@ def _apply_settings_plans(
 
 
 def fix_provider_settings(
-    manifest_path: Optional[Path], door: str = DOOR_DOCTOR_FIX, yes: bool = False
+    manifest_path: Optional[Path], door: str = DOOR_DOCTOR_FIX, yes: bool = False, non_interactive: bool = False
 ) -> List[SettingsCheckResult]:
     """--fix's settings step: plan, show, ask once, write — or say why nothing was written.
 
-    The install door never asks, ``--yes`` skips the question, no tty without ``--yes`` writes nothing.
+    ``--yes`` skips the question; no tty or *non_interactive* without ``--yes`` writes nothing.
     An unreadable or since-changed settings file is a FAIL row and nothing is written.
     """
     try:
@@ -381,18 +386,18 @@ def fix_provider_settings(
     plugin = opencode_plugin_plan(manifest_path)
     if not plans and not plugin:
         return []
-    if door == DOOR_INSTALL:
-        consent: Optional[str] = CONSENT_INSTALL
-    elif yes:
-        consent = CONSENT_YES
-    else:
+    consent: Optional[str] = CONSENT_YES
+    if not yes:
         count = _render_settings_plan(plans, plugin)
-        if not sys.stdin.isatty():
-            logger.info("[doctor] --fix with no tty and no --yes — settings plan shown, nothing written")
-            return [SettingsCheckResult(SETTINGS_FIX_LABEL, GLYPH_WARN, NOT_APPLIED_NO_TTY, YES_COMMAND)]
+        if non_interactive or not sys.stdin.isatty():
+            logger.info("[doctor] --fix unattended (non_interactive=%s) — plan shown, nothing written", non_interactive)
+            why = NOT_APPLIED_NON_INTERACTIVE if non_interactive else NOT_APPLIED_NO_TTY
+            return [SettingsCheckResult(SETTINGS_FIX_LABEL, GLYPH_WARN, why, YES_COMMAND)]
         consent = _ask_apply(count)
         if consent is None:
-            _print_manual_wire_warning([], [], [], [], [])
+            logger.warning("[doctor] provider settings not wired — user declined")
+            warning(DECLINED_WARNING)
+            warning(f"Wire them later: {WIRE_COMMAND}")
             console.print(NOTHING_CHANGED)
             return [SettingsCheckResult(SETTINGS_FIX_LABEL, GLYPH_WARN, NOT_APPLIED_DECLINED, YES_COMMAND)]
     try:
@@ -558,11 +563,6 @@ class WireCheckResult(NamedTuple):
     remediation: str
 
 
-_GLYPH_PASS = "[green]✓[/green]"
-_GLYPH_FAIL = "[red]✗[/red]"
-_GLYPH_WARN = "[yellow]![/yellow]"
-
-
 def check_wire_verify() -> list[WireCheckResult]:
     """Run the hooks wire_verify guard — catch empty/orphaned/duplicate provider entries."""
     try:
@@ -571,22 +571,26 @@ def check_wire_verify() -> list[WireCheckResult]:
             capture_output=True,
             text=True,
             timeout=10,
+            # hooks prints its report to stderr through Rich, which wraps a pipe at 80 columns.
+            env={**os.environ, "COLUMNS": "1000"},
         )
         if proc.returncode == 0:
-            return [WireCheckResult("wire verify", _GLYPH_PASS, "provider hooks wired correctly", "")]
-        lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
-        detail = lines[-1] if lines else "errors detected"
+            return [WireCheckResult("wire verify", GLYPH_PASS, "provider hooks wired correctly", "")]
+        lines = [ln.strip() for ln in f"{proc.stdout}\n{proc.stderr}".splitlines() if ln.strip()]
+        found = [ln.removeprefix("ERROR").strip() for ln in lines if ln.startswith("ERROR")]
+        detail = "; ".join(found) or (lines[-1] if lines else f"drone @hooks verify exited {proc.returncode}")
         return [
             WireCheckResult(
                 "wire verify",
-                _GLYPH_FAIL,
+                GLYPH_FAIL,
                 detail,
-                "Run 'aipass doctor --fix' to re-wire, then re-run doctor to confirm",
+                "'aipass doctor --fix' re-wires only the provider manifest's rows; "
+                "if this stays after it, the full report is 'drone @hooks verify' and the fix is @hooks'",
             )
         ]
     except FileNotFoundError as exc:
         logger.warning("[doctor] drone not found for wire_verify: %s", exc)
-        return [WireCheckResult("wire verify", _GLYPH_WARN, "drone not found", "")]
+        return [WireCheckResult("wire verify", GLYPH_WARN, "drone not found", "")]
     except subprocess.TimeoutExpired as exc:
         logger.warning("[doctor] wire_verify timed out: %s", exc)
-        return [WireCheckResult("wire verify", _GLYPH_WARN, "timed out", "")]
+        return [WireCheckResult("wire verify", GLYPH_WARN, "timed out", "")]

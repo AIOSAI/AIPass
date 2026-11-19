@@ -3,7 +3,7 @@
 # Description: state_leak_check — test template v1 item 18, no test leaks state into the next
 # Version: 1.2.1
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/state_leak_check.py."""
@@ -616,7 +616,7 @@ class TestAProductsOwnResetThatNoFixtureCalls:
         assert _lines_of(_resets(_branch(tmp_path, source, product=product))) == [5]
 
     def test_a_test_that_only_reads_the_flag_is_a_known_miss(self, tmp_path):
-        """test_versioned_engine.py's side: the reader needs a call graph, so it is never convicted."""
+        """copy_snapshot's side: the reader needs a call graph, so it is never convicted."""
         source = "from aipass.backup.apps.handlers.state import stop_flag\n\n\ndef test_x():\n"
         source += "    assert not stop_flag.stop_requested()\n    assert stop_flag.stopped_line(1, 2)\n"
 

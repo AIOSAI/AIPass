@@ -32,7 +32,36 @@ and the command ran no `drone @memory` or `drone @spawn` verb, the whole file is
 during this Bash call, outside the caps gate`, followed by every over-cap entry with its cut point. A file
 that measures clean is **said, not charged**: `MEMORY CHANGED DURING THIS BASH CALL`, which adds
 that it may not have been this command — @memory's rollover, run by *any* seat's compaction, writes here
-too. A clean change logs at INFO, a charged one at WARNING. It never blocks. Keying on `tool_use_id` is what keeps a memory Edit made just before the call from being blamed on it.
+too. A clean change logs at INFO, a charged one at WARNING. A report never blocks. Keying on `tool_use_id` is what keeps a memory Edit made just before the call from being blamed on it.
+
+**Both halves fail loud.** A snapshot that cannot be taken refuses the Bash call: an unwatched shell call is
+not let through, with one exception: a command that is exactly `drone @hooks promote rollback` (outer
+whitespace trimmed, nothing chained, piped, redirected, substituted, prefixed or added) runs, so any seat can
+put back the copy that worked; rollback smokes that copy before it moves the pointer. The match is a whole-string
+comparison, not a parse, so no parser can be what broke, and a quoted or respaced spelling is refused. Every
+other Bash call is refused with a text that names the cause, says Read, Edit and Write still work, and names the
+two repairs: that one command from the seat, or the owner's terminal. Either way it logs one
+fixed ERROR line, `[HOOKS] edit_gate tripwire: the memory snapshot could not be taken, Bash is refused until it
+can`, with the snapshot directory and cause at INFO. A comparison that fails runs after the command, so there is
+nothing left to refuse: the seat is told `MEMORY CHECK DID NOT RUN for this Bash call (<cause>)`, and one fixed
+ERROR line, `[HOOKS] edit_gate tripwire: the memory check failed, a shell write to memory may be unreported`,
+reaches medic with the cause at INFO.
+
+**The snapshot store.** The pending snapshots live in one file per session in the temp directory,
+`aipass-trinity-tripwire-<session>.json`, a dict keyed by `tool_use_id`. After the call, a store that exists but
+is not such a dict (a directory, unreadable, not JSON, another type) is the comparison failing, as above; a
+store that does not exist, or holds no entry for this call, logs `no snapshot for <id>` at INFO and says
+nothing to the seat, since the snapshot side either refused that call or chose not to watch it. Before the
+call, a damaged store starts fresh: refusing would refuse every Bash call for the rest of the session, because
+nothing else rewrites the store. The fresh store carries `_fresh_start`, the time it started. Once the write
+lands, one fixed ERROR line, `[HOOKS] edit_gate tripwire: a damaged snapshot store started fresh, calls in flight
+lost their check`, reaches medic with the cause at INFO; a store the write cannot replace (a directory) refuses
+the call as above. A damaged store cannot say which calls it held, so the stamp stands in: a watched call that
+finds no snapshot of its own while the stamp is younger than 600 seconds (Claude Code's longest Bash timeout,
+so no call in flight outlives it) is the comparison failing, with the ERROR line and `MEMORY CHECK DID NOT RUN`.
+A call the snapshot side chose not to watch (no tool_use_id, no `.trinity` to watch) stays quiet, and a call
+snapshotted after the fresh start is checked as normal. Each later snapshot carries the stamp forward until it
+is 600 seconds old and then drops it, so one damaged store marks ten minutes, not the session.
 
 It watches **every `.trinity` in the project**, not just the seat's, and
 `passport.json` with `local.json` and `observations.json`. A cross-branch shell write is exactly the shape the reader cannot always see. The wording follows
@@ -88,7 +117,9 @@ missing canonical field is authored, and refused.
 
 **The todo pad count is advised, never refused.** An 11th todo is legal on disk: the
 oldest roll off to `.backup/todo/<branch>/backlog.json` at that branch's next PreCompact or
-`drone @memory rollover run --branch @<branch>`. The pad size is @memory's own resolver
+`drone @memory rollover run --branch @<branch>`. The PreCompact hook runs that drone call (and its
+`rollover check`) with the compacting branch's directory as its cwd, so @memory's verified-caller rail
+reads the branch as the caller; a session in no branch runs the fleet roll from the repo root. The pad size is @memory's own resolver
 (`config_loader.get_todos_count`), the number its roll applies. A write that leaves the pad over it
 gets an advisory as PreToolUse `hookSpecificOutput.additionalContext`, because the model writing the
 todo is its audience; plain stdout on a PreToolUse exit 0 is shown in the transcript view and never

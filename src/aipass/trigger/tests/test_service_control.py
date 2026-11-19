@@ -3,7 +3,7 @@
 # Description: Tests for the systemd unit lifecycle of the log watcher
 # Version: 1.1.1
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/service_control.py, the systemd control surface extracted from medic.py."""
@@ -43,16 +43,15 @@ def systemd_present(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A host that has systemctl on PATH - stated, never inherited: PATH holds only an inert stub."""
     bin_dir = tmp_path / "systemd_bin"
     bin_dir.mkdir()
-    for name in ("systemctl", "systemctl.exe"):  # the .exe is what which() finds on Windows
-        stub = bin_dir / name
-        stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        stub.chmod(0o755)
+    stub = bin_dir / "systemctl"
+    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir))
 
 
 @pytest.fixture
 def systemd_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A host with no systemd at all: macOS, Windows, a bare container - PATH holds nothing."""
+    """A host with no systemd at all: a bare container - PATH holds nothing."""
     empty = tmp_path / "empty_bin"
     empty.mkdir()
     monkeypatch.setenv("PATH", str(empty))
@@ -204,8 +203,8 @@ class TestEnsureServiceInstalled:
 class TestNoSystemdHost:
     """The 2026-09-12 cure: no systemctl is a named refusal, never a False.
 
-    sentry host_portability, arm B. macOS and Windows have no systemctl and a
-    Linux container may have none; a missing binary raises FileNotFoundError
+    sentry host_portability, arm B. A Linux container may have no systemctl;
+    a missing binary raises FileNotFoundError
     out of exec, so ``check=False`` does not save the caller. Every case here
     fails on the pre-cure code, which shelled out blind.
     """

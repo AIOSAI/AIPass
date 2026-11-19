@@ -11,7 +11,7 @@ Admin grant ceremony — keygen, mint, verify the birth-cert admin privilege.
 """
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.devpulse.apps.handlers.json import json_handler
 
 from aipass.devpulse.apps.handlers.owner.admin_grant import (

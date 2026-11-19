@@ -3,7 +3,7 @@
 # Description: Tests for the read lane's git-changes lane — the card contract, the stampede, grains, rows, refusals
 # Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-10
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for read_git_changes() in apps/handlers/host/git_reads.py and its cache and refusal memory."""
@@ -943,25 +943,6 @@ class TestStagedAndUnstagedAreDifferentAnswers:
 
         assert rows["both.py"]["index"] == "M"
         assert rows["both.py"]["worktree"] == "M"
-
-    def test_the_split_is_derived_from_the_code_when_the_door_omits_it(self, fake_repo: dict) -> None:
-        """An older drone answers with `status` and no columns; those columns ARE the code."""
-        document = json.dumps(
-            {
-                "ok": True,
-                "branch": "demo",
-                "scope": "branch",
-                "files": [{"status": "A ", "path": "src/aipass/demo/new.py"}],
-                "total": 1,
-                "message": "1 file(s) changed",
-            }
-        )
-
-        with patch.object(subprocess, "run", return_value=self._completed(document)):
-            rows = self._rows(host_git.read_git_changes("demo"))
-
-        assert rows["new.py"]["index"] == "A"
-        assert rows["new.py"]["worktree"] == " "
 
     def test_the_rendered_surface_could_not_have_carried_this(self, fake_repo: dict) -> None:
         """THE EVIDENCE, KEPT: why this lane must never read drone's screen output again."""

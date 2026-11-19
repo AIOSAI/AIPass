@@ -3,7 +3,7 @@
 # Description: Tests for the roots roster and the widened name fence
 # Version: 1.1.1
 # Created: 2026-08-18
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/reads.py's four-kind name fence, /v1/dir paging and the /v1/roots route."""
@@ -17,7 +17,6 @@
 
 import json
 import re
-import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -314,10 +313,6 @@ class TestTheFenceCoversEveryRoot:
         with pytest.raises(host_reads.ReadRefused):
             host_reads.read_file("VERA-STUDIO", "/etc/passwd", root=host_reads.ROOT_PROJECT)
 
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="constructing a symlink needs a privilege the CI account may not hold",
-    )
     def test_symlink_out_of_home_refused(self, world: dict) -> None:
         """The post-resolution check — the only gate that sees a symlink out.
 

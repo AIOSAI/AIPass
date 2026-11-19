@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: loader.py
-# Version: 2.3.0
+# Version: 2.4.1
 # Description: Hook config loader — the AIPass config from AIPASS_HOME, a project's own behind trust, gates always
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-05-19
-# Modified: 2026-11-09
+# Modified: 2026-11-18
 # =============================================
 
 """Which hook config a session runs. Security never depends on trust (DPLAN-0356 item 1).
@@ -20,8 +20,8 @@ import tempfile
 from pathlib import Path
 
 from aipass.hooks.apps.handlers.config import gates
-from aipass.hooks.apps.handlers.module_root import module_file
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 _GUARD_DIR = Path(tempfile.gettempdir())
 _CONFIG = Path(".aipass") / "hooks.json"
@@ -50,7 +50,7 @@ def _absolute(raw: str) -> Path:
     path = Path(raw)
     try:
         return path.resolve()
-    except OSError as exc:  # resolve() reads the cwd on Windows; the spelling is still the place
+    except OSError as exc:  # resolve() can read the cwd; the spelling is still the place
         logger.info("[HOOKS] loader: cannot resolve %s, using it as spelled: %s", raw, exc)
         return path
 
@@ -58,16 +58,20 @@ def _absolute(raw: str) -> Path:
 def aipass_home() -> Path | None:
     """The AIPass install: $AIPASS_HOME, else the repo this code was loaded from, else None.
 
+    The repo is found by shape, not depth: the package this file sits in is its nearest folder named
+    aipass, and only a src/aipass checkout has a home. An installed aipass (site-packages) answers None,
+    even inside a checkout: the home runs its config with no trust check, so it is never a guess.
     Read per call so a test's environment patch is honoured.
     """
     raw = os.environ.get("AIPASS_HOME", "")
     if raw:
         return _absolute(raw)
-    here = module_file(__file__)
-    if len(here.parents) > 6:
-        root = here.parents[6]
-        if (root / _CONFIG).is_file() and (root / "src" / "aipass").is_dir():
-            return root
+    package = next((folder for folder in Path(__file__).resolve().parents if folder.name == "aipass"), None)
+    if package is None or package.parent.name != "src":
+        return None
+    root = package.parent.parent
+    if (root / _CONFIG).is_file() and (root / "src" / "aipass").is_dir():
+        return root
     return None
 
 
@@ -79,7 +83,7 @@ def fleet_rows(repo_root: Path) -> list[dict]:
     key = str(repo_root)
     if key not in _fleet_cache:
         # Lazy: only the commands that enumerate citizens pay for the door's import.
-        from aipass.memory.apps.modules.door_registry_scope import fleet_branches
+        from aipass.memory import fleet_branches
 
         _fleet_cache[key] = fleet_branches(repo_root=Path(repo_root), name_from="registry", strict=True)
     return _fleet_cache[key]
@@ -101,7 +105,7 @@ def _is_project_root(directory: Path) -> bool:
 def locate_config() -> tuple[str, Path | None]:
     """Where this session's config comes from: (AIPASS | EXTERNAL | NONE, the directory holding .aipass/)."""
     home = aipass_home()
-    # One canonical form, like home and the trust registry's keys: a symlinked walk (macOS /var) reads as external.
+    # One canonical form, like home and the trust registry's keys: a symlinked walk reads as external.
     search, stop = (_absolute(str(bound)) for bound in _search_bounds())
     start = search
     while search != stop and search.parent != search:
@@ -187,7 +191,12 @@ def find_project_config() -> dict | None:
     if kind == EXTERNAL:
         if not registry_path().exists():
             bootstrap()
-        if not is_trusted(str(where)):
+        try:
+            trusted = is_trusted(str(where))
+        except ValueError as exc:  # a registry that cannot be read is no trust: the gate set serves
+            logger.error("[HOOKS] loader: %s — %s runs the AIPass gates only", exc, where)
+            return None
+        if not trusted:
             # Its handler_namespace with it: no handler of an untrusted config is imported.
             logger.warning(
                 "[HOOKS] project not enrolled, or its hooks.json changed since enrollment: %s (its own hooks are off;"
@@ -217,9 +226,9 @@ def find_project_config() -> dict | None:
 def resolve_config() -> dict:
     """The config a hook call runs: the site's own (find_project_config), else the gate set. Never empty of gates."""
     config = find_project_config()
-    if config is not None:
-        return config
-    return gate_set()
+    found = config is not None
+    json_handler.log_operation("resolve_config", {"source": "project" if found else "gate_set"})
+    return config if found else gate_set()
 
 
 def config_unavailable_reason() -> str:
@@ -250,6 +259,22 @@ def config_unavailable_reason() -> str:
             f"Fix (re-enroll): aipass trust {where}"
         )
     return f"{config_file} could not be read or parsed — see the [HOOKS] error in the engine log.{tail}"
+
+
+def config_break_banner() -> str | None:
+    """Loud check for an AIPass config that cannot be read: the built-in gate set alone runs, every injector is off."""
+    home = aipass_home()
+    if home is None:
+        return None
+    try:
+        _read_config(home / _CONFIG)
+    except (OSError, ValueError) as exc:
+        return (
+            "# HOOKS CONFIG UNREADABLE — ONLY THE BUILT-IN GATES RUN\n\n"
+            f"{home / _CONFIG} cannot be read ({exc}), so grounding, identity and every other "
+            "injector are off. The gates still run.\n\nFix the file: this does not heal itself."
+        )
+    return None
 
 
 def trust_break_banner() -> str | None:

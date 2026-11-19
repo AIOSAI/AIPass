@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.10.1
+# Version: 1.12.0
 # Description: Tests for cadence module (DPLAN-0200): the fire decision; regroup and counter in test_cadence_regroup.py
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-11-04
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/cadence.py: the fire decision."""
@@ -17,9 +17,9 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that cadence.py parses and imports, ruff and collection cover it
 # sentry: no-test-needed(documentation) — is_automated(), reset_counter() and should_fire() carry docstrings
-# sentry: no-test-needed(stdlib) — fcntl, unavailable on Windows; the platform fallback never runs on this CI
 
 import contextlib
+import importlib
 import json
 import os
 import time
@@ -27,6 +27,7 @@ from unittest.mock import patch
 
 import pytest
 
+import aipass.prax as prax
 from aipass.hooks.apps.modules import cadence
 from aipass.hooks.apps.modules.cadence import (
     is_automated,
@@ -93,6 +94,20 @@ class TestShouldFire:
             patch(f"{MODULE}._CONFIG_PATH", config),
         ):
             assert should_fire("global") is True
+
+    @pytest.mark.parametrize("body", ["{broken", "[]"], ids=["not-json", "not-object"])
+    def test_an_unusable_config_is_an_error_and_never_a_crash(self, tmp_path, caplog, body):
+        """A non-object file crashed _deep_merge; a broken one fell to the defaults at INFO."""
+        config = tmp_path / "cadence.json"
+        config.write_text(body, encoding="utf-8")
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+            patch(f"{MODULE}._CONFIG_PATH", config),
+            caplog.at_level("ERROR"),
+        ):
+            assert should_fire("global") is True
+        assert any(r.levelname == "ERROR" and "cadence.json" in r.getMessage() for r in caplog.records)
 
     def test_cadence_disabled_always_fires(self, tmp_path):
         state_file = tmp_path / "aipass-cadence-test-session.json"
@@ -965,3 +980,65 @@ class TestShippedDefaults:
 
         assert self._decide(tmp_path, monkeypatch, "tier0", 5, config) is True
         assert self._decide(tmp_path, monkeypatch, "navmap", 5, config) is False
+
+
+class TestTheConfigFollowsPraxsStateRoot:
+    """cadence_config.json never ships: it is read from branch_state_root("hooks"), on a wheel the home folder."""
+
+    def test_a_config_in_the_state_root_puts_the_kernel_back_on_the_beat(self, tmp_path, monkeypatch):
+        custom = tmp_path / "state" / "hooks" / "hooks_json" / "custom_config"
+        custom.mkdir(parents=True)
+        config = {"loaders": {"tier0": {"beat": True}}}
+        (custom / "cadence_config.json").write_text(json.dumps(config), encoding="utf-8")
+        try:
+            with patch.object(prax, "branch_state_root", lambda branch: tmp_path / "state" / branch):
+                importlib.reload(cadence)
+            monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path)
+            monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "test-session")
+            _reset_module_globals()
+            _write_state(tmp_path, turn=4)
+            assert should_fire("tier0") is True
+        finally:
+            importlib.reload(cadence)
+
+
+class TestDamagedStateIsSetAsideOnce:
+    """Cadence state is read every prompt: damage is set aside under the lock with one ERROR, never one per prompt."""
+
+    @contextlib.contextmanager
+    def _seat(self, tmp_path, content: str):
+        state = tmp_path / "aipass-cadence-test-session.json"
+        state.write_text(content, encoding="utf-8")
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+            patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
+            patch(f"{MODULE}.logger") as log,
+        ):
+            yield state, log
+
+    @pytest.mark.parametrize("damage", ["{corrupt", "[1, 2]"])
+    def test_a_damaged_state_file_is_set_aside_once_and_counting_starts_over(self, tmp_path, damage):
+        with self._seat(tmp_path, damage) as (state, log):
+            first = should_fire("global")
+            _reset_module_globals()
+            should_fire("global")
+
+        assert first is True and log.error.call_count == 1
+        (aside,) = tmp_path.glob("aipass-cadence-test-session.json.corrupt-*")
+        assert aside.read_text(encoding="utf-8") == damage
+        assert json.loads(state.read_text(encoding="utf-8"))["turn"] == 0
+
+    def test_current_turn_sets_a_damaged_file_aside(self, tmp_path):
+        with self._seat(tmp_path, "{corrupt") as (_state, log):
+            assert cadence.current_turn() is None
+
+        assert log.error.call_count == 1
+        assert len(list(tmp_path.glob("*.corrupt-*"))) == 1
+
+    def test_consume_regroup_pending_sets_a_damaged_file_aside(self, tmp_path):
+        with self._seat(tmp_path, "{corrupt") as (_state, log):
+            assert cadence.consume_regroup_pending() is False
+
+        assert log.error.call_count == 1
+        assert len(list(tmp_path.glob("*.corrupt-*"))) == 1

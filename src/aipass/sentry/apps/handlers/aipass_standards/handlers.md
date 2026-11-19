@@ -88,8 +88,7 @@ json_handler.log_operation("my_module", "operation", data)  # Typo-prone, boiler
 - The proof is the **question**, not the spelling: a call to any frame-walk API
   (`sys._getframe`, `inspect.stack`, `inspect.currentframe` ...) or to a named caller helper
   (`_get_caller_module_name`, `get_caller`). `sys._getframe` is the sound answer:
-  `inspect.stack()` reaches an unguarded `os.path.realpath` inside `inspect.getmodule`, which
-  reads `os.getcwd()` and fails on a Windows machine with a dead working directory.
+  it reads one frame, where `inspect.stack()` reads the source of every frame on the stack.
 - Both are read from the parse tree, never as a substring, so a docstring or comment that
   names a call neither proves nor convicts. An unparseable file is no acquittal.
 - Known blind spot: the rule reads the parameter's NAME, so a `module_name` that is an event
@@ -142,7 +141,7 @@ json_handler.log_operation("validation_run", {"files": 42})
 
 **Core principle:** Handlers cannot import MODULES from their own branch (prevents circular dependencies).
 
-**Strings are imports (2026-10-07, DPLAN-0404).** The cross-branch rule also reads a handlers target named as a call's string: `importlib.import_module("aipass.<other>.apps.handlers...")` (any alias, or a seam whose name ends in `import_module`), `pkgutil.resolve_name(...)`, `patch(...)` (first positional), `<x>.setattr("...", ...)`, and a bare name bound once at module level to such a string. The conviction quotes the line with `(string import)`. Prose (docstrings, comments, assignments, log messages) is not read; same-branch targets stay allowed. Reach another branch through its door, `aipass.<owner>.apps.modules.door_<subject>`.
+**Strings are imports (2026-10-07, DPLAN-0404).** The cross-branch rule also reads a handlers target named as a call's string: `importlib.import_module("aipass.<other>.apps.handlers...")` (any alias, or a seam whose name ends in `import_module`), `pkgutil.resolve_name(...)`, `patch(...)` (first positional), `<x>.setattr("...", ...)`, and a bare name bound once at module level to such a string. The conviction quotes the line with `(string import)`. Prose (docstrings, comments, assignments, log messages) is not read; same-branch targets stay allowed. Reach another branch through its front door, `from aipass.<owner> import <name>`.
 
 ### Why This Matters
 
@@ -194,11 +193,11 @@ from aipass.sentry.apps.modules.create_thing import something  # ❌ NO - circul
 # flow/apps/modules/list_plans.py
 from aipass.prax.apps.handlers.logging.setup import get_logger  # ❌ BLOCKED
 
-# ✅ CORRECT - use the module (public API)
-from aipass.prax.apps.modules.logger import system_logger as logger
+# ✅ CORRECT - use the front door
+from aipass.prax import logger
 ```
 
-**Why forbidden:** Handlers are internal implementation. External branches use MODULES.
+**Why forbidden:** Handlers are internal implementation. External branches use the front door.
 
 ### Real Example - Error Package
 
@@ -228,7 +227,7 @@ from .formatters import format_result, format_batch_header
 
 ```python
 # modules/imports_standard.py
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.cli import prompts
 from aipass.sentry.apps.handlers.standards import imports_check
@@ -236,28 +235,20 @@ from aipass.sentry.apps.handlers.standards import imports_check
 
 **Why this works:** Dependencies flow ONE way (modules → handlers). Better one module imports 20 handlers than handlers importing each other.
 
-### Package-Level Exceptions
+### Service Providers - No Exception
 
-**Error handlers are system-wide service:**
+**Infrastructure branches are reached through their front door like any other branch:**
 
 ```python
-# Any handler can import error system (current: cli)
-from aipass.cli.apps.handlers.error import track_operation
-from aipass.cli.apps.handlers.error.result_types import OperationResult
-
-@track_operation
-def create_branch(name):
-    # Business logic
-    return True
+# Any handler, any branch: what cli's door hands out
+from aipass.cli import error, fatal, mark_command_failed
+from aipass.prax import logger
 ```
 
-**Why exception:** Error handlers are infrastructure service - three-tier output (JSON log, system log, console). Not domain logic, but framework service.
-
-**Current reality:** Error system lives in `aipass.cli.apps.handlers.error` and is imported by handlers across branches. This creates dependency on cli, but is necessary for consistent error handling across system.
-
-**Current direction:** Error system in `aipass.cli.apps.handlers.error` — clearly infrastructure, not branch-specific.
-
-**Rule:** Service providers (infrastructure shared across ALL branches) can be imported cross-domain.
+**Rule:** There is no service-provider exception. A path under another branch's `apps/`
+(`aipass.cli.apps.handlers...`, `aipass.cli.apps.modules...`) is convicted by the
+`front_door` row, infrastructure or not. A service provider shares a name by listing it in its
+door's `_HOMES` table in `src/aipass/<branch>/__init__.py`.
 
 ---
 
@@ -265,33 +256,34 @@ def create_branch(name):
 
 **Status:** ✅ Standard (2025-11-29)
 
-**Core principle:** Handlers are INTERNAL to their branch. External consumers use MODULES as the public API.
+**Core principle:** Handlers are INTERNAL to their branch. External consumers use the branch's front door, `from aipass.<branch> import <name>`.
 
 ### The Import Hierarchy
 
 ```
 External Branch
       ↓
-  Entry Point (prax.py, drone.py, cli.py)
+  Front door (src/aipass/prax/__init__.py: _HOMES + __getattr__)  ← EXTERNAL STOPS HERE
       ↓
-    Modules (prax/apps/modules/*.py)  ← EXTERNAL STOPS HERE
+    Modules (prax/apps/modules/*.py)  ← NEVER IMPORTED FROM OUTSIDE
       ↓
     Handlers (prax/apps/handlers/*/*.py)  ← NEVER EXPOSED
 ```
 
-**Rule:** External consumers stop at MODULES. They never touch handlers.
+**Rule:** External consumers stop at the package door, `from aipass.<branch> import <name>`.
+They never import a path under `apps/`, modules as much as handlers (`front_door` row).
 
 ### Two Types of Branches
 
-1. **CLI Tools** - Used via command line, not imported
+1. **CLI Tools** - Used via command line first
    - Flow, Sentry, AI_Mail, Spawn, Drone
-   - You run `drone @flow create`, you don't `import flow` or `import drone`
-   - Drone is a CLI router that resolves @ and routes commands to branches
+   - You run `drone @flow create`, you don't `import flow` to reach Flow
+   - Drone is a command router that resolves @ and routes commands to branches
 
 2. **Library Services** - Imported by other code
    - Prax (logging), CLI (formatting), API (LLM calls), Memory (vectors)
-   - You `import aipass.prax` then `from aipass.prax.apps.modules.logger import logger`
-   - **NOTE:** Drone is NOT a library service - it's a CLI router, never imported
+   - You `from aipass.prax import logger` (or `from aipass import prax`, then `prax.logger`)
+   - **NOTE:** Drone is a command router first; a name its package door hands out is imported as `from aipass.drone import <name>`
 
 ### Same-Branch Handler Imports - ALLOWED
 
@@ -313,24 +305,24 @@ from aipass.flow.apps.handlers.json.json_handler import log_operation  # ✅ OK 
 # ❌ WRONG - reaching into Prax handlers from Flow
 from aipass.prax.apps.handlers.logging.setup import get_logger
 
-# ✅ RIGHT - import Prax module (public API)
-from aipass.prax.apps.modules.logger import system_logger as logger
+# ✅ RIGHT - import from Prax's front door
+from aipass.prax import logger
 ```
 
 ```python
 # ❌ WRONG - reaching into CLI handlers from Spawn
 from aipass.cli.apps.handlers.error_handler import track_operation
 
-# ✅ RIGHT - import CLI module (public API)
-from aipass.cli.apps.modules.error_tracking import track_operation
+# ✅ RIGHT - import what CLI's front door hands out
+from aipass.cli import error
 ```
 
 ### Handlers and modules/ - own branch BLOCKED, other branches ALLOWED
 
 A handler importing its **own** branch's `modules/` inverts the layering (orchestration lives in
-modules/) and is the shape that can close a cycle. Another branch's `modules/` is that branch's
-public gateway, the door the independence rule sends cross-branch callers to, so a handler may
-import it. Prax's logger and cli's modules are allowed everywhere. When the file's branch cannot be
+modules/) and is the shape that can close a cycle. Another branch is reached through its front
+door, `from aipass.<branch> import <name>`; this rule does not convict another branch's
+`modules/`, the `front_door` standard does. When the file's branch cannot be
 told from its path, the independence rule is not evaluable and says so, while the orchestration
 rule stays strict.
 
@@ -358,11 +350,8 @@ ACCESS DENIED: Cross-branch handler import blocked
   Blocked:       from aipass.prax.apps.handlers.logging.setup import get_logger
 
   Handlers are internal to their branch.
-  Use the module API instead:
-    from aipass.prax.apps.modules.<module> import <function>
-
-  Example:
-    from aipass.prax.apps.modules.logger import logger
+  Use the package door instead:
+    from aipass.prax import <name>
 
   For full standards guide:
     drone @sentry handlers
@@ -396,7 +385,7 @@ Each library service defines what it exposes:
 
 **Modules are the contract. Handlers are the implementation.**
 
-**NOTE:** Drone is NOT in this table because it's a CLI router, not a library service. Branches receive commands FROM Drone (via CLI), they never import it.
+**NOTE:** Drone is not in this table because it's a command router first. Branches receive commands FROM Drone (via CLI); a name its package door hands out (e.g. `normalize_branch_arg`) is imported as `from aipass.drone import <name>`.
 
 ### Transitive Dependencies
 
@@ -408,15 +397,15 @@ Example with library services:
 
 **You import the service that owns the capability.** You don't care about its internal dependencies.
 
-**Important:** CLI branches like Flow, Sentry, AI_Mail don't import each other or Drone. They're invoked via `drone @branch command`, not imported.
+**Important:** CLI branches like Flow, Sentry, AI_Mail reach each other via `drone @branch command`, not by importing drone. A drone door name is imported as `from aipass.drone import <name>`.
 
 ---
 
-## Drone Architecture - CLI Router, Not Library
+## Drone Architecture - a Command Router with a Package Door
 
-**Status:** ✅ Critical Architecture Rule (2025-11-29)
+**Status:** ✅ Critical Architecture Rule
 
-**Core principle:** Drone is a CLI router that resolves @ symbols and routes commands to branches. It is NEVER imported as a library.
+**Core principle:** Drone is a command router first: it resolves @ symbols and routes commands to branches. A branch reaches another branch through `drone @branch command`; a name drone's door hands out is imported as `from aipass.drone import <name>`, never from `aipass.drone.apps...`.
 
 ### What Drone Does
 
@@ -435,7 +424,7 @@ When a branch is invoked via Drone:
 1. Drone has already resolved all @ symbols in the command
 2. Branch receives clean arguments without @ symbols
 3. Branch never sees or handles @ resolution
-4. Branch never imports Drone
+4. Branch does not import drone to resolve @
 
 **Example:**
 ```bash
@@ -456,6 +445,7 @@ sys.argv = ["flow.py", "create", "<project_root>/projects/project1", "--name", "
 
 ```python
 # ❌ WRONG - Branch should NEVER handle @ resolution
+# ❌ WRONG - under drone's apps/, convicted by front_door; use from aipass.drone import <name>
 from aipass.drone.apps.modules.resolve import resolve_path
 
 def some_function(path_arg):
@@ -466,11 +456,11 @@ def some_function(path_arg):
 **Why this is wrong:**
 1. Drone resolves @ BEFORE calling the branch
 2. Branch never receives @ symbols (already resolved)
-3. Importing Drone creates unnecessary coupling
+3. Importing drone's apps/ is convicted by front_door, and re-resolving @ creates unnecessary coupling
 4. Violates single responsibility (routing vs execution)
 
 **If a branch has @ handling code:**
-- It's legacy from before Drone architecture was clarified
+- It's architectural debt
 - Should be removed
 - Branch should expect pre-resolved paths
 
@@ -492,25 +482,25 @@ def create_plan(project_path: str, name: str):
 
 ### Two Types of Branches (Updated)
 
-**1. CLI Tools** - Invoked via Drone, never imported:
+**1. CLI Tools** - Invoked via Drone first:
 - Flow, Sentry, AI_Mail, Spawn, **Drone itself**
 - Usage: `drone @branch command`
 - Communication: Via CLI arguments (@ pre-resolved)
-- Never import each other
+- Reach each other through `drone @branch command`; a door name only as `from aipass.<branch> import <name>`
 
 **2. Library Services** - Imported by other code:
 - Prax (logging), CLI (formatting), API (LLM calls), Memory (vectors)
-- Usage: `from aipass.prax.apps.modules.logger import logger`
+- Usage: `from aipass.prax import logger` (front door; never a path under `apps/`)
 - Communication: Via Python imports
 - Can be imported by any branch
 
-**Drone is special:** It's a CLI tool that routes TO other CLI tools, but is never imported.
+**Drone is special:** It's a command router first that routes TO other CLI tools; its package door hands out names such as `resolve_branch`, `normalize_branch_arg`, `route_command`, imported as `from aipass.drone import <name>`.
 
 ### Summary
 
-- **Drone = CLI router** (resolves @, routes commands)
+- **Drone = command router first** (resolves @, routes commands), with a package door
 - **Branches = CLI executors** (receive pre-resolved paths)
-- **If branch imports Drone** = architectural debt
+- **If branch imports from `aipass.drone.apps...`** = convicted by front_door; use `from aipass.drone import <name>`
 - **If branch handles @** = architectural debt
 - **@ resolution happens ONCE** (in Drone, before branch invocation)
 
@@ -734,7 +724,7 @@ handlers/
       └── prompts.py        → 59 lines (user prompts)
 ```
 
-**Note:** Spawn handlers currently import from `aipass.cli.apps.handlers.error` for error tracking. This is the service provider exception - error handlers are infrastructure used across all branches.
+**Note:** Spawn reaches cli's error output through cli's door (`from aipass.cli import error`); a path under `aipass.cli.apps` is convicted by the `front_door` row, error handling included.
 
 **Notice:**
 - Each domain self-contained
@@ -1336,6 +1326,19 @@ def _get_registered_emails() -> set:
 **When NOT to use:**
 - Need to modify the registry (use Spawn module API)
 - Need complex registry queries (consider whether a module should handle this)
+
+---
+
+## Bypass Rows
+
+Each import that breaks independence (another branch's handlers) or orchestration (its own
+branch's modules) is its own site, at its line, inside the function that holds it (`<file>` at
+module level). The message names every open site. A row with `"lines": [n]` waives the import on
+line n; a row with `"functions": ["load"]` waives the imports inside `load`. Every other site still
+convicts.
+
+The auto-detection finding is file-level: a row with `"functions": ["<file>"]` waives it and a line
+row does not. A row with no `lines` or `functions` waives the whole file.
 
 ---
 

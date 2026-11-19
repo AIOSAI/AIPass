@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: *_REGISTRY.json discovery and CRUD operations
-# Version: 1.3.0
+# Version: 1.5.0
 # Created: 2026-03-05
-# Modified: 2026-11-09
+# Modified: 2026-11-17
 # =============================================
 
 """*_REGISTRY.json discovery and CRUD operations.
@@ -11,21 +11,17 @@
 metadata.id is the project credential; an entry's registry_id is a per-citizen UUID. Never conflate them.
 Entry flags owner and admin are the sealed authority; a passport never is."""
 
+import fcntl
+import os
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from aipass.memory.apps.modules.door_registry_scope import fleet_branches
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.drone import is_registry_filename, resolve_aipass_home
+from aipass.memory import fleet_branches
+from aipass.prax import logger
 from aipass.spawn.apps.handlers.json import json_handler
-
-# POSIX only: Windows has no fcntl, so registry_lock is a no-op there.
-try:
-    import fcntl
-except ImportError:
-    fcntl = None  # type: ignore[assignment]
-    logger.info("[registry] fcntl unavailable (Windows) — registry writers run unlocked")
 
 
 _PROTECTED_FLOOR = frozenset({"spawn", "devpulse", "drone"})
@@ -41,6 +37,7 @@ def is_protected(branch_name, branch_dir=None, registry_path=None, count_passpor
 
     Any one layer protects: the hardcoded floor, the registry owner flag, or a registered passport.
     count_passport=False asks the floor and owner layers only (retirement clears the passport layer).
+    A layer that cannot be read answers PROTECTED: the delete is refused, never let through blind.
     Returns (protected, reason)."""
     name_lower = branch_name.lower()
 
@@ -53,28 +50,43 @@ def is_protected(branch_name, branch_dir=None, registry_path=None, count_passpor
             # Answer, never raise: AttributeError on None would escape the except below inside a safety check.
             logger.info("[is_protected] No registry found — registry layer cannot answer for %s", branch_name)
             return False, "no registry found — not protected by the registry layer"
-        reg_data = load_registry(rp)
+        # Not load_registry(): it answers an empty schema for an unreadable file, which would read as "not protected".
+        reg_data = json_handler.read_json(rp) if rp.exists() else {}
+        if not isinstance(reg_data, dict):
+            raise ValueError(f"{rp} could not be read as a registry")
         for entry in branches_as_list(reg_data.get("branches", [])):
             if entry.get("name", "").lower() == name_lower:
                 if entry.get("owner") is True:
                     return True, "registry owner"
                 if branch_dir is None:
-                    branch_dir = (rp.parent / entry.get("path", "")).resolve()
+                    branch_dir = (rp.parent / entry_path(entry)).resolve()
                 break
     except (OSError, ValueError, KeyError) as exc:
-        logger.info("[is_protected] Registry lookup failed for %s: %s", branch_name, exc)
+        logger.error("[is_protected] Registry lookup failed for %s: %s", branch_name, exc)
+        return True, f"protection unknown: the registry could not be read ({exc})"
 
     if count_passport and branch_dir is not None:
         passport_path = Path(branch_dir) / ".trinity" / "passport.json"
         if passport_path.is_file():
             try:
                 passport = json_handler.read_json(passport_path)
-                if passport and passport.get("citizenship", {}).get("registered") is True:
+                if not isinstance(passport, dict):
+                    raise ValueError("not a readable JSON object")
+                if passport.get("citizenship", {}).get("registered") is True:
                     return True, "active citizen"
             except (OSError, ValueError, KeyError) as exc:
-                logger.info("[is_protected] Passport read failed for %s: %s", branch_name, exc)
+                logger.error("[is_protected] Passport read failed for %s: %s", branch_name, exc)
+                return True, f"protection unknown: passport {passport_path} could not be read ({exc})"
 
     return False, ""
+
+
+def entry_path(entry):
+    """The entry's relative path; a row with none raises, never joins as the project root."""
+    path = entry.get("path")
+    if not path:
+        raise ValueError(f"registry entry {entry.get('name', '?')!r} has no path")
+    return path
 
 
 def branches_as_list(branches):
@@ -86,14 +98,45 @@ def branches_as_list(branches):
     return []
 
 
+def registry_files_in(directory) -> list[Path]:
+    """Every registry FILE directly inside ``directory``, sorted: drone's exact-case name rule, then is_file.
+
+    A directory named like a registry, or a lowercase lookalike such as .template_registry.json, is never one.
+    A directory that cannot be listed holds none, and says so in the log."""
+    try:
+        entries = list(Path(directory).iterdir())
+    except OSError as exc:
+        logger.warning("[spawn] cannot list %s for a registry: %s", directory, exc)
+        return []
+    return sorted(p for p in entries if is_registry_filename(p.name) and p.is_file())
+
+
 def find_registry(start_path=None):
-    """Find *_REGISTRY.json — walks up from start_path only.
+    """Find *_REGISTRY.json — walks up from start_path (or the cwd) only.
 
-    No package_root fallback: it would silently register external agents in AIPass's own registry.
-    Returns None when no registry is found."""
-    from aipass.aipass.shared.registry_discovery import find_registry as _common_find
+    An operator-named AIPASS_REGISTRY is returned unchecked. No package_root fallback: it would silently
+    register external agents in AIPass's own registry. Returns None when no registry is found."""
+    explicit = os.environ.get("AIPASS_REGISTRY")
+    if explicit:
+        return Path(explicit)
+    current = Path(start_path).resolve() if start_path else Path.cwd()
+    for directory in (current, *current.parents):
+        found = registry_files_in(directory)
+        if found:
+            return found[0]
+    return None
 
-    return _common_find(start_path=start_path)
+
+def aipass_home() -> Path:
+    """The AIPass home, drone's answer (AIPASS_HOME, the interpreter's install, the newest enrolled home).
+
+    Raises when none of the three names one: a guessed folder would misfile a citizen or a receipt."""
+    answer = resolve_aipass_home()
+    if answer.path is None:
+        msg = "AIPass home not found - tried: " + "; ".join(answer.tried)
+        logger.error("[spawn] %s", msg)
+        raise RuntimeError(msg)
+    return Path(answer.path).resolve()
 
 
 def fleet_rows(repo_root):
@@ -177,9 +220,6 @@ def registry_lock(registry_path):
 
     flock is per open file, so a nested registry_lock on the same registry in one process deadlocks."""
     registry_path = Path(registry_path)
-    if fcntl is None:
-        yield
-        return
     lock_path = registry_path.parent / f".{registry_path.stem}.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "w", encoding="utf-8") as lock_fd:
@@ -345,7 +385,7 @@ def pick_owner_branch(branches, project_root):
     project_root = Path(project_root)
 
     for branch in branches:
-        branch_path = project_root / branch.get("path", "")
+        branch_path = project_root / entry_path(branch)
         passport_path = branch_path / ".trinity" / "passport.json"
         if passport_path.exists():
             passport = json_handler.read_json(passport_path)

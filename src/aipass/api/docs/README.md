@@ -10,12 +10,13 @@ is the face; these are what you open when something breaks.
 |---|---|
 | [clients.md](clients.md) | The in-process Python API other branches import, and the contract registry |
 | [host_api.md](host_api.md) | The Stage 0 host API: the bind rule, tokens, scopes, routes, the read cache |
-| [host_surfaces.md](host_surfaces.md) | Scopes and verbs, the phone face, the fleet snapshot, the terminal socket, uploads, the backup door |
+| [host_surfaces.md](host_surfaces.md) | Scopes and verbs, the phone face, the fleet snapshot, the terminal socket, uploads |
+| [host_backup.md](host_backup.md) | The backup door: lane runs and jobs, @backup's status, the scheduled backup |
 | [host_agent_chat.md](host_agent_chat.md) | An agent's chat feed, its live state, and typing, interrupting, allowing and denying in its room |
 | [host_autostart.md](host_autostart.md) | The systemd user unit, what it installs, and what it deliberately does not |
 | [git_surface.md](git_surface.md) | The git reads the phone asks for: patch, changes, log, commit |
 | [git_remote.md](git_remote.md) | The remote lane, its two fields, and why credentials never travel |
-| [internals.md](internals.md) | Import safety without a working directory, and the settings conformance corpus |
+| [internals.md](internals.md) | The handlers fence, and the settings conformance corpus |
 | [SECURITY.md](SECURITY.md) | The security posture of the host API and the credential store |
 
 Work in progress, research and dated one-offs belong in `docs.local/`, not here: this

@@ -177,7 +177,7 @@
       "path": ".sentry/README.md"
     },
     "f010": {
-      "content_hash": "9b1734c42fc2",
+      "content_hash": "0955a9b64593",
       "has_branch_placeholder": false,
       "name": "bypass.json",
       "path": ".sentry/bypass.json"
@@ -249,7 +249,7 @@
       "path": "apps/handlers/README.md"
     },
     "f022": {
-      "content_hash": "feb5e7c1e4b6",
+      "content_hash": "c88189c02566",
       "has_branch_placeholder": false,
       "name": "__init__.py",
       "path": "apps/handlers/__init__.py"
@@ -273,13 +273,13 @@
       "path": "apps/plugins/README.md"
     },
     "f026": {
-      "content_hash": "cb42dcf8f733",
+      "content_hash": "10a431cbfff5",
       "has_branch_placeholder": false,
       "name": "__init__.py",
       "path": "__init__.py"
     },
     "f027": {
-      "content_hash": "a2a3a63d4044",
+      "content_hash": "9c477503cad8",
       "has_branch_placeholder": true,
       "name": "{{BRANCH}}.py",
       "path": "apps/{{BRANCH}}.py"
@@ -411,19 +411,19 @@
       "path": "tests/test_cli_routing.py"
     },
     "f049": {
-      "content_hash": "fcad11deea25",
+      "content_hash": "76ef767d7ce5",
       "has_branch_placeholder": false,
       "name": "test_scaffold.py",
       "path": "tests/test_scaffold.py"
     },
     "f050": {
-      "content_hash": "d3df3c22c520",
+      "content_hash": "ee50f54b3da5",
       "has_branch_placeholder": false,
       "name": "support_fence.py",
       "path": "tests/support_fence.py"
     },
     "f051": {
-      "content_hash": "3fe422edcbc3",
+      "content_hash": "7ede9272d093",
       "has_branch_placeholder": false,
       "name": "test_handlers_fence.py",
       "path": "tests/test_handlers_fence.py"
@@ -431,7 +431,7 @@
   },
   "metadata": {
     "description": "Template file tracking registry for ID-based updates",
-    "last_updated": "2026-11-02",
+    "last_updated": "2026-11-17",
     "version": "1.0.0"
   }
 }

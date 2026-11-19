@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email_send.py
 # Description: Email Send Orchestration (extracted from email.py)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-04-22
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -12,14 +12,13 @@ Email Send Orchestration
 Direct, interactive and broadcast send, plus the dispatch trigger.
 """
 
-import os
 import sys
 from pathlib import Path
 from typing import List
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
-from aipass.trigger.apps.modules.core import trigger
+from aipass.cli import console, error
+from aipass.trigger import trigger
 
 from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
 from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
@@ -43,12 +42,6 @@ from aipass.ai_mail.apps.handlers.email.error_dispatch import dispatch_send_erro
 from aipass.ai_mail.apps.handlers.email.send_args import parse_send_args, resolve_dispatch_target
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 _AI_MAIL_DIR = Path(__file__).resolve().parents[2]
 _REPO_ROOT = find_repo_root()
@@ -128,6 +121,7 @@ def handle_send(args: List[str]) -> bool:
             parsed["no_memory_save"],
             from_branch=from_branch,
             upsert_key=parsed.get("upsert_key"),
+            kind=parsed.get("kind"),
         )
         return True
 
@@ -145,6 +139,7 @@ def handle_send(args: List[str]) -> bool:
             parsed["no_memory_save"],
             from_branch=from_branch,
             upsert_key=parsed.get("upsert_key"),
+            kind=parsed.get("kind"),
         ):
             ok += 1
     console.print(f"\nGroup send complete: {ok}/{len(recipients)} delivered")
@@ -192,6 +187,7 @@ def _send_direct(
     from_branch=None,
     upsert_key=None,
     user_info=None,
+    kind=None,
 ) -> bool:
     """Direct email send - thin wrapper over send handlers.
 
@@ -211,7 +207,9 @@ def _send_direct(
             if upsert_key:
                 error("--upsert-key is not supported for broadcast (@all) sends")
                 return False
-            return _send_broadcast(subject, message, user_info, auto_execute, no_memory_save, reply_to, dispatched_to)
+            return _send_broadcast(
+                subject, message, user_info, auto_execute, no_memory_save, reply_to, dispatched_to, kind=kind
+            )
 
         success, error_msg = send_to_single(
             to_branch,
@@ -228,6 +226,7 @@ def _send_direct(
             _delivery_callback,
             json_handler.log_operation,
             upsert_key=upsert_key,
+            kind=kind,
         )
 
         if success:
@@ -284,7 +283,9 @@ def resolve_broadcast_targets() -> list:
     return branches
 
 
-def _send_broadcast(subject, message, user_info, auto_execute, no_memory_save, reply_to, dispatched_to) -> bool:
+def _send_broadcast(
+    subject, message, user_info, auto_execute, no_memory_save, reply_to, dispatched_to, kind=None
+) -> bool:
     """Broadcast send to all branches - display wrapper."""
     branches = resolve_broadcast_targets()
     console.print(f"\nBroadcasting to {len(branches)} branches...")
@@ -302,6 +303,7 @@ def _send_broadcast(subject, message, user_info, auto_execute, no_memory_save, r
         deliver_email_to_branch,
         json_handler.log_operation,
         update_central,
+        kind=kind,
     )
     if isinstance(results, str) or results is None:
         error("Failed to load email file for broadcast")

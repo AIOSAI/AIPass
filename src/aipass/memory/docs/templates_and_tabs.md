@@ -16,15 +16,17 @@ instruction the editing agent reads. Everything below is the machinery behind
 `push-templates` and `diff-templates` still **route and refuse**, naming the live lane
 (`modules/templates.RETIRED_VERBS`); a removed verb tells a caller nothing about its replacement.
 They scanned the branch root for a naming convention that predates `.trinity/` and could match no
-real memory file. `pusher.py`, `differ.py` and the tests that pinned them are parked in
-`tests/parked/dead_template_lane_20260827/`, with the measurement written down there.
+real memory file: measured live, `diff-templates` reported 16 branches with differences and not
+one was a `.trinity/` file. `pusher.py`, `differ.py` and their tests have left the tree.
 
 - `push-templates` → `drone @memory push` (branch memory files, gated) and
   `drone @memory templates spawn-templates` (@spawn's scaffold sets)
 - `diff-templates` → `drone @memory push --dry-run`
 
 `templates spawn-templates` (`spawn_pusher.py`) propagates the gold templates into @spawn's template
-sets at `spawn/templates/*/.trinity/{local,observations}.json`.
+sets at `spawn/templates/*/.trinity/{local,observations}.json`. A real write is @spawn's seat,
+@memory's or the verified admin's; `templates bump --confirm` pushes every branch's memory, so it is
+@memory's or the admin's (`handlers/cli/caller_gate.py`). Dry runs pass for anyone.
 
 `template-status` reads each branch's own `.trinity/.template_version.json` receipt through
 `template_bump.receipt_status()`, plus the fleet ledger below.
@@ -87,7 +89,7 @@ there before files are re-rendered.
 
 **Nothing hand-edits that file.** `drone @memory config` is the verb surface over rollover limits — see [config_verbs.md](config_verbs.md).
 
-**Source of truth:** `memory_json/custom_config/memory.config.json` — the operator-edited file *is* the runtime authority for rollover counts and entry char limits. `config_loader.DEFAULT_CONFIG` in code is the **regeneration seed**: when the file is genuinely *missing*, `load()` rebuilds it in full from those defaults so there is always a real file to edit. A file that *exists* but cannot be read — for **any** reason: bad syntax, bad bytes, bad permissions — is never written over and never raises at the caller. `load()` logs an ERROR, serves defaults in memory, and leaves the bytes alone for the operator to fix; healing a stray comma must not cost them their per-branch tuning. `rollover push` refuses on the same condition rather than rebuilding from the seed. A file that parses is never rewritten either, so operator edits persist, and anything it omits is deep-merged from the defaults. Tab strings are *generated* from the effective config, never hand-written.
+**Source of truth:** `memory_json/custom_config/memory.config.json` — the operator-edited file *is* the runtime authority for rollover counts and entry char limits. `config_loader.DEFAULT_CONFIG` in code is the **regeneration seed**: when the file is genuinely *missing*, `load()` rebuilds it in full from those defaults so there is always a real file to edit. A file that *exists* but cannot be read — for **any** reason: bad syntax, bad bytes, bad permissions, wrong shape — is never written over. `load()` logs an ERROR and raises `ConfigUnreadable` naming the file, leaving the bytes alone for the operator to fix; healing a stray comma must not cost them their per-branch tuning, and serving the seed instead would run the fleet on numbers nobody chose. `rollover push` refuses on the same condition rather than rebuilding from the seed. A file that parses is never rewritten either, so operator edits persist, and anything it omits is deep-merged from the defaults. Tab strings are *generated* from the effective config, never hand-written.
 
 **Sections:** `todos_meta` (a pad of `rollover.defaults.local.todos.count` todos; the oldest roll to a backlog file, never to vectors), `key_learnings_meta`, `sessions_meta`, `observations_meta` (all rollover ON). The todos tab carries the pad size, the backlog path, the task cap and `next #N`, derived at render time as max(pad ∪ backlog) + 1. This branch's, as rendered on its own `local.json`:
 

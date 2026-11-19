@@ -10,22 +10,14 @@
 Plan Verification Module
 """
 
-import os
 import sys
+from pathlib import Path
 from typing import List
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
-from aipass.memory.apps.handlers.repo_root import module_file
 from aipass.memory.apps.handlers.storage.lane import CHROMA_SUBPROCESS_SCRIPT, run_json
 
 
@@ -97,7 +89,7 @@ def _verify_plan(plan_label: str) -> None:
 
 def _discover_handlers() -> dict[str, list[str]]:
     """Map each handler directory to its .py files (excluding __init__.py)."""
-    handlers_dir = module_file(__file__).parent.parent / "handlers"
+    handlers_dir = Path(__file__).resolve().parent.parent / "handlers"
     result: dict[str, list[str]] = {}
     if not handlers_dir.exists():
         return result

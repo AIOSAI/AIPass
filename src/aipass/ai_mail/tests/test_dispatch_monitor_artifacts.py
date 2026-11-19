@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_artifacts.py
 # Description: Tests for what each dispatch attempt leaves behind - stdout, exit codes, result JSON, the lock
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's attempt artifacts: stdout, stderr, result JSON, lock."""
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_si
 
 
 def test_stdout_preserved_across_retries(monkeypatch, main_argv, tmp_path):
-    """Each failed attempt's stdout survives as dispatch_stdout.attempt-N.log
+    """Each failed attempt's stdout survives as dispatch_stdout.attempt-N.out
     instead of being silently truncated by the next attempt -- the result
     JSON is the only artifact naming why an attempt failed."""
     argv, lock_file, stderr_log = main_argv
@@ -53,15 +53,15 @@ def test_stdout_preserved_across_retries(monkeypatch, main_argv, tmp_path):
     with pytest.raises(SystemExit):
         main()
 
-    assert "attempt-1-failure" in (logs_dir / "dispatch_stdout.attempt-1.log").read_text(encoding="utf-8")
-    assert "attempt-2-failure" in (logs_dir / "dispatch_stdout.attempt-2.log").read_text(encoding="utf-8")
-    assert "attempt-3-failure" in (logs_dir / "dispatch_stdout.log").read_text(encoding="utf-8")
+    assert "attempt-1-failure" in (logs_dir / "dispatch_stdout.attempt-1.out").read_text(encoding="utf-8")
+    assert "attempt-2-failure" in (logs_dir / "dispatch_stdout.attempt-2.out").read_text(encoding="utf-8")
+    assert "attempt-3-failure" in (logs_dir / "dispatch_stdout.out").read_text(encoding="utf-8")
     bounce.assert_called_once()
     assert "attempt-3-failure" in bounce.call_args.args[1]
 
 
 def test_per_attempt_exit_code_written_to_stderr_log(monkeypatch, main_argv, tmp_path):
-    """Each attempt's exit code lands in dispatch_stderr.log itself, not just prax."""
+    """Each attempt's exit code lands in dispatch_stderr.out itself, not just prax."""
     argv, lock_file, stderr_log = main_argv
 
     bounce = MagicMock()
@@ -256,7 +256,7 @@ def test_a_failed_attempts_stdout_is_moved_aside_not_copied(monkeypatch, main_ar
 
     assert code == 0
     assert stdout_there_at_start == [False, False]
-    assert (logs_dir / "dispatch_stdout.attempt-1.log").read_text(encoding="utf-8") == '{"result": "boom"}'
+    assert (logs_dir / "dispatch_stdout.attempt-1.out").read_text(encoding="utf-8") == '{"result": "boom"}'
     bounce.assert_not_called()
 
 

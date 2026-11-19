@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: artifact.py
 # Description: Audit Artifact Handler
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-08-11
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -32,12 +32,11 @@ from typing import Any, Dict, List, Optional
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.audit import incremental_cache
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.module_root import module_file
 
 # Bump when the doc SHAPE changes so consumers can gate on it.
 SCHEMA_VERSION = 1
 
-_SENTRY_ROOT = module_file(__file__).parents[3]
+_SENTRY_ROOT = Path(__file__).resolve().parents[3]
 
 ARTIFACT_DIR_NAME = ".sentry"
 ARTIFACT_FILE_NAME = "last_audit.json"

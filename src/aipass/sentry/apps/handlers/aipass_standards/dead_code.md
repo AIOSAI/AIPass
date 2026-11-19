@@ -1,6 +1,6 @@
 # Dead Code Standard
-**Status:** v1.5
-**Date:** 2026-10-10
+**Status:** v1.6
+**Date:** 2026-11-17
 
 ---
 
@@ -41,12 +41,13 @@ For each collected file, the checker builds a search corpus from ALL `.py` conte
 | Glob-based discovery | `glob("*_check.py")`, `glob("*.py")` |
 | Filename string literal | `"foo_handler.py"` in source |
 | Project config, dotted path only | `"aipass.branch.apps.handlers.foo.handle"` in the project's `.aipass/*.json`, the project root being the nearest directory at or above the branch holding a `*_REGISTRY.json` (since 2026-10-08: hooks names 28 handlers only there), or the AIPass install, known as hooks' loader knows it: `.aipass/hooks.json` beside `src/aipass/` (since 2026-10-10: `AIPASS_REGISTRY.json` is git-ignored, so a clean checkout read hooks 88 where the seat read 100). A stem or filename in a json acquits nothing |
+| The branch's own door table | a string value of a module-level dict in the branch's top `__init__.py`, literal or an f-string over that file's string constants, equal to the file's whole dotted path: `"render_bootstrap_trinity": f"{_HANDLERS}.bootstrap_render"`. Other branches and shell scripts reach such a handler through the door alone, so no import names it. An entry naming a module that does not exist serves nothing |
 
 ### Always Considered Used
 
 - `__init__.py` (package structure)
 - Entry point files (`apps/{branch}.py`)
-- Doors (`apps/modules/door_*.py`) that pass the modules standard's Door shape row (DPLAN-0404, since 2026-10-08): a door is called from other branches, so its own branch never names it. A `door_` file that fails Door shape is read like any other module
+- Second doors (`apps/modules/door_*.py`, or a module that only re-exports its own handlers): a retired pattern the `front_door` row convicts. Its own branch never naming it is the same defect, so this row does not report it again
 - Glob-discovered patterns (`*_check.py`, `*_content.py`) when a matching glob call exists
 - Direct children of `modules/` when `glob("*.py")` exists in the source
 
@@ -102,7 +103,7 @@ from aipass.branch.apps.handlers.legacy import old_processor
 - **Threshold:** Score >= 75 to pass overall
 - A branch with 20/25 files referenced scores 80 (passes)
 - A branch with 15/25 files referenced scores 60 (fails)
-- The violation message lists up to 10 unreferenced files, each relative to `apps/` with forward slashes on every host (`handlers/x/y.py`, never `handlers\x\y.py`; since 2026-10-10, Windows CI)
+- The violation message lists up to 10 unreferenced files, each relative to `apps/` (`handlers/x/y.py`)
 
 ---
 
@@ -122,6 +123,11 @@ and `handlers/x.py` both match (checker 1.4.0, 2026-10-08). Until then dead_code
 handed the `apps/`-relative path: @hooks' rows written `apps/handlers/lifecycle/session_boot.py`
 silenced nothing, and `bypass prune`'s dead-rule report could not see it because every other
 lane matched them. A rule naming no `file` is inert (owner, 2026-09-25), not branch-wide.
+
+Each unreferenced file is its own site, and a dead file has no line or function: its site is the
+whole file. A row with `"functions": ["<file>"]` waives that file alone, the same as a row with no
+scope. A row with `lines`, or with `functions` naming a function, waives nothing here: dead_code
+judges files, not functions (unused_function judges those). Every other dead file still convicts.
 
 ---
 

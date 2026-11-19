@@ -452,8 +452,8 @@ def update_readme_auto_sections(branch_path: str, dry_run: bool = False) -> dict
         if open_marker in updated_content and close_marker in updated_content:
             pattern = re.compile(re.escape(open_marker) + r".*?" + re.escape(close_marker), re.DOTALL)
             replacement = f"{open_marker}\n{section_content}\n{close_marker}"
-            # A callable hands the text over verbatim: as a template string, a Windows
-            # path's "C:\Users" reads as the escape \U and raises re.error.
+            # A callable hands the text over verbatim: as a template string, a
+            # backslash such as "C:\Users" reads as the escape \U and raises re.error.
             new_content = pattern.sub(lambda _match: replacement, updated_content)
             if new_content != updated_content:
                 result["updated"].append(section_name)

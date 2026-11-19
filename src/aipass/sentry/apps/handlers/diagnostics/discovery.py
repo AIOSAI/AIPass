@@ -14,14 +14,13 @@ import json
 from pathlib import Path
 from typing import Dict, List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers import registry_scan
 
 
 def _find_registry() -> Path:
     """Find *_REGISTRY.json — CWD-first for external project support, then __file__ fallback."""
-    # Never a local glob: "*_REGISTRY.json" folds case on Windows/macOS and can match a plan counter.
     return registry_scan.find_registry()
 
 

@@ -80,13 +80,9 @@ first one that claims a command, and turns a refusal into an exit code. `apps/mo
 business-logic module per verb — fleet, governance, health, limits, lint, pool, push, rollover,
 roots, search, symbolic, templates, todo, verify and watch — alongside `rollover_config` and
 `rollover_json`, which carry the `config` verb's implementation and the shared `--json` emitter for
-a `rollover` module that outgrew one file. Eight door modules are the files a foreign branch may
-import, each a plain re-export of the handlers it opens: `door_auto_process` (the background
-auto-process launch), `door_config_loader` (config sections and the todo pad size),
-`door_entry_limits` (entry limits and file budgets), `door_plans_processor` (closed-plan
-vectorization), `door_registry_scope` (fleet and external branch scope), `door_tab_renderer` (the
-`*_meta` line rendering), `door_todo_report` (the todo pad's ready phrase) and `door_trinity_push`
-(the push's entry rules). `apps/handlers/` holds the implementation,
+a `rollover` module that outgrew one file. A foreign branch imports through one door, the package
+top file: `from aipass.memory import <name>`, each name loaded from its handler on access and never
+cached. `apps/handlers/` holds the implementation,
 grouped one directory per concern: `json/` (the fleet's json shim, the write gate, the caps and the
 closed shape), `rollover/` (the extractor, the normalizer, the todo roll), `templates/` (the trinity
 push and the gold templates), `tracking/` (line counts and the `*_meta` state tabs), `monitor/`
@@ -106,14 +102,14 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 |---|---|
 | [docs/rollover_pipeline.md](docs/rollover_pipeline.md) | The rollover engine: the pipeline, normalization, the safety valve, the newest-first guardrail, and the one definition of the fleet |
 | [docs/trinity_standard.md](docs/trinity_standard.md) | The entry shape and the write gate: the closed field shape, the refusal reasons, authored-versus-carried, the char caps and the per-branch receipt |
-| [docs/trinity_push.md](docs/trinity_push.md) | The push lane: vectorize → verify → prune, what counts as non-canonical, the scope and the two gates |
+| [docs/trinity_push.md](docs/trinity_push.md) | The push lane: vectorize → verify → prune, what counts as non-canonical, the scope and the three gates |
 | [docs/todos_and_backlog.md](docs/todos_and_backlog.md) | The sticky-note pad, the backlog file, the roll and the restore |
 | [docs/todos_v2_shape_contract.md](docs/todos_v2_shape_contract.md) | The todos v2 shape contract in full — the field-by-field contract other branches build against |
 | [docs/config_verbs.md](docs/config_verbs.md) | The rollover limit verbs, the keep-count ceiling, and the `--json` machine surface |
 | [docs/templates_and_tabs.md](docs/templates_and_tabs.md) | The gold templates, the bump site, and the `*_meta` state tabs written into every memory file |
 | [docs/vector_search.md](docs/vector_search.md) | The vector lane: subprocess isolation, `vectorize_and_store`, plan-ID matching |
 | [docs/cli_surface.md](docs/cli_surface.md) | How this branch's CLI behaves: exit codes, help flags, and why a correct refusal must not become a runaway log |
-| [docs/quality_and_proof.md](docs/quality_and_proof.md) | How this branch's suite is judged, and what a parked test costs |
+| [docs/quality_and_proof.md](docs/quality_and_proof.md) | How this branch's suite is judged, and why retired code leaves the tree |
 
 ---
 

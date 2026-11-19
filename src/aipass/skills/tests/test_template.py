@@ -3,13 +3,13 @@
 # Description: Tests for skill template management
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/template.py: resolution, placeholder replacement, copy."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(ruff) — that template.py and module_paths.py parse and import
+# sentry: no-test-needed(ruff) — that template.py parses and imports
 # sentry: no-test-needed(documentation) — that get_template and copy_template carry docstrings
 
 import shutil
@@ -111,10 +111,10 @@ class TestReplacePlaceholder:
         target = self._copied(tmp_path, {"noop.txt": original})
         assert (target / "noop.txt").read_text(encoding="utf-8") == original
 
-    def test_skips_binary_file(self, tmp_path):
-        """Binary files with UnicodeDecodeError should be silently skipped."""
-        target = self._copied(tmp_path, {"binary.bin": b"\x80\x81\x82\xff{{SKILL_NAME}}"})
-        assert (target / "binary.bin").exists()
+    def test_a_binary_file_keeps_every_byte_but_the_placeholder(self, tmp_path):
+        # Mutant killed 2026-11-17: a text read with errors="replace" turns \x80 into U+FFFD.
+        target = self._copied(tmp_path, {"binary.bin": b"\x80\x81\x82\xff{{SKILL_NAME}}\x00"})
+        assert (target / "binary.bin").read_bytes() == b"\x80\x81\x82\xffmy-tool\x00"
 
     def test_empty_file_no_error(self, tmp_path):
         target = self._copied(tmp_path, {"empty.md": ""})
@@ -153,8 +153,7 @@ class TestCopyTemplate:
         target = tmp_path / "placeholder-test"
         copy_template(src["path"], target, "placeholder-test")
         files = [p for p in target.rglob("*") if p.is_file()]
-        # The floor: an empty target must fail. A set, not sorted(): Path ordering
-        # is case-insensitive on Windows and byte-wise on POSIX.
+        # The floor: an empty target must fail.
         assert {f.name for f in files} == {"SKILL.md", "handler.py"}
         for f in files:
             content = f.read_text(encoding="utf-8")

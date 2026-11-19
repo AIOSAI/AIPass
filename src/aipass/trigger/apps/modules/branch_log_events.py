@@ -3,18 +3,17 @@
 # Description: Branch log events module for log watcher public API
 # Version: 1.2.0
 # Created: 2026-02-02
-# Modified: 2026-11-08
+# Modified: 2026-11-16
 # =============================================
 
 """
 Branch Log Events Module - Public API for branch log watching
 """
 
-import os
 import sys
 
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.service_control import service_state
 from aipass.trigger.apps.modules.core import trigger
@@ -28,24 +27,10 @@ from aipass.trigger.apps.handlers.log_watcher import (
 )
 from rich.markup import escape
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError.
-    except (ImportError, OSError):
-        logger.info("CLI console not available, using rich fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]branch_log_events Module[/bold cyan]")
@@ -100,7 +85,7 @@ def reset_hashes() -> None:
 
 def print_help() -> None:
     """Print module help."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
     from rich.panel import Panel
 
     console.print(Panel("Branch Log Events - Branch Log Watcher", style="bold"))
@@ -133,7 +118,7 @@ def print_help() -> None:
 
 def handle_command(command: str, args: list) -> bool:
     """Handle branch_log_events commands - orchestrate handler calls."""
-    from aipass.cli.apps.modules import console, success, error
+    from aipass.cli import console, success, error
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 
@@ -178,7 +163,6 @@ def handle_command(command: str, args: list) -> bool:
         # The daemon runs the watcher, not this CLI process: report both, never one as the other.
         console.print(f"  Service: {service_state()}")
         console.print(f"  This process: {info['active']}")
-        console.print(f"  Watchdog available: {info['watchdog_available']}")
         console.print(f"  Seen error hashes: {info['seen_hashes_count']}")
         console.print(f"  Pending flush: {info['pending_flush']}")
         console.print(f"  AIPASS root: {info['aipass_root']}")

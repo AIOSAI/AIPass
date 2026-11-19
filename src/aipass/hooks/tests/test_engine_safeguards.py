@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_engine_safeguards.py
 # Description: The hook engine's safeguards: trust, timeouts, one document, the ledger, fail-closed gates, promote
-# Version: 1.2.0
+# Version: 1.5.0
 # Created: 2026-10-08
-# Modified: 2026-11-10
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/engine.py: trust, timeouts, the ledger and the fail-closed gates."""
@@ -18,9 +18,13 @@
 # sentry: no-test-needed(ruff) — that engine.py parses and imports, ruff and collection cover it
 
 import importlib
+import io
 import json
+import os
 import sys
+import tempfile
 from datetime import datetime
+from typing import cast
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -198,10 +202,10 @@ class TestLayerATrustEnforcement:
         }
         (config_dir / "hooks.json").write_text(json.dumps(hostile_config), encoding="utf-8")
         reg_path = temp_test_dir / "registry.json"
-        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+        with patch.dict("os.environ", {"AIPASS_TRUST_REGISTRY": str(reg_path)}):
             enroll(str(temp_test_dir))
         with (
-            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch.dict("os.environ", {"AIPASS_TRUST_REGISTRY": str(reg_path)}),
             patch(
                 "aipass.hooks.apps.handlers.config.loader._search_bounds",
                 return_value=(temp_test_dir, temp_test_dir.parent),
@@ -263,7 +267,7 @@ def ns_project(temp_test_dir, monkeypatch):
         patch.object(loader, "aipass_home", return_value=None),
         patch.object(loader, "logger") as log,
     ):
-        # resolved: the loader stamps realpaths, and macOS tmp is /var -> /private/var
+        # resolved: the loader stamps realpaths
         yield temp_test_dir.resolve(), log
 
 
@@ -460,7 +464,9 @@ class TestDispatchHandlerTimeout:
         ):
             mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
             dispatch("UserPromptSubmit", "{}", config)
-        mock_run.assert_called_once_with("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=5)
+        mock_run.assert_called_once_with(
+            "aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=5, event="UserPromptSubmit", hook="slow_handler"
+        )
 
     def test_handler_default_timeout_is_30_when_unset(self, mock_logger):
         config = {
@@ -478,7 +484,13 @@ class TestDispatchHandlerTimeout:
         ):
             mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
             dispatch("UserPromptSubmit", "{}", config)
-        mock_run.assert_called_once_with("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=30)
+        mock_run.assert_called_once_with(
+            "aipass.hooks.apps.handlers.fake.handle",
+            {},
+            timeout_s=30,
+            event="UserPromptSubmit",
+            hook="no_timeout_handler",
+        )
 
     def test_inner_timeout_above_30_reaches_the_join(self, mock_logger):
         """A hooks.json value >30 must survive to worker.join, not be clamped.
@@ -502,7 +514,9 @@ class TestDispatchHandlerTimeout:
         ):
             mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
             dispatch("UserPromptSubmit", "{}", config)
-        mock_run.assert_called_once_with("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=90)
+        mock_run.assert_called_once_with(
+            "aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=90, event="UserPromptSubmit", hook="slow_handler"
+        )
 
     def test_timeout_logs_speaks_and_lets_dispatch_continue(self, mock_logger):
         config = {
@@ -678,7 +692,7 @@ def _post_tool_use(stdouts: dict, event: str = "PostToolUse") -> str:
     for name in stdouts:
         config[event][name] = {"enabled": True, "handler": handlers[name], "matcher": ""}
 
-    def run(handler, _data, timeout_s=30):
+    def run(handler, _data, timeout_s=30, **_named):
         name = next(n for n in stdouts if handlers[n] == handler)
         return {"exit_code": 0, "stdout": stdouts[name], "stderr": "", "elapsed_ms": 1}
 
@@ -1022,6 +1036,29 @@ def _load_by_path(name: str, path: Path):
     return module
 
 
+class _Unwritable:
+    """A break log whose every use raises something that is not an OSError."""
+
+    def __fspath__(self) -> str:
+        raise RuntimeError("the record itself broke")
+
+    def __str__(self) -> str:
+        return "<unwritable break log>"
+
+
+class _DeadStream:
+    """A stream whose reader has gone: every write is a broken pipe."""
+
+    def write(self, _text: str) -> int:
+        raise BrokenPipeError("reader gone")
+
+    def flush(self) -> None:
+        raise BrokenPipeError("reader gone")
+
+
+_NOT_UTF8 = os.fsdecode(b"bad\xff.py")
+
+
 class TestTheBridgeFailsClosed:
     """DPLAN-0356 item 2: an engine that cannot import made Python exit 1, and Claude Code ran the tool."""
 
@@ -1067,6 +1104,65 @@ class TestTheBridgeFailsClosed:
         self._bridge("UserPromptSubmit:branch_prompt", monkeypatch).main()  # returns: no SystemExit, so exit 0
         assert capsys.readouterr().out == ""
 
+    def _assert_refused(self, bridge, capsys) -> None:
+        with pytest.raises(SystemExit) as refused:
+            bridge.main()
+        assert refused.value.code == 2
+        assert json.loads(capsys.readouterr().out)["reason"].startswith("HOOKS BROKEN")
+
+    def test_a_break_naming_a_non_utf8_path_is_still_refused(self, monkeypatch, capsys, mock_logger):
+        """The stdlib record raised UnicodeEncodeError on this text, Python exited 1, and Claude Code ran the tool."""
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        monkeypatch.setattr(bridge, "_mount", MagicMock(side_effect=ImportError(f"No module named {_NOT_UTF8}")))
+        self._assert_refused(bridge, capsys)
+
+    def test_a_record_that_raises_anything_is_still_refused_and_says_so(self, monkeypatch, capsys, mock_logger):
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        monkeypatch.setattr(bridge, "BREAK_LOG", _Unwritable())
+        with pytest.raises(SystemExit) as refused:
+            bridge.main()
+        out, err = capsys.readouterr()
+        assert (refused.value.code, json.loads(out)["reason"][:12]) == (2, "HOOKS BROKEN")
+        assert "not recorded" in err and "the record itself broke" in err
+
+    def test_the_answer_is_out_before_the_record_is_attempted(self, monkeypatch, capsys, mock_logger):
+        """A record that hangs can then cost a timeout, never the refusal."""
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        seen: list[str] = []
+        monkeypatch.setattr(bridge, "_record_break", lambda *_: seen.append(cast(io.StringIO, sys.stdout).getvalue()))
+        with pytest.raises(SystemExit):
+            bridge.main()
+        assert '"decision": "block"' in seen[0]
+
+    def test_a_stderr_that_cannot_be_written_still_refuses_with_exit_2(self, monkeypatch, capsys, mock_logger):
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        monkeypatch.setattr("sys.stderr", _DeadStream())
+        with pytest.raises(SystemExit) as refused:
+            bridge.main()
+        assert refused.value.code == 2
+
+    def test_a_dispatch_that_exits_quietly_is_refused_not_run(self, monkeypatch, capsys, mock_logger):
+        """Claude Code ran the tool when the bridge died at exit 1 (a real run, 2026-11-15): exit 0 is no better."""
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        monkeypatch.setattr(bridge, "_mount", MagicMock(side_effect=SystemExit(0)))
+        self._assert_refused(bridge, capsys)
+
+    def test_a_payload_that_is_not_utf8_is_refused_not_run(self, monkeypatch, capsys, mock_logger):
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(b'{"x": "\xff"}'), encoding="utf-8"))
+        self._assert_refused(bridge, capsys)
+
+    def test_an_engine_refusal_naming_a_non_utf8_path_still_exits_2_with_its_reason(
+        self, monkeypatch, capsys, mock_logger
+    ):
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        monkeypatch.setattr(bridge, "_mount", MagicMock(return_value="test"))
+        monkeypatch.setattr(engine, "run_event", MagicMock(return_value=(f"refused: {_NOT_UTF8}", 2)))
+        with pytest.raises(SystemExit) as refused:
+            bridge.main()
+        assert refused.value.code == 2
+        assert "refused: bad" in capsys.readouterr().out
+
 
 class TestPromote:
     """DPLAN-0356 item 3. All three gate crashes were NameErrors from half-done edits to live files."""
@@ -1087,6 +1183,15 @@ class TestPromote:
         assert not [p for p in root.iterdir() if p.name.startswith(".live-2")]
         assert len(report) == 1 and "FAILED" in report[0]
         smoke.assert_not_called()
+
+    def test_the_smoke_refusal_writes_no_row_in_the_live_deletions_ledger(self, tmp_path, monkeypatch):
+        """The smoke's raw rm is refused for real: its ledger row goes to the temp dir, never the project's."""
+        monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
+        with patch.object(promote.subprocess, "run") as run:
+            run.return_value.returncode, run.return_value.stdout = 0, ""
+            promote.check_smoke(tmp_path, ".live-x")
+        ledger = Path(run.call_args.kwargs["env"]["AIPASS_DELETION_LOG"])
+        assert ledger.parent == Path(tempfile.gettempdir())
 
     def test_a_failed_smoke_discards_the_candidate(self, tmp_path, mock_logger):
         root = self._branch(tmp_path)
@@ -1123,6 +1228,44 @@ class TestPromote:
             ".live-20200103T000000Z",
             live,
         ]
+
+    def _promoted(self, tmp_path: Path, live: str) -> Path:
+        root = self._branch(tmp_path)
+        for old in (".live-20200101T000000Z", ".live-20200102T000000Z", ".live-20200103T000000Z"):
+            (root / old).mkdir()
+        promote.point_at(root, live)
+        return root
+
+    def test_rollback_points_at_the_newest_older_copy_after_its_smoke(self, tmp_path, mock_logger):
+        root = self._promoted(tmp_path, ".live-20200103T000000Z")
+        with patch.object(promote, "check_smoke", return_value=(True, "ok")) as smoke:
+            ok, report = promote.rollback(root)
+        assert ok is True
+        assert promote.live_name(root) == ".live-20200102T000000Z"
+        smoke.assert_called_once_with(root, ".live-20200102T000000Z")
+        assert "was .live-20200103T000000Z" in report[-1]
+
+    def test_rollback_refuses_when_no_older_copy_is_retained(self, tmp_path, mock_logger):
+        root = self._promoted(tmp_path, ".live-20200101T000000Z")
+        with patch.object(promote, "check_smoke", return_value=(True, "ok")) as smoke:
+            ok, report = promote.rollback(root)
+        assert ok is False and "no retained copy older than .live-20200101T000000Z" in report[-1]
+        assert promote.live_name(root) == ".live-20200101T000000Z"
+        smoke.assert_not_called()
+
+    def test_rollback_refuses_when_the_older_copy_fails_its_smoke(self, tmp_path, mock_logger):
+        root = self._promoted(tmp_path, ".live-20200103T000000Z")
+        with patch.object(promote, "check_smoke", return_value=(False, "raw rm was not refused")):
+            ok, report = promote.rollback(root)
+        assert ok is False and "raw rm was not refused" in report[-1]
+        assert promote.live_name(root) == ".live-20200103T000000Z"
+
+    def test_the_rollback_verb_with_nothing_promoted_exits_1_and_says_why(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(promote, "BRANCH_ROOT", self._branch(tmp_path))
+        with pytest.raises(SystemExit) as refused:
+            promote.handle_command("promote", ["rollback"])
+        assert refused.value.code == 1
+        assert "nothing was ever promoted" in capsys.readouterr().err
 
     def test_the_bridge_and_promote_spell_the_pointer_alike(self):
         mount = _load_by_path("mount_under_test", _BRIDGE.parent / "mount.py")

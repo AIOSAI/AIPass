@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_share.py
 # Description: Tests for the share module and the drive/share handler it drives
-# Version: 2.0.4
+# Version: 2.0.5
 # Created: 2026-07-01
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/share.py and apps/handlers/drive/share.py."""
@@ -274,6 +274,23 @@ class TestShareFile:
         assert "Folder creation failed" in result["error"]
         assert result["file_id"] is None
         assert result["link"] is None
+
+    def test_a_search_with_no_answer_fails_the_share_and_never_uploads_a_twin(self, tmp_path, monkeypatch) -> None:
+        """No answer read as 'not there', and the share uploaded a second copy beside the first."""
+        edge = MagicMock(return_value=None)
+        monkeypatch.setattr(client_mod, "api_call_with_retry", edge)
+        real = client_mod.DriveClient()
+        real._drive_service = MagicMock()
+        real.project_folder_cache[share_handler.SHARE_PROJECT_NAME] = "folder-shared-123"
+        test_file = tmp_path / "report.pdf"
+        test_file.write_text("content", encoding="utf-8")
+
+        result = share_handler.share_file(real, str(test_file))
+
+        assert result["error"] == "Upload failed: File search for 'report.pdf' got no answer - not uploading a twin"
+        assert (result["success"], result["file_id"]) == (False, None)
+        # The search is the only request: an upload would be a second.
+        assert edge.call_count == 1
 
     def test_a_failed_permission_still_names_the_uploaded_file_and_hands_back_no_link(self, tmp_path, client) -> None:
         """The file reached Drive; a run that could not share it must say which file it left there."""

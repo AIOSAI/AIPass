@@ -4,7 +4,7 @@
 # Description: Tests for persistent_alert handler and alert_dismiss module (cadence-gated since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-14
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/prompt/persistent_alert.py and apps/modules/alert_dismiss.py."""
@@ -229,7 +229,6 @@ class TestExpiredAlertCleanup:
         saved = json.loads((aipass_dir / "alerts.json").read_text(encoding="utf-8"))
         assert [alert["id"] for alert in saved["alerts"]] == ["expired", "active"]
 
-    @pytest.mark.skipif(not hasattr(time, "tzset"), reason="time.tzset sets the zone on POSIX only")
     def test_a_naive_expiry_is_local_time_as_trigger_writes_it(self, tmp_path, monkeypatch):
         """trigger stamps datetime.now() + TTL, naive local: read as UTC it died 7 hours early in PDT."""
         monkeypatch.setenv("TZ", "America/Los_Angeles")

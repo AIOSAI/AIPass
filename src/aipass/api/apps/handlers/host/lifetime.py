@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lifetime.py
 # Description: Host API Lifetime Handler — a serve that outlives the shell that started it
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-19
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -23,14 +23,14 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple
 
-from aipass.drone.apps.modules.config import resolve_aipass_home
+from aipass.drone import resolve_aipass_home
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.host import autostart
 
 # logs/ is gitignored, which the unit needs: it carries this machine's absolute paths.
 RUNTIME_DIRNAME = "logs"
-LOG_NAME = "host_api_serve.log"
+LOG_NAME = "host_api_serve.out"
 RECORD_NAME = "host_api_serve.json"
 
 UNIT_FILE_NAME = "aipass-host-api.service"
@@ -49,18 +49,6 @@ _ANNOUNCED_HOMES: Set[Path] = set()
 
 class LifetimeError(Exception):
     """A detached server could not be started, found or stopped."""
-
-
-def _detach_kwargs() -> Dict[str, Any]:
-    """However this platform says "you are not my child any more"."""
-    # start_new_session is POSIX only: Windows accepts it and silently does nothing.
-    # Both Windows flags are needed: one severs the console, the other blocks Ctrl-C.
-    if sys.platform == "win32":  # pragma: no cover - exercised on Windows only
-        detached_process = 0x00000008
-        create_new_process_group = 0x00000200
-        return {"creationflags": detached_process | create_new_process_group}
-
-    return {"start_new_session": True}
 
 
 def _branch_root() -> Path:
@@ -99,9 +87,8 @@ def server_home() -> Tuple[str, Path]:
         return sys.executable, root
 
     branch = home / "src" / "aipass" / "api"
-    windows = sys.platform == "win32"
     # Used as found, never resolved: a venv's python is a symlink, and following it loses the venv.
-    python = home / ".venv" / ("Scripts" if windows else "bin") / ("python.exe" if windows else "python")
+    python = home / ".venv" / "bin" / "python"
     for needed in (python, branch / "apps" / "api.py"):
         if not needed.is_file():
             raise LifetimeError(
@@ -166,23 +153,10 @@ def _alive(pid: int) -> bool:
     if pid <= 0:
         return False
 
-    # Never os.kill on Windows: it terminates outright, killing what it asked about.
-    if sys.platform == "win32":  # pragma: no cover - exercised on Windows only
-        import ctypes
-
-        query_limited_information = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(query_limited_information, False, pid)
-
-        if not handle:
-            return False
-
-        ctypes.windll.kernel32.CloseHandle(handle)
-        return True
-
     try:
         # Reap our own exited child first: os.kill(pid, 0) says yes to a zombie.
         os.waitpid(pid, os.WNOHANG)
-    except (ChildProcessError, OSError) as e:
+    except ChildProcessError as e:
         logger.debug("[host_api] nothing to reap for pid %s: %s", pid, e)
 
     try:
@@ -274,7 +248,7 @@ def serve_detached(host: Optional[str] = None, port: Optional[int] = None) -> Di
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
             cwd=str(server_home()[1]),
-            **_detach_kwargs(),
+            start_new_session=True,
         )
 
     time.sleep(SETTLE_SECONDS)

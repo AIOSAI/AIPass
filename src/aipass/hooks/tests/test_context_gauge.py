@@ -4,7 +4,7 @@
 # Description: Tests for context_gauge (per-window guard, real window, Codex, OpenCode store) and the grounding receipt
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-10
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/prompt/context_gauge.py."""
@@ -514,10 +514,11 @@ class TestOpenCodeStore:
         cache.write_text(json.dumps(aged), encoding="utf-8")
         assert context_window.opencode_window("ses_1", str(tmp_path)) == (100_000, 84_000)
 
-    def test_an_unreadable_cache_reads_the_catalog(self, tmp_path, monkeypatch):
+    def test_an_unreadable_cache_reads_the_catalog_and_is_left_as_found(self, tmp_path, monkeypatch):
         self._window(tmp_path, monkeypatch)
         context_window.opencode_limit_cache_path().write_text("{torn", encoding="utf-8")
         assert context_window.opencode_window("ses_1", str(tmp_path)) == (160_000, 136_000)
+        assert context_window.opencode_limit_cache_path().read_text(encoding="utf-8") == "{torn"
 
     def test_no_store_or_no_session_row_is_silent(self, tmp_path, monkeypatch):
         monkeypatch.setenv("OPENCODE_DB", str(tmp_path / "absent.db"))

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_auth.py
 # Description: Init handler — provision a project for manager-class git (owner-tier)
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-04
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -304,9 +304,11 @@ def provision_git_auth(target: Path, dry_run: bool = False) -> Dict[str, Any]:
         try:
             recorded = located.relative_to(repo_root).as_posix()
         except ValueError as exc:
-            # A symlinked citizen dir outside the root: absolute keeps binding exact.
-            logger.info("[git-auth] %s is not under %s (%s) — recording absolute path", located, repo_root, exc)
-            recorded = str(located)
+            # An outside path can never match path-binding, the same refusal as a recorded outside path below.
+            raise GitAuthRefusal(
+                f"the passport for '{owner_name}' sits at {located}, outside the project ({repo_root}). "
+                "Move the citizen's branch directory inside the project, then re-run"
+            ) from exc
         owner_entry["path"] = recorded
         branch_dir = located
         registry_dirty = True

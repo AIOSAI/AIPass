@@ -1,21 +1,20 @@
 # =================== AIPass ====================
 # Name: test_sandbox.py
-# Version: 1.0.4
+# Version: 1.1.0
 # Description: Tests for sandbox wrapper module
 # Branch: hooks
 # Created: 2026-06-09
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/sandbox.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that sandbox.py parses and every import resolves
-# sentry: no-test-needed(documentation) — that build_policy and sandbox_launch carry docstrings
+# sentry: no-test-needed(documentation) — that build_policy and resolve_bwrap_command carry docstrings
 # sentry: no-test-needed(constant) — HELP_COMMANDS' display text and the CONSOLE binding
 # sentry: no-test-needed(stdlib) — shutil.which and tempfile.gettempdir's own path-resolution correctness
 
-import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -27,10 +26,7 @@ from aipass.hooks.apps.modules.sandbox import (
     build_srt_config,
     handle_command,
     resolve_bwrap_command,
-    sandbox_launch,
 )
-
-pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="sandbox is Linux-only: bwrap mount namespaces")
 
 
 class TestBuildSrtConfig:
@@ -79,25 +75,22 @@ def _path_holding(monkeypatch, tmp_path: Path, *names: str) -> Path:
     """PATH is one tmp directory holding exactly `names`, as the real which() reads it.
 
     No shutil.which patch (fleet green leg 7, stdlib_patch). Each name is written
-    bare and as .exe and marked executable: POSIX's which() wants the mode bit,
-    Windows' answers by PATHEXT instead. So the asserts read found or not found
+    and marked executable. So the asserts read found or not found
     and the directory it was found in, never the path's spelling.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for name in names:
-        for spelled in (name, f"{name}.exe"):
-            exe = bin_dir / spelled
-            exe.write_text("", encoding="utf-8")
-            exe.chmod(0o755)
+        exe = bin_dir / name
+        exe.write_text("", encoding="utf-8")
+        exe.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir))
     return bin_dir
 
 
 def _home_at(monkeypatch, home: Path) -> None:
-    """The real Path.home() answers from HOME on POSIX and USERPROFILE on Windows."""
+    """The real Path.home() answers from HOME."""
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
 
 
 def _resolver_call() -> tuple[list, dict]:
@@ -243,69 +236,6 @@ class TestResolveBwrapCommand:
         assert not Path(created_files[0]).exists()
 
 
-class TestSandboxLaunch:
-    """Full launch flow (mocked resolver)."""
-
-    def test_returns_popen(self, tmp_path):
-        fake_popen = MagicMock()
-
-        with (
-            patch(
-                "aipass.hooks.apps.modules.sandbox.resolve_bwrap_command",
-                return_value="bwrap --test -- /bin/bash -c 'echo hi'",
-            ),
-            patch(
-                "aipass.hooks.apps.modules.sandbox.build_srt_config",
-                return_value={"network": {}},
-            ),
-            patch(
-                "aipass.hooks.apps.modules.sandbox.subprocess.Popen",
-                return_value=fake_popen,
-            ) as mock_popen,
-        ):
-            result = sandbox_launch("echo hi", policy={"allow_write": [str(tmp_path)]})
-
-        assert result is fake_popen
-        call_args = mock_popen.call_args
-        assert call_args[0][0] == ["/bin/bash", "-c", "bwrap --test -- /bin/bash -c 'echo hi'"]
-
-    def test_passes_cwd(self, tmp_path):
-        launch_cwd = tmp_path / "test"
-
-        with (
-            patch(
-                "aipass.hooks.apps.modules.sandbox.resolve_bwrap_command",
-                return_value="bwrap --test",
-            ),
-            patch(
-                "aipass.hooks.apps.modules.sandbox.build_srt_config",
-                return_value={"network": {}},
-            ),
-            patch("aipass.hooks.apps.modules.sandbox.subprocess.Popen") as mock_popen,
-        ):
-            sandbox_launch("echo hi", cwd=str(launch_cwd), policy={"allow_write": [str(tmp_path)]})
-
-        assert mock_popen.call_args[1]["cwd"] == str(launch_cwd)
-
-    def test_passes_custom_env(self, tmp_path):
-        custom_env = {"PATH": "/usr/bin", "HOME": str(tmp_path)}
-
-        with (
-            patch(
-                "aipass.hooks.apps.modules.sandbox.resolve_bwrap_command",
-                return_value="bwrap --test",
-            ),
-            patch(
-                "aipass.hooks.apps.modules.sandbox.build_srt_config",
-                return_value={"network": {}},
-            ),
-            patch("aipass.hooks.apps.modules.sandbox.subprocess.Popen") as mock_popen,
-        ):
-            sandbox_launch("echo hi", policy={"allow_write": [str(tmp_path)]}, env=custom_env)
-
-        assert mock_popen.call_args[1]["env"] is custom_env
-
-
 class TestSrtResolveCwd:
     """CWD selection for srt resolver — prevents mask-placeholder pollution."""
 
@@ -416,6 +346,12 @@ class TestBuildPolicy:
         policy = build_policy(branch)
         assert str(repo / ".git") in policy["allow_write"]
 
+    def test_a_corrupt_passport_raises_never_read_by_the_directory_name(self, tmp_path):
+        branch = self._make_branch(tmp_path, "devpulse", is_devpulse=True)
+        (branch / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+        with pytest.raises(ValueError):
+            build_policy(branch)
+
     def test_sibling_mail_writable(self, tmp_path):
         branch = self._make_branch(tmp_path, "sentry")
         sibling = self._make_sibling(branch, "hooks")
@@ -485,7 +421,7 @@ class TestHandleCommand:
         assert result is True
         err = capsys.readouterr().err
         assert "Phase 1: wrapper module only" in err
-        assert "sandbox_launch()" in err
+        assert "resolve_bwrap_command" in err
 
     def test_sandbox_help(self, capsys):
         result = handle_command("sandbox", ["--help"])

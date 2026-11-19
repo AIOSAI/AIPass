@@ -76,7 +76,9 @@ import graph, so its tests are found by the path they name:
 drone @sentry tests pinning <path> [<path> ...]
 ```
 
-Each path is repo-relative (as `git diff --name-only` prints it) or absolute. It is matched
+Each path is repo-relative (as `git diff --name-only` prints it) or absolute; an absolute path
+outside the repository above the cwd is named on stderr and skipped, and when every path is
+outside, the command refuses with exit 3. It is matched
 in test files under pyproject's testpaths, spelled as one string (`".claude/commands/codex.md"`)
 or as trailing literal Path parts (`root / ".claude" / "commands" / "codex.md"`,
 `Path(".claude", "commands", "codex.md")`). stdout carries only test paths, one per line,

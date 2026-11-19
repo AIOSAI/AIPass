@@ -3,7 +3,7 @@
 # Description: Unit tests for filesystem_handler.py
 # Version: 1.3.0
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/monitoring/filesystem_handler.py, its watchdog events."""
@@ -21,7 +21,6 @@
 # sentry: no-test-needed(through_the_command) — detect_branch_from_path, covered by tests/test_monitoring_handlers.py
 # sentry: no-test-needed(json_structure) — the shape of __init__'s file_change_handled log_operation record
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -332,56 +331,6 @@ class TestHandleEvent:
                 session = tmp_path / ".codex" / "sessions" / "session.jsonl"
                 handler._handle_event("modified", str(session))
                 mock_parse.assert_called_once_with(session, "PRAX")
-
-    def test_claude_code_jsonl_windows_form(self):
-        """A Windows-form Claude Code JSONL path is still parsed as agent activity.
-
-        Mutant: testing ".claude/projects/" against the raw path_str again reddens this.
-        """
-        mod, _, mock_bd, mock_filters, queue = _import_filesystem_handler()
-        handler = _make_handler(mod, queue=queue)
-        mock_filters.should_monitor.return_value = True
-        mock_bd.detect_branch_from_path.return_value = "PRAX"
-        with patch.object(handler, "_parse_agent_activity", return_value=True) as mock_parse:
-            windows_form = "D:\\dev\\.claude\\projects\\abc\\session.jsonl"
-            handler._handle_event("modified", windows_form)
-            mock_parse.assert_called_once_with(Path(windows_form), "PRAX")
-
-    def test_claude_code_subagent_windows_form(self):
-        """A Windows-form subagent JSONL path is still tagged with the agent suffix.
-
-        Mutant: testing "/subagents/" against the raw path_str again reddens this.
-        """
-        mod, _, mock_bd, mock_filters, queue = _import_filesystem_handler()
-        handler = _make_handler(mod, queue=queue)
-        mock_filters.should_monitor.return_value = True
-        mock_bd.detect_branch_from_path.return_value = "PRAX"
-        with patch.object(handler, "_parse_agent_activity", return_value=True) as mock_parse:
-            handler._handle_event(
-                "modified",
-                "D:\\dev\\.claude\\projects\\abc\\subagents\\session.jsonl",
-            )
-            assert mock_parse.call_args.args[1] == "PRAX agent"
-
-    def test_codex_jsonl_windows_form(self):
-        """A Windows-form Codex JSONL path is still parsed, and the raw path goes on unchanged.
-
-        Mutant: testing ".codex/sessions/" against the raw path_str again reddens this.
-        """
-        mod, _, mock_bd, mock_filters, queue = _import_filesystem_handler()
-        handler = _make_handler(mod, queue=queue)
-        mock_filters.should_monitor.return_value = True
-        mock_bd.detect_branch_from_path.return_value = "CODEX"
-        raw = "D:\\dev\\.codex\\sessions\\session.jsonl"
-        with patch.object(handler, "_get_codex_branch", return_value="PRAX") as mock_branch:
-            with patch.object(
-                handler,
-                "_parse_codex_activity",
-                return_value=True,
-            ) as mock_parse:
-                handler._handle_event("modified", raw)
-                mock_parse.assert_called_once()
-                assert mock_branch.call_args.args[1] == raw
 
     def test_exception_caught(self, tmp_path):
         """A failure inside the handler costs the event, never the watcher.

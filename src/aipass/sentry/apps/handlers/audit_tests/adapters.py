@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adapters.py
 # Description: audit-tests adapter discovery and contract enforcement
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-29
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -23,7 +23,6 @@ from typing import Dict, List, Optional, Tuple
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.module_root import module_file
 
 SUPPORTED_ADAPTER_API = 1
 
@@ -43,7 +42,7 @@ FORBIDDEN_FUNCTIONS: tuple = ("check_module", "check_branch")
 
 PAYLOAD_DIR = "payload"
 
-HANDLERS_ROOT = module_file(__file__).parents[1]
+HANDLERS_ROOT = Path(__file__).resolve().parents[1]
 
 #: Pack directory suffix; the command path depends on it.
 PACK_SUFFIX = "_standards"

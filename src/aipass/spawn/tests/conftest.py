@@ -3,7 +3,7 @@
 # Description: Shared test fixtures for spawn test suite
 # Version: 1.3.1
 # Created: 2026-03-07
-# Modified: 2026-11-09
+# Modified: 2026-11-16
 # =============================================
 
 """Shared test fixtures for spawn test suite."""
@@ -21,7 +21,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import aipass.spawn.apps.handlers.file_ops as file_ops
-from aipass.cli.apps.modules import display
+import aipass.spawn.apps.handlers.seat_gate as seat_gate
+from aipass.cli import display
 
 
 def _find_registry_path() -> Path:
@@ -130,8 +131,8 @@ def _shipped_templates_are_read_only():
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
-    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    """Rich sizes an unpinned console on every print: 80 under pytest's capture,
+    the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 
@@ -141,6 +142,12 @@ def clean_command_state():
     """error() marks the process failed; a test must not hand that to the next."""
     yield
     display.reset_command_state()
+
+
+@pytest.fixture(autouse=True)
+def spawn_seat(monkeypatch):
+    """The seat gate's caller is @spawn unless a test stands another seat; the rail itself is ai_mail's."""
+    monkeypatch.setattr(seat_gate, "resolve_verified_caller", lambda: "@spawn")
 
 
 @pytest.fixture

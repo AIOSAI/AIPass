@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cross-OS e2e wiring harness prototype: runs inside a clean container, repo read-only at /repo.
+# E2e wiring harness prototype: runs inside a clean container, repo read-only at /repo.
 # Never exits on first failure, so every tier's red/green shows.
 set -uo pipefail
 
@@ -50,7 +50,7 @@ chk "aipass entrypoint imports (aipass init --help)" "'$AIPASS' init --help"
 
 hdr "TIER 1 — aipass init scaffolds correctly"
 PROJ=/tmp/proj; rm -rf "$PROJ"
-# AIPASS_HOME unset on purpose: the core scaffold alone, without the Windows-only .venv symlink path.
+# AIPASS_HOME unset on purpose: the core scaffold alone.
 "$AIPASS" init "$PROJ" demo > /tmp/init.out 2>&1
 echo "  init exit=$? (see /tmp/init.out)"; tail -3 /tmp/init.out | sed 's/^/    | /'
 chk "DEMO_REGISTRY.json exists"           "[ -f '$PROJ/DEMO_REGISTRY.json' ]"

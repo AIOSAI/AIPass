@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: protected_paths.py
-# Version: 2.3.0
+# Version: 2.4.0
 # Description: The files that switch the gates themselves — written by the admin seat alone (git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-11-03
+# Modified: 2026-11-17
 # =============================================
 
 """Which files decide whether the gates run, and so must never be an agent's to write (DPLAN-0356 item 1).
@@ -17,17 +17,17 @@ import os
 import re
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.handlers.config.loader import aipass_home
-from aipass.hooks.apps.handlers.module_root import module_file
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 CONSOLE = err_console
 
-_HOOKS_BRANCH = module_file(__file__).parent.parent.parent
+_HOOKS_BRANCH = Path(__file__).resolve().parent.parent.parent
 
-# Matched on the path spelled with "/" and case-insensitively: Windows and default
-# macOS filesystems open .Claude\Settings.json as the same file.
+# Matched on the path spelled with "/" and case-insensitively: a case-insensitive mount
+# opens .Claude/Settings.json as the same file.
 _ANYWHERE = (
     (re.compile(r"/\.claude/settings[^/]*\.json$", re.IGNORECASE), "the provider hook wiring (.claude/settings*.json)"),
     (re.compile(r"/\.claude/hooks/", re.IGNORECASE), "the provider hook scripts (.claude/hooks/)"),
@@ -60,7 +60,7 @@ _HELD_INSIDE = (
 def _spelled(path: Path) -> str:
     try:
         path = path.resolve()
-    except (OSError, RuntimeError) as exc:  # resolve reads the cwd on Windows; the spelling still names the file
+    except (OSError, RuntimeError) as exc:  # the spelling still names the file
         logger.info("[HOOKS] protected_paths: cannot resolve %s: %s", path, exc)
     return str(path).replace("\\", "/")
 
@@ -100,11 +100,8 @@ def _by_name(spelled: str) -> str | None:
 
 
 def _files(root: Path, pattern: str) -> list[Path]:
-    try:
-        return [found for found in root.glob(pattern) if found.is_file()]
-    except OSError as exc:  # an unreadable tree names no anchor in it; the name lane still holds
-        logger.info("[HOOKS] protected_paths: cannot list %s/%s: %s", root, pattern, exc)
-        return []
+    # Uncaught: an unlistable tree could hide an anchor, so the gate's fail-closed handler refuses.
+    return [found for found in root.glob(pattern) if found.is_file()]
 
 
 def anchors() -> list[Path]:
@@ -137,7 +134,7 @@ def _by_identity(target: Path) -> str | None:
     info = None
     try:
         info = os.stat(target)
-    except OSError as exc:  # a file that does not exist yet has one name: the one being written
+    except FileNotFoundError as exc:  # a file that does not exist yet has one name: the one being written
         logger.debug("[HOOKS] protected_paths: no file at %s: %s", target, exc)
     if info is None or info.st_nlink < 2:
         return None
@@ -145,7 +142,7 @@ def _by_identity(target: Path) -> str | None:
     for anchor in anchors():
         try:
             theirs = os.stat(anchor)
-        except OSError as exc:  # gone since it was listed: no second name to share
+        except FileNotFoundError as exc:  # gone since it was listed: no second name to share
             logger.debug("[HOOKS] protected_paths: anchor gone %s: %s", anchor, exc)
             continue
         if (theirs.st_dev, theirs.st_ino) == mine:
@@ -154,9 +151,11 @@ def _by_identity(target: Path) -> str | None:
 
 
 def protected(path: str | Path, cwd: str = "") -> str | None:
-    """What *path* governs when it is a protected file, by name or by file identity, else None."""
+    """What *path* governs when it is a protected file, by name or by file identity, else None. One trail entry."""
     target = _absolute(path, cwd)
-    return _by_name(_spelled(target)) or _by_identity(target)
+    governs = _by_name(_spelled(target)) or _by_identity(target)
+    json_handler.log_operation("protected", {"seat": cwd, "governs": governs})
+    return governs
 
 
 def protected_within(path: str | Path, cwd: str = "") -> str | None:

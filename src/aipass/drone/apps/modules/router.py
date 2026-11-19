@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router.py
 # Description: Command routing logic for the drone module
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-09
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -13,15 +13,15 @@ Command routing logic for the AIPass drone module.
 import sys
 from typing import Dict, List, Optional
 
-from aipass.prax.apps.modules.logger import system_logger
-from aipass.cli.apps.modules import console
+from aipass.prax import logger as system_logger
+from aipass.cli import console
 from aipass.drone.apps.handlers.executor import CommandResult, resolve_timeout
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.router_handler import (
     execute_branch_command,
     caller_cwd,
     # Re-exported for apps/drone.py: the entry point keeps one seam into handlers.
-    registries_in,  # noqa: F401
+    registry_named_entries,  # noqa: F401
     resolve_caller_identity,
 )
 from .resolver import list_branches, resolve_branch
@@ -68,7 +68,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
 
 def print_help() -> None:
     """Print help for the router module."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("router — Command routing logic")
     console.print()
@@ -120,13 +120,7 @@ def route_command(
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    except ImportError:
-        logger.warning("CLI console not available, using fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]router Module[/bold cyan]")

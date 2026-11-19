@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_errors.py
 # Description: Unit tests for the errors module (error registry management CLI)
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/errors.py: the errors command routing and its report_error re-export."""
@@ -18,7 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.trigger.apps.handlers import error_reporter
 from aipass.trigger.apps.modules import errors
 
@@ -52,7 +52,7 @@ def _registry_edge(monkeypatch: pytest.MonkeyPatch) -> None:
             "state": "closed",
             "opened_at": 0,
             "cooldown_seconds": 300,
-            "recent_error_count": 0,
+            "recent_send_count": 0,
             "summary_sent": False,
         }
     )
@@ -206,7 +206,7 @@ class TestHandleCommandStats:
             "state": "closed",
             "opened_at": 0,
             "cooldown_seconds": 300,
-            "recent_error_count": 0,
+            "recent_send_count": 0,
             "summary_sent": False,
         }
 
@@ -248,7 +248,7 @@ class TestHandleCommandCircuitBreaker:
             "state": "closed",
             "opened_at": 0,
             "cooldown_seconds": 300,
-            "recent_error_count": 0,
+            "recent_send_count": 0,
             "summary_sent": False,
         }
 
@@ -265,7 +265,7 @@ class TestHandleCommandCircuitBreaker:
 
         assert _has_line(out, "Cooldown", "300"), "Expected Cooldown line with '300' in output"
 
-        assert _has_line(out, "Recent errors", "0"), "Expected Recent errors line with '0' in output"
+        assert _has_line(out, "Recent mails", "0"), "Expected Recent mails line with '0' in output"
 
         assert _has_line(out, "Summary sent", "False"), "Expected Summary sent line with 'False' in output"
 
@@ -278,7 +278,7 @@ class TestHandleCommandCircuitBreaker:
             "state": "open",
             "opened_at": time.time() - 60,
             "cooldown_seconds": 300,
-            "recent_error_count": 12,
+            "recent_send_count": 12,
             "summary_sent": True,
         }
 

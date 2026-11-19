@@ -18,7 +18,7 @@ systemctl --user restart trigger-log-watcher   # Restart watcher
 ```
 
 `drone @trigger medic on` installs and starts the unit if it is not running, and
-`medic off --forever` stops it. On a host with no systemd at all — macOS, Windows, a bare
+`medic off --forever` stops it. On a host with no systemd at all — a bare
 container — every door here probes `shutil.which("systemctl")` first and refuses by name
 rather than reporting a unit that failed: `medic status` says the watcher is unavailable
 because the host has no systemd, not that it is stopped.

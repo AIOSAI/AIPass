@@ -32,7 +32,7 @@ every fixture it requests.
 | form | spelling | why it is needed |
 |---|---|---|
 | an import binding | `from aipass.backup... import is_ignored` | the obvious half |
-| a module-level constant, to a fixed point | `SIMPLE_MODULES = [snapshot, versioned]` | how a parametrized test reaches `mod.handle_command` with the import three screens up |
+| a module-level constant, to a fixed point | `SIMPLE_MODULES = [drive_sync, settings]` | how a parametrized test reaches `mod.handle_command` with the import three screens up |
 | a dotted string | `"aipass.backup.apps..."` | `import_module` and `mock.patch` take the product by name, not by binding |
 | a multi-line string mentioning `aipass` | a probe source | product code, written down, handed to a subprocess |
 | a path from `__file__` | `Path(__file__).parents[1] / "apps"` | it points into the repo tree; a test that reads the guard file's text is testing the guard |

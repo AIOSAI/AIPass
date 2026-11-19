@@ -3,7 +3,7 @@
 # Description: CLI Routing Tests for DAEMON
 # Version: 1.1.0
 # Created: 2026-03-28
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/daemon.py — the router: help, introspection, unknown commands, the argument gate."""
@@ -17,7 +17,7 @@ from unittest.mock import call, patch
 
 import pytest
 
-from aipass.cli.apps.modules import error, mark_command_failed
+from aipass.cli import error, mark_command_failed
 
 from aipass.daemon.apps import daemon as _daemon_mod
 
@@ -263,8 +263,8 @@ class TestUnknownArgumentIsRefused:
 
         with (
             patch.object(_daemon_mod.timer_install, "gate", lambda *a, **k: None),
-            # Patched at the trigger's home, the object _uninstall imports, so no fire reaches the bus.
-            patch("aipass.trigger.apps.modules.core.trigger.fire") as fire,
+            # Patched on the class through trigger's door, where _uninstall's fire resolves: no fire reaches the bus.
+            patch("aipass.trigger.Trigger.fire") as fire,
         ):
             with patch("sys.argv", ["daemon", verb, "not_a_real_subarg_xyz"]):
                 result = _daemon_mod.main()

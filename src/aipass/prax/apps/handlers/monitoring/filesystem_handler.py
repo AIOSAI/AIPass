@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: filesystem_handler.py
 # Description: FileSystem Event Handler
-# Version: 0.3.0
+# Version: 0.3.1
 # Created: 2026-03-08
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """PRAX Filesystem Event Handler"""
@@ -15,7 +15,7 @@ from typing import Optional, Dict
 
 from watchdog.events import FileSystemEventHandler
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 from aipass.prax.apps.handlers.monitoring.event_queue import MonitoringEvent, MonitoringQueue
 from aipass.prax.apps.handlers.monitoring.branch_detector import detect_branch_from_path
 from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor, get_priority
@@ -156,27 +156,17 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
     @staticmethod
     def _branch_from_cwd(cwd: str) -> Optional[str]:
-        """Extract branch name from a CWD path like /path/to/src/aipass/devpulse."""
+        """The detector's label for a session's CWD; path shape (aipass/<name>, src/<name>) only when it has none."""
         if not cwd:
             return None
+        result = detect_branch_from_path(cwd)
+        if result and result != "UNKNOWN":
+            return result
         parts = Path(cwd).parts
         if "aipass" in parts:
             idx = parts.index("aipass")
             if idx + 1 < len(parts):
                 return parts[idx + 1].upper()
-        # External project under ~/Projects/: branch_detector gives the full label (AIPL/POLYGLOT)
-        projects_base = Path.home() / "Projects"
-        try:
-            Path(cwd).relative_to(projects_base)
-            result = detect_branch_from_path(cwd)
-            if result and result != "UNKNOWN":
-                return result
-        except ValueError:
-            logger.info(
-                f"[monitor] Live monitor file watcher is ignoring a folder outside "
-                f"the watched area (~/Projects/): {cwd}"
-            )
-        # Fallback: check src/{name} for branches outside aipass namespace
         if "src" in parts:
             idx = parts.index("src")
             if idx + 1 < len(parts):
@@ -435,21 +425,18 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
             branch = detect_branch_from_path(str(file_path))
 
-            # Markers use forward slashes; match on a local copy so Windows paths match too
-            norm = path_str.replace("\\", "/")
-
             if file_path.suffix == ".jsonl" and action != "created" and str(file_path) not in self._jsonl_positions:
                 # A transcript first seen mid-life starts at its end: its history is not live activity.
                 with contextlib.suppress(OSError):
                     self._jsonl_positions[str(file_path)] = file_path.stat().st_size
 
-            if file_path.suffix == ".jsonl" and ".claude/projects/" in norm:
-                if "/subagents/" in norm:
+            if file_path.suffix == ".jsonl" and ".claude/projects/" in path_str:
+                if "/subagents/" in path_str:
                     branch = branch + " agent"
                 if self._parse_agent_activity(file_path, branch):
                     return
 
-            if file_path.suffix == ".jsonl" and ".codex/sessions/" in norm:
+            if file_path.suffix == ".jsonl" and ".codex/sessions/" in path_str:
                 codex_branch = self._get_codex_branch(file_path, path_str)
                 if self._parse_codex_activity(file_path, codex_branch):
                     return

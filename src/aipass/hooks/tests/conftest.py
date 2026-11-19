@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.9.0
+# Version: 2.11.0
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-09
+# Modified: 2026-11-16
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -14,6 +14,7 @@
 the json shim with it unset) and again per test by ``mock_infrastructure``.
 """
 
+import contextlib
 import json
 import os
 import shutil
@@ -28,13 +29,13 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import pytest
 
-from aipass.ai_mail.apps.modules import door_dispatch_grant, door_verified_caller
-from aipass.cli.apps.modules import display
+from aipass.ai_mail import GRANT_KEY
+from aipass.cli import display
 from aipass.hooks.apps import sound
 from aipass.hooks.apps.handlers.config import diagnostics, loader, trust_registry
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.handlers.lifecycle import session_boot
-from aipass.hooks.apps.modules import cadence, cc_transcripts
+from aipass.hooks.apps.modules import cadence, cc_transcripts, engine
 from aipass.hooks.apps.modules import diagnostics_state as ds
 
 collect_ignore_glob = [".archive/*"]
@@ -75,7 +76,7 @@ def recorded_cli_trigger(monkeypatch) -> TriggerRecorder:
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    """Rich sizes an unpinned console on every print: 80
     under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
@@ -129,12 +130,21 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
 
 
 @pytest.fixture(autouse=True)
+def isolated_deletion_ledger(tmp_path_factory, monkeypatch) -> Path:
+    """Every rm_gate refusal writes a row through @drone's door: keep test rows out of the LIVE ledger.
+
+    The environment seam reaches child processes a test spawns too.
+    """
+    sandbox = tmp_path_factory.mktemp("deletion_ledger") / "deletions.jsonl"
+    monkeypatch.setenv("AIPASS_DELETION_LOG", str(sandbox))
+    return sandbox
+
+
+@pytest.fixture(autouse=True)
 def isolated_mute_flag(tmp_path_factory, monkeypatch) -> Path:
-    """Keep every test off the owner's LIVE sound flag, and off the old mute flags is_muted() removes."""
+    """Keep every test off the owner's LIVE sound flag."""
     sandbox = tmp_path_factory.mktemp("mute_flag")
     monkeypatch.setattr(sound, "SOUND_FLAG", sandbox / "home" / "aipass-hooks-sound-on")
-    monkeypatch.setattr(sound, "MUTE_FLAG", sandbox / "home" / "aipass-hooks-muted")
-    monkeypatch.setattr(sound, "LEGACY_MUTE_FLAG", sandbox / "tmp" / "aipass-hooks-muted")
     return sound.SOUND_FLAG
 
 
@@ -143,9 +153,11 @@ def isolated_trust_registry(tmp_path_factory, monkeypatch) -> Path:
     """Keep the trust registry out of the LIVE ~/.aipass/trusted_projects.json.
 
     REGISTRY_PATH binds at import, and bootstrap() WRITES it when a test meets an absent registry.
+    The environment seam carries the sandbox into every child process a test spawns too.
     """
     sandbox = tmp_path_factory.mktemp("trust_registry") / "trusted_projects.json"
     monkeypatch.setattr(trust_registry, "REGISTRY_PATH", sandbox)
+    monkeypatch.setenv(trust_registry.REGISTRY_ENV, str(sandbox))
     return sandbox
 
 
@@ -203,6 +215,20 @@ def mock_logger():
 
 
 @pytest.fixture
+def engine_fault(mock_logger, _no_real_trust_banners):
+    """Run one real handler through engine.dispatch: answer (its fault[...] ERROR lines, the dispatch result)."""
+
+    def run(event: str, hook: str, handler: str, hook_data: dict) -> tuple[list[str], tuple[str, int]]:
+        hook_def = {"enabled": True, "handler": handler, "matcher": "", "timeout": 10}
+        with patch.object(sound, "speak"):
+            result = engine.dispatch(event, json.dumps(hook_data), {"hooks_enabled": True, event: {hook: hook_def}})
+        lines = [c.args[0] % c.args[1:] for c in mock_logger.error.call_args_list]
+        return [line for line in lines if "fault[" in line], result
+
+    return run
+
+
+@pytest.fixture
 def mock_subprocess():
     """Mock subprocess.run for hook execution tests."""
     with patch("aipass.hooks.apps.modules.engine.subprocess.run") as mock:
@@ -253,7 +279,7 @@ _TMUX_OWN_TESTS = {
 def _no_real_tmux_lookup(request):
     """Keep the MENU tests off a real subprocess.
 
-    The menu asks tmux where each process lives: WinError 2 on the Windows runner, slow elsewhere.
+    The menu asks tmux where each process lives, which is slow.
     """
     if request.cls is not None and request.cls.__name__ in _TMUX_OWN_TESTS:
         yield
@@ -273,13 +299,8 @@ def fake_projects(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def isolated_diagnostics_state(tmp_path_factory, monkeypatch):
-    """Keep the fleet-shared .diagnostics_state.json out of every test.
-
-    Live sessions write it, so a test would read another branch's open error or erase one.
-    """
-    sandbox = tmp_path_factory.mktemp("diagnostics_state") / ".diagnostics_state.json"
-    monkeypatch.setattr(ds, "LEGACY_FILE", sandbox)
-    monkeypatch.setattr(ds, "STATE_DIR", sandbox.parent / "seats")
+    """Keep the live per-seat diagnostics state out of every test: a test would read or erase a live seat's error."""
+    monkeypatch.setattr(ds, "STATE_DIR", tmp_path_factory.mktemp("diagnostics_state") / "seats")
 
 
 @pytest.fixture
@@ -341,7 +362,18 @@ def _no_inherited_dispatch_id(monkeypatch):
 
 
 @pytest.fixture
-def dispatch_grant(tmp_path: Path, monkeypatch) -> SimpleNamespace:
+def door_patch():
+    """Patch a front-door name for the test's life.
+
+    mock.patch, never monkeypatch.setattr: the door hands names out uncached, and monkeypatch's undo
+    would leave a real copy in the package that shadows every later patch on the name's home.
+    """
+    with contextlib.ExitStack() as stack:
+        yield lambda target, new: stack.enter_context(patch(target, new))
+
+
+@pytest.fixture
+def dispatch_grant(tmp_path: Path, monkeypatch, door_patch) -> SimpleNamespace:
     """Dispatch d1's @hooks seat in a daemon session, a registry-less git tree beside it, @ai_mail's door faked.
 
     The fake answers as the door does and records each call; ``ended`` makes it refuse with that reason.
@@ -386,13 +418,13 @@ def dispatch_grant(tmp_path: Path, monkeypatch) -> SimpleNamespace:
                 "dispatch_id": "d1",
                 "sender": "@grantor",
                 "target": state.grantee,
-                door_dispatch_grant.GRANT_KEY: state.grant,
+                GRANT_KEY: state.grant,
             }
         ]
 
-    monkeypatch.setattr(door_dispatch_grant, "granted", granted)
-    monkeypatch.setattr(door_dispatch_grant, "open_grants", open_grants)
-    monkeypatch.setattr(door_verified_caller, "is_verified_admin_caller", lambda: state.admin)
+    door_patch("aipass.ai_mail.granted", granted)
+    door_patch("aipass.ai_mail.open_grants", open_grants)
+    door_patch("aipass.ai_mail.is_verified_admin_caller", lambda: state.admin)
     for name in ("AIPASS_CALLER_BRANCH", "AIPASS_CALLER_CWD", "AIPASS_CALLER_IDENTITY_SOURCE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AIPASS_DISPATCH_ID", "d1")

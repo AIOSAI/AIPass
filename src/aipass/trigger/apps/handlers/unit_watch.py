@@ -17,7 +17,7 @@ import json
 import subprocess
 from typing import Any, Callable, Dict, List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.trigger.apps.config import TRIGGER_JSON_DIR, atomic_write_json
 from aipass.trigger.apps.handlers.json import json_handler
 

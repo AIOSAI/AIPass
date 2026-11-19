@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: timestamps.py
 # Description: Per-project last-backup timestamp persistence
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Timestamp state handler."""
 
-# Snapshot lane only: the versioned store compares against its own stored copies and never reads this map.
+# The snapshot lane reads and writes this map; nothing else does.
 
 from ..audit import trail
 from ..json import json_handler

@@ -1,32 +1,22 @@
 # =================== AIPass ====================
 # Name: aipass.py
 # Description: AIPASS branch entry point — thin command router
-# Version: 0.5.3
+# Version: 0.6.0
 # Created: 2026-04-16
-# Modified: 2026-11-08
+# Modified: 2026-11-14
 # =============================================
 
 """
 AIPASS Branch - Main Orchestrator
 """
 
-import os
 import sys
 import importlib
 import importlib.metadata
 from pathlib import Path
 from typing import List, Any
 
-# Windows streams default to cp1252 and cannot encode Rich's glyphs; PYTHONUTF8 only
-# reaches child interpreters, so the live streams are reconfigured too (as drone/cli.py).
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")  # for child subprocesses
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
-from aipass.cli.apps.modules import console, error, resolve_exit, warning
+from aipass.cli import console, error, resolve_exit, warning
 from aipass.prax import logger
 
 try:
@@ -45,15 +35,11 @@ _PUBLIC_COMMANDS = {
     "adopt": "Turn an existing directory anywhere into a project",
     "baud": "Install the baud phone face from a release",
     "doctor": "System health — structure, registry, hooks, tests",
-    "handoff": "Launch your CLI in a new session",
-    "help": "README-backed Q&A — ask about any branch",
-    "init": "Guided setup — 'init run' walks the 10 stages, resumable",
-    "install": "One-command bootstrap — clone, setup.sh, hooks, welcome chat",
+    "init": "Scaffold or update a project, create an agent",
+    "install": "One-command bootstrap — clone, setup.sh, hooks, doctor",
     "new": "Create a project inside AIPass",
-    "profile": "Show/edit user profile",
     "read": "View a branch README, rendered in the terminal",
     "trust": "Trust registry — enroll/revoke projects",
-    "feedback": "Toggle the feedback reminder on/off",
 }
 
 
@@ -144,8 +130,8 @@ def discover_modules() -> List[Any]:
 def print_introspection(modules: List[Any] | None = None) -> None:
     """Bare invocation — title, purpose, public commands, --help pointer."""
     console.print()
-    console.print("[bold cyan]AIPASS — Concierge & Setup[/bold cyan]")
-    console.print("[dim]The friendly front door for AIPass. Setup, diagnostics, documentation, project creation.[/dim]")
+    console.print("[bold cyan]AIPASS — machine concierge[/bold cyan]")
+    console.print("[dim]Host and OS diagnosis, doctor, installer, fleet health.[/dim]")
     console.print()
 
     if modules is None:
@@ -171,8 +157,8 @@ def print_introspection(modules: List[Any] | None = None) -> None:
 def print_help(modules: List[Any] | None = None) -> None:
     """Full help — usage, commands, examples."""
     console.print()
-    console.print("[bold cyan]AIPASS — Concierge & Setup[/bold cyan]")
-    console.print("[dim]The friendly front door for AIPass. Setup, diagnostics, documentation, project creation.[/dim]")
+    console.print("[bold cyan]AIPASS — machine concierge[/bold cyan]")
+    console.print("[dim]Host and OS diagnosis, doctor, installer, fleet health.[/dim]")
     console.print()
 
     console.print("[yellow]Usage:[/yellow]")
@@ -189,21 +175,14 @@ def print_help(modules: List[Any] | None = None) -> None:
     )
     console.print("  [green]doctor --fix[/green]                 [dim]Remediation report with repair commands[/dim]")
     console.print("  [green]doctor --fix --json[/green]          [dim]The remediation report as JSON[/dim]")
-    console.print("  [green]doctor --cross-os[/green]            [dim]Cross-OS pre-flight check[/dim]")
     console.print(
-        "  [green]feedback[/green] [dim]\\[on|off][/dim]            [dim]Toggle the feedback reminder pulse[/dim]"
+        "  [green]init \\[target][/green]                [dim]Scaffold a project; init update, init agent[/dim]"
     )
-    console.print(
-        "  [green]handoff[/green] [dim]\\[launch][/dim]             [dim]Launch your CLI in a new session[/dim]"
-    )
-    console.print("  [green]help <question>[/green]              [dim]Search branch documentation (Q&A)[/dim]")
-    console.print("  [green]init run[/green]                     [dim]The 10-stage guided setup, resumable[/dim]")
-    console.print("  [green]install[/green]                      [dim]Bootstrap — clone, setup.sh, hooks, chat[/dim]")
+    console.print("  [green]install[/green]                      [dim]Bootstrap — clone, setup.sh, hooks, doctor[/dim]")
     console.print("  [green]new <name>[/green]                   [dim]Create a project inside AIPass[/dim]")
     console.print(
         "  [green]adopt <name>[/green]                 [dim]Turn an existing directory anywhere into a project[/dim]"
     )
-    console.print("  [green]profile[/green]                      [dim]Show/edit user profile[/dim]")
     console.print(
         "  [green]read <branch>[/green]                [dim]View a branch README, rendered in the terminal[/dim]"
     )
@@ -217,10 +196,8 @@ def print_help(modules: List[Any] | None = None) -> None:
 
     console.print("[yellow]Examples:[/yellow]")
     console.print("  [green]aipass doctor[/green]                       [dim]Check system health[/dim]")
-    console.print("  [green]aipass help what does drone do[/green]      [dim]Search documentation[/dim]")
     console.print("  [green]aipass new myapp --template python[/green]  [dim]Create a Python project[/dim]")
     console.print("  [green]aipass adopt myapp --dry-run[/green]        [dim]Preview adopting projects/myapp[/dim]")
-    console.print("  [green]aipass init run[/green]                     [dim]Start guided setup[/dim]")
     console.print()
 
 
@@ -290,7 +267,7 @@ def main():
 
     if command.startswith("@"):
         console.print(f"{command} is a drone routing target, not an aipass command.")
-        console.print("aipass is your front-door CLI; drone is the agent router — two separate tools.")
+        console.print("aipass is the machine concierge CLI; drone is the agent router — two separate tools.")
         console.print()
         console.print(f"  Reach an agent:   drone {command} ...   ·  drone systems")
         console.print("  aipass commands:  aipass --help")
@@ -299,18 +276,6 @@ def main():
     for stem, err in _import_failures.items():
         if command in (stem, stem.replace("_", "")):
             error(f"'{command}' failed to load: {err}")
-            return 1
-
-    # Multi-word plain input reads as a question; anything with flags stays Unknown command.
-    if remaining and not command.startswith("-") and all(not a.startswith("-") for a in remaining):
-        question = [command, *remaining]
-        console.print(f"[dim]No command '{command}' — answering as: aipass help {' '.join(question)}[/dim]")
-        try:
-            if route_command("help", question, modules):
-                return resolve_exit(True)
-        except Exception as e:
-            error(f"help crashed: {e}")
-            _log_crash("[AIPASS] catch-all help traceback")
             return 1
 
     console.print(f"Unknown command: {command}")

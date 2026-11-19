@@ -9,6 +9,29 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+## [2026-11-18] — v2.8.38: a repair that keeps what it touches, passport seeds for every citizen, one import door per branch
+
+### Added
+
+- **aipass: `aipass doctor --fix` repairs a lost or corrupt passport** (2026-11-18). Doctor fails a citizen with no readable passport or no passport seed; the fix writes a missing seed, then restores the passport from it, then seats the owner. Memory, mail, plans, the registry and provider settings are not touched. It is a command for a person at a terminal.
+- **spawn: every citizen is born with a passport seed** (2026-11-18), in the fleet and in a project. A project seed is the passport as it stands, minus the machine ids. `drone @spawn export-seeds` writes the seeds of citizens born before them.
+- **drone: `drone rm` reaches another project for the verified admin seat** (2026-11-18). The target moves into the `.archive` beside it under the same rules as inside the tree; provider settings folders and anything outside the home stay refused.
+
+### Fixed
+
+- **spawn: a corrupt passport is set aside, not left in place** (2026-11-18). A passport that is present but not JSON is renamed beside itself and a fresh one is rendered from the seed. A seed refresh keeps the seed it replaces in the citizen's recovery folder.
+- **spawn: a registered citizen with no passport is reported as damaged, never removed** (2026-11-18), and the owner check no longer seats another citizen in a missing owner's place.
+- **ai_mail: a caller that is no citizen gets no mailbox** (2026-11-18). An assigned name no registry knows, standing in no branch, is refused instead of being given a mailbox where it stands.
+- **setup: the installer no longer picks the python of the venv it is about to remove** (2026-11-18).
+- **tests: three files the full suite found red** (2026-11-18), each a test behind the product: the e2e wiring tests, memory's retired-verb pins, the screen-lock self-contained pin.
+
+### Changed
+
+- **fleet: one import door per branch** (2026-11-16 and 17; every branch building, devpulse landing). Another branch is imported only as `from aipass.<branch> import <name>`. Each package top file is the door: a name-to-home table read on every access, nothing cached, an unknown name is an `AttributeError`, and a bare import loads nothing under `apps`. Every cross-branch caller and its tests moved to the doors (the fleet scan went from 619 production and 290 test sites to 0 and 0). The 23 `door_*.py` files under `apps/modules` are removed, and modules no longer list handler names in `__all__`. The handlers fence in all 18 branches and in the citizen template tells a refused importer to use the package door.
+- **sentry: the `front_door` standard gates** (2026-11-16 and 17). It convicts a cross-branch import through `apps`, a `door_*` file under `apps/modules`, a pure re-export module, and a module whose `__all__` hands out handler names. `unused_function` counts a name in the branch's own door table as used; `encapsulation` acquits a handler import inside `if TYPE_CHECKING:` in the package top file. The front-door scan skips the retired folders the audit skips (`tests/parked`, `deprecated`) and prints how many. The standards pages state the rule, how a test patches a door name, and that the event bus is silenced by patching `Trigger.fire`.
+
 ## [2026-11-10] — v2.8.37: citizens at any path, the fleet read through memory's door, quieter hooks
 
 ### Added

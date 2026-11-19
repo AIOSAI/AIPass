@@ -14,7 +14,7 @@ clone that dropped ignored files) unioned with the on-disk contents. Reference: 
 from pathlib import Path
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES
 from aipass.spawn.apps.handlers.meta_ops import load_template_registry
 from aipass.spawn.apps.handlers.placeholders import replace_placeholders

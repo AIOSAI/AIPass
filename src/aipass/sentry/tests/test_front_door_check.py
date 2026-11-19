@@ -1,0 +1,307 @@
+# =================== AIPass ====================
+# Name: test_front_door_check.py
+# Description: front_door_check — the gating row: per-site findings, scoped and whole-file waivers
+# Version: 1.4.0
+# Created: 2026-11-16
+# Modified: 2026-11-17
+# =============================================
+
+"""Tests for apps/handlers/aipass_standards/front_door_check.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# sentry: no-test-needed(shared) — scan_source's reading of each import shape; tests/test_front_door_count.py
+# sentry: no-test-needed(shared) — matching_rule's file and scope matching; tests/test_bypass.py
+
+import pytest
+
+from aipass.sentry.apps.handlers.aipass_standards import encapsulation_check
+from aipass.sentry.apps.handlers.aipass_standards import front_door_check as checker
+
+#: Where every specimen is written, so its owner is sentry.
+REL = "src/aipass/sentry/apps/modules/specimen.py"
+
+CASES = [
+    ("modules", "from aipass.cli.apps.modules import console\n", [1]),
+    ("handlers", "from aipass.flow.apps.handlers.plan.validator import validate_plan\n", [1]),
+    ("door", "from aipass.prax import logger\n", []),
+    ("own_branch", "from aipass.sentry.apps.handlers.json import json_handler\n", []),
+    ("relative", "from ..handlers import json\n", []),
+    ("in_function", "def run():\n    from aipass.memory.apps.modules.fleet import fleet\n", [2]),
+    ("type_only", "if TYPE_CHECKING:\n    from aipass.cli.apps.modules import x\n", [2]),
+    ("import_module", 'import importlib\nimportlib.import_module("aipass.memory.apps.modules.door_x")\n', [2]),
+    ("patch", 'from unittest.mock import patch\npatch("aipass.cli.apps.modules.display.console")\n', [2]),
+    ("prose", '"""from aipass.cli.apps.modules import console"""\nprint("aipass.cli.apps.modules")\n', []),
+    ("import_as", "import aipass.trigger.apps.modules.core as core\n", [1]),
+    ("nested_lib", "from aipass.skills.lib.drone_commands.apps.handlers.run import go\n", [1]),
+    ("beneath_shared", "from aipass.aipass.shared.ops import x\n", [1]),
+    ("beneath_plain", "import aipass.skills.lib.x\n", [1]),
+    ("beneath_in_function", "def run():\n    from aipass.flow.docs import b\n", [2]),
+    ("beneath_string", 'import importlib\nimportlib.import_module("aipass.aipass.shared.ops")\n', [2]),
+    ("patch_door_name", 'from unittest.mock import patch\npatch("aipass.prax.logger")\n', []),
+    ("own_deep", "from aipass.sentry.docs.x import y\n", []),
+]
+
+#: Two sites, one at module level and one inside run().
+TWO_SITES = (
+    "from aipass.cli.apps.modules import console\n\n\ndef run():\n    from aipass.prax.apps.modules import logger\n"
+)
+
+
+def _write(tmp_path, source, rel=REL):
+    target = tmp_path / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(source, encoding="utf-8")
+    return str(target)
+
+
+def _convicted(outcome):
+    return [check["line"] for check in outcome["checks"] if not check["passed"]]
+
+
+class TestTheRow:
+    @pytest.mark.parametrize("source, lines", [case[1:] for case in CASES], ids=[case[0] for case in CASES])
+    def test_the_row_convicts_and_acquits_what_the_scanner_reads(self, tmp_path, source, lines):
+        outcome = checker.check_module(_write(tmp_path, source))
+        assert (_convicted(outcome), outcome["score"], outcome["passed"]) == (lines, 0 if lines else 100, not lines)
+
+    def test_a_test_file_reaching_into_another_branch_is_convicted(self, tmp_path):
+        path = _write(tmp_path, "from aipass.cli.apps.modules import display\n", "src/aipass/sentry/tests/test_x.py")
+        assert _convicted(checker.check_module(path)) == [1]
+
+    def test_each_site_carries_its_line_function_and_the_door_cure(self, tmp_path):
+        checks = checker.check_module(_write(tmp_path, TWO_SITES))["checks"]
+        assert [(c["line"], c["function"]) for c in checks] == [(1, "<module>"), (5, "run")]
+        assert "from aipass.prax import <name>" in checks[1]["message"]
+
+    def test_a_site_in_a_nested_def_names_the_innermost_function(self, tmp_path):
+        source = "def outer():\n    def inner():\n        from aipass.cli.apps.modules import x\n"
+        assert [c["function"] for c in checker.check_module(_write(tmp_path, source))["checks"]] == ["inner"]
+
+    def test_a_beneath_site_names_the_top_file_and_the_door_cure(self, tmp_path):
+        outcome = checker.check_module(_write(tmp_path, "from aipass.aipass.shared.ops import x\n"))
+        message = outcome["checks"][0]["message"]
+        assert "beneath aipass's top file" in message and "from aipass.aipass import <name>" in message
+
+    def test_the_aipass_branch_importing_its_own_apps_is_acquitted(self, tmp_path):
+        rel = "src/aipass/aipass/apps/modules/doctor.py"
+        path = _write(tmp_path, "from aipass.aipass.apps.handlers.x import y\n", rel)
+        assert checker.check_module(path)["score"] == 100
+
+    def test_a_file_python_cannot_parse_scores_zero_unjudged(self, tmp_path):
+        outcome = checker.check_module(_write(tmp_path, "def broken(:\n"))
+        assert (outcome["passed"], outcome["score"]) == (False, 0)
+        assert "Cannot be read as Python" in outcome["checks"][0]["message"]
+
+
+class TestBypass:
+    def _rule(self, **scope):
+        return [{"file": REL, "standard": "front_door", "reason": "pin", **scope}]
+
+    def test_a_lines_row_waives_exactly_its_line(self, tmp_path):
+        outcome = checker.check_module(_write(tmp_path, TWO_SITES), self._rule(lines=[5]))
+        assert _convicted(outcome) == [1]
+
+    def test_a_functions_row_waives_exactly_its_function(self, tmp_path):
+        outcome = checker.check_module(_write(tmp_path, TWO_SITES), self._rule(functions=["run"]))
+        assert _convicted(outcome) == [1]
+
+    def test_a_whole_file_row_waives_every_site(self, tmp_path):
+        outcome = checker.check_module(_write(tmp_path, TWO_SITES), self._rule())
+        assert (outcome["passed"], outcome["score"]) == (True, 100)
+
+    def test_a_row_for_another_standard_waives_nothing(self, tmp_path):
+        rules = [{"file": REL, "standard": "encapsulation", "reason": "pin"}]
+        assert _convicted(checker.check_module(_write(tmp_path, TWO_SITES), rules)) == [1, 5]
+
+
+#: A module whose whole body hands its own handlers' names outward: the retired second-door shape.
+RE_EXPORT = 'from aipass.sentry.apps.handlers.json import json_handler\n\n__all__ = ["json_handler"]\n'
+#: A real module: it imports a handler and does work with it.
+WORKER = (
+    "from aipass.sentry.apps.handlers.json import json_handler\n\n\n"
+    "def handle_command(c, a) -> bool:\n    return bool(json_handler)\n"
+)
+MODULES = "src/aipass/sentry/apps/modules"
+
+
+class TestSecondDoor:
+    @pytest.mark.parametrize(
+        "name, source, convicted",
+        [
+            ("door_audit.py", RE_EXPORT, True),
+            ("door_audit.py", WORKER, True),
+            ("audit_view.py", RE_EXPORT, True),
+            ("audit_view.py", WORKER, False),
+            ("__init__.py", RE_EXPORT, False),
+            ("empty.py", "__all__ = []\n", False),
+        ],
+        ids=["by_name", "by_name_with_logic", "by_shape", "real_module", "package_marker", "nothing_handed_out"],
+    )
+    def test_a_second_door_under_apps_modules_is_convicted_by_name_or_shape(self, tmp_path, name, source, convicted):
+        checks = checker.check_module(_write(tmp_path, source, f"{MODULES}/{name}"))["checks"]
+        assert any("second door" in c["message"] and not c["passed"] for c in checks) is convicted
+
+    def test_the_second_door_finding_names_the_package_top_file_and_retirement(self, tmp_path):
+        check = checker.check_module(_write(tmp_path, RE_EXPORT, f"{MODULES}/door_audit.py"))["checks"][0]
+        assert (check["line"], check["function"]) == (1, "<module>")
+        assert "from aipass.sentry import <name>" in check["message"] and "retire" in check["message"]
+
+    def test_a_door_name_outside_apps_modules_is_not_a_second_door(self, tmp_path):
+        path = _write(tmp_path, RE_EXPORT, "src/aipass/sentry/apps/handlers/door_audit.py")
+        assert checker.check_module(path)["passed"] is True
+
+    def test_a_door_named_file_is_one_finding_not_two(self, tmp_path):
+        source = RE_EXPORT + "\n\ndef helper():\n    return json_handler\n"
+        checks = checker.check_module(_write(tmp_path, source, f"{MODULES}/door_audit.py"))["checks"]
+        assert [c["line"] for c in checks] == [1]
+
+    def test_no_bypass_row_waives_a_second_door(self, tmp_path):
+        rel = f"{MODULES}/door_audit.py"
+        rules = [{"file": rel, "standard": "front_door", "reason": "pin"}]
+        assert checker.check_module(_write(tmp_path, RE_EXPORT, rel), rules)["score"] == 0
+
+
+#: A real module: one handler import used by its own def, and an __all__ of what it defines.
+OWN_API = (
+    "from aipass.sentry.apps.handlers.json.json_handler import load_json as load\n\n\n"
+    "def read(p):\n    return load(p)\n\n\n"
+    '__all__ = ["read"]\n'
+)
+#: The same module handing the handler name outward too.
+HANDS_OUT = OWN_API.replace('["read"]', '["read", "load"]')
+
+
+class TestAModuleHandingOutHandlerNames:
+    """The mixed second door: real logic, plus own-handler names in __all__."""
+
+    @pytest.mark.parametrize(
+        "rel, source, lines",
+        [
+            (f"{MODULES}/reader.py", OWN_API, []),
+            (f"{MODULES}/reader.py", HANDS_OUT, [8]),
+            (f"{MODULES}/reader.py", HANDS_OUT.replace('["read", "load"]', '("read", "load")'), [8]),
+            (f"{MODULES}/__init__.py", HANDS_OUT, []),
+            ("src/aipass/sentry/apps/handlers/reader.py", HANDS_OUT, []),
+            (f"{MODULES}/reader.py", HANDS_OUT.replace('\n\n__all__ = ["read", "load"]\n', ""), []),
+            (f"{MODULES}/reader.py", "from aipass.prax import logger\n\n__all__ = ['logger']\n", []),
+        ],
+        ids=[
+            "own_api_only",
+            "hands_out_a_handler_name",
+            "tuple_all",
+            "package_marker",
+            "under_handlers",
+            "no_all",
+            "another_branchs_door_name",
+        ],
+    )
+    def test_handler_names_in_all_are_convicted_at_the_all_line(self, tmp_path, rel, source, lines):
+        assert _convicted(checker.check_module(_write(tmp_path, source, rel))) == lines
+
+    def test_the_finding_names_each_name_its_home_the_door_and_the_cure(self, tmp_path):
+        message = checker.check_module(_write(tmp_path, HANDS_OUT, f"{MODULES}/reader.py"))["checks"][0]["message"]
+        assert "load (aipass.sentry.apps.handlers.json.json_handler)" in message
+        assert "read" not in message.split("hands out")[1].split(";")[0]
+        assert "from aipass.sentry import <name>" in message and "drop" in message
+
+    def test_no_bypass_row_waives_handed_out_names(self, tmp_path):
+        rel = f"{MODULES}/reader.py"
+        rules = [{"file": rel, "standard": "front_door", "reason": "pin"}]
+        assert checker.check_module(_write(tmp_path, HANDS_OUT, rel), rules)["score"] == 0
+
+
+DOOR_REL = "src/aipass/sentry/__init__.py"
+SERVE = "    return getattr(importlib.import_module(_HOMES[name]), name)\n"
+GUARD = "    if name not in _HOMES:\n        raise AttributeError(name)\n"
+#: The door model: a table, __all__ built from it, a guarded uncached __getattr__, a __dir__.
+DOOR = (
+    'import importlib\nimport sys\n\n_HOMES = {"read": "aipass.sentry.apps.modules.reader"}\n\n'
+    "__all__ = list(_HOMES)\n\n\ndef __getattr__(name):\n" + GUARD + SERVE + "\n\n"
+    "def __dir__():\n    return sorted(set(globals()) | set(__all__))\n"
+)
+STORE = "    value = getattr(importlib.import_module(_HOMES[name]), name)\n    {}\n    return value\n"
+HELPER = (
+    DOOR.replace(SERVE, "    return _load(name)\n") + "\n\ndef _load(name):\n" + STORE.format("globals()[name] = value")
+)
+
+
+def _door_findings(tmp_path, source):
+    """(line, first words) of each door-model finding; cross-branch sites are not in these sources."""
+    outcome = checker.check_module(_write(tmp_path, source, DOOR_REL))
+    return [(c["line"], " ".join(c["message"].split()[:3])) for c in outcome["checks"] if not c["passed"]]
+
+
+def _at(source, text):
+    return source.splitlines().index(text) + 1
+
+
+class TestTheDoorModel:
+    """A package top file with a __getattr__ is a door: uncached, unknown names raise, __all__ and __dir__ present."""
+
+    def test_the_model_door_passes(self, tmp_path):
+        assert _door_findings(tmp_path, DOOR) == []
+
+    @pytest.mark.parametrize(
+        "store",
+        ["globals()[name] = value", "setattr(sys.modules[__name__], name, value)", "_SEEN[name] = value"],
+        ids=["globals", "setattr_on_the_package", "memo_dict"],
+    )
+    def test_a_door_that_stores_what_it_serves_is_convicted_at_the_write(self, tmp_path, store):
+        source = DOOR.replace(SERVE, STORE.format(store)).replace("\n\n__all__", "\n_SEEN = {}\n\n__all__")
+        assert _door_findings(tmp_path, source) == [(_at(source, f"    {store}"), "the door caches:")]
+
+    def test_a_cache_in_a_helper_getattr_calls_is_convicted(self, tmp_path):
+        assert _door_findings(tmp_path, HELPER) == [(_at(HELPER, "    globals()[name] = value"), "the door caches:")]
+
+    @pytest.mark.parametrize(
+        "old, new, at",
+        [
+            (GUARD, "", SERVE[:-1]),
+            (GUARD + SERVE, "    _HOMES.get(name)\n", "def __getattr__(name):"),
+            (SERVE, SERVE.replace("), name)", "), name, None)"), SERVE.replace("), name)", "), name, None)")[:-1]),
+            (GUARD, "    if name in _HOMES:\n" + "    " + SERVE + "    return None\n", "    return None"),
+            (SERVE, "    try:\n    " + SERVE + "    except Exception:\n        return None\n", "        return None"),
+        ],
+        ids=["no_guard", "falls_off_the_end", "getattr_default", "returns_for_unknown", "except_returns"],
+    )
+    def test_a_door_that_answers_an_unknown_name_is_convicted(self, tmp_path, old, new, at):
+        source = DOOR.replace(old, new, 1)
+        assert _door_findings(tmp_path, source) == [(_at(source, at), "the door answers")]
+
+    @pytest.mark.parametrize(
+        "all_line, convicted",
+        [
+            ("", True),
+            ('__all__ = ["read"]', True),
+            ("__all__ = sorted(_HOMES)", False),
+            ('__all__ = ["helper", *_HOMES]', False),
+        ],
+        ids=["no_all", "hand_written", "sorted_table", "own_defs_and_table"],
+    )
+    def test_all_is_built_from_the_table(self, tmp_path, all_line, convicted):
+        source = DOOR.replace("__all__ = list(_HOMES)", all_line)
+        found = _door_findings(tmp_path, source)
+        assert [words for _, words in found] == (["the door's __all__"] if convicted else [])
+
+    def test_a_door_with_no_dir_is_convicted(self, tmp_path):
+        source = DOOR.split("\n\n\ndef __dir__")[0] + "\n"
+        assert _door_findings(tmp_path, source) == [(_at(source, "def __getattr__(name):"), "the door has")]
+
+    @pytest.mark.parametrize(
+        "rel, source",
+        [(DOOR_REL, '"""Package marker."""\n'), (f"{MODULES}/reader.py", DOOR.replace(GUARD, ""))],
+        ids=["bare_marker", "not_a_package_top_file"],
+    )
+    def test_only_a_package_top_file_with_getattr_is_judged_as_a_door(self, tmp_path, rel, source):
+        assert _convicted(checker.check_module(_write(tmp_path, source, rel))) == []
+
+    def test_no_bypass_row_waives_the_door_model(self, tmp_path):
+        rules = [{"file": DOOR_REL, "standard": "front_door", "reason": "pin"}]
+        assert checker.check_module(_write(tmp_path, DOOR.replace(GUARD, ""), DOOR_REL), rules)["score"] == 0
+
+    def test_an_eager_own_handler_import_in_a_door_is_still_encapsulations(self, tmp_path):
+        (tmp_path / "src" / "aipass" / "sentry" / "apps").mkdir(parents=True)
+        source = "from aipass.sentry.apps.handlers.json import json_handler\n" + DOOR
+        target = _write(tmp_path, source, DOOR_REL)
+        assert encapsulation_check.check_module(target)["passed"] is False
+        assert _door_findings(tmp_path, source) == []

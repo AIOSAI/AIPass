@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: close_plan.py
 # Description: PLAN closure module with registry cleanup
-# Version: 3.7.0
+# Version: 3.8.0
 # Created: 2025-11-25
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -20,20 +20,11 @@ Usage:
 """
 
 import sys
-import os
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 from typing import List, Dict, Any
+from pathlib import Path
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-_PKG_ROOT = module_file(__file__).parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
+_PKG_ROOT = Path(__file__).resolve().parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 from aipass.prax import logger
@@ -41,10 +32,10 @@ from aipass.prax import logger
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 
 # handle_command binds a local `error` that shadows the helper; this alias still prints.
-from aipass.cli.apps.modules import error as error_display
+from aipass.cli import error as error_display
 
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
 from aipass.flow.apps.handlers.registry.save_registry import registry_lock, save_registry
@@ -68,13 +59,9 @@ from aipass.flow.apps.handlers.mbank.process import is_template_content, archive
 
 from aipass.flow.apps.handlers.plan.close_ops import close_plan_impl, close_all_plans_impl
 
-try:
-    from aipass.trigger.apps.modules.core import trigger as _trigger_module
+from aipass.trigger import trigger as _trigger_module
 
-    _trigger_fire = _trigger_module.fire
-except ImportError:
-    logger.info("[close_plan] Trigger module not available, plan events will be skipped")
-    _trigger_fire = None
+_trigger_fire = _trigger_module.fire
 
 MODULE_NAME = "close_plan"
 
@@ -135,6 +122,7 @@ def _display_messages(messages: List[Dict[str, Any]]):
                     f"  [dim]held back by type ({', '.join(msg['excluded_types'])}):[/dim] {msg['held_by_type']}"
                 )
             console.print(f"  [dim]held back, another project:[/dim] {msg['held_out_of_scope']}")
+            console.print(f"  [dim]held back, another branch's plan:[/dim] {msg.get('held_by_owner', 0)}")
             if msg.get("refused"):
                 error(f"  refused (untyped registry row): {msg['refused']}")
             console.print()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_api.py
 # Description: Host API Module — server lifecycle and token administration
-# Version: 1.5.3
+# Version: 1.6.0
 # Created: 2026-08-14
-# Modified: 2026-11-06
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -16,25 +16,17 @@ Reference: docs/host_api.md
 import os
 import sys
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from aipass.cli.apps.modules import console, header, success, error, warning
+from aipass.cli import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.prax import logger
 from aipass.api.apps.handlers.host import autostart as host_autostart
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import lifetime as host_lifetime
 from aipass.api.apps.handlers.host import server as host_server
-from aipass.api.apps.handlers.host import pairings as host_pairings
 from aipass.api.apps.modules import host_config_cli
 from aipass.api.apps.modules import host_pair_cli
 from aipass.api.apps.modules import host_serve
@@ -60,15 +52,9 @@ def print_introspection() -> None:
     console.print()
 
     console.print("[cyan]Available Workflows:[/cyan]")
-    console.print("  - serve()          - Validate the bind, then run the server")
-    console.print("  - issue_token()    - Mint a bearer token for a device")
-    console.print("  - revoke_token()   - Revoke server-side, next request")
-    console.print("  - set_bind()       - Validate and store the bind address")
     console.print("  - autostart()      - Render the boot unit (a running unit is left alone)")
     console.print("  - install_unit()   - Install the unit under the user's systemd (dry_run names the steps)")
     console.print("  - enable_unit()    - enable --now it, inside the graphical session (dry_run names the steps)")
-    console.print("  - mint_pairing()   - A one-use, five-minute code the phone trades for its bearer")
-    console.print("  - render_qr()      - A text's QR as terminal block characters")
     console.print()
 
     available = host_server.is_available()
@@ -167,64 +153,7 @@ def print_help() -> None:
     console.print()
 
 
-def issue_token(label: str, scope: str = "read"):
-    """Mint a bearer token. Returns (record, raw_value); the raw is never stored."""
-    return host_tokens.issue_token(label, scope)
-
-
-def revoke_token(token_id: str) -> bool:
-    """Revoke a token by id. Effective on the next request, no restart."""
-    return host_tokens.revoke_token(token_id)
-
-
-def serve(host: Optional[str] = None, port: Optional[int] = None) -> None:
-    """Validate the configured bind address, then run the server."""
-    host_server.serve(host=host, port=port)
-
-
-# The door for other branches' in-process calls (@aipass's installer), so none reaches into handlers.
-FaceDirRefused = host_config.FaceDirRefused
-BaudBinRefused = host_config.BaudBinRefused
-
-
-def load_config() -> dict:
-    """The effective host config: defaults merged under the stored values."""
-    return host_config.load_config()
-
-
-def face_dir() -> Optional[Path]:
-    """The configured phone-face directory, or None: the checkout build serves."""
-    return host_config.face_dir()
-
-
-def set_face_dir(path: Optional[Path]) -> Optional[Path]:
-    """Validate and store the face dir, or clear it with None. Raises FaceDirRefused."""
-    return host_config.set_face_dir(path)
-
-
-def baud_bin() -> Optional[Path]:
-    """The configured baud binary, or None: the automatic lookup answers."""
-    return host_config.baud_bin()
-
-
-def set_baud_bin(path: Optional[Path]) -> Optional[Path]:
-    """Validate and store the baud binary, or clear it with None. Raises BaudBinRefused."""
-    return host_config.set_baud_bin(path)
-
-
-# The install doors for `aipass install`: the CLI's autostart only prints its steps; these run them.
-BindRefused = host_config.BindRefused
-AutostartUnsupported = host_autostart.AutostartUnsupported
-SupervisorUnreachable = host_autostart.SupervisorUnreachable
-LifetimeError = host_lifetime.LifetimeError
-TokenError = host_tokens.TokenError
-
-
-def set_bind(host: str, port: int) -> dict:
-    """Validate and store the bind, as set-config --host --port does. Unchanged = not written. Raises BindRefused."""
-    return host_config.set_bind(host, port)
-
-
+# The install doors for `aipass install`, handed out by aipass.api: the CLI's autostart only prints its steps.
 def autostart(host: Optional[str] = None, port: Optional[int] = None) -> dict:
     """Render the boot unit and report what installing it needs; a unit already running is left alone."""
     return host_lifetime.ensure_autostart(host, port)
@@ -238,32 +167,6 @@ def install_unit(dry_run: bool = False) -> dict:
 def enable_unit(dry_run: bool = False) -> dict:
     """enable --now the installed unit; refused while a hand-started server holds the port."""
     return host_lifetime.enable_autostart(dry_run)
-
-
-def serve_detached(host: Optional[str] = None, port: Optional[int] = None) -> dict:
-    """Start the server in its own session, as serve --detach does: {pid, host, port, log, started}.
-
-    The install's door on a machine with no user systemd. Raises BindRefused, LifetimeError, SupervisorUnreachable.
-    """
-    return host_lifetime.serve_detached(host=host, port=port)
-
-
-def receipt_path(label: str) -> Path:
-    """Where issue-token writes a token's raw value by default. Raises TokenError for a label that is no filename."""
-    return host_tokens.receipt_path(label)
-
-
-PairingError = host_pairings.PairingError
-
-
-def mint_pairing(label: str, scope: str = "read", ttl_seconds: int = host_pairings.DEFAULT_TTL_SECONDS) -> dict:
-    """Mint a one-use code: {id, label, scope, code, expires_at, url}. Raises PairingError (bad input, no bind)."""
-    return host_pairings.mint_pairing(label, scope, ttl_seconds)
-
-
-def render_qr(text: str) -> str:
-    """The QR of text as terminal block characters, no trailing newline. Raises PairingError for empty text."""
-    return host_pairings.render_qr(text)
 
 
 def handle_command(command: str, args: List[str]) -> bool:

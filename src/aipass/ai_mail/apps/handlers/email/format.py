@@ -13,22 +13,13 @@ Every email-sourced string is sender-shaped Rich markup: escape it here, once, f
 """
 
 import json
-import os
-import sys
 from typing import Dict, Optional
 
 from rich.markup import escape
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 
 REGISTRY_PATH = find_repo_root() / "AIPASS_REGISTRY.json"
@@ -136,7 +127,7 @@ def format_email_list_item(index: int, email_data: Dict, show_unread: bool = Tru
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("\n" + "=" * 70)
     console.print("EMAIL FORMATTING HANDLER")

@@ -55,8 +55,8 @@ not a command, with `post` the one module that answers to both.
 ## How To Reach Me
 
 Mail `@flow`. Send a defect with what you measured, or a request for a plan
-type, a template or a lifecycle change. Plans themselves need no permission —
-create one from any branch, in any directory, whenever you need one.
+type, a template or a lifecycle change. Plans themselves need no permission:
+create one in any branch, yours or the one you are briefing, whenever you need one.
 
 ---
 
@@ -82,9 +82,10 @@ routes by verb, so adding a module adds a command with no registration step.
 The modules are thin orchestrators that route and display, never decide:
 `create_plan`, `close_plan`, `list_plans`, `restore_plan`, `template_manager`,
 `registry_monitor`, `aggregate_central`, and `post_close_runner`, which is the
-detached worker that picks up where a close left off. One more file there is
-not a command but a door: `door_open_plans` publishes `get_open_plans` to
-other branches, because `apps/handlers/` refuses any importer from outside flow.
+detached worker that picks up where a close left off. Other branches import
+from the package top file, `from aipass.flow import get_open_plans`: it loads
+each name from its handler home on access, on the caller's behalf, because
+`apps/handlers/` refuses any importer from outside flow.
 
 Below them, `apps/handlers/` holds the implementation in groups by domain —
 plan lifecycle, registry load and repair, template and plan-type resolution,
@@ -115,7 +116,7 @@ Read the one that broke.
 |---|---|
 | [Plan Lifecycle](docs/plan_lifecycle.md) | Verb forms that execute, how a bare number resolves against per-type registries, and what the close pipeline does in the foreground versus the background runner |
 | [Plan Types](docs/plan_types.md) | Registering a type, and the three self-healing behaviours: auto-close of missing files, ignored folders, orphaned locations |
-| [Location Discovery](docs/repo_root.md) | `repo_root.py`, the cross-platform test worlds, and the rules a cross-platform instrument follows |
+| [Location Discovery](docs/repo_root.md) | `repo_root.py` and the test worlds that keep it honest |
 | [Argument Gate](docs/argument_gate.md) | Why an unrecognised argument refuses, the one gate every door routes through, and what "absolute" means in a shared registry |
 | [Dashboard Mirror](docs/dashboard_mirror.md) | The flow section contract, why `quick_status` is merged rather than replaced, and the caps mirrored from the dashboard owner |
 

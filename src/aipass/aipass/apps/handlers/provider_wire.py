@@ -25,7 +25,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, NamedTuple, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 
 from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
@@ -65,9 +65,6 @@ SETTINGS_DESCRIPTIONS: Dict[str, str] = {
 }
 
 WIRE_COMMAND = "aipass doctor --fix"
-
-MSYS_ENV_KEY = "PYTHONUTF8"
-MSYS_ENV_VALUE = "1"
 
 STATE_SET = "set"
 STATE_MISSING = "missing"
@@ -143,23 +140,11 @@ def _merge_settings_scalars(settings: dict, wanted: Dict[str, Any]) -> List[str]
     return actions
 
 
-def platform_bridge_command(command: str, os_name: Optional[str] = None) -> str:
-    """Write-time OS transform for the venv interpreter path (manifest stays POSIX-canonical).
-
-    Public: doctor's manifest check verifies with this same transform (write and verify
-    must agree). *os_name* is a test seam; product callers pass None.
-    """
-    # Windows hooks run under Git Bash ($AIPASS_HOME still expands) but the venv is .venv/Scripts.
-    if (os.name if os_name is None else os_name) == "nt":
-        return command.replace("/.venv/bin/python3", "/.venv/Scripts/python.exe")
-    return command
-
-
 def _build_manifest_hook_entries(manifest_hooks: List[dict]) -> Dict[str, List[dict]]:
     """Build the settings.json hook-entry shape per event from manifest hook rows."""
     fresh: Dict[str, List[dict]] = {}
     for hook in manifest_hooks:
-        command = platform_bridge_command(hook.get("command", ""))
+        command = hook.get("command", "")
         event = hook.get("event", "")
         if not command or not event:
             continue
@@ -200,27 +185,14 @@ def _strip_and_readd_hooks(
     return merged, actions
 
 
-def _is_msys_shell(environ: Optional[Mapping[str, str]] = None) -> bool:
-    """True under Git Bash / MSYS / MinGW on Windows — the one place PYTHONUTF8 belongs."""
-    env = os.environ if environ is None else environ
-    shell = env.get("MSYSTEM", "") + env.get("OSTYPE", "")
-    return "MSYS" in shell or "msys" in shell or "MINGW" in shell
-
-
 def _merge_env(settings: dict, claude_section: dict, manifest_path: Path) -> List[str]:
-    """Additive env merge: the manifest's env keys the file lacks, plus PYTHONUTF8 under MSYS.
-
-    The manifest has no guard syntax, so the wire owns the PYTHONUTF8 conditional
-    (Rich output in Windows hook processes needs it).
-    """
+    """Additive env merge: the manifest's env keys the file lacks."""
     actions: List[str] = []
     wanted: Dict[str, str] = {}
     repo_root = str(manifest_path.parent.parent)
     project_root = str(Path.cwd())
     for key, value in claude_section.get("env", {}).items():
         wanted[key] = value.replace("{{REPO_ROOT}}", repo_root).replace("{{PROJECT_ROOT}}", project_root)
-    if _is_msys_shell():
-        wanted.setdefault(MSYS_ENV_KEY, MSYS_ENV_VALUE)
     if not wanted:
         return actions
     env_block = settings.setdefault("env", {})

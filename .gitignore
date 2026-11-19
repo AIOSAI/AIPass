@@ -18,8 +18,6 @@ build/
 .env
 .devpulse_secret.md
 
-# OS
-.DS_Store
 .vscode
 
 # AIPass runtime state (local to each installation)
@@ -157,14 +155,6 @@ src/aipass/memory/artifacts/*
 src/aipass/hooks/tools/*
 !src/aipass/hooks/tools/install_boot_shim.sh
 
-# skills suspend grants — reviewable root-grant drafts + installer for the
-# /suspend control verb (DPLAN-0270 P5). Must ship: the owner reviews and
-# installs from the repo. Collides with the blanket tools/ ignore (line 51).
-!src/aipass/skills/tools/
-src/aipass/skills/tools/*
-!src/aipass/skills/tools/suspend/
-!src/aipass/skills/tools/suspend/**
-
 # devpulse watchdog statusline — the versioned source for ~/.claude/statusline.sh
 # (provider config, otherwise tracked nowhere; FPLAN-0492, 2026-09-07). Collides
 # with the blanket tools/ ignore (line 57).
@@ -177,9 +167,6 @@ src/aipass/devpulse/tools/*
 # so the public repo can point at the standalone project repos.
 projects/*
 !projects/README.md
-
-# CI artifacts
-windows-pytest-results/
 
 # Parked / one-off
 HERALD.md

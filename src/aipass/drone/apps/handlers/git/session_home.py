@@ -32,7 +32,7 @@ def session_id() -> str:
 
 def _transcript_dir(directory: Path) -> Path | None:
     """@ai_mail's encoding of a launch directory into Claude's projects dir; None when it cannot be named."""
-    from aipass.ai_mail.apps.modules.door_session_pointer import transcript_dir
+    from aipass.ai_mail import transcript_dir
 
     return transcript_dir(directory)
 

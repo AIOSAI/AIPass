@@ -1,68 +1,74 @@
-"""Prax - Monitoring and logging for AIPass.
+"""Prax - Monitoring and logging for AIPass: the one import door other branches take prax names from.
 
-Lazy (PEP 562). Reference: docs/json_service.md
-``__getattr__`` uses ``importlib.import_module``, never a from-import: that re-enters ``aipass.prax`` and recurses."""
+Lazy (PEP 562), docs/json_service.md. ``__getattr__`` uses ``importlib.import_module``, never a from-import:
+that re-enters ``aipass.prax`` and recurses."""
 
 import importlib
-import logging as _logging
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    # Type-checker view only: `logger` is a SystemLogger, `json_handler` the module.
+if TYPE_CHECKING:  # each name typed from its home
+    from aipass.prax.apps.handlers.dashboard.operations import (
+        DASHBOARD_CHAR_BUDGET as DASHBOARD_CHAR_BUDGET,
+        SUBJECT_CAP as SUBJECT_CAP,
+        cap_subject as cap_subject,
+        dashboard_lock as dashboard_lock,
+        write_section as write_section,
+    )
+    from aipass.prax.apps.handlers.dashboard.refresh import (
+        refresh_all_dashboards as refresh_all_dashboards,
+        refresh_single_dashboard as refresh_single_dashboard,
+    )
+    from aipass.prax.apps.handlers.config.load import get_system_logs_dir as get_system_logs_dir
+    from aipass.prax.apps.handlers.dashboard.status import get_branch_paths as get_branch_paths
     from aipass.prax.apps.handlers.json import json_service as json_handler
-    from aipass.prax.apps.modules.logger import append_jsonl as append_jsonl
+    from aipass.prax.apps.handlers.logging.jsonl_writer import append_jsonl as append_jsonl
+    from aipass.prax.apps.handlers.logging.trail import trail as trail
+    from aipass.prax.apps.handlers.state_root import branch_state_root as branch_state_root
+    from aipass.prax.apps.modules.logger import get_system_logger as get_system_logger
+    from aipass.prax.apps.modules.logger import log_backup_count as log_backup_count
     from aipass.prax.apps.modules.logger import system_logger as logger
-
-__all__ = ["append_jsonl", "json_handler", "logger"]
 
 _LOGGER_MODULE = "aipass.prax.apps.modules.logger"
 _JSON_MODULE = "aipass.prax.apps.handlers.json.json_service"
+_WRITER_MODULE = "aipass.prax.apps.handlers.logging.jsonl_writer"
+_TRAIL_MODULE = "aipass.prax.apps.handlers.logging.trail"
+_OPS_MODULE = "aipass.prax.apps.handlers.dashboard.operations"
+_REFRESH_MODULE = "aipass.prax.apps.handlers.dashboard.refresh"
+_STATUS_MODULE = "aipass.prax.apps.handlers.dashboard.status"
+_STATE_MODULE = "aipass.prax.apps.handlers.state_root"
+_CONFIG_MODULE = "aipass.prax.apps.handlers.config.load"
 
+# Door name -> (home module, attribute there); None hands out the home module itself.
+_HOMES = {
+    "branch_state_root": (_STATE_MODULE, "branch_state_root"),
+    "get_system_logs_dir": (_CONFIG_MODULE, "get_system_logs_dir"),
+    "logger": (_LOGGER_MODULE, "system_logger"),
+    "get_system_logger": (_LOGGER_MODULE, "get_system_logger"),
+    "log_backup_count": (_LOGGER_MODULE, "log_backup_count"),
+    "append_jsonl": (_WRITER_MODULE, "append_jsonl"),
+    "trail": (_TRAIL_MODULE, "trail"),
+    "json_handler": (_JSON_MODULE, None),
+    "SUBJECT_CAP": (_OPS_MODULE, "SUBJECT_CAP"),
+    "DASHBOARD_CHAR_BUDGET": (_OPS_MODULE, "DASHBOARD_CHAR_BUDGET"),
+    "cap_subject": (_OPS_MODULE, "cap_subject"),
+    "dashboard_lock": (_OPS_MODULE, "dashboard_lock"),
+    "write_section": (_OPS_MODULE, "write_section"),
+    "get_branch_paths": (_STATUS_MODULE, "get_branch_paths"),
+    "refresh_single_dashboard": (_REFRESH_MODULE, "refresh_single_dashboard"),
+    "refresh_all_dashboards": (_REFRESH_MODULE, "refresh_all_dashboards"),
+}
 
-class NullLogger:
-    """Fallback logger when prax SystemLogger fails to import.
-
-    Every SystemLogger method must exist here too, or a branch crashes exactly when prax is broken."""
-
-    def __init__(self):
-        self._logger = _logging.getLogger("aipass.prax.fallback")
-        if not self._logger.handlers:
-            self._logger.addHandler(_logging.StreamHandler())
-        self._logger.warning("Prax SystemLogger unavailable — using fallback NullLogger")
-
-    def info(self, message, *args, **kwargs):
-        self._logger.info(message, *args, **kwargs)
-
-    def warning(self, message, *args, **kwargs):
-        self._logger.warning(message, *args, **kwargs)
-
-    def error(self, message, *args, **kwargs):
-        self._logger.error(message, *args, **kwargs)
-
-    def debug(self, message, *args, **kwargs):
-        self._logger.debug(message, *args, **kwargs)
+__all__ = sorted(_HOMES)
 
 
 def __getattr__(name: str) -> Any:
-    """Resolve a public prax name on first access, then cache it in globals()."""
-    if name == "logger":
-        try:
-            value = importlib.import_module(_LOGGER_MODULE).system_logger
-        except Exception:
-            value = NullLogger()
-    elif name == "append_jsonl":
-        try:
-            value = importlib.import_module(_LOGGER_MODULE).append_jsonl
-        except Exception:
-            value = None
-    elif name == "json_handler":
-        # No fallback: a broken json service is an error, not a silent no-op.
-        value = importlib.import_module(_JSON_MODULE)
-    else:
+    """Hand out a door name from its home on every access; nothing under apps loads at package import."""
+    if name not in _HOMES:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-    globals()[name] = value
-    return value
+    module_name, attribute = _HOMES[name]
+    # Never cached, so a patch on the home reaches every later read; no fallback, a broken chain raises.
+    home = importlib.import_module(module_name)
+    return home if attribute is None else getattr(home, attribute)
 
 
 def __dir__() -> list:

@@ -91,17 +91,20 @@ is always current; depth is in the docs below. A verb `--help` does not name is 
 
 ## Architecture
 
+Other branches import from the package top file, `from aipass.hooks import <name>`: the trust registry's
+verbs, the sandbox builders, the branch-prompt cap and the mute flag, each read from its home on access.
+
 Three layers. `apps/hooks.py` is a thin router: it discovers the modules beside it and dispatches each
 command to the one that claims it. `apps/modules/` holds one business-logic module per concern —
 `engine` (the dispatcher), `engine_closure` (the engine's imports, kept free of NameErrors),
-`door_trust_registry` (the trust registry aipass imports), `cadence` (which turn a loader fires on),
+`cadence` (which turn a loader fires on),
 `injection_ledger` (what a seat was told, per turn), `grounding_receipt` (whether the grounding
 reached the model), `grounding_content` (the injected blocks and their budgets), `write_ownership`
 (whose file a write lands in), `write_grant` (whether a dispatch's grant covers a crossing write),
 `bash_writes`, `shell_reader`, `shell_programs` and `testwrite_targets` (a shell command's visible
 writes, its programs, its new tests), `admin_seat` and `testgate_policy` (who is exempt,
 and what the policy says), `promote` (source to live code), `protected_paths` (the files that switch
-the gates), `comment_scan` and `comments` (the comment budget), `hookstatus`, `hooksound`, `alert_dismiss`, `feedback`, `context_window`,
+the gates), `provider_launch` (a provider session started outside the caller's branch), `comment_scan` and `comments` (the comment budget), `hookstatus`, `hooksound`, `alert_dismiss`, `feedback`, `context_window`,
 `cc_sessions`, `cc_transcripts`, `diagnostics_state`, `hook_test`, `release_notice`, `sandbox` and
 `wire_verify`. `apps/handlers/` holds the implementation, one directory per concern: `bridges/` per
 platform, `prompt/` for injection, `security/` for the gates, `lifecycle/` for session and compaction
@@ -109,9 +112,7 @@ events, `notification/` for sound and mail, plus `config/`, `cli/` and the `json
 branch shares.
 
 Handlers are imported dynamically by dotted path at dispatch time, never statically, which is why no
-handler is referenced anywhere in this tree and why static analysis cannot see them as used. Every
-module-level `__file__` resolution goes through `apps/handlers/module_root.py`, because a hook must
-import in a process whose working directory is gone.
+handler is referenced anywhere in this tree and why static analysis cannot see them as used.
 
 The directory tree lives in this branch's own prompt (`.aipass/aipass_local_prompt.md`) — one place,
 so it cannot disagree with itself.

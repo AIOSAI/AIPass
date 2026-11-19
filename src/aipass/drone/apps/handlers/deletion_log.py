@@ -1,15 +1,12 @@
 # =================== AIPass ====================
 # Name: deletion_log.py
-# Description: Durable record of every delete drone performs
-# Version: 1.3.1
+# Description: Durable record of every delete and archive-move drone performs
+# Version: 1.6.1
 # Created: 2026-08-14
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
-"""Durable record of every delete drone performs.
-
-Reference: docs/rm_and_the_record.md
-"""
+"""Durable record of every delete and archive-move drone performs: docs/rm_and_the_record.md."""
 
 from __future__ import annotations
 
@@ -42,12 +39,15 @@ _ROTATIONS = 1
 _MEASURE_ENTRY_CAP = 10_000
 
 OUTCOME_DELETED = "deleted"
+OUTCOME_MOVED = "moved"
 OUTCOME_REFUSED = "refused"
 OUTCOME_FAILED = "failed"
 OUTCOME_NOT_FOUND = "not_found"
 
 LANE_RM = "rm"
 LANE_BROKER = "broker"
+# The hooks rm gate's lane: refused before drone ran, so drone's fences never judged the path.
+LANE_RM_GATE = "rm_gate"
 
 UNKNOWN_CALLER = "unknown"
 
@@ -161,6 +161,26 @@ def _measure_tree(path: Path) -> dict:
     return {"kind": "directory", "size_bytes": total, "entry_count": entries, "measured": measured}
 
 
+def _kind_only(resolved: Path | str | None) -> dict:
+    """The kind from one lstat of an absolute path, nothing read inside: what a refused record still says."""
+    shape = {"kind": "unknown", "size_bytes": None, "entry_count": None, "measured": "none"}
+    if resolved is None or not Path(resolved).is_absolute() or not os.path.lexists(resolved):
+        return shape
+    try:
+        mode = os.lstat(resolved).st_mode
+    except OSError as exc:
+        logger.warning("rm ledger: cannot read the kind of %s: %s", resolved, exc)
+        shape["measured"] = "failed"
+        return shape
+    if stat.S_ISLNK(mode):
+        shape["kind"] = "symlink"
+    elif stat.S_ISDIR(mode):
+        shape["kind"] = "directory"
+    elif stat.S_ISREG(mode):
+        shape["kind"] = "file"
+    return shape
+
+
 def _rotate_if_needed(log_path: Path) -> None:
     """Roll the log over once it passes the cap, keeping _ROTATIONS generations.
 
@@ -207,7 +227,7 @@ def record_deletion(
     lane: str,
     outcome: str,
     requested: str,
-    resolved: Path | str,
+    resolved: Path | str | None,
     reason: str,
     measurement: dict | None = None,
     caller: str | None = None,
@@ -215,16 +235,20 @@ def record_deletion(
     mode: str | None = None,
     age: str | None = None,
     target: Path | str | None = None,
+    moved_to: Path | str | None = None,
+    exemption: str | None = None,
+    cwd: Path | str | None = None,
+    strict: bool = False,
 ) -> dict:
-    """Write one deletion record to both channels and return it.
+    """Write one record of an rm outcome to both channels and return it.
 
-    ``caller``/``project_root``: the broker passes its HMAC-authenticated requester and served repo.
-    ``mode``/``age``/``target`` add keys only when given; a plain delete keeps its twelve.
-    Never raises: losing the log must not turn into losing the delete.
+    ``caller``/``project_root``/``cwd``: a lane acting for someone else (broker, hooks gate) passes them in.
+    ``mode``/``age``/``target``/``moved_to``/``exemption`` add keys only when given; a plain delete keeps twelve.
+    Never raises: losing the log must not turn into losing the delete. ``strict`` re-raises a store failure.
     """
-    cwd = caller_cwd()
+    cwd = Path(cwd) if cwd is not None else caller_cwd()
     caller = caller or _resolve_citizen_caller(cwd)
-    shape = measurement or {"kind": "unknown", "size_bytes": None, "entry_count": None, "measured": "none"}
+    shape = measurement or _kind_only(resolved)
 
     record = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -233,7 +257,7 @@ def record_deletion(
         "caller": caller,
         "cwd": str(cwd) if cwd is not None else NO_CURRENT_DIRECTORY,
         "requested": requested,
-        "path": str(resolved),
+        "path": str(resolved) if resolved is not None else None,
         "reason": reason,
         **shape,
     }
@@ -242,30 +266,37 @@ def record_deletion(
         record["age"] = age
     if target is not None:
         record["target"] = str(target)
+    if moved_to is not None:
+        record["moved_to"] = str(moved_to)
+    if exemption is not None:
+        record["exemption"] = exemption
 
     logger.info(
-        "deletion record: %s %s%s by %s — %s (%s, size=%s, entries=%s)%s",
+        "rm ledger: %s %s%s%s by %s, lane %s%s (%s, size=%s, entries=%s)%s",
         outcome,
         record["path"],
-        f" -> {target}" if target is not None else "",
+        f" -> {moved_to}" if moved_to is not None else "",
+        f" (symlink to {target})" if target is not None else "",
         caller,
         lane,
+        f", exemption {exemption}" if exemption is not None else "",
         record["kind"],
         record["size_bytes"],
         record["entry_count"],
         f" mode={mode} age={age}" if mode is not None else "",
     )
 
-    json_handler.log_operation(
-        "deletion_record",
-        {"lane": lane, "outcome": outcome, "path": record["path"], "caller": caller},
-    )
+    entry = {"lane": lane, "outcome": outcome, "path": record["path"], "caller": caller}
+    entry.update({key: record[key] for key in ("moved_to", "exemption") if key in record})
+    json_handler.log_operation("deletion_record", entry)
 
     try:
         _append_record(record, deletion_log_path(project_root))
     except Exception as exc:
         # The prax line already landed, but an unwritable store is its own fault to fix.
-        logger.error("deletion record: failed to write store for %s: %s", record["path"], exc)
+        logger.error("rm ledger: failed to write store for %s: %s", record["path"], exc)
+        if strict:
+            raise
 
     return record
 
@@ -309,4 +340,34 @@ def record_foreign_deletion(
         reason=reason,
         measurement=measurement,
         project_root=project_root,
+    )
+
+
+def record_gate_refusal(
+    *,
+    caller: str,
+    cwd: Path | str,
+    requested: str,
+    resolved: Path | str | None,
+    reason: str,
+    project_root: Path | None = None,
+) -> dict:
+    """Record a drone rm the hooks gate refused before drone ran; ValueError on a half row, never written.
+
+    *resolved* is None when the gate could not resolve the text; the row's ``path`` is then null.
+    A store that cannot be written raises: the refusal stands, and the gate logs the failure itself.
+    """
+    for name, value in (("caller", caller), ("cwd", cwd), ("requested", requested), ("reason", reason)):
+        if not str(value or "").strip():
+            raise ValueError(f"record_gate_refusal: {name} is required, got {value!r}")
+    return record_deletion(
+        lane=LANE_RM_GATE,
+        outcome=OUTCOME_REFUSED,
+        caller=caller,
+        cwd=cwd,
+        requested=requested,
+        resolved=resolved,
+        reason=reason,
+        project_root=project_root,
+        strict=True,
     )

@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for canary - json seam, console width, command state, logger capture
 # Version: 3.3.0
 # Created: 2025-11-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 #
 # CHANGELOG (Max 5 entries):
 #   - v3.3.0 (2026-10-10): temp_test_dir and sample_test_data retired - the template's
@@ -37,7 +37,7 @@ import pytest
 
 from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.json import json_handler
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 # .archive/ holds disposal copies that must never be collected or rglob-walked into module names.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
@@ -45,7 +45,7 @@ collect_ignore_glob = [".archive/*", "**/.archive/*"]
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Unpinned, Rich sizes per print: 80 POSIX, 79 Windows under capture, the terminal under -s, COLUMNS if set."""
+    """Unpinned, Rich sizes per print: 80 under capture, the terminal under -s, COLUMNS if set."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 

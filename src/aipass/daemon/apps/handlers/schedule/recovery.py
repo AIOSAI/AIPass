@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: recovery.py
 # Description: Gap detection, missed-window enumeration, catch-up queue and drain policy
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-09-08
-# Modified: 2026-10-24
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -16,9 +16,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+import psutil
+
 from aipass.prax import logger
+from aipass.ai_mail import outstanding_dispatches
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.schedule import runstate as rs
+from aipass.daemon.apps.handlers.schedule.discovery import active_citizens
 
 #: One window (2 * WINDOW_MINUTES), the smallest span a daily job's whole firing chance can pass in.
 GAP_THRESHOLD_MINUTES = 30
@@ -39,11 +43,7 @@ class BootTimeUnavailable(Exception):
 def boot_time() -> datetime:
     """When did this host last boot? Raises BootTimeUnavailable if it cannot be known."""
     try:
-        import psutil
-
         return datetime.fromtimestamp(psutil.boot_time())
-    except ImportError:
-        logger.info("[recovery] psutil unavailable, trying /proc/stat")
     except (OSError, ValueError, OverflowError) as e:
         logger.warning("[recovery] psutil.boot_time() unreadable: %s", e)
 
@@ -53,9 +53,9 @@ def boot_time() -> datetime:
                 if line.startswith("btime "):
                     return datetime.fromtimestamp(int(line.split()[1]))
     except (OSError, ValueError, IndexError) as e:
-        logger.warning("[recovery] /proc/stat btime unreadable: %s", e)
+        raise BootTimeUnavailable(f"no readable boot time (psutil unusable, /proc/stat btime unreadable: {e})") from e
 
-    raise BootTimeUnavailable("no readable boot time (psutil absent, /proc/stat unusable)")
+    raise BootTimeUnavailable("no readable boot time (psutil unusable, no btime line in /proc/stat)")
 
 
 def _classify_cause(gap_start: datetime, boot: Optional[datetime]) -> Tuple[str, str]:
@@ -224,10 +224,11 @@ def catch_up_enabled(schedule: dict) -> bool:
     return schedule.get("type") in WINDOWED_TYPES and rs.catch_up_on(schedule)
 
 
-def _within_max_age(schedule: dict, instant: str, now: datetime) -> bool:
+def _within_max_age(schedule: dict, instant: str, now: datetime, key: str) -> bool:
     """Is this missed window young enough to be worth firing?
 
     Unset or unreadable bound/instant answers True: a late wake costs less than a dropped window.
+    An unreadable one is logged at warning, so medic sees the bad row.
     """
     limit = schedule.get(CATCH_UP_MAX_AGE_FIELD)
     if limit is None:
@@ -240,6 +241,7 @@ def _within_max_age(schedule: dict, instant: str, now: datetime) -> bool:
     try:
         when = datetime.fromisoformat(instant)
     except (ValueError, TypeError):
+        logger.warning("[recovery] missed window %r for %s unreadable, kept with no age known", instant, key)
         return True
     return (now - when) <= timedelta(hours=hours)
 
@@ -262,11 +264,11 @@ def queue_catch_up(
     if not catch_up_enabled(schedule):
         return None
 
-    fresh = [i for i in instants if _within_max_age(schedule, i, now)]
+    key = rs.job_key(job["owner"], job["id"])
+    fresh = [i for i in instants if _within_max_age(schedule, i, now, key)]
     if not fresh:
         return None
 
-    key = rs.job_key(job["owner"], job["id"])
     queue = runstate.setdefault(QUEUE_FIELD, {})
     entry = queue.get(key)
 
@@ -311,12 +313,7 @@ def _branch_is_awake(owner: str) -> bool:
     Unreadable answers awake: holding costs a tick, firing onto a live agent is the collision.
     """
     try:
-        from aipass.ai_mail import outstanding_dispatches
-
         return any(str(entry.get("target", "")) == owner for entry in outstanding_dispatches())
-    except ImportError as e:
-        logger.warning("[recovery] dispatch register unavailable (%s) — holding the drain", e)
-        return True
     except OSError as e:
         logger.warning("[recovery] dispatch register unreadable (%s) — holding the drain", e)
         return True
@@ -396,6 +393,7 @@ def _humanise_ago(then: Optional[str], now: datetime) -> str:
     try:
         when = datetime.fromisoformat(then)
     except (ValueError, TypeError):
+        logger.warning("[recovery] last_run %r unreadable, the wake header names no age", then)
         return ""
     return f" ({format_duration(now - when)} ago)"
 
@@ -472,12 +470,10 @@ def _branch_daemon_dir(owner: str):
     Keyed on email through discovery's roster, never a path convention of its own.
     """
     try:
-        from aipass.daemon.apps.handlers.schedule.discovery import active_citizens
-
         for citizen in active_citizens():
             if citizen.get("email") == owner:
                 return Path(citizen["path"]) / ".daemon"
-    except (ImportError, OSError, TypeError, KeyError) as e:
+    except (OSError, TypeError, KeyError) as e:
         logger.warning("[recovery] could not resolve .daemon/ for %s: %s", owner, e)
     return None
 

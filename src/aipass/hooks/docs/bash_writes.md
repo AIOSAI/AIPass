@@ -27,7 +27,7 @@ writes and its own `cd`. A backslash-newline joins two lines into one command, a
 comment only where a word starts outside quotes.
 
 **One program, many spellings.** `verb_name()` is the single reading of a
-command-position token: basename, lowercased, with a Windows executable extension (`.exe`, `.com`,
+command-position token: basename, lowercased, with an executable extension (`.exe`, `.com`,
 `.bat`, `.cmd`, `.ps1`) removed. `CP.EXE` and `cp.exe` are cp on the host that runs them, and read as
 cp. `git_gate` and `rm_gate` read through this same function, so the list of executable extensions
 exists once. Only
@@ -103,31 +103,18 @@ as a local write — the dangerous reading, not a degraded one.
 
 The reader does not pick a dialect. A command containing a backslash is lexed **twice** — once with
 shlex's escape rules (correct for POSIX `cp a\ b.txt dest`) and once with backslashes protected
-(correct for a Windows path) — and the write targets are unioned. Reading `\` as a separator only
+(correct for a backslash-separated path) — and the write targets are unioned. Reading `\` as a separator only
 ever *adds* path components, so a local write can never become foreign by it, while the reverse is
 exactly how a foreign write became local. Separators are then normalised before `pathlib` sees the
-token, on every OS: `WindowsPath("C:/a/b")` is absolute and correct, so one spelling reaches `Path`
-from both dialects and the parser's reading stops depending on which machine runs it.
+token, so one spelling reaches `Path` from both dialects.
 
 What is *not* portable is the **root**, which is why the drive-letter entry is in the residual list
-above rather than left to be discovered. The tests pin the Windows spelling in-process on any OS by
-back-slashing a real local path (`str(p).replace("/", "\\")`) — a no-op on Windows, and on Linux the
-backslash spelling, still resolving to the same real file under the same real
-fence.
+above rather than left to be discovered. The tests pin the backslash spelling by
+back-slashing a real local path (`str(p).replace("/", "\\")`), still resolving to the same real file
+under the same real fence.
 
-**Git Bash's own drive spelling is read too.** Git Bash
-spells drive C as `/c`: its `pwd` prints `/c/Users/me`, and every command it runs accepts that. A
-Windows path cannot hold that spelling: `WindowsPath("/c/Users/me")` has a root and no drive, so read
-literally it joins the seat's drive and names `C:\c\Users\me`, a directory with no registry, where a
-foreign write would be allowed. `/x` or `/x/...` (one letter) reads as drive `X:` whenever the path being resolved
-against is a Windows path. On POSIX, `/c` stays an ordinary directory. Paths lifted out of
-interpreter source get the same reading, although python itself would not translate them: broader
-than the write, which is the safe direction for a fence. The pins use a platform oracle: `bash_writes`
-is made to build every path in one flavour (`PureWindowsPath` or `PurePosixPath`), so Linux reads a
-command the way Windows does, and nothing about the host is asserted.
-
-A path put *into* a command string in these suites is spelled with `as_posix()`, the form bash takes
-on every OS. An unquoted `C:\Users\...` cd target loses its backslashes to bash, and the reader,
+A path put *into* a command string in these suites is spelled with `as_posix()`, the form bash takes.
+An unquoted `C:\Users\...` cd target loses its backslashes to bash, and the reader,
 reading as bash does, would `cd` into a directory named `C:Users...`.
 
 > **CONFIG WIRE — the lane is live.** `pre_edit_gate` carries

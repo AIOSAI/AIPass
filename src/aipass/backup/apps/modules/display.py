@@ -1,27 +1,17 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: Rich CLI rendering for backup results (full 9-stage output)
-# Version: 3.1.1
+# Version: 3.2.0
 # Created: 2026-06-12
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Rich CLI rendering for backup — full output pipeline faithfully ported from gold source."""
 
-import os
-import sys
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, header, success, warning
+from aipass.cli import console, error, header, success, warning
 
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.report.formatter import _human_bytes, format_age
@@ -36,13 +26,13 @@ def print_introspection():
     """Display module info."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
     console.print("  Rich CLI rendering for backup results (full 9-stage output)")
-    console.print("  Not a command module — used by snapshot/versioned/all")
+    console.print("  Not a command module — used by snapshot/all")
 
 
 def refuse_missing_root(mode: str, project_root: str, show_panels: bool = True) -> BackupResult:
     """Build the refusal result for a project root that is not a directory.
 
-    Shared by snapshot/versioned/all: create_backup_dir refuses a non-directory
+    Shared by snapshot/all: create_backup_dir refuses a non-directory
     by returning None, and every caller must stop there rather than let the
     rest of the pipeline mkdir the tree it was told not to touch.
     """
@@ -67,7 +57,7 @@ def refuse_oversized_run(
 ) -> BackupResult:
     """Build the refusal result for a run that breached a per-run ceiling.
 
-    Shared by snapshot/versioned/all. Fails LOUD and early: the alternative
+    Shared by snapshot/all. Fails LOUD and early: the alternative
     the baud incident demonstrated is a run that grinds for 7.5h writing
     50GB of build artifacts while reporting nothing wrong.
     """
@@ -102,7 +92,6 @@ def _show_lane_ages(title: str, project_root: str) -> None:
     console.print()
     console.print(f"[dim]{title}:[/dim]")
     console.print(f"  [dim]Snapshot:   {format_age(ts.get('snapshot'))}[/dim]")
-    console.print(f"  [dim]Versioned:  {format_age(ts.get('versioned'))}[/dim]")
     console.print(f"  [dim]Drive sync: {format_age(ts.get('drive_sync'))}[/dim]")
 
 
@@ -175,7 +164,7 @@ def show_backups_now(project_root: str) -> None:
 
 
 def show_drive_result(result: dict, project_root: str) -> None:
-    """Show Drive sync result panel matching Snapshot/Versioned style."""
+    """Show Drive sync result panel matching the Snapshot style."""
     console.print()
 
     total = result.get("total", 0)

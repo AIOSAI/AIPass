@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_backup.py
-# Description: Tests for the host API's backup door — runs, cancels, jobs and status (DPLAN-0411, DPLAN-0412)
-# Version: 1.2.0
+# Description: Tests for the host API's backup door — runs, cancels, jobs, status and schedule
+# Version: 1.3.0
 # Created: 2026-10-16
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/host/backup.py."""
@@ -32,11 +32,14 @@ import pytest
 import aipass.drone as drone
 from aipass.api.apps.handlers.host import backup as host_backup
 from aipass.api.apps.handlers.host import fleet as host_fleet
+from aipass.api.apps.handlers.host import server as host_server
+from aipass.api.apps.handlers.host import tokens as host_tokens
 
 PATCH_BACKUP_DRONE = "aipass.api.apps.handlers.host.backup.drone"
 PATCH_BACKUP_LOGGER = "aipass.api.apps.handlers.host.backup.logger"
 PATCH_BACKUP_JSON = "aipass.api.apps.handlers.host.backup.json_handler"
 PATCH_DENIALS_LOGGER = "aipass.api.apps.handlers.host.denials.logger"
+PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
 PATCH_DENIALS_JSON = "aipass.api.apps.handlers.host.denials.json_handler"
 
 STATUS = {
@@ -46,7 +49,6 @@ STATUS = {
     "runs": 64,
     "lanes": {
         "snapshot": {"last": "2026-10-16T07:09:50+00:00", "files": 15414},
-        "versioned": {"last": None, "files": None},
         "drive_sync": {"last": None, "files": None},
     },
     "drive": {"tracked_files": 12},
@@ -164,7 +166,7 @@ class TestStartRun:
 
     @pytest.mark.parametrize(
         ("lane", "flags", "limit"),
-        [("snapshot", ["--quiet"], 1800), ("versioned", ["--quiet"], 1800), ("all", ["--quiet"], 86400)],
+        [("snapshot", ["--quiet"], 1800), ("all", ["--quiet"], 86400)],
     )
     def test_each_limited_lane_runs_its_contract_argv_under_its_own_limit(
         self, door: Any, starter: Starter, alarms: Alarms, seated: Path, lane: str, flags: List[str], limit: int
@@ -221,7 +223,7 @@ class TestStartRun:
     def test_a_limit_whose_stop_cannot_be_routed_is_logged_never_raised(
         self, door: Any, starter: Starter, alarms: Alarms, backup_log: Any
     ) -> None:
-        job = host_backup.start_run("AIPASS", "versioned")
+        job = host_backup.start_run("AIPASS", "snapshot")
         starter.run_all()
         refusal = drone.RoutingError("Branch not found: @backup")
         door.route_command.side_effect = refusal
@@ -231,7 +233,7 @@ class TestStartRun:
         backup_log.error.assert_called_once()
         message, lane, job_id, error = backup_log.error.call_args.args
         assert "could not be stopped at its limit" in message
-        assert (lane, job_id, error) == ("versioned", job["job"], refusal)
+        assert (lane, job_id, error) == ("snapshot", job["job"], refusal)
         assert backup_log.error.call_args.kwargs == {"exc_info": refusal}
 
     def test_a_second_run_of_the_same_lane_is_refused_with_the_contract_sentence(
@@ -246,10 +248,10 @@ class TestStartRun:
         assert len(starter.pending) == 1
 
     def test_the_seat_in_another_case_is_the_same_slot(self, door: Any) -> None:
-        host_backup.start_run("AIPASS", "versioned")
+        host_backup.start_run("AIPASS", "snapshot")
 
         with pytest.raises(host_backup.VerbRefused):
-            host_backup.start_run("aipass", "versioned")
+            host_backup.start_run("aipass", "snapshot")
 
     def test_different_lanes_on_one_project_overlap(self, door: Any, starter: Starter) -> None:
         snapshot = host_backup.start_run("AIPASS", "snapshot")
@@ -266,14 +268,14 @@ class TestStartRun:
 
         assert again["state"] == "running"
 
-    @pytest.mark.parametrize("lane", ["", "nightly", "SNAPSHOT"])
+    @pytest.mark.parametrize("lane", ["", "nightly", "SNAPSHOT", "versioned"])
     def test_a_missing_or_unknown_lane_is_refused_before_anything_runs(
         self, door: Any, starter: Starter, lane: str
     ) -> None:
         with pytest.raises(host_backup.VerbRefused) as refused:
             host_backup.start_run("AIPASS", lane)
 
-        assert "snapshot, versioned, all, drive_sync" in str(refused.value)
+        assert "snapshot, all, drive_sync" in str(refused.value)
         assert starter.pending == []
 
     def test_a_missing_project_is_refused(self, door: Any, starter: Starter) -> None:
@@ -378,12 +380,12 @@ class TestStopRun:
         with pytest.raises(host_backup.VerbUnavailable):
             host_backup.stop_run("AIPASS", "snapshot")
 
-    @pytest.mark.parametrize("lane", ["", "nightly"])
+    @pytest.mark.parametrize("lane", ["", "nightly", "versioned"])
     def test_a_missing_or_unknown_lane_is_refused_before_backup_is_asked(self, door: Any, lane: str) -> None:
         with pytest.raises(host_backup.VerbRefused) as refused:
             host_backup.stop_run("AIPASS", lane)
 
-        assert "snapshot, versioned, all, drive_sync" in str(refused.value)
+        assert "snapshot, all, drive_sync" in str(refused.value)
         door.route_command.assert_not_called()
 
     def test_a_missing_project_is_refused(self, door: Any) -> None:
@@ -553,7 +555,7 @@ class TestReadStatus:
 
     def test_running_lists_only_this_projects_in_flight_jobs(self, door: Any, starter: Starter, census: Path) -> None:
         door.route_command.return_value = _result(json.dumps(STATUS))
-        finished = host_backup.start_run("AIPASS", "versioned")
+        finished = host_backup.start_run("AIPASS", "all")
         starter.run_all()
         running = host_backup.start_run("AIPASS", "snapshot")
         host_backup.start_run("BAUD", "snapshot")
@@ -583,7 +585,7 @@ class TestReadStatus:
         since = "2026-10-16T07:30:00+00:00"
         entries = [
             {"verb": "all", "lane": "snapshot", "pid": 4242, "started_at": since, "progress": None},
-            {"verb": "all", "lane": "versioned", "pid": 4242, "started_at": since, "progress": progress},
+            {"verb": "all", "lane": "drive_sync", "pid": 4242, "started_at": since, "progress": progress},
             {"verb": "drive_sync", "lane": "drive_sync", "pid": 175450, "started_at": since, "progress": None},
         ]
         door.route_command.return_value = _result(json.dumps({**STATUS, "running": entries}))
@@ -639,6 +641,235 @@ class TestReadStatus:
             host_backup.read_status("VERA")
 
         door.route_command.assert_not_called()
+
+
+SCHEDULE = {
+    "project": "aipass",
+    "root": "/srv/aipass",
+    "job_id": "backup-aipass",
+    "scheduled": True,
+    "on": True,
+    "frequency": "daily",
+    "time": "05:00",
+    "weekday": None,
+    "day": None,
+    "steps": ["snapshot", "drive_sync"],
+    "last_run": None,
+    "last_status": None,
+    "last_error": None,
+    "next_run": "2026-11-16T05:00:00",
+}
+
+# @backup's error() as drone captures it: the sentence, then a hint Rich wraps at 80 columns.
+NO_SCHEDULE_YET = (
+    "❌ Schedule: No schedule for aipass yet: set a time first\n(daily HH:MM)\n"
+    "   → Try: schedule <project_path|@name> [--json] | schedule <project_path|@name>\non|off|daily HH:MM\n"
+)
+
+
+def _schedule_calls(door: Any) -> List[List[str]]:
+    return [c.args[2][1:] for c in door.route_command.call_args_list]
+
+
+class TestReadSchedule:
+    """GET /v1/backup/schedule's logic: @backup's schedule --json, passed through untouched."""
+
+    def test_the_schedule_passes_through_with_every_key_unchanged(self, door: Any, seated: Path) -> None:
+        door.route_command.return_value = _result(json.dumps(SCHEDULE))
+
+        answered = host_backup.read_schedule("AIPASS")
+
+        target, verb, argv = door.route_command.call_args.args
+        assert (target, verb) == ("@backup", "schedule")
+        assert Path(argv[0]) == seated.resolve()
+        assert argv[1:] == ["--json"]
+        assert door.route_command.call_args.kwargs == {"timeout": host_backup.SCHEDULE_TIMEOUT_SECONDS}
+        assert answered == SCHEDULE
+
+    def test_exit_2_with_a_sentence_is_refused_in_backups_words_without_the_hint(self, door: Any) -> None:
+        door.route_command.return_value = _result(stderr=NO_SCHEDULE_YET, exit_code=2)
+
+        with pytest.raises(host_backup.VerbRefused) as refused:
+            host_backup.read_schedule("AIPASS")
+
+        assert str(refused.value) == "Schedule: No schedule for aipass yet: set a time first (daily HH:MM)"
+
+    @pytest.mark.parametrize(("exit_code", "stderr"), [(2, ""), (2, "\n  \n"), (1, NO_SCHEDULE_YET)])
+    def test_exit_2_with_no_sentence_or_any_other_exit_is_unavailable_never_refused(
+        self, door: Any, exit_code: int, stderr: str
+    ) -> None:
+        door.route_command.return_value = _result(stderr=stderr, exit_code=exit_code)
+
+        with pytest.raises(host_backup.VerbUnavailable) as failed:
+            host_backup.read_schedule("AIPASS")
+
+        assert not isinstance(failed.value, host_backup.VerbRefused)
+
+    @pytest.mark.parametrize("stdout", ["", "Scheduled: daily 05:00", "[1, 2]"])
+    def test_an_answer_that_is_not_one_json_object_is_unavailable(self, door: Any, stdout: str) -> None:
+        door.route_command.return_value = _result(stdout)
+
+        with pytest.raises(host_backup.VerbUnavailable):
+            host_backup.read_schedule("AIPASS")
+
+    def test_a_routing_error_is_unavailable(self, door: Any) -> None:
+        door.route_command.side_effect = drone.RoutingError("Branch not found: @backup")
+
+        with pytest.raises(host_backup.VerbUnavailable):
+            host_backup.read_schedule("AIPASS")
+
+    def test_an_unknown_project_is_refused_before_backup_is_asked(self, door: Any, census: Path) -> None:
+        with pytest.raises(host_backup.VerbRefused):
+            host_backup.read_schedule("VERA")
+
+        door.route_command.assert_not_called()
+
+
+class TestSetSchedule:
+    """POST /v1/backup/schedule's logic: a frequency with its fields, then on or off, then the read-back."""
+
+    def test_a_time_and_on_are_set_in_that_order_and_answered_as_read_back(self, door: Any, seated: Path) -> None:
+        door.route_command.side_effect = [_result(), _result(), _result(json.dumps(SCHEDULE))]
+
+        answered = host_backup.set_schedule("AIPASS", True, "daily", "05:00")
+
+        assert _schedule_calls(door) == [["daily", "05:00"], ["on"], ["--json"]]
+        assert all(Path(c.args[2][0]) == seated.resolve() for c in door.route_command.call_args_list)
+        assert answered == SCHEDULE
+
+    def test_off_alone_sends_off_and_no_time(self, door: Any) -> None:
+        door.route_command.side_effect = [_result(), _result(json.dumps({**SCHEDULE, "on": False}))]
+
+        answered = host_backup.set_schedule("AIPASS", False)
+
+        assert door.route_command.call_count == 2
+        assert _schedule_calls(door) == [["off"], ["--json"]]
+        assert answered["on"] is False
+
+    @pytest.mark.parametrize(
+        ("fields", "words"),
+        [
+            ({"frequency": "daily", "time": "00:00"}, ["daily", "00:00"]),
+            ({"frequency": "weekly", "weekday": "monday", "time": "05:00"}, ["weekly", "monday", "05:00"]),
+            ({"frequency": "weekly", "weekday": "sunday", "time": "23:59"}, ["weekly", "sunday", "23:59"]),
+            ({"frequency": "monthly", "day": 1, "time": "05:00"}, ["monthly", "1", "05:00"]),
+            ({"frequency": "monthly", "day": 31, "time": "05:00"}, ["monthly", "31", "05:00"]),
+        ],
+    )
+    def test_each_frequency_sends_backups_set_form_in_its_word_order(
+        self, door: Any, fields: dict, words: List[str]
+    ) -> None:
+        door.route_command.side_effect = [_result(), _result(json.dumps(SCHEDULE))]
+
+        host_backup.set_schedule("AIPASS", **fields)
+
+        assert door.route_command.call_count == 2
+        assert _schedule_calls(door) == [words, ["--json"]]
+
+    @pytest.mark.parametrize(
+        ("fields", "words"),
+        [
+            ({}, "Nothing to set"),
+            (
+                {"frequency": "yearly", "time": "05:00"},
+                "Unknown frequency 'yearly' — the schedule takes daily, weekly, monthly",
+            ),
+            ({"time": "05:00"}, "A frequency is required with its fields"),
+            ({"on": True, "weekday": "monday"}, "A frequency is required with its fields"),
+            ({"frequency": "daily"}, "Not a 24-hour HH:MM time: None"),
+            ({"frequency": "daily", "time": "5:00"}, "Not a 24-hour HH:MM time: '5:00'"),
+            ({"frequency": "daily", "time": "24:00"}, "Not a 24-hour HH:MM time: '24:00'"),
+            ({"frequency": "daily", "time": "05:00x"}, "Not a 24-hour HH:MM time: '05:00x'"),
+            ({"frequency": "daily", "time": "05:00", "weekday": "monday"}, "daily takes no weekday"),
+            ({"frequency": "daily", "time": "05:00", "day": 1}, "daily takes no day"),
+            ({"frequency": "weekly", "weekday": "monday", "time": "05:00", "day": 1}, "weekly takes no day"),
+            ({"frequency": "monthly", "day": 1, "time": "05:00", "weekday": "monday"}, "monthly takes no weekday"),
+            ({"frequency": "weekly", "time": "05:00"}, "Not a weekday: None"),
+            ({"frequency": "weekly", "weekday": "Monday", "time": "05:00"}, "Not a weekday: 'Monday'"),
+            ({"frequency": "weekly", "weekday": "mon", "time": "05:00"}, "Not a weekday: 'mon'"),
+            ({"frequency": "weekly", "weekday": "monday"}, "Not a 24-hour HH:MM time: None"),
+            ({"frequency": "monthly", "time": "05:00"}, "Not a day of the month: None"),
+            ({"frequency": "monthly", "day": 0, "time": "05:00"}, "Not a day of the month: 0"),
+            ({"frequency": "monthly", "day": 32, "time": "05:00"}, "Not a day of the month: 32"),
+            ({"frequency": "monthly", "day": "5", "time": "05:00"}, "Not a day of the month: '5'"),
+            ({"frequency": "monthly", "day": True, "time": "05:00"}, "Not a day of the month: True"),
+            ({"frequency": "monthly", "day": 5.0, "time": "05:00"}, "Not a day of the month: 5.0"),
+            ({"frequency": "monthly", "day": 5}, "Not a 24-hour HH:MM time: None"),
+            ({"on": "true"}, "on is true or false, not 'true'"),
+        ],
+    )
+    def test_a_body_backup_would_refuse_is_refused_here_and_nothing_is_written(
+        self, door: Any, fields: dict, words: str
+    ) -> None:
+        with pytest.raises(host_backup.VerbRefused) as refused:
+            host_backup.set_schedule("AIPASS", **fields)
+
+        assert words in str(refused.value)
+        door.route_command.assert_not_called()
+
+    def test_backups_refusal_stops_the_set_with_its_sentence_and_reads_nothing_back(self, door: Any) -> None:
+        door.route_command.return_value = _result(stderr=NO_SCHEDULE_YET, exit_code=2)
+
+        with pytest.raises(host_backup.VerbRefused) as refused:
+            host_backup.set_schedule("AIPASS", True)
+
+        assert "No schedule for aipass yet" in str(refused.value)
+        assert _schedule_calls(door) == [["on"]]
+
+
+@pytest.mark.skipif(not host_server.is_available(), reason="the [host] extra is not installed")
+class TestTheScheduleRoutesThroughTheRealApp:
+    """GET and POST /v1/backup/schedule, wired: scopes, the 400 envelope, the read-back."""
+
+    @pytest.fixture
+    def api(self, store: Path, door: Any, host_app: Any):
+        from fastapi.testclient import TestClient
+
+        with patch(PATCH_SERVER_LOGGER):
+            _, read_raw = host_tokens.issue_token("phone", "read")
+            _, operate_raw = host_tokens.issue_token("ops-phone", "operate")
+            yield (
+                TestClient(host_app, raise_server_exceptions=False),
+                {"Authorization": f"Bearer {read_raw}"},
+                {"Authorization": f"Bearer {operate_raw}"},
+            )
+
+    def test_a_read_token_reads_the_schedule_unchanged(self, api: Any, door: Any) -> None:
+        client, read, _ = api
+        door.route_command.return_value = _result(json.dumps(SCHEDULE))
+
+        response = client.get("/v1/backup/schedule", params={"project": "AIPASS"}, headers=read)
+
+        assert (response.status_code, response.json()) == (200, SCHEDULE)
+
+    def test_a_read_token_is_refused_on_set_and_backup_is_never_asked(self, api: Any, door: Any) -> None:
+        client, read, _ = api
+
+        response = client.post("/v1/backup/schedule", json={"project": "AIPASS", "on": True}, headers=read)
+
+        assert response.status_code == 403
+        door.route_command.assert_not_called()
+
+    def test_a_set_answers_200_with_the_schedule_read_back(self, api: Any, door: Any) -> None:
+        client, _, operate = api
+        door.route_command.side_effect = [_result(), _result(), _result(json.dumps(SCHEDULE))]
+        body = {"project": "AIPASS", "frequency": "daily", "time": "05:00", "on": True}
+
+        response = client.post("/v1/backup/schedule", json=body, headers=operate)
+
+        assert (response.status_code, response.json()) == (200, SCHEDULE)
+        assert door.route_command.call_count == 3
+        assert _schedule_calls(door) == [["daily", "05:00"], ["on"], ["--json"]]
+
+    def test_a_refusal_is_400_verb_refused_with_its_sentence(self, api: Any, door: Any) -> None:
+        client, _, operate = api
+        door.route_command.return_value = _result(stderr=NO_SCHEDULE_YET, exit_code=2)
+
+        response = client.post("/v1/backup/schedule", json={"project": "AIPASS", "on": True}, headers=operate)
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "verb_refused"
+        assert "No schedule for aipass yet" in response.json()["error"]["message"]
 
 
 class TestTheDoorOwnsNoMechanism:

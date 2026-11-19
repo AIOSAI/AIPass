@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_send_identity.py
 # Description: Tests for sender identity detection chain
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-03-10
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/users/branch_detection.py and the sender identity chain in apps/handlers/email/send.py."""
@@ -11,7 +11,6 @@
 # The identity chain is ai_mail's most critical and most fragile path.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(stdlib) — os.environ.setdefault on the win32 import-time branch, unreachable on POSIX
 
 import json
 import os
@@ -27,6 +26,7 @@ from aipass.ai_mail.apps.handlers.users.branch_detection import (
 )
 from aipass.ai_mail.apps.handlers.email.send import resolve_sender_info
 from aipass.ai_mail.apps.handlers.email.send_args import parse_send_args
+from aipass.ai_mail.apps.handlers.users.user import get_current_user
 
 
 @pytest.fixture
@@ -241,6 +241,24 @@ class TestDetectBranchFromPwd:
             assert result is not None
             assert result["name"].lower() == "vera-studio"
             assert result["email"].lower() == "@vera-studio"
+
+    def test_an_assigned_non_citizen_at_a_project_root_is_refused_not_synthesized(
+        self, clean_env, tmp_path, temp_registry, monkeypatch
+    ):
+        """Shipped defect: AIPASS_BRANCH_NAME=<project> at its root sent as the project, mailbox at the root."""
+        registry_path, _ = temp_registry
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path)
+        project_root = tmp_path / "demoproj"
+        project_root.mkdir()
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "demoproj")
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(project_root))
+        monkeypatch.setenv("AIPASS_CALLER_IDENTITY_SOURCE", "assigned")
+
+        assert detect_branch_from_pwd() is None
+        with pytest.raises(RuntimeError) as excinfo:
+            get_current_user()
+        assert f"AIPASS_CALLER_CWD={project_root} is not inside a branch" in str(excinfo.value)
+        assert "re-run from within the sending branch" in str(excinfo.value)
 
 
 class TestFindBranchRoot:
@@ -888,15 +906,16 @@ class TestGetContactInfo:
     def _external_caller(monkeypatch, tmp_path, book_text):
         """An external caller whose name only the address book could vouch for.
 
-        Outside any branch with an assigned name, so a book holding no row walks on to
+        In its own unregistered branch with an assigned name, so a book holding no row walks on to
         synthesis; *book_text* goes verbatim into the book conftest points contacts at.
         """
         book = tmp_path / "contacts" / "contacts.json"
         book.parent.mkdir(parents=True, exist_ok=True)
         book.write_text(book_text, encoding="utf-8")
-        outside = tmp_path / "elsewhere"
-        outside.mkdir()
-        monkeypatch.setenv("AIPASS_CALLER_CWD", str(outside))
+        own_branch = tmp_path / "elsewhere"
+        (own_branch / ".trinity").mkdir(parents=True)
+        (own_branch / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(own_branch))
         monkeypatch.setenv("AIPASS_CALLER_IDENTITY_SOURCE", "assigned")
         return book
 

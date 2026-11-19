@@ -3,7 +3,7 @@
 # Description: Registry loading, lookup and credential verification
 # Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/registry_handler.py: registry loading, lookup and credential verification."""
@@ -241,6 +241,17 @@ class TestLoadRegistry:
         with pytest.raises(RegistryCorruptError, match="missing 'branches'"):
             load_registry()
 
+    @pytest.mark.parametrize("lookup", ["get_all_branches", "get_branch_by_name", "get_branch_with_registry"])
+    def test_a_corrupt_primary_raises_naming_the_file_and_never_reaches_home(self, registry_dir: Path, lookup: str):
+        """Mutant: the old (NotFound, Corrupt, Permission) catch logs and answers from the home registry."""
+        bad_file = registry_dir / "BAD_REGISTRY.json"
+        bad_file.write_text("{not valid json!!!", encoding="utf-8")
+        set_registry_path(bad_file)
+        args = () if lookup == "get_all_branches" else ("alpha",)
+
+        with pytest.raises(RegistryCorruptError, match=str(bad_file)):
+            getattr(registry_handler, lookup)(*args)
+
     def test_branches_wrong_type_raises_corrupt_error(self, registry_dir: Path):
         """branches field that is neither list nor dict triggers RegistryCorruptError."""
         bad = {"metadata": {"version": "1.0.0"}, "branches": "not-a-list-or-dict"}
@@ -398,7 +409,7 @@ class TestFindRegistry:
         # find_registry never returns None -- it returns a conventional fallback path
         result = find_registry()
         assert isinstance(result, Path)
-        # On Windows, case-insensitive glob may match other *_registry.json files
+        # A case-insensitive glob may match other *_registry.json files
         # during the walk from __file__; accept any *_REGISTRY.json variant
         assert result.name.lower().endswith("_registry.json")
 
@@ -574,10 +585,9 @@ class TestAipassHomeResolution:
         assert find_registry() == home / "AIPASS_REGISTRY.json"
 
 
-def _with_venv(home: Path, layout: str = "posix") -> Path:
-    """Give *home* its own venv python in *layout*, the way setup.sh does; returns that python."""
-    directory, name = registry_handler.VENV_LAYOUTS[layout]
-    python = home / ".venv" / directory / name
+def _with_venv(home: Path) -> Path:
+    """Give *home* its own venv python, the way setup.sh does; returns that python."""
+    python = home / ".venv" / "bin" / "python"
     python.parent.mkdir(parents=True, exist_ok=True)
     python.write_text("", encoding="utf-8")
     return python
@@ -585,10 +595,6 @@ def _with_venv(home: Path, layout: str = "posix") -> Path:
 
 class TestBranchInterpreter:
     """A branch app runs on the interpreter of the AIPass home it lives in, not on whichever drone came first."""
-
-    @pytest.fixture(autouse=True)
-    def _posix_layout(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(registry_handler, "_venv_layout", lambda: registry_handler.VENV_LAYOUTS["posix"])
 
     def test_an_enrolled_homes_branch_runs_on_the_homes_venv_announced_once(self, stranger: dict[str, Path]) -> None:
         """The sandbox: the uv tool's drone, an enrolled home with its own .venv (mutant: always sys.executable)."""
@@ -605,14 +611,12 @@ class TestBranchInterpreter:
         assert python.resolve() in log.info.call_args.args
         log.warning.assert_not_called()
 
-    @pytest.mark.parametrize("layout", ["posix", "windows"])
-    def test_aipass_home_set_to_another_install_takes_its_venv_in_either_layout(
-        self, stranger: dict[str, Path], monkeypatch: pytest.MonkeyPatch, layout: str
+    def test_aipass_home_set_to_another_install_takes_its_venv(
+        self, stranger: dict[str, Path], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         home = _an_aipass_home(stranger["tmp"] / "AIPass")
-        python = _with_venv(home, layout)
+        python = _with_venv(home)
         monkeypatch.setenv("AIPASS_HOME", str(home))
-        monkeypatch.setattr(registry_handler, "_venv_layout", lambda: registry_handler.VENV_LAYOUTS[layout])
 
         assert registry_handler.branch_interpreter(home / "src" / "aipass" / "api") == str(python.resolve())
 

@@ -117,7 +117,7 @@ One line, done. No navigation.
 ### Approved Output Method
 
 ```python
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 
 console.print("[cyan]This is the ONLY approved way to output text[/cyan]")
 ```
@@ -178,7 +178,7 @@ console.print(parser.format_help())
 
 ```python
 # Import CLI services
-from aipass.cli.apps.modules import console, header, success, error, warning
+from aipass.cli import console, header, success, error, warning
 
 # Use throughout your module
 console.print("[bold cyan]Starting operation...[/bold cyan]")
@@ -253,7 +253,7 @@ print("✅ Success!")
 
 **After (CLI service):**
 ```python
-from aipass.cli.apps.modules import console, header, success
+from aipass.cli import console, header, success
 
 console.print()
 header("My Operation")
@@ -271,9 +271,9 @@ success("Operation complete!")
 ### Implementation Notes
 
 - CLI branch provides service (like Prax for logging)
-- Branches import from `aipass.cli.apps.modules`
-- Public API in `apps/modules/`, implementation in `apps/handlers/`
-- Backward compatible (old usage still works)
+- Branches import from cli's one door: `from aipass.cli import <name>`
+- The door (`src/aipass/cli/__init__.py`) maps each name to its home under `apps/`; a path
+  under `aipass.cli.apps` is convicted by front_door, modules as much as handlers
 
 **Reference:**
 - Standard: `src/aipass/sentry/docs/aipass_code_standards/cli.md`
@@ -380,12 +380,12 @@ parser = argparse.ArgumentParser(
     epilog="""
 EXAMPLES:
   python backup.py snapshot
-  python backup.py versioned --note "Before changes"
+  python backup.py drive_sync --note "Before changes"
     """
 )
 
 # Positional arguments
-parser.add_argument('mode', choices=['snapshot', 'versioned', 'all'])
+parser.add_argument('mode', choices=['snapshot', 'drive_sync', 'all'])
 
 # Optional arguments
 parser.add_argument('--note', type=str, help='Backup note')
@@ -413,7 +413,7 @@ parser.add_argument('--v1', type=str, help='First version for comparison')
 **Every module MUST respond to `--help` using Rich formatting:**
 
 ```python
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 
 if __name__ == "__main__":
     # Check for help FIRST
@@ -471,7 +471,7 @@ parser.add_argument('--dry-run', action='store_true')
 
 **Choices (constrained values):**
 ```python
-parser.add_argument('mode', choices=['snapshot', 'versioned', 'all'])
+parser.add_argument('mode', choices=['snapshot', 'drive_sync', 'all'])
 parser.add_argument('--level', choices=['debug', 'info', 'warning'])
 ```
 
@@ -755,12 +755,11 @@ python delete_plan.py 0042 --yes
 ```bash
 # Mode selection
 python backup_cli.py snapshot
-python backup_cli.py versioned --note "Before changes"
+python backup_cli.py drive_sync --note "Before changes"
 
-# Special commands
-python backup_cli.py --list-modes
-python backup_cli.py --diff "file.py"
-python backup_cli.py --diff "file.py" --v1 20241101 --v2 20241102
+# Flags on a command
+python backup_cli.py status --json
+python backup_cli.py prune --apply
 ```
 
 ### Argument Design Checklist

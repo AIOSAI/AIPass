@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load.py
 # Description: Load Logging Configuration Handler
-# Version: 1.5.1
+# Version: 1.7.0
 # Created: 2025-11-07
-# Modified: 2026-11-01
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -11,23 +11,24 @@ Load Logging Configuration Handler
 """
 
 import json
-import logging
 import os
 import sys
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional, Union
 
+from aipass.prax.apps.handlers.logging.trail import PraxTrail
 from aipass.prax.apps.handlers.repo_root import find_repo_root
-from aipass.prax.apps.handlers.repo_root import resolved_file
+from aipass.prax.apps.handlers.state_root import branch_root, is_installed, state_home
 
-logger = logging.getLogger(__name__)
+# The trail, never door one: this module resolves the paths door one is built on.
+logger = PraxTrail("load")
 
 MODULE_NAME = "load"
 
-PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # config/load.py → handlers/ → apps/ → prax/
-ECOSYSTEM_ROOT = PRAX_ROOT.parent  # prax/ → aipass/ (contains all sibling modules)
-PRAX_JSON_DIR = PRAX_ROOT / "prax_json"
+PRAX_ROOT = branch_root("prax").resolve()
+ECOSYSTEM_ROOT = PRAX_ROOT.parent
+PRAX_JSON_DIR = state_home(PRAX_ROOT) / "prax_json"
 
 
 def _find_repo_root() -> Path:
@@ -46,18 +47,14 @@ USER_SYSTEM_LOGS = Path(".aipass") / "system_logs"
 
 
 def system_logs_home(repo_root: Path) -> Path:
-    """The system_logs/ directory for a resolved repo root — never the filesystem root.
-
-    An installed package has no repo above it, so the walk ends at the filesystem
-    root (unwritable); its logs go to ``~/.aipass/system_logs`` instead.
-    """
+    """The system_logs/ for a resolved repo root; a walk that ended at the filesystem root goes to the home folder."""
     if repo_root == Path(repo_root.anchor):
         return Path.home() / USER_SYSTEM_LOGS
     return repo_root / "system_logs"
 
 
 def get_system_logs_dir() -> Path:
-    """Lazily resolve and create system_logs directory (see system_logs_home())."""
+    """Lazily resolve and create system_logs; installed by the install directories, so a venv under src/ counts."""
     test_log_dir = os.environ.get("AIPASS_TEST_LOG_DIR")
     if test_log_dir:
         p = Path(test_log_dir) / "system"
@@ -69,7 +66,7 @@ def get_system_logs_dir() -> Path:
         return p
     global _system_logs_dir_cache
     if _system_logs_dir_cache is None:
-        logs_dir = system_logs_home(_find_repo_root())
+        logs_dir = Path.home() / USER_SYSTEM_LOGS if is_installed(PRAX_ROOT) else system_logs_home(_find_repo_root())
         logs_dir.mkdir(parents=True, exist_ok=True)
         # Cache only after mkdir succeeds, or later callers get a directory never made.
         _system_logs_dir_cache = logs_dir
@@ -77,22 +74,12 @@ def get_system_logs_dir() -> Path:
 
 
 def _warn_routing(module_name: str, destination: object) -> None:
-    """Log routing warning when a module's log path falls outside ECOSYSTEM_ROOT."""
-    try:
-        from aipass.prax.apps.modules.logger import get_direct_logger
-
-        get_direct_logger().warning(
-            "[get_module_logs_dir] '%s' not in ECOSYSTEM_ROOT; routing to %s",
-            module_name,
-            destination,
-        )
-    except Exception as e:
-        logger.warning(
-            "[get_module_logs_dir] '%s' routing to %s (logger unavailable: %s)",
-            module_name,
-            destination,
-            e,
-        )
+    """Record, on load's trail, that a module's logs were routed outside ECOSYSTEM_ROOT."""
+    logger.warning(
+        "[get_module_logs_dir] module not in ECOSYSTEM_ROOT; logs routed away",
+        module=module_name,
+        destination=str(destination),
+    )
 
 
 _PSEUDO_FILENAME = ("<", ">")
@@ -102,7 +89,7 @@ def _module_name_from_filename(filename: str) -> str:
     """Turn a frame's ``co_filename`` into a module name, or admit there is none.
 
     The name becomes a directory (get_module_logs_dir mkdirs it): ``<stdin>`` makes
-    a junk directory on Linux and raises on Windows, so a pseudo-frame gets "unknown".
+    a junk directory, so a pseudo-frame gets "unknown".
     """
     if filename.startswith(_PSEUDO_FILENAME[0]) and filename.endswith(_PSEUDO_FILENAME[1]):
         return "unknown"
@@ -114,7 +101,7 @@ def _get_caller_module_name(depth: int = 1) -> str:
     """Name the module `depth` frames above this one, without touching the disk.
 
     sys._getframe, never inspect.stack(): inspect.stack() reaches realpath, which
-    calls os.getcwd() on Windows and raises from the logging path with a dead cwd.
+    calls os.getcwd() and raises from the logging path with a dead cwd.
     """
     try:
         frame = sys._getframe(depth)
@@ -145,13 +132,12 @@ def get_module_logs_dir(module_name: Optional[str] = None, branch_dir: Optional[
 
     named_dir = ECOSYSTEM_ROOT / module_name
     if named_dir.exists():
-        logs_dir = named_dir / "logs"
+        logs_dir = state_home(named_dir) / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         return logs_dir
 
-    src_root = ECOSYSTEM_ROOT.parent
-    alt_branch_dir = src_root / module_name
-    if alt_branch_dir.exists():
+    alt_branch_dir = ECOSYSTEM_ROOT.parent / module_name
+    if not is_installed(ECOSYSTEM_ROOT) and alt_branch_dir.exists():
         logs_dir = alt_branch_dir / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         return logs_dir
@@ -181,7 +167,7 @@ def get_module_logs_dir(module_name: Optional[str] = None, branch_dir: Optional[
 
 PRAX_LOGGER_CONFIG_FILE = PRAX_JSON_DIR / "prax_logger_config.json"
 
-LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+LOG_FORMAT = "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 DEFAULT_LOG_LEVEL = "INFO"
 
@@ -190,7 +176,8 @@ DEFAULT_SYSTEM_LOGS = {"max_lines": 1000, "backup_count": 3, "log_level": "INFO"
 
 DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 3, "log_level": "INFO"}
 
-LOG_LEVEL_NAMES = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+LOG_LEVEL_NUMBERS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
+LOG_LEVEL_NAMES = tuple(LOG_LEVEL_NUMBERS)
 
 # Set before the process starts: levels bind when a logger is created, not per call.
 LOG_LEVEL_ENV = "AIPASS_LOG_LEVEL"
@@ -224,21 +211,19 @@ def resolve_log_level(configured: Any = None) -> Any:
         if key not in _bad_level_warned:
             _bad_level_warned.add(key)
             logger.warning(
-                "[config] %s is not a log level (%s) — using %s. Valid: %s",
-                candidate,
-                source,
-                DEFAULT_LOG_LEVEL,
-                ", ".join(LOG_LEVEL_NAMES),
+                f"[config] {candidate} is not a log level ({source}) — using {DEFAULT_LOG_LEVEL}",
+                value=str(candidate),
+                source=source,
+                valid=list(LOG_LEVEL_NAMES),
             )
     return DEFAULT_LOG_LEVEL
 
 
 def level_to_int(level: Any) -> int:
-    """Convert a resolved log level to its numeric value for comparison."""
+    """Convert a resolved log level to its numeric value for comparison; an unknown name raises KeyError."""
     if isinstance(level, int) and not isinstance(level, bool):
         return level
-    numeric = logging.getLevelName(str(level).strip().upper())
-    return numeric if isinstance(numeric, int) else logging.INFO
+    return LOG_LEVEL_NUMBERS[str(level).strip().upper()]
 
 
 def _as_dict(value: Any) -> Dict[str, Any]:
@@ -261,12 +246,11 @@ def load_log_config() -> Dict[str, Any]:
                 if missing and not _config_schema_warned:
                     _config_schema_warned = True
                     logger.warning(
-                        "[config] %s has no %s section — those settings are IGNORED, "
-                        "using code defaults (system: %s, local: %s)",
-                        PRAX_LOGGER_CONFIG_FILE.name,
-                        " or ".join(missing),
-                        DEFAULT_SYSTEM_LOGS,
-                        DEFAULT_LOCAL_LOGS,
+                        "[config] a log section is missing — its settings are IGNORED, using code defaults",
+                        file=PRAX_LOGGER_CONFIG_FILE.name,
+                        missing=" or ".join(missing),
+                        system_defaults=DEFAULT_SYSTEM_LOGS,
+                        local_defaults=DEFAULT_LOCAL_LOGS,
                     )
 
                 system_logs = {**DEFAULT_SYSTEM_LOGS, **_as_dict(section.get("system_logs"))}
@@ -280,7 +264,12 @@ def load_log_config() -> Dict[str, Any]:
                 }
                 return result
     except (json.JSONDecodeError, OSError) as e:
-        logger.info(f"Log config load error (using defaults): {e}")
+        # Not a raise: this runs inside every logger call fleet-wide, the hooks' included.
+        logger.error(
+            "[config] the logger config is unreadable, its settings are IGNORED until fixed",
+            file=str(PRAX_LOGGER_CONFIG_FILE),
+            error=str(e),
+        )
 
     return {
         "system_logs": DEFAULT_SYSTEM_LOGS,

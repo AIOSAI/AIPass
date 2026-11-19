@@ -3,13 +3,12 @@
 # Description: Tests for email reply handler
 # Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/email/reply.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(windows_compat) — the sys.platform == "win32" stdout/stderr reconfigure block
 
 import json
 import pytest

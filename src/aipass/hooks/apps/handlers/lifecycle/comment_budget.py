@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: comment_budget.py
-# Version: 1.4.0
+# Version: 1.5.1
 # Description: Comment budget — measures every edit's comment share (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-10-16
-# Modified: 2026-11-10
+# Modified: 2026-11-17
 # =============================================
 
 """Measures an edited file's comment share and tells the agent when it is over budget (docs/comments.md)."""
@@ -19,16 +19,15 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from aipass.prax import append_jsonl
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import append_jsonl, branch_state_root
+from aipass.prax import logger
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.handlers.lifecycle.auto_fix import _scratch_ground
-from aipass.hooks.apps.handlers.module_root import module_file
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 CONTEXT_CAP = 700
 HELD_FRESH_SECONDS = 10
-BRANCH_ROOT = module_file(__file__).parent.parent.parent.parent
-_PROD_LEDGER = BRANCH_ROOT / "logs" / "comments.jsonl"
+_PROD_LEDGER = branch_state_root("hooks") / "logs" / "comments.jsonl"
 _SILENT = {"stdout": "", "exit_code": 0}
 comment_scan = importlib.import_module("aipass.hooks.apps.modules.comment_scan")
 
@@ -164,6 +163,14 @@ def _status(verdict: str | tuple) -> str:
 
 
 def handle(hook_data: dict) -> dict:
+    """Judge the comment share of written files, never blocking; each call leaves one json trail entry."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Judge the comment share of every file the tool wrote; never blocks."""
     try:
         tool_name = hook_data.get("tool_name", "")

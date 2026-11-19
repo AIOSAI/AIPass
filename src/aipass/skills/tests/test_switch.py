@@ -1,14 +1,15 @@
 # =================== AIPass ====================
 # Name: test_switch.py
 # Description: Skill off-switch tests
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-18
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
-#   - v1.2.0 (2026-10-22): Telegram left skills - its notifier door and unit-declaration tests go with it
-#   - v1.1.0 (2026-09-14): Refusal line carries the recorded reason; notifier door gated (telegram retired)
+#   - v1.4.0 (2026-11-15): Every test switches a neutral 'sample' skill
+#   - v1.2.0 (2026-10-22): Notifier door and unit-declaration tests cut
+#   - v1.1.0 (2026-09-14): Refusal line carries the recorded reason; notifier door gated
 #   - v1.0.0 (2026-08-18): Initial creation - DPLAN-0306 per-skill off-switch
 #
 # CODE STANDARDS:
@@ -36,6 +37,7 @@ from aipass.skills.apps.handlers import registry
 from aipass.skills.apps.handlers import switch_handler as sh
 from aipass.skills.apps.handlers.json import json_handler as jh
 from aipass.skills.apps.modules import runner
+from aipass.skills.apps.modules import switch as switch_module
 
 
 class FakeSystemctl:
@@ -110,17 +112,17 @@ class TestStatePersistence:
         assert sh.get_state_path() == state_dir / "switch_state.json"
 
     def test_a_skill_with_no_entry_is_on(self, state_dir):
-        assert sh.is_enabled("telegram") is True
+        assert sh.is_enabled("sample") is True
 
     def test_off_survives_a_process_restart(self, state_dir):
-        sh.set_enabled("telegram", False, reason="retired 08-18")
+        sh.set_enabled("sample", False, reason="retired 08-18")
 
         # A fresh interpreter, not importlib.reload(): reload rebinds SwitchStateUnreadable while
         # runner.py holds the old class, breaking later tests. The seam is spelled out, not inherited.
         probe = (
             "import sys;"
             "from aipass.skills.apps.handlers import switch_handler as s;"
-            "sys.stdout.write(str(s.get_state_path()) + '|' + repr(s.is_enabled('telegram')))"
+            "sys.stdout.write(str(s.get_state_path()) + '|' + repr(s.is_enabled('sample')))"
         )
         completed = subprocess.run(
             [sys.executable, "-c", probe],
@@ -143,53 +145,53 @@ class TestStatePersistence:
         assert answer == "False"
 
     def test_the_value_is_on_disk_not_in_memory(self, state_dir):
-        sh.set_enabled("telegram", False, reason="retired 08-18")
+        sh.set_enabled("sample", False, reason="retired 08-18")
 
         raw = json.loads((state_dir / "switch_state.json").read_text(encoding="utf-8"))
-        assert raw["skills"]["telegram"]["enabled"] is False
-        assert raw["skills"]["telegram"]["reason"] == "retired 08-18"
+        assert raw["skills"]["sample"]["enabled"] is False
+        assert raw["skills"]["sample"]["reason"] == "retired 08-18"
 
     def test_toggling_one_skill_leaves_the_others_alone(self, state_dir):
-        sh.set_enabled("telegram", False)
+        sh.set_enabled("sample", False)
         sh.set_enabled("github", True)
         sh.set_enabled("screen_lock", False)
 
-        assert sh.is_enabled("telegram") is False
+        assert sh.is_enabled("sample") is False
         assert sh.is_enabled("github") is True
         assert sh.is_enabled("screen_lock") is False
 
     def test_re_recording_the_same_value_keeps_the_reason(self, state_dir):
         # The reason is the record of why a skill is dark; a bare repeat must not erase it.
-        sh.set_enabled("telegram", False, reason="retired 08-18 by ruling")
-        sh.set_enabled("telegram", False)
+        sh.set_enabled("sample", False, reason="retired 08-18 by ruling")
+        sh.set_enabled("sample", False)
 
-        entry = sh.read_state()["telegram"]
+        entry = sh.read_state()["sample"]
         assert entry["reason"] == "retired 08-18 by ruling"
 
     def test_a_new_reason_replaces_the_old_one(self, state_dir):
-        sh.set_enabled("telegram", False, reason="first reason")
-        sh.set_enabled("telegram", False, reason="second reason")
+        sh.set_enabled("sample", False, reason="first reason")
+        sh.set_enabled("sample", False, reason="second reason")
 
-        assert sh.read_state()["telegram"]["reason"] == "second reason"
+        assert sh.read_state()["sample"]["reason"] == "second reason"
 
     def test_flipping_the_value_drops_a_reason_that_no_longer_applies(self, state_dir):
-        sh.set_enabled("telegram", False, reason="retired 08-18")
-        sh.set_enabled("telegram", True)
+        sh.set_enabled("sample", False, reason="retired 08-18")
+        sh.set_enabled("sample", True)
 
-        assert "reason" not in sh.read_state()["telegram"]
+        assert "reason" not in sh.read_state()["sample"]
 
     def test_changed_only_moves_when_the_value_moves(self, state_dir):
-        sh.set_enabled("telegram", False, reason="retired 08-18")
-        first = sh.read_state()["telegram"]["changed"]
+        sh.set_enabled("sample", False, reason="retired 08-18")
+        first = sh.read_state()["sample"]["changed"]
 
-        sh.set_enabled("telegram", False)
-        assert sh.read_state()["telegram"]["changed"] == first
+        sh.set_enabled("sample", False)
+        assert sh.read_state()["sample"]["changed"] == first
 
-        sh.set_enabled("telegram", True)
-        assert sh.read_state()["telegram"]["changed"] != first
+        sh.set_enabled("sample", True)
+        assert sh.read_state()["sample"]["changed"] != first
 
     def test_a_write_leaves_no_partial_document_behind(self, state_dir):
-        sh.set_enabled("telegram", False)
+        sh.set_enabled("sample", False)
         leftovers = [p.name for p in state_dir.iterdir() if p.suffix == ".tmp"]
         assert leftovers == []
 
@@ -202,7 +204,7 @@ class TestUnreadableStateFailsClosed:
         (state_dir / "switch_state.json").write_text("{not json at all", encoding="utf-8")
 
         with pytest.raises(sh.SwitchStateUnreadable):
-            sh.is_enabled("telegram")
+            sh.is_enabled("sample")
 
     def test_the_refusal_names_the_file_and_the_fix(self, state_dir):
         (state_dir / "switch_state.json").write_text("{not json at all", encoding="utf-8")
@@ -212,18 +214,73 @@ class TestUnreadableStateFailsClosed:
 
         message = str(caught.value)
         assert "switch_state.json" in message
-        assert "delete" in message.lower()
+        assert "drone rm" in message
 
     def test_wrong_shape_is_unreadable_too(self, state_dir):
         (state_dir / "switch_state.json").write_text('["not", "a", "map"]', encoding="utf-8")
 
         with pytest.raises(sh.SwitchStateUnreadable):
-            sh.is_enabled("telegram")
+            sh.is_enabled("sample")
 
     def test_a_missing_file_is_not_corrupt(self, state_dir):
         # Missing means nobody has toggled anything: every skill is on.
         assert not (state_dir / "switch_state.json").exists()
         assert sh.read_state() == {}
+
+
+class TestSwitchingOverAnUnreadableDocument:
+    """Switching over an unreadable document refuses: nothing written, the original kept for repair."""
+
+    CORRUPT = b'{"skills": {"sample": {"enabled": false}}} trailing'
+
+    def test_switching_refuses_and_leaves_the_bytes_untouched(self, state_dir):
+        (state_dir / "switch_state.json").write_bytes(self.CORRUPT)
+
+        with pytest.raises(sh.SwitchStateUnreadable):
+            sh.set_enabled("github", True)
+
+        assert (state_dir / "switch_state.json").read_bytes() == self.CORRUPT
+
+    def test_a_skill_that_was_off_never_reads_as_on_after_a_refused_switch(self, state_dir):
+        (state_dir / "switch_state.json").write_bytes(self.CORRUPT)
+
+        with pytest.raises(sh.SwitchStateUnreadable):
+            sh.set_enabled("github", True)
+
+        with pytest.raises(sh.SwitchStateUnreadable):
+            sh.is_enabled("sample")
+
+    def test_the_off_command_refuses_on_stderr_and_logs_one_error(self, state_dir, monkeypatch, capsys):
+        (state_dir / "switch_state.json").write_bytes(self.CORRUPT)
+        errors = []
+        monkeypatch.setattr(switch_module.logger, "error", lambda msg, *a, **k: errors.append(msg % a))
+
+        assert switch_module.handle_command("off", ["sample"]) is False
+
+        out, err = capsys.readouterr()
+        assert "switch_state.json" in err and "drone rm" in err
+        assert len(errors) == 1 and "switch_state.json" in errors[0]
+
+
+class TestCreatedDate:
+    """The document's created date is written once and kept by every later write."""
+
+    def test_a_healthy_document_keeps_its_created_date_through_a_switch(self, state_dir):
+        document = {"module_name": "switch", "created": "2026-01-01", "last_updated": "2026-01-01", "skills": {}}
+        (state_dir / "switch_state.json").write_text(json.dumps(document), encoding="utf-8")
+
+        assert sh.set_enabled("sample", False) is True
+
+        written = json.loads((state_dir / "switch_state.json").read_text(encoding="utf-8"))
+        assert written["created"] == "2026-01-01"
+        assert written["skills"]["sample"]["enabled"] is False
+
+    def test_an_absent_document_starts_clean_with_today_as_created(self, state_dir):
+        assert sh.set_enabled("sample", False) is True
+
+        written = json.loads((state_dir / "switch_state.json").read_text(encoding="utf-8"))
+        assert written["created"] == written["last_updated"]
+        assert list(written["skills"]) == ["sample"]
 
 
 class TestTurnOff:
@@ -233,7 +290,7 @@ class TestTurnOff:
         fake = FakeSystemctl(active=["fake-bot@one", "fake-bot@two"])
         monkeypatch.setattr(sh, "_systemctl", fake)
 
-        result = sh.turn_off("telegram", reason="retired")
+        result = sh.turn_off("sample", reason="retired")
 
         assert result["success"] is True
         assert fake.active == set()
@@ -242,7 +299,7 @@ class TestTurnOff:
         fake = FakeSystemctl(active=["fake-bot@one", "fake-bot@two"])
         monkeypatch.setattr(sh, "_systemctl", fake)
 
-        sh.turn_off("telegram")
+        sh.turn_off("sample")
 
         # Disable only stops the BOOT path; mask refuses a manual start or a dependency pull.
         for unit in ("fake-bot@one", "fake-bot@two"):
@@ -253,7 +310,7 @@ class TestTurnOff:
         fake = FakeSystemctl(active=["fake-bot@one", "fake-bot@two"])
         monkeypatch.setattr(sh, "_systemctl", fake)
 
-        sh.turn_off("telegram")
+        sh.turn_off("sample")
         code, _, err = fake("start", "fake-bot@one")
 
         assert code != 0
@@ -265,11 +322,11 @@ class TestTurnOff:
         seen = {}
 
         def recording_systemctl(*args, timeout=15):
-            seen.setdefault("enabled_at_first_call", sh.is_enabled("telegram"))
+            seen.setdefault("enabled_at_first_call", sh.is_enabled("sample"))
             return (0, "inactive", "")
 
         monkeypatch.setattr(sh, "_systemctl", recording_systemctl)
-        sh.turn_off("telegram")
+        sh.turn_off("sample")
 
         assert seen["enabled_at_first_call"] is False
 
@@ -277,7 +334,7 @@ class TestTurnOff:
         fake = FakeSystemctl(active=["fake-bot@one", "fake-bot@two"], stubborn=["fake-bot@two"])
         monkeypatch.setattr(sh, "_systemctl", fake)
 
-        result = sh.turn_off("telegram")
+        result = sh.turn_off("sample")
 
         assert result["success"] is False
         assert "fake-bot@two" in result["error"]
@@ -301,23 +358,23 @@ class TestTurnOn:
         fake = FakeSystemctl(active=["fake-bot@one", "fake-bot@two"])
         monkeypatch.setattr(sh, "_systemctl", fake)
 
-        sh.turn_off("telegram")
+        sh.turn_off("sample")
         assert fake.active == set()
 
-        result = sh.turn_on("telegram")
+        result = sh.turn_on("sample")
 
         assert result["success"] is True
         assert fake.active == {"fake-bot@one", "fake-bot@two"}
-        assert sh.is_enabled("telegram") is True
+        assert sh.is_enabled("sample") is True
 
     def test_on_unmasks_before_it_starts(self, state_dir, fake_units, monkeypatch):
         fake = FakeSystemctl(active=["fake-bot@one"])
         monkeypatch.setattr(sh, "declared_units", lambda name, registry=None: ["fake-bot@one"])
         monkeypatch.setattr(sh, "_systemctl", fake)
 
-        sh.turn_off("telegram")
+        sh.turn_off("sample")
         fake.calls.clear()
-        sh.turn_on("telegram")
+        sh.turn_on("sample")
 
         verbs = fake.verbs_for("fake-bot@one")
         # systemd refuses a start issued before the unmask: the order is the contract.
@@ -327,8 +384,8 @@ class TestTurnOn:
         fake = FakeSystemctl(active=["fake-bot@one", "fake-bot@two"])
         monkeypatch.setattr(sh, "_systemctl", fake)
 
-        sh.turn_off("telegram")
-        sh.turn_on("telegram")
+        sh.turn_off("sample")
+        sh.turn_on("sample")
 
         assert fake.enabled == {"fake-bot@one", "fake-bot@two"}
 
@@ -343,7 +400,7 @@ class TestTurnOn:
             return fake(*args, timeout=timeout)
 
         monkeypatch.setattr(sh, "_systemctl", refuses_to_start)
-        result = sh.turn_on("telegram")
+        result = sh.turn_on("sample")
 
         assert result["success"] is False
         assert "fake-bot@one" in result["error"]
@@ -353,29 +410,29 @@ class TestRunnerGate:
     """The second door: AIPass must not start a skill it has switched off."""
 
     def test_run_skill_refuses_a_switched_off_skill(self, state_dir):
-        sh.set_enabled("telegram", False, reason="retired 08-18")
+        sh.set_enabled("sample", False, reason="retired 08-18")
 
         # Stubbed so a regressed gate fails here instead of running the skill's handler.
         with patch.object(runner, "run_handler") as ran_handler, patch.object(runner, "run_markdown") as ran_markdown:
-            result = runner.run_skill("telegram", action="start", args={"arg0": "base"})
+            result = runner.run_skill("sample", action="start", args={"arg0": "base"})
 
         assert result["success"] is False
         assert result["error"] == (
-            "Skill 'telegram' is switched OFF and will not run (retired 08-18). "
-            "Turn it back on with: drone @skills on telegram"
+            "Skill 'sample' is switched OFF and will not run (retired 08-18). "
+            "Turn it back on with: drone @skills on sample"
         )
         ran_handler.assert_not_called()
         ran_markdown.assert_not_called()
 
     def test_the_gate_runs_before_the_handler_is_even_loaded(self, state_dir):
         # A handler can start work IN-PROCESS on import: the gate bites before the load.
-        sh.set_enabled("telegram", False)
+        sh.set_enabled("sample", False)
         with patch.object(runner, "load_skill") as loader:
-            result = runner.run_skill("telegram", action="start")
+            result = runner.run_skill("sample", action="start")
 
         assert result["success"] is False
         assert result["error"] == (
-            "Skill 'telegram' is switched OFF and will not run. Turn it back on with: drone @skills on telegram"
+            "Skill 'sample' is switched OFF and will not run. Turn it back on with: drone @skills on sample"
         )
         loader.assert_not_called()
 
@@ -387,7 +444,7 @@ class TestRunnerGate:
         assert "switch_state.json" in result["error"]
 
     def test_an_on_skill_passes_through_the_gate(self, state_dir):
-        sh.set_enabled("telegram", True)
+        sh.set_enabled("sample", True)
         with patch.object(runner, "load_skill") as loader:
             loader.return_value = {
                 "success": False,
@@ -397,7 +454,7 @@ class TestRunnerGate:
                 "handler": None,
                 "path": None,
             }
-            result = runner.run_skill("telegram", action="status")
+            result = runner.run_skill("sample", action="status")
 
         loader.assert_called_once()
         assert result["error"] == "reached the loader"

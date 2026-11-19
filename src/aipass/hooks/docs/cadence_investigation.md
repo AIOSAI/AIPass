@@ -31,6 +31,13 @@ Three-layer dedup, decided by `_should_increment()` under the lock `_load_and_in
 
 Special case: `turn < 0` (post-compact reset) always increments — debounce must not swallow the turn-0 all-fire guarantee.
 
+**A damaged state file is set aside once.** Every reader opens the state file through `_open_state`, which
+takes the flock and re-checks that the name still points at the locked file. An empty file reads as no state.
+Bytes that are not JSON, or JSON that is not an object, are damage: one ERROR line names the file, it is renamed
+beside itself as `<name>.corrupt-<ns>`, and the loop reopens a fresh file under the lock, so the next write
+never lands in the evidence and counting starts over. The copies stay in the system temp dir beside the state
+files and are left to its cleaning, one per damage event.
+
 **One decision per prompt key.** The state file stores a prompt key, sha1(transcript size + NUL + prompt
 text). When both the stored state and the payload carry a key, the key decides alone: the counter
 increments only on a new key, however far apart the siblings run, and a real next prompt within 2s counts.

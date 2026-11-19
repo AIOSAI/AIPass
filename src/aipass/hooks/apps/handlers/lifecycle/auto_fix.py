@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
-# Version: 1.7.0
+# Version: 1.9.0
 # Description: Post-edit diagnostics — syntax, lint, type, pattern, sentry checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-11-10
+# Modified: 2026-11-17
 # =============================================
 
 """Runs diagnostics on edited files and surfaces errors for the agent to fix."""
@@ -18,7 +18,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 SKIP_EXTENSIONS = {".md", ".txt", ".log", ".csv", ".html"}
@@ -34,7 +35,7 @@ def _scratch_ground(file_path: str) -> str | None:
 
     The harness scratchpad counts only below a ``claude-<uid>`` root; a bare ``scratchpad`` is a tree directory.
     """
-    dirs = [part for part in file_path.replace("\\", "/").split("/") if part][:-1]
+    dirs = [part for part in file_path.split("/") if part][:-1]
     for part in dirs:
         if part in SCRATCH_DIRS:
             return part
@@ -83,7 +84,8 @@ def _check_syntax(file_path: str) -> list[str]:
         if result.returncode != 0:
             return [f"SYNTAX: {result.stderr.strip()}"]
     except Exception as exc:
-        logger.info("[HOOKS] auto_fix: py_compile failed: %s", exc)
+        logger.warning("[HOOKS] auto_fix: py_compile failed: %s", exc)
+        return [f"UNCHECKED: syntax, py_compile could not run ({type(exc).__name__}: {exc})"]
     return []
 
 
@@ -96,14 +98,15 @@ def _check_ruff_lint(file_path: str) -> list[str]:
             timeout=10,
         )
         if result.returncode not in (0, 1):
-            logger.info("[HOOKS] auto_fix: ruff lint error: %s", result.stderr.strip())
-            return []
+            logger.warning("[HOOKS] auto_fix: ruff lint error: %s", result.stderr.strip())
+            return [f"UNCHECKED: lint, ruff exit {result.returncode}: {result.stderr.strip()[:100]}"]
         if result.stdout.strip():
             lines = result.stdout.strip().split("\n")
             violations = [line for line in lines if ".py:" in line]
             return [f"LINT: {line}" for line in violations[:5]]
     except Exception as exc:
-        logger.info("[HOOKS] auto_fix: ruff lint failed: %s", exc)
+        logger.warning("[HOOKS] auto_fix: ruff lint failed: %s", exc)
+        return [f"UNCHECKED: lint, ruff could not run ({type(exc).__name__}: {exc})"]
     return []
 
 
@@ -119,9 +122,11 @@ def _check_ruff_format(file_path: str) -> list[str]:
             name = Path(file_path).name
             return [f"FORMAT: {name} needs ruff format (run: ruff format {name})"]
         if result.returncode not in (0, 1):
-            logger.info("[HOOKS] auto_fix: ruff format error: %s", result.stderr.strip())
+            logger.warning("[HOOKS] auto_fix: ruff format error: %s", result.stderr.strip())
+            return [f"UNCHECKED: format, ruff exit {result.returncode}: {result.stderr.strip()[:100]}"]
     except Exception as exc:
-        logger.info("[HOOKS] auto_fix: ruff format check failed: %s", exc)
+        logger.warning("[HOOKS] auto_fix: ruff format check failed: %s", exc)
+        return [f"UNCHECKED: format, ruff could not run ({type(exc).__name__}: {exc})"]
     return []
 
 
@@ -161,7 +166,8 @@ def _check_patterns(file_path: str) -> list[str]:
                     errors.append(f"PATTERN: {message}")
                     break
     except Exception as exc:
-        logger.info("[HOOKS] auto_fix: pattern check failed: %s", exc)
+        logger.warning("[HOOKS] auto_fix: pattern check failed: %s", exc)
+        errors.append(f"UNCHECKED: patterns ({type(exc).__name__}: {exc})")
     return errors
 
 
@@ -185,7 +191,7 @@ def _run_ruff_lint_structured(file_path: str, unanswered: list[str] | None = Non
 
     None when ruff did not judge the file (skipped, no answer, timeout); the why goes to *unanswered*.
     """
-    if "/.claude/hooks/" in file_path.replace("\\", "/"):
+    if "/.claude/hooks/" in file_path:
         return _no_answer(unanswered, "ruff", "skipped: a provider hook file")
     try:
         result = subprocess.run(
@@ -225,7 +231,7 @@ def _run_pyright_check(file_path: str, unanswered: list[str] | None = None) -> l
 
     None when pyright did not judge the file (skipped, not installed, timeout); the why goes to *unanswered*.
     """
-    if "/.claude/hooks/" in file_path.replace("\\", "/"):
+    if "/.claude/hooks/" in file_path:
         return _no_answer(unanswered, "pyright", "skipped: a provider hook file")
     try:
         result = subprocess.run(
@@ -262,13 +268,27 @@ def _run_pyright_check(file_path: str, unanswered: list[str] | None = None) -> l
 
 _CHECKLIST_MARKER_FALLBACK = "[FAIL]"
 
+#: Standards whose findings cite sites (`name.py:N`): only the sites this edit wrote are shown.
+SITE_STANDARDS = ("logged_fallback", "fallback")
+_SITE = re.compile(r"(?<![\w/])[\w.()-]+\.py:(\d+) ")
+
+#: @sentry's wording for the fallback standard, shown when an edit adds a fallback site.
+FALLBACK_WARNING = (
+    "A fallback hides a failure: an except that returns a default, an empty file served for a corrupt one, "
+    "a check that cannot run and reads as passed, an import failure replaced by a stand-in. In an autonomous "
+    "system nobody is watching to notice. Do not add one unless it is truly necessary. Raise, or carry the "
+    "failure to the caller. If a fallback is necessary, keep it and waive that one site in .sentry/bypass.json "
+    "(lines or functions, standard fallback) with a reason that says who finds out when it fires. "
+    "A whole-file row waives nothing."
+)
+
 
 def _load_checklist_module():
-    """Import @sentry's checklist module, where the finding marker is published.
+    """@sentry's door, which hands out the checklist's markers; each read loads the checklist module.
 
     A seam: tests replace it by name instead of patching importlib.import_module process-wide.
     """
-    return importlib.import_module("aipass.sentry.apps.modules.checklist")
+    return importlib.import_module("aipass.sentry")
 
 
 def _checklist_marker() -> str:
@@ -277,7 +297,8 @@ def _checklist_marker() -> str:
     A restated marker once went stale silently: an empty list reads like a clean file. So the fallback is loud.
     """
     try:
-        checklist = _load_checklist_module()
+        # Read inside the try: the door loads the checklist module on this read, so a missing one raises here.
+        marker = getattr(_load_checklist_module(), "FINDING_MARKER", "")
     except Exception as exc:
         logger.warning(
             "[HOOKS] auto_fix: sentry checklist module unreadable (%s) — using fallback marker %r",
@@ -285,7 +306,6 @@ def _checklist_marker() -> str:
             _CHECKLIST_MARKER_FALLBACK,
         )
         return _CHECKLIST_MARKER_FALLBACK
-    marker = getattr(checklist, "FINDING_MARKER", "")
     if isinstance(marker, str) and marker:
         return marker
     logger.warning(
@@ -321,11 +341,70 @@ def _parse_checklist_findings(stdout: str, marker: str) -> list[str]:
     return [f for f in findings if f]
 
 
-def _run_sentry_checklist(file_path: str) -> list[str]:
-    if "/.claude/hooks/" in file_path.replace("\\", "/"):
+def _added_lines(file_path: str, tool_input: dict) -> set[int] | None:
+    """The lines of *file_path* this edit wrote, as the file now stands; None means every line (a Write).
+
+    A new_string no longer in the file (edited since) also answers None: then every site is shown, never none.
+    An unreadable file raises OSError for the caller to report.
+    """
+    news = [e.get("new_string", "") for e in tool_input.get("edits", []) if isinstance(e, dict)]
+    news += [tool_input["new_string"]] if isinstance(tool_input.get("new_string"), str) else []
+    if not news:
+        return None
+    content = Path(file_path).read_text(encoding="utf-8", errors="replace")
+    added: set[int] = set()
+    for new in (n for n in news if n.strip()):
+        at = content.find(new)
+        if at < 0:
+            return None
+        while at >= 0:
+            first = content.count("\n", 0, at) + 1
+            added.update(range(first, first + new.count("\n") + 1))
+            at = content.find(new, at + len(new))
+    return added
+
+
+def _only_added(findings: list[str], added: set[int] | None) -> list[str]:
+    """*findings* with each site-citing standard cut to the sites on *added* lines; one left with none goes."""
+    if added is None:
+        return findings
+    kept: list[str] = []
+    for finding in findings:
+        standard, _, detail = finding.partition(": ")
+        sites = list(_SITE.finditer(detail))
+        if standard not in SITE_STANDARDS or not sites:
+            kept.append(finding)
+            continue
+        ends = [s.start() for s in sites[1:]] + [len(detail)]
+        on = [detail[s.start() : end].strip() for s, end in zip(sites, ends) if int(s.group(1)) in added]
+        if on:
+            kept.append(f"{standard}: {' '.join(on)}")
+    return kept
+
+
+def _advice_marker() -> str:
+    """The token @sentry's checklist prints on an advisory; LookupError when it publishes none."""
+    marker = getattr(_load_checklist_module(), "ADVICE_MARKER", "")
+    if isinstance(marker, str) and marker:
+        return marker
+    raise LookupError("sentry publishes no ADVICE_MARKER")
+
+
+def _run_sentry_checklist(
+    file_path: str,
+    unanswered: list[str] | None = None,
+    added: set[int] | None = None,
+    advice: list[str] | None = None,
+) -> list[str]:
+    """The checklist's findings on what the edit wrote; its fallback advisories on those lines go to *advice*.
+
+    A checklist that did not run puts its why in *unanswered*, never a clean [].
+    """
+    if "/.claude/hooks/" in file_path:
         return []
     aipass_home = os.environ.get("AIPASS_HOME", "")
     if not aipass_home:
+        _no_answer(unanswered, "sentry checklist", "no AIPASS_HOME")
         return []
     try:
         result = subprocess.run(
@@ -342,11 +421,20 @@ def _run_sentry_checklist(file_path: str) -> list[str]:
                 result.returncode,
                 Path(file_path).name,
             )
-        return _parse_checklist_findings(result.stdout, _checklist_marker())[:5]
+        if advice is not None:
+            try:
+                found = _parse_checklist_findings(result.stdout, _advice_marker())
+            except Exception as exc:  # no marker to read advisories by: said, never an empty advice list
+                _no_answer(unanswered, "sentry fallback advice", str(exc))
+            else:
+                advice.extend(_only_added([a for a in found if a.startswith("fallback: ")], added))
+        return _only_added(_parse_checklist_findings(result.stdout, _checklist_marker()), added)[:5]
     except FileNotFoundError:
         logger.info("[HOOKS] auto_fix: drone not found for sentry checklist")
+        _no_answer(unanswered, "sentry checklist", "drone not found")
     except Exception as exc:
         logger.info("[HOOKS] auto_fix: sentry checklist failed: %s", exc)
+        _no_answer(unanswered, "sentry checklist", f"{type(exc).__name__}: {exc}")
     return []
 
 
@@ -361,9 +449,8 @@ def _record_diagnostics(seat: str, file_path: str, answers: list[list[dict] | No
         ds.save_seat(seat, file_path, found)
     elif all(answer is not None for answer in answers):
         # Clean here says nothing of another file's record: edit_gate revalidates and clears that one.
-        recorded = (ds.load_seat(seat) or {}).get("file", "")
-        if not recorded or recorded == str(Path(file_path).resolve()):
-            ds.clear_seat(seat)
+        resolved = str(Path(file_path).resolve())
+        ds.clear_seat(seat, when=lambda now: now.get("file", "") in ("", resolved))
 
 
 def _check_emoji_list(items: list, key: str) -> str | None:
@@ -436,68 +523,86 @@ def _to_model(context: str) -> str:
 
 
 def handle(hook_data: dict) -> dict:
-    """Run diagnostics on edited files and surface errors."""
-    try:
-        tool_name = hook_data.get("tool_name", "")
-        if tool_name not in EDIT_TOOLS:
-            return {"stdout": "", "exit_code": 0}
+    """Run diagnostics on an edited file; each call leaves one json trail entry. A raise is the engine's to log."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
 
-        tool_input = hook_data.get("tool_input", {})
-        file_path = tool_input.get("file_path", "")
-        if not file_path:
-            return {"stdout": "", "exit_code": 0}
 
-        ext = Path(file_path).suffix.lower()
-        if ext in SKIP_EXTENSIONS:
-            return {"stdout": "", "exit_code": 0}
-
-        if _scratch_ground(file_path):
-            return {"stdout": "", "exit_code": 0}
-
-        errors: list[str] = []
-        unanswered: list[str] = []
-
-        if file_path.endswith(".py"):
-            errors = _run_python_checks(file_path)
-
-            sentry_violations = _run_sentry_checklist(file_path)
-            for v in sentry_violations:
-                errors.append(f"SENTRY: {v}")
-
-            type_errors = _run_pyright_check(file_path, unanswered)
-            for te in type_errors or []:
-                errors.append(f"TYPE: L{te['line']}: {te['message']}")
-
-            ruff_lint_errors = _run_ruff_lint_structured(file_path, unanswered)
-            ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
-            # A template's or a placeholder line's errors are not the tree's: never recorded.
-            tree = [ds.of_the_tree(file_path, ruff_lint_errors, 1), ds.of_the_tree(file_path, type_errors, 0)]
-            _record_diagnostics(ds.seat_key(hook_data), file_path, tree)
-
-        elif file_path.endswith(".json"):
-            errors = _run_json_checks(file_path)
-        else:
-            return {"stdout": "", "exit_code": 0}
-
-        no_answer = ""
-        if unanswered:
-            no_answer = f"NO ANSWER from {'; '.join(unanswered)}: this edit cleared no recorded error"
-
-        if errors:
-            head = f"[AUTO-FIX] {len(errors)} error(s) in {Path(file_path).name}:\n"
-            tail = f"\n\nFix these errors in {Path(file_path).name} now. Do not skip or defer."
-            if no_answer:
-                tail = f"{tail}\n{no_answer}"
-            error_text = _fit("\n".join(f"  - {e}" for e in errors), head + tail, file_path)
-            context = f"{head}{error_text}{tail}"
-            logger.info("[HOOKS] auto_fix: %s", context.replace("\n", " | "))
-            return {"stdout": _to_model(context), "exit_code": 0, "sound": "auto fix diagnostics"}
-
-        if not no_answer:
-            return {"stdout": "", "exit_code": 0}
-        logger.info("[HOOKS] auto_fix: %s in %s", no_answer, file_path)
-        return {"stdout": _to_model(f"[diagnostics] {no_answer}"), "exit_code": 0}
-
-    except Exception as exc:
-        logger.info("[HOOKS] auto_fix: unexpected error (allowing): %s", exc)
+def _handle(hook_data: dict) -> dict:
+    """Run diagnostics on edited files and surface errors. A raise is the engine's to log."""
+    tool_name = hook_data.get("tool_name", "")
+    if tool_name not in EDIT_TOOLS:
         return {"stdout": "", "exit_code": 0}
+
+    tool_input = hook_data.get("tool_input", {})
+    file_path = tool_input.get("file_path", "")
+    if not file_path:
+        return {"stdout": "", "exit_code": 0}
+
+    ext = Path(file_path).suffix.lower()
+    if ext in SKIP_EXTENSIONS:
+        return {"stdout": "", "exit_code": 0}
+
+    if _scratch_ground(file_path):
+        return {"stdout": "", "exit_code": 0}
+
+    errors: list[str] = []
+    unanswered: list[str] = []
+    advice: list[str] = []
+
+    if file_path.endswith(".py"):
+        errors = _run_python_checks(file_path)
+        # A check that could not run is NO ANSWER, never an error in the file the agent is told to fix.
+        unanswered += [e.removeprefix("UNCHECKED: ") for e in errors if e.startswith("UNCHECKED: ")]
+        errors = [e for e in errors if not e.startswith("UNCHECKED: ")]
+
+        try:
+            added = _added_lines(file_path, tool_input)
+        except OSError as exc:  # said as NO ANSWER; the checklist then judges every line
+            _no_answer(unanswered, "added lines", f"{type(exc).__name__}: {exc}")
+            added = None
+        sentry_violations = _run_sentry_checklist(file_path, unanswered, added=added, advice=advice)
+        for v in sentry_violations:
+            errors.append(f"SENTRY: {v}")
+
+        type_errors = _run_pyright_check(file_path, unanswered)
+        for te in type_errors or []:
+            errors.append(f"TYPE: L{te['line']}: {te['message']}")
+
+        ruff_lint_errors = _run_ruff_lint_structured(file_path, unanswered)
+        ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
+        # A template's or a placeholder line's errors are not the tree's: never recorded.
+        tree = [ds.of_the_tree(file_path, ruff_lint_errors, 1), ds.of_the_tree(file_path, type_errors, 0)]
+        _record_diagnostics(ds.seat_key(hook_data), file_path, tree)
+
+    elif file_path.endswith(".json"):
+        errors = _run_json_checks(file_path)
+    else:
+        return {"stdout": "", "exit_code": 0}
+
+    no_answer = ""
+    if unanswered:
+        no_answer = f"NO ANSWER from {'; '.join(unanswered)}: this edit cleared no recorded error"
+    warning = ""
+    if advice:
+        sites = "\n".join(f"  - {a}" for a in advice)
+        warning = f"[FALLBACK] this edit adds a fallback (sentry standard fallback):\n{sites}\n{FALLBACK_WARNING}"
+        logger.info("[HOOKS] auto_fix: %s", warning.replace("\n", " | "))
+
+    if errors:
+        head = f"[AUTO-FIX] {len(errors)} error(s) in {Path(file_path).name}:\n"
+        tail = f"\n\nFix these errors in {Path(file_path).name} now. Do not skip or defer."
+        if no_answer:
+            tail = f"{tail}\n{no_answer}"
+        error_text = _fit("\n".join(f"  - {e}" for e in errors), head + tail, file_path)
+        context = f"{head}{error_text}{tail}" + (f"\n\n{warning}" if warning else "")
+        logger.info("[HOOKS] auto_fix: %s", context.replace("\n", " | "))
+        return {"stdout": _to_model(context), "exit_code": 0, "sound": "auto fix diagnostics"}
+
+    if not no_answer:
+        return {"stdout": _to_model(warning), "exit_code": 0} if warning else {"stdout": "", "exit_code": 0}
+    logger.info("[HOOKS] auto_fix: %s in %s", no_answer, file_path)
+    quiet = f"[diagnostics] {no_answer}" + (f"\n\n{warning}" if warning else "")
+    return {"stdout": _to_model(quiet), "exit_code": 0}

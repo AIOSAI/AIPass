@@ -3,7 +3,7 @@
 # Description: The target-exists lane — adopt a passported directory, or birth one from its tracked seed
 # Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """The target-exists lane of ``spawn create``: adopt a passported directory, or birth it from its seed."""
@@ -114,13 +114,15 @@ def adopt_existing(target, purpose, profile, registry_path, citizen_id="", crede
     identity = (json_handler.read_json(target / ".trinity" / "passport.json") or {}).get("identity", {})
     purpose = purpose or identity.get("purpose", "Adopted agent")
 
-    fix_passport_registry_id(target, reg_path)
-
     try:
         registry_branch_path = target.relative_to(reg_path.parent).as_posix()
-    except ValueError as e:
-        logger.warning("Cannot relativize path %s to registry %s: %s", target, reg_path.parent, e)
-        registry_branch_path = target.as_posix()
+    except ValueError:
+        # Refused before any write: an absolute path in the tracked registry leaks the author's home.
+        msg = f"Cannot adopt {target}: it is outside the project of registry {reg_path}"
+        logger.error("[adopt] %s", msg)
+        return {"branch": get_branch_name(target), "success": False, "error": msg}
+
+    fix_passport_registry_id(target, reg_path)
 
     registry_updated = add_to_registry(
         reg_path,

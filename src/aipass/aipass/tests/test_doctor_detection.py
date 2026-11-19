@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_detection.py
 # Description: Tests for doctor's system detection and progress helpers
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/system_detect/system_detector.py and apps/handlers/ui/progress.py."""
@@ -22,13 +22,11 @@ from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_claude_code,
     detect_cpu,
     detect_git,
+    detect_install_method,
     detect_os,
     detect_python,
     detect_ram,
     detect_shell,
-    detect_docker,
-    detect_tmux,
-    detect_wt,
 )
 from aipass.aipass.apps.handlers.ui.progress import (
     GLYPH_FAIL,
@@ -43,7 +41,7 @@ from aipass.aipass.apps.handlers.ui.progress import (
 
 def _on_path(directory, name: str):
     """Put an executable stub named ``name`` in ``directory`` for shutil.which to find through PATH."""
-    stub = directory / (name if os.name != "nt" or name.endswith(".exe") else f"{name}.exe")
+    stub = directory / name
     stub.write_text("", encoding="utf-8")
     stub.chmod(0o755)
     return stub
@@ -107,7 +105,7 @@ class TestDetectGit:
 
 class TestDetectClaudeCode:
     def test_runs_the_resolved_path_and_parses_the_leading_version(self, tmp_path, monkeypatch) -> None:
-        """Mutant: argv[0] `claude_path` -> "claude" -> red (a bare name misses claude.cmd on Windows)."""
+        """Mutant: argv[0] `claude_path` -> "claude" -> red."""
         stub = _on_path(tmp_path, "claude")
         monkeypatch.setenv("PATH", str(tmp_path))
         with patch("aipass.aipass.apps.handlers.system_detect.system_detector.subprocess.run") as mock_run:
@@ -162,6 +160,16 @@ class TestDetectRam:
         with patch("aipass.aipass.apps.handlers.system_detect.system_detector._total_ram_gb", return_value=4.0):
             result = detect_ram()
         assert result["ok"] is True
+
+    def test_an_unreadable_ram_raises_instead_of_reading_as_zero_gb(self, monkeypatch) -> None:
+        """Mutant: a try/except around psutil returning 0.0 -> red (the old 0 GB FAIL row)."""
+
+        def _boom() -> None:
+            raise OSError("meminfo unreadable")
+
+        monkeypatch.setattr(system_detector.psutil, "virtual_memory", _boom)
+        with pytest.raises(OSError, match="meminfo unreadable"):
+            detect_ram()
 
 
 class TestDetectOS:
@@ -229,18 +237,13 @@ class TestDetectShell:
 class TestShellFromParentProc:
     """The /proc fallback, reached the way doctor reaches it: detect_shell() with SHELL unset.
 
-    Platform and parent pid go in through detect_shell's os_name/getppid seams: replacing
-    os process-wide makes pathlib dispatch follow the forced os.name on Windows.
+    The parent pid goes in through detect_shell's getppid seam.
     """
 
     @pytest.fixture(autouse=True)
     def _no_shell_env(self, monkeypatch, tmp_path) -> None:
         monkeypatch.delenv("SHELL", raising=False)
         monkeypatch.setenv("PATH", str(tmp_path))
-
-    def test_non_posix_reports_unknown(self) -> None:
-        """Mutant: `if os_name != "posix"` -> `if False` -> red (the real /proc answers on Linux)."""
-        assert detect_shell(os_name="nt")["name"] == "unknown"
 
     def test_reads_comm_file(self, monkeypatch, tmp_path) -> None:
         fake_ppid = 424242
@@ -256,7 +259,7 @@ class TestShellFromParentProc:
             return real_path_cls(arg, *a, **kw)
 
         monkeypatch.setattr(system_detector, "Path", _fake_path)
-        assert detect_shell(os_name="posix", getppid=lambda: fake_ppid) == {"name": "bash", "path": ""}
+        assert detect_shell(getppid=lambda: fake_ppid) == {"name": "bash", "path": ""}
 
     def test_missing_comm_file_reports_unknown(self, monkeypatch, tmp_path) -> None:
         fake_ppid = 999999
@@ -269,7 +272,7 @@ class TestShellFromParentProc:
             return real_path_cls(arg, *a, **kw)
 
         monkeypatch.setattr(system_detector, "Path", _fake_path)
-        assert detect_shell(os_name="posix", getppid=lambda: fake_ppid)["name"] == "unknown"
+        assert detect_shell(getppid=lambda: fake_ppid)["name"] == "unknown"
 
     def test_read_oserror_reports_unknown(self, monkeypatch) -> None:
         class _BoomPath:
@@ -280,7 +283,7 @@ class TestShellFromParentProc:
                 raise OSError("permission denied")
 
         monkeypatch.setattr(system_detector, "Path", lambda *a, **kw: _BoomPath())
-        assert detect_shell(os_name="posix", getppid=lambda: 1)["name"] == "unknown"
+        assert detect_shell(getppid=lambda: 1)["name"] == "unknown"
 
 
 class TestDetectCpu:
@@ -292,28 +295,27 @@ class TestDetectCpu:
         assert result["count"] >= 1
 
 
-class TestDetectOptionalTools:
-    def test_tmux_found(self, tmp_path, monkeypatch) -> None:
-        """True when tmux binary is on PATH."""
-        _on_path(tmp_path, "tmux")
-        monkeypatch.setenv("PATH", str(tmp_path))
-        assert detect_tmux() is True
+class TestDetectInstallMethod:
+    """The install kind read off where the module sits: the path is handed in through the module's __file__."""
 
-    def test_tmux_not_found(self, tmp_path, monkeypatch) -> None:
-        """False when tmux is absent from PATH."""
-        monkeypatch.setenv("PATH", str(tmp_path))
-        assert detect_tmux() is False
-
-    def test_docker_found(self, tmp_path, monkeypatch) -> None:
-        """True when docker binary is on PATH."""
-        _on_path(tmp_path, "docker")
-        monkeypatch.setenv("PATH", str(tmp_path))
-        assert detect_docker() is True
-
-    def test_wt_not_on_linux(self, tmp_path, monkeypatch) -> None:
-        """False when wt.exe (Windows Terminal) is absent from PATH."""
-        monkeypatch.setenv("PATH", str(tmp_path))
-        assert detect_wt() is False
+    @pytest.mark.parametrize(
+        ("layout", "expected"),
+        [("dev", "dev"), ("clone", "clone"), ("empty_git", "unknown"), ("site", "pip")],
+    )
+    def test_reads_the_tree_around_the_module(self, tmp_path, monkeypatch, layout, expected) -> None:
+        """Mutants: an empty .git read as a repo -> red at empty_git; pyproject check dropped -> red at clone."""
+        root = tmp_path / ("lib/site-packages" if layout == "site" else "proj")
+        module = root / "src" / "pkg" / "system_detector.py"
+        module.parent.mkdir(parents=True)
+        module.write_text("", encoding="utf-8")
+        if layout != "site":
+            (root / ".git").mkdir()
+        if layout in ("dev", "clone"):
+            (root / ".git" / "HEAD").write_text("ref: refs/heads/dev\n", encoding="utf-8")
+        if layout == "dev":
+            (root / "pyproject.toml").write_text("", encoding="utf-8")
+        monkeypatch.setattr(system_detector, "__file__", str(module))
+        assert detect_install_method() == expected
 
 
 class TestProgressHelpers:

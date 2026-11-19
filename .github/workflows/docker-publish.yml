@@ -1,0 +1,62 @@
+name: Publish Docker image
+
+# Builds the AIPass image from the release wheel and pushes it to GitHub's
+# container registry. It fires on a version tag, beside publish.yml, and is no
+# part of CI: no pull request runs it and no merge waits for it. A failed run
+# is re-run from the Actions tab (workflow_dispatch) without a new tag.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# Least-privilege token (Scorecard Token-Permissions); the job adds packages.
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The image's install clones from this checkout; a shallow one cannot be cloned from.
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --require-hashes -r .github/requirements/build.txt
+      - run: python -m build --wheel
+      - name: Build and push
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${REPOSITORY,,}"
+          # A tag publishes its version and moves latest; a manual run from a branch publishes edge only.
+          if [ "$REF_TYPE" = "tag" ]; then
+            tags=(--tag "$image:${REF_NAME#v}" --tag "$image:latest")
+          else
+            tags=(--tag "$image:edge")
+          fi
+          echo "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          # The default builder cannot export a registry cache; a container builder can.
+          docker buildx create --use
+          docker buildx build --push "${tags[@]}" \
+            --build-context repo=.git \
+            --cache-from "type=registry,ref=$image:buildcache" \
+            --cache-to "type=registry,ref=$image:buildcache,mode=max" \
+            --label "org.opencontainers.image.source=https://github.com/$REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            .

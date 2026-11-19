@@ -3,7 +3,7 @@
 # Description: Tests for the wake's small parts - dispatch status, the grant read, pid lock and branch resolution
 # Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's helpers and pid_lock.py: status, locks, pids, resolve_branch."""
@@ -17,10 +17,8 @@
 import json
 import os
 import subprocess
-import sys
 import pytest
 from datetime import datetime, timedelta
-from pathlib import Path as _Path
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
@@ -136,8 +134,7 @@ def test_dispatch_status_format_output():
 
 
 # Read through fable_allowed(), the public reader of the wake config, not called
-# directly. A missing file and a corrupt one both fall to the
-# default grant; only the corrupt one is warned about.
+# directly. A missing file keeps the default grant; a corrupt one grants nobody, at ERROR.
 
 
 def _grant_from(monkeypatch, config_file):
@@ -162,6 +159,7 @@ def test_read_json_missing_file(tmp_path, monkeypatch):
     grant, log = _grant_from(monkeypatch, tmp_path / "nope.json")
     assert grant == wake_mod.FABLE_GRANT_DEFAULT
     log.warning.assert_not_called()
+    log.error.assert_not_called()
 
 
 def test_read_json_corrupt(tmp_path, monkeypatch):
@@ -169,9 +167,9 @@ def test_read_json_corrupt(tmp_path, monkeypatch):
     f = tmp_path / "bad.json"
     f.write_text("{not valid", encoding="utf-8")
     grant, log = _grant_from(monkeypatch, f)
-    assert grant == wake_mod.FABLE_GRANT_DEFAULT
-    fmt, raised = log.warning.call_args.args
-    assert fmt == "[wake] %s — the Fable grant falls back to the default"
+    assert grant == frozenset()
+    fmt, raised = log.error.call_args.args
+    assert fmt == "[wake] %s — the Fable grant fails closed: nobody holds it"
     assert isinstance(raised, wake_mod.JsonUnreadable)
     assert str(raised).startswith("bad.json could not be read")
 
@@ -187,7 +185,6 @@ def test_check_pid_alive_dead(monkeypatch):
 
 def test_check_pid_alive_permission_error(monkeypatch):
     """PermissionError means process exists but cannot signal -- returns True."""
-    monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr(os, "kill", _raise_permission)
     assert check_pid_alive(1) is True
 
@@ -195,7 +192,6 @@ def test_check_pid_alive_permission_error(monkeypatch):
 def test_check_pid_alive_running_non_zombie(monkeypatch, tmp_path):
     """Running non-zombie process returns True on Linux."""
     monkeypatch.setattr(os, "kill", lambda pid, sig: None)
-    monkeypatch.setattr("sys.platform", "linux")
     # Create a fake /proc/{pid}/status
     proc_dir = tmp_path / "proc" / "42"
     proc_dir.mkdir(parents=True)
@@ -211,7 +207,6 @@ def test_check_pid_alive_running_non_zombie(monkeypatch, tmp_path):
 def test_check_pid_alive_zombie(monkeypatch, tmp_path):
     """Zombie process (State: Z) returns False on Linux."""
     monkeypatch.setattr(os, "kill", lambda pid, sig: None)
-    monkeypatch.setattr("sys.platform", "linux")
     proc_dir = tmp_path / "proc" / "42"
     proc_dir.mkdir(parents=True)
     status_file = proc_dir / "status"
@@ -223,32 +218,12 @@ def test_check_pid_alive_zombie(monkeypatch, tmp_path):
     assert check_pid_alive(42) is False
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="zombies and ps are POSIX")
-def test_an_unreaped_child_reads_dead_where_there_is_no_proc(monkeypatch):
-    """macOS has no /proc: a stopped monitor its parent had not reaped yet read alive, and stop said it outlived SIGKILL."""
-    child = subprocess.Popen([sys.executable, "-c", "pass"])
-    try:
-        os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)  # exited, left unreaped: a zombie
-        monkeypatch.setattr("sys.platform", "darwin")
-        assert check_pid_alive(child.pid) is False
-        assert check_pid_alive(os.getpid()) is True
-    finally:
-        child.wait()
-
-
 # --- pid_lock's process readers, through branch_occupant -----------
 #
 # The cwd and session-type readers are reached through the occupancy check,
 # their one caller: one claude pid, its cwd, its session type.
 # A blocking session reads occupied; a dispatched/daemon one, a cwd elsewhere,
-# or a cwd that cannot be read, reads free. The darwin branch is a synthetic
-# POSIX literal, never a tmp_path: lsof output is DATA the parser reads, and on
-# a Windows runner a tmp_path is a drive-letter path (CI 35058244702). Both the
-# branch and the cwd go through the same resolve(), so they compare alike there.
-
-# Data, never a host path: built from the root separator, so lsof's name line is
-# "/private/..." on every runner and nothing on disk is read or owned.
-_DARWIN_BRANCH = _Path(os.sep, "private", "var", "folders", "aipass", "pytest-project")
+# or a cwd that cannot be read, reads free.
 
 
 class _Ran:
@@ -259,23 +234,18 @@ class _Ran:
         self.stdout = stdout
 
 
-def _processes(monkeypatch, pid, lsof=None, ps=None):
-    """pgrep -l answers one claude *pid*; lsof and ps answer as handed (darwin)."""
+def _processes(monkeypatch, pid):
+    """pgrep -l answers one claude *pid*."""
 
     def run(cmd, *a, **kw):
-        if cmd[0] == "pgrep":
-            return _Ran(0, f"{pid} claude\n")
-        answer = {"lsof": lsof, "ps": ps}[cmd[0]]
-        if isinstance(answer, BaseException):
-            raise answer
-        return answer
+        assert cmd[0] == "pgrep", cmd
+        return _Ran(0, f"{pid} claude\n")
 
     monkeypatch.setattr(subprocess, "run", run)
 
 
 def _linux_claude_in(monkeypatch, tmp_path, branch, environ):
     """A linux claude pid 123 standing in *branch*, its environ holding *environ*."""
-    monkeypatch.setattr("sys.platform", "linux")
     _processes(monkeypatch, 123)
     monkeypatch.setattr(os, "readlink", lambda p: str(branch.resolve()) if p == "/proc/123/cwd" else "")
     env_file = tmp_path / "environ"
@@ -296,18 +266,6 @@ def test_read_session_type_not_set(monkeypatch, tmp_path):
     assert branch_occupant(tmp_path) == "claude"
 
 
-def test_read_session_type_non_linux(monkeypatch, tmp_path):
-    """win32: no cwd can be read, so no session in the branch is seen and it reads free.
-
-    The session-type reader's own win32 arm sits behind this: through its one
-    caller it is never reached on win32, since the cwd read answers None first.
-    """
-    monkeypatch.setattr("sys.platform", "win32")
-    _processes(monkeypatch, 123)
-    monkeypatch.setattr(os, "readlink", lambda p: str(tmp_path.resolve()))
-    assert branch_occupant(tmp_path) is None
-
-
 def test_read_session_type_unreadable_environ(monkeypatch, tmp_path):
     """Linux: an environ that cannot be opened answers interactive, the blocking class.
 
@@ -321,31 +279,6 @@ def test_read_session_type_unreadable_environ(monkeypatch, tmp_path):
 
     monkeypatch.setattr("builtins.open", _no_environ)
     assert branch_occupant(tmp_path) == "claude"
-
-
-def _darwin_claude(monkeypatch, cwd_stdout, ps):
-    """A darwin claude pid 123: lsof answers *cwd_stdout*, ps answers *ps*."""
-    monkeypatch.setattr("sys.platform", "darwin")
-    _processes(monkeypatch, 123, lsof=_Ran(0, cwd_stdout), ps=ps)
-
-
-def test_read_session_type_darwin_found(monkeypatch):
-    """macOS: a dispatched session read from ps -wwE does not block."""
-    ps = _Ran(0, "/usr/bin/claude AIPASS_SESSION_TYPE=dispatched HOME=/Users/u")
-    _darwin_claude(monkeypatch, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n", ps)
-    assert branch_occupant(_DARWIN_BRANCH) is None
-
-
-def test_read_session_type_darwin_not_set(monkeypatch):
-    """macOS: no session type in ps output reads interactive, which blocks."""
-    _darwin_claude(monkeypatch, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n", _Ran(0, "/usr/bin/claude HOME=/Users/u"))
-    assert branch_occupant(_DARWIN_BRANCH) == "claude"
-
-
-def test_read_session_type_darwin_ps_failure(monkeypatch):
-    """macOS: a ps that fails reads interactive, which blocks."""
-    _darwin_claude(monkeypatch, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n", _Ran(1))
-    assert branch_occupant(_DARWIN_BRANCH) == "claude"
 
 
 def test_get_pid_cwd_linux(monkeypatch, tmp_path):
@@ -362,41 +295,6 @@ def test_get_pid_cwd_linux_oserror(monkeypatch, tmp_path):
     assert branch_occupant(tmp_path) is None
 
 
-def test_get_pid_cwd_darwin(monkeypatch):
-    """macOS: the cwd is read from lsof's name line; a session standing there blocks."""
-    _darwin_claude(monkeypatch, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n", _Ran(0, "/usr/bin/claude"))
-    assert branch_occupant(_DARWIN_BRANCH) == "claude"
-    assert branch_occupant(_DARWIN_BRANCH.parent) is None
-
-
-def test_get_pid_cwd_darwin_ignores_a_name_line_that_is_not_an_absolute_path(monkeypatch):
-    """The leading slash is load-bearing: 'n' alone is not a cwd.
-
-    lsof -Fn prefixes every name line with 'n'; the parser takes only the ones
-    that are absolute POSIX paths. Without the slash a non-path name line would
-    be returned as a cwd, and this branch, named the same, would read occupied.
-    This is the mechanism behind CI 35058244702.
-    """
-    _darwin_claude(monkeypatch, "p123\nnD:\\build\\project\n", _Ran(0, "/usr/bin/claude"))
-    assert branch_occupant(_Path("D:\\build\\project")) is None
-
-
-def test_get_pid_cwd_darwin_failure(monkeypatch):
-    """macOS: an lsof that fails is no session in the branch, even when it printed a name line."""
-    monkeypatch.setattr("sys.platform", "darwin")
-    failed = _Ran(1, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n")
-    _processes(monkeypatch, 123, lsof=failed, ps=_Ran(0, "/usr/bin/claude"))
-    assert branch_occupant(_DARWIN_BRANCH) is None
-
-
-def test_get_pid_cwd_unsupported_platform(monkeypatch, tmp_path):
-    """An unsupported platform reads no cwd, even where /proc would name the branch."""
-    monkeypatch.setattr("sys.platform", "sunos5")
-    _processes(monkeypatch, 123)
-    monkeypatch.setattr(os, "readlink", lambda p: str(tmp_path.resolve()))
-    assert branch_occupant(tmp_path) is None
-
-
 # test_is_zombie_linux_not_zombie and _zombie retired: they
 # pinned the same two answers as test_check_pid_alive_running_non_zombie and
 # test_check_pid_alive_zombie above, which reach the reader through its caller.
@@ -404,7 +302,6 @@ def test_get_pid_cwd_unsupported_platform(monkeypatch, tmp_path):
 
 def test_is_zombie_linux_no_proc(monkeypatch):
     """Linux: a pid that answers the signal but has no /proc entry reads alive, not zombie."""
-    monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr(os, "kill", lambda pid, sig: None)
     _real_open = open
 
@@ -472,7 +369,6 @@ def test_check_lock_stale_old_timestamp(tmp_path, monkeypatch):
 
 def test_check_lock_permission_error_treated_active(tmp_path, monkeypatch):
     """Lock PID that raises PermissionError is treated as active."""
-    monkeypatch.setattr("sys.platform", "linux")
     lock_dir = tmp_path / ".ai_mail.local"
     lock_dir.mkdir(parents=True)
     lock_file = lock_dir / ".dispatch.lock"
@@ -750,8 +646,8 @@ class TestFindClaudeBin:
     """The claude binary, resolved by the wake that spawns it.
 
     Each row reads the command the wake handed the monitor, so the answer is
-    the one a spawn carries. HOME/USERPROFILE name tmp_path so Path.home
-    answers from the environment the platform reads. shutil.which is the
+    the one a spawn carries. HOME names tmp_path so Path.home
+    answers from the environment. shutil.which is the
     stand-in for PATH, as in _record_spawn_routes.
     """
 
@@ -762,7 +658,6 @@ class TestFindClaudeBin:
         calls = _record_spawn_routes(monkeypatch)
         monkeypatch.setattr(wake_mod.shutil, "which", lambda name: claude_on_path if name == "claude" else None)
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
         status, ok = wake_branch("@testbranch")
         return status, ok, calls
@@ -957,7 +852,6 @@ class TestIsBranchOccupied:
 
     def test_claude_in_different_dir(self, tmp_path, monkeypatch):
         """Claude running in a different directory -> not occupied."""
-        monkeypatch.setattr("sys.platform", "linux")
 
         class FakeResult:
             returncode = 0
@@ -969,7 +863,6 @@ class TestIsBranchOccupied:
 
     def test_claude_in_same_dir_interactive(self, tmp_path, monkeypatch):
         """Claude in same dir with interactive session -> occupied."""
-        monkeypatch.setattr("sys.platform", "linux")
         resolved = str(tmp_path.resolve())
 
         class FakeResult:
@@ -984,7 +877,6 @@ class TestIsBranchOccupied:
 
     def test_claude_in_same_dir_daemon_not_blocking(self, tmp_path, monkeypatch):
         """Claude in same dir with daemon session -> not blocking."""
-        monkeypatch.setattr("sys.platform", "linux")
         resolved = str(tmp_path.resolve())
 
         class FakeResult:
@@ -1000,7 +892,6 @@ class TestIsBranchOccupied:
         """pgrep answers one pid with `comm`; its cwd is the branch, its argv is `argv` (/proc is the edge)."""
         import re
 
-        monkeypatch.setattr("sys.platform", "linux")
         resolved = str(tmp_path.resolve())
         asked = []
 
@@ -1054,7 +945,6 @@ class TestIsBranchOccupied:
 
     def test_readlink_oserror_continues(self, tmp_path, monkeypatch):
         """OSError on readlink is caught, continues to next PID."""
-        monkeypatch.setattr("sys.platform", "linux")
 
         class FakeResult:
             returncode = 0
@@ -1069,15 +959,15 @@ class TestIsBranchOccupied:
         assert branch_occupant(tmp_path) is None
 
 
-def test_prepend_path_uses_the_platform_separator(monkeypatch):
-    """The PATH joiner is os.pathsep, not a literal colon: a Windows PATH joined with ':' loses every entry after it."""
-    monkeypatch.setattr(wake_mod.os, "pathsep", ";")
-    env = {"PATH": "C:\\tools"}
+def test_prepend_path_puts_the_directory_first_once(tmp_path):
+    """A second wake must not stack the venv twice on PATH."""
+    venv_bin = str(tmp_path / ".venv" / "bin")
+    env = {"PATH": "usr_bin"}
 
-    wake_mod.prepend_path(env, "C:\\venv\\Scripts")
-    wake_mod.prepend_path(env, "C:\\venv\\Scripts")
+    wake_mod.prepend_path(env, venv_bin)
+    wake_mod.prepend_path(env, venv_bin)
 
-    assert env["PATH"] == "C:\\venv\\Scripts;C:\\tools", "prepended once, joined with the platform separator"
+    assert env["PATH"] == f"{venv_bin}:usr_bin", "prepended once, joined with ':'"
 
 
 def test_systemd_scope_env_file_does_not_outlive_the_launch(tmp_path, monkeypatch):
@@ -1093,8 +983,16 @@ def test_systemd_scope_env_file_does_not_outlive_the_launch(tmp_path, monkeypatc
 
     monkeypatch.setattr(wake_mod.subprocess, "run", fake_run)
 
-    ok = wake_mod.spawn_in_systemd_scope(["monitor"], branch_path, {"A": "1"}, "@target", tmp_path / "lock", None, None)
+    status = wake_mod.DispatchStatus()
+    ok = wake_mod.spawn_in_systemd_scope(
+        ["monitor"], branch_path, {"A": "1"}, "@target", tmp_path / "lock", None, status
+    )
 
     assert ok is False
+    assert status.find_step("scope") == (
+        "warn",
+        "scope",
+        "systemd-run failed (rc=1: unit refused); the monitor starts as a plain child",
+    ), "a failed scope is said, never passed off as started"
     assert seen["existed_during_launch"] is True, "systemd-run reads the file at launch"
     assert not env_file.exists(), "the environment copy must not stay on disk"

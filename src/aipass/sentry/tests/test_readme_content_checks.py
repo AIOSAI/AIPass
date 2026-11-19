@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_readme_content_checks.py
 # Description: Unit tests for readme content accuracy checks and the docs page standard
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-05-15
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/readme_check.py and docs_page_check.py beside it."""
@@ -14,7 +14,6 @@
 # sentry: no-test-needed(ruff) — that readme_check.py and docs_page_check.py parse and import
 
 import os
-import sys
 
 import pytest
 from pathlib import Path
@@ -419,11 +418,11 @@ def test_directory_tree_passes_absent_runtime_dir(tmp_path):
 
 
 # An unlistable directory is the only route to a walk error, and it is not one
-# everywhere: Windows ignores the mode bits and root lists through them.
-_MODE_BITS_HOLD = sys.platform != "win32" and getattr(os, "geteuid", lambda: 1)() != 0
+# everywhere: root lists through the mode bits.
+_MODE_BITS_HOLD = os.geteuid() != 0
 
 
-@pytest.mark.skipif(not _MODE_BITS_HOLD, reason="a directory cannot be made unlistable on this platform")
+@pytest.mark.skipif(not _MODE_BITS_HOLD, reason="root lists through the mode bits")
 def test_directory_tree_names_the_unreadable_subtree_it_could_not_verify(tmp_path):
     branch_root = tmp_path / "mybranch"
     locked = branch_root / "locked"

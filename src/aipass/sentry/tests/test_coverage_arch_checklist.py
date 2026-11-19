@@ -3,7 +3,7 @@
 # Description: Line-coverage tests for architecture_check.py and checklist.py
 # Version: 1.1.4
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py and apps/modules/checklist.py."""
@@ -16,7 +16,7 @@
 # sentry: no-test-needed(documentation) — the text print_help and print_introspection show
 
 import json
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import List
 from unittest.mock import MagicMock, patch
 
@@ -32,7 +32,6 @@ from aipass.sentry.apps.handlers.aipass_standards.architecture_check import (
 )
 from aipass.sentry.apps.handlers.audit_tests import refusal
 from aipass.sentry.apps.handlers.bypass import bypass_handler
-from aipass.sentry.apps.handlers.checklist import verdicts
 from aipass.sentry.apps.handlers.checklist.verdicts import is_applicable as _is_applicable
 from aipass.sentry.apps.handlers.checklist.verdicts import is_entry_point as _is_entry_point
 from aipass.sentry.apps.modules import CommandRefused, checklist
@@ -41,11 +40,6 @@ from aipass.sentry.apps.modules import CommandRefused, checklist
 def _lines(text: str) -> List[str]:
     """Split text into lines, widening LiteralString to str for pyright."""
     return text.split("\n")
-
-
-def _windows_form(tmp_path: Path, *parts: str) -> str:
-    """The tmp_path-rebuilt path as Windows spells it: a drive letter and backslashes."""
-    return str(PureWindowsPath("C:/", *tmp_path.parts[1:], *parts))
 
 
 @pytest.fixture(autouse=True)
@@ -612,15 +606,6 @@ class TestScanTemplate:
 class TestCheckTemplateBaselineFull:
     """Full template baseline tests with mocked spawn template dirs."""
 
-    def test_a_template_entry_is_spelled_in_posix_on_every_platform(self):
-        """The CI red of 2026-09-08, cured at the producer instead of at the pin."""
-        spelled = architecture_check._relative_spelling(
-            PureWindowsPath(r"C:\templates\citizen\apps\something.py"),
-            PureWindowsPath(r"C:\templates\citizen"),
-        )
-
-        assert spelled == "apps/something.py"
-
     def test_spawn_templates_dir_missing(self, tmp_path, monkeypatch):
         """When SPAWN_TEMPLATES_DIR does not exist, returns failure."""
         monkeypatch.setattr(architecture_check, "SPAWN_TEMPLATES_DIR", tmp_path / "nonexistent")
@@ -825,16 +810,6 @@ class TestIsApplicable:
         checker.AUDIT_SCOPE = "entry_point"
         checker.check_module = MagicMock()
         assert _is_applicable(checker, str(tmp_path / "branch" / "apps" / "branch.py")) is True
-
-    def test_entry_point_scope_matches_entry_on_a_windows_path(self, tmp_path, monkeypatch):
-        """A drive letter and backslashes still name an entry point (compass 458)."""
-        # verdicts' Path is WindowsPath on Windows; PureWindowsPath stands in for it on this host.
-        monkeypatch.setattr(verdicts, "Path", PureWindowsPath)
-        checker = MagicMock()
-        checker.AUDIT_SCOPE = "entry_point"
-        checker.check_module = MagicMock()
-        assert _is_applicable(checker, _windows_form(tmp_path, "branch", "apps", "branch.py")) is True
-        assert _is_applicable(checker, _windows_form(tmp_path, "branch", "apps", "modules", "helper.py")) is False
 
     def test_entry_point_scope_non_entry(self, tmp_path):
 
@@ -1283,10 +1258,3 @@ class TestIsEntryPointEdgeCases:
     def test_valid_entry_point(self, tmp_path):
 
         assert _is_entry_point(str(tmp_path / "branch" / "apps" / "branch.py")) is True
-
-    def test_valid_entry_point_on_a_windows_path(self, tmp_path, monkeypatch):
-        """A drive letter and backslashes still name an entry point (compass 458)."""
-        # verdicts' Path is WindowsPath on Windows; PureWindowsPath stands in for it on this host.
-        monkeypatch.setattr(verdicts, "Path", PureWindowsPath)
-        assert _is_entry_point(_windows_form(tmp_path, "branch", "apps", "branch.py")) is True
-        assert _is_entry_point(_windows_form(tmp_path, "branch", "apps", "handlers", "thing.py")) is False

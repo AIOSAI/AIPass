@@ -3,7 +3,7 @@
 # Description: Save Registry Handler
 # Version: 1.4.0
 # Created: 2025-11-07
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Save Registry Handler"""
@@ -13,14 +13,13 @@ import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Dict, Any, Iterator
+from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.flow.apps.handlers.runner.lock_ops import os_file_lock
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-_PKG_ROOT = module_file(__file__).parents[4]
+_PKG_ROOT = Path(__file__).resolve().parents[4]
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 MODULE_NAME = "save_registry"

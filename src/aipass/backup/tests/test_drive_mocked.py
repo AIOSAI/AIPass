@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_drive_mocked.py
 # Description: Tests for the drive_* command modules, the settings verb and the suite-wide Drive seal
-# Version: 2.0.4
+# Version: 2.1.0
 # Created: 2026-06-12
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/drive_*.py and settings.py, and the Drive seal on apps/handlers/drive/client.py."""
@@ -12,7 +12,6 @@
 # sentry: no-test-needed(ruff) — that the six modules imported below parse; ruff parses, it does not import
 # sentry: no-test-needed(documentation) — that each module's public functions carry docstrings
 # sentry: no-test-needed(constant) — the [bold cyan]/[yellow] styling in print_introspection(); tests read plain text
-# sentry: no-test-needed(stdlib) — the win32 preamble's os.environ.setdefault and stream reconfigure
 
 import json
 from pathlib import Path
@@ -173,6 +172,24 @@ class TestDriveClearRouting:
         assert armed == [(str(tmp_path), True), (str(tmp_path), False)], f"the flag did not reach the verb: {armed!r}"
         assert out == "", f"the route printed instead of delegating: {out!r}"
         assert err == ""
+
+    def test_force_from_a_citizen_neither_backup_nor_admin_is_refused_before_the_clear(
+        self, tmp_path, verified_seat, capsys, monkeypatch
+    ) -> None:
+        verified_seat.caller, verified_seat.admin = "@grow", False
+        armed: list = []
+        monkeypatch.setattr(
+            drive_clear,
+            "run_drive_clear",
+            lambda project_root, force=False: armed.append((project_root, force)),
+        )
+
+        drive_clear.handle_command(drive_clear.PRIMARY_COMMAND, [str(tmp_path), "--force"])
+        drive_clear.handle_command(drive_clear.PRIMARY_COMMAND, [str(tmp_path)])
+
+        _out, err = capsys.readouterr()
+        assert armed == [(str(tmp_path), False)]
+        assert "Drive clear refused:" in err and "not @grow" in " ".join(err.split())
 
 
 class TestSettingsStub:

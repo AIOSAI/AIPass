@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_log_watcher.py
 # Description: Tests for log file monitoring handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/monitoring/log_watcher.py."""
@@ -656,14 +656,6 @@ class TestExtractCommandInfoAdditional:
         result = watcher._extract_command_info(line)
         assert result == {"command": "sentry checklist prax", "caller": None, "target": None}
 
-    def test_backup_versioned(self):
-        """Should detect backup versioned commands."""
-        mod = _import_log_watcher()
-        watcher, _ = _make_watcher(mod)
-        line = "[backup] Starting versioned backup"
-        result = watcher._extract_command_info(line)
-        assert result == {"command": "backup versioned", "caller": None, "target": None}
-
     def test_backup_sync(self):
         """Should detect backup sync commands."""
         mod = _import_log_watcher()
@@ -749,16 +741,6 @@ class TestExtractTargetFromCmd:
         mod = _import_log_watcher()
         cmd_path = str(tmp_path / "aipass" / "sentry" / "run.py")
         result = mod.LogFileWatcher._extract_target_from_cmd(cmd_path)
-        assert result == "SENTRY"
-
-    def test_extracts_path_target_windows_form(self):
-        """Should extract target from a Windows-form path with backslashes.
-
-        Mutant: searching the raw cmd instead of its slash-normalised copy reddens this.
-        """
-        mod = _import_log_watcher()
-        cmd = "D:\\dev\\AIPass\\src\\aipass\\sentry\\run.py"
-        result = mod.LogFileWatcher._extract_target_from_cmd(cmd)
         assert result == "SENTRY"
 
     def test_returns_none_when_no_target(self):

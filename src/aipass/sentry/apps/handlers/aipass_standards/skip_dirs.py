@@ -12,7 +12,6 @@ Single source of truth so per-checker lists cannot drift. Output dirs (artifacts
 system_logs) are runtime products, not committed source; scanning them diverges a local audit from CI.
 """
 
-import sys
 import tempfile
 from pathlib import Path
 
@@ -29,18 +28,17 @@ def is_disabled_file(name: str) -> bool:
 
 
 def _get_temp_roots() -> list[Path]:
-    """Return resolved system temp directory roots (cross-platform)."""
+    """Return resolved system temp directory roots."""
     roots: list[Path] = []
     try:
         roots.append(Path(tempfile.gettempdir()).resolve())
     except Exception as exc:
         logger.info("[skip_dirs] tempfile.gettempdir() failed: %s", exc)
-    if sys.platform != "win32":
-        tmp = Path("/" + "tmp")
-        if tmp.exists():
-            resolved_tmp = tmp.resolve()
-            if resolved_tmp not in roots:
-                roots.append(resolved_tmp)
+    tmp = Path("/" + "tmp")
+    if tmp.exists():
+        resolved_tmp = tmp.resolve()
+        if resolved_tmp not in roots:
+            roots.append(resolved_tmp)
     return roots
 
 

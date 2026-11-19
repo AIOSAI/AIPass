@@ -3,7 +3,7 @@
 # Description: Tests for refused-send bookkeeping and the handled-vs-worked routing contract
 # Version: 1.0.4
 # Created: 2026-08-12
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/email/create.py, format.py and send.py."""
@@ -29,7 +29,7 @@ from aipass.ai_mail.apps.handlers.email.create import (
 from aipass.ai_mail.apps.handlers.email.format import format_email_list_item
 from aipass.ai_mail.apps.handlers.email.send import send_to_single, send_to_broadcast
 from aipass.ai_mail.apps.ai_mail import route_command
-from aipass.cli.apps.modules import error, reset_command_state, resolve_exit
+from aipass.cli import error, reset_command_state, resolve_exit
 import aipass.ai_mail.apps.modules.email as email_mod
 import aipass.ai_mail.apps.modules.email_send as send_mod
 

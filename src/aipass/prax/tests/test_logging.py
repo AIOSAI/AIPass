@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logging.py
 # Description: Tests for prax logging subsystem
-# Version: 1.4.1
+# Version: 1.7.0
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/logging/introspection.py and setup.py."""
@@ -14,8 +14,12 @@
 # sentry: no-test-needed(stdlib) — get_captured_loggers_count, the size of _captured_loggers
 
 import copy
+import importlib.util
+import json
 import logging
 import os
+import subprocess
+import sys
 import threading
 import types
 from logging.handlers import RotatingFileHandler
@@ -24,6 +28,7 @@ from unittest.mock import patch
 
 import pytest
 
+import aipass
 from aipass.prax.apps.handlers.logging import introspection
 from aipass.prax.apps.handlers.logging import setup as setup_handler
 from aipass.prax.apps.handlers.logging.introspection import (
@@ -31,7 +36,6 @@ from aipass.prax.apps.handlers.logging.introspection import (
     detect_external_project,
     get_caller_info,
 )
-from aipass.prax.apps.handlers.repo_root import resolved_file
 
 
 def _ask_for_the_caller(ask):
@@ -64,13 +68,6 @@ class TestIsPraxInternal:
         path = tmp_path / "src" / "aipass" / "prax" / "apps" / "handlers" / "logging" / "setup.py"
         assert _caller_seen_from(str(path)) == __file__
 
-    def test_prax_paths_windows_form(self, mock_prax_infrastructure):
-        """Windows-form logger and handler paths are detected as prax internal (backslash normalisation)."""
-        handler = "D:\\dev\\AIPass\\src\\aipass\\prax\\apps\\handlers\\logging\\setup.py"
-        logger_module = "D:\\dev\\AIPass\\src\\aipass\\prax\\apps\\modules\\logger.py"
-        assert _caller_seen_from(handler) == __file__
-        assert _caller_seen_from(logger_module) == __file__
-
     def test_prax_logger_filename(self, mock_prax_infrastructure, tmp_path):
         """prax_logger.py filename is detected as prax internal."""
         assert _caller_seen_from(str(tmp_path / "some" / "path" / "prax_logger.py")) == __file__
@@ -100,8 +97,8 @@ class TestIsPraxInternal:
 
 
 def _aipass_package_root() -> Path:
-    """src/aipass, found from introspection's own file with the resolver it uses."""
-    return resolved_file(Path(introspection.__file__)).parents[4]
+    """src/aipass, found from the package itself, as introspection finds it."""
+    return Path(aipass.__file__).resolve().parent
 
 
 class TestDetectBranchFromPath:
@@ -126,6 +123,10 @@ class TestDetectBranchFromPath:
         """Drone branch is detected from aipass/drone/apps/branch.py."""
         drone_path = str(_aipass_package_root() / "drone" / "apps" / "branch.py")
         assert detect_branch_from_path(drone_path) == str(_aipass_package_root() / "drone")
+
+    def test_a_checkout_names_a_src_sibling_by_its_folder(self, mock_prax_infrastructure):
+        sibling = _aipass_package_root().parent / "sibling"
+        assert detect_branch_from_path(str(sibling / "apps" / "mod.py")) == str(sibling)
 
     def test_random_path_returns_none(self, mock_prax_infrastructure, tmp_path):
         """Random path outside the project returns None."""
@@ -196,6 +197,18 @@ class TestDetectExternalProject:
         repo_root = _aipass_package_root().parent.parent
         internal_path = str(repo_root / "src" / "aipass" / "flow" / "apps" / "handler.py")
         assert detect_external_project(internal_path) is None
+
+    def test_a_copy_run_from_elsewhere_still_knows_the_repo(self, mock_prax_infrastructure, tmp_path):
+        """A snapshot copy (the hook engine runs one) took its package folder from its own depth, and lost it."""
+        copy_file = tmp_path / "snap" / "handlers" / "logging" / "x" / "introspection.py"
+        copy_file.parent.mkdir(parents=True)
+        copy_file.write_text(Path(introspection.__file__).read_text(encoding="utf-8"), encoding="utf-8")
+        spec = importlib.util.spec_from_file_location("introspection_snapshot_copy", copy_file)
+        assert spec is not None and spec.loader is not None
+        snapshot = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(snapshot)
+
+        assert snapshot.detect_external_project(str(_aipass_package_root() / "flow" / "apps" / "flow.py")) is None
 
     def test_an_empty_git_dir_is_no_project_root(self, mock_prax_infrastructure, tmp_path):
         """Codex's sandbox plants an empty .git in every cwd it starts in."""
@@ -273,6 +286,74 @@ class TestDetectExternalProject:
         assert detect_external_project(str(module_file)) is None
 
 
+_INSTALLED_PROBE = """
+import json, sys, sysconfig
+site, purelib, *files = sys.argv[1:]
+real = sysconfig.get_paths
+sysconfig.get_paths = lambda *a, **k: {**real(*a, **k), "purelib": purelib, "platlib": purelib}
+sys.path.insert(0, site)
+from aipass.prax.apps.handlers.logging import introspection as i
+print(json.dumps([[i.detect_branch_from_path(f), i.detect_external_project(f)] for f in files], default=str))
+"""
+
+
+def _answers_installed(site: Path, purelib: Path, *files: Path) -> list:
+    """[branch, external] per file, from a fresh interpreter whose aipass package sits in ``site``."""
+    (site / "aipass").mkdir(parents=True, exist_ok=True)
+    # The package's own modules still load from the checkout; only where aipass sits moves.
+    path_line = f"__path__.append({str(_aipass_package_root())!r})\n"
+    (site / "aipass" / "__init__.py").write_text(path_line, encoding="utf-8")
+    for module in files:
+        module.parent.mkdir(parents=True, exist_ok=True)
+        module.touch()
+    dropped = ("AIPASS_TEST_LOG_DIR", "PYTEST_CURRENT_TEST", "AIPASS_CALLER_CWD", "AIPASS_BRANCH_NAME")
+    env = {k: v for k, v in os.environ.items() if k not in dropped}
+    argv = [sys.executable, "-c", _INSTALLED_PROBE, str(site), str(purelib), *map(str, files)]
+    result = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", env=env, timeout=120)
+    assert result.returncode == 0, f"probe failed: {result.stderr}"
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def _site_packages(venv: Path) -> Path:
+    return venv.resolve() / "lib" / "python3.12" / "site-packages"
+
+
+class TestAnInstalledPackageHasNoCheckout:
+    """Installed, there is no src/ and no repo root around aipass: the interpreter's folders are neither."""
+
+    def test_a_third_party_module_beside_aipass_is_no_branch_and_no_project(self, tmp_path):
+        """A src/ above the venv must not pass it off as a checkout: the install directories decide."""
+        site = _site_packages(tmp_path / "src" / "venv")
+        third, flow = site / "thirdparty_pkg" / "work.py", site / "aipass" / "flow" / "apps" / "flow.py"
+
+        answers = _answers_installed(site, site, third, flow)
+
+        assert answers == [[None, None], [str(site / "aipass" / "flow"), None]]
+
+    def test_a_third_party_module_in_a_project_venv_logs_as_that_project(self, tmp_path):
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "pyproject.toml").write_text("[project]\nname = 'proj'\n", encoding="utf-8")
+        site = _site_packages(project / ".venv")
+
+        answers = _answers_installed(site, site, site / "thirdparty_pkg" / "work.py")
+
+        assert answers == [[None, ["proj", str(project.resolve())]]]
+
+    def test_a_user_install_with_no_src_above_it_still_finds_an_external_project(self, tmp_path):
+        """--user lands outside purelib, so the install check says no; no src/ above it says no checkout too."""
+        site = _site_packages(tmp_path / "home" / ".local")
+        project = tmp_path / "extproj"
+        project.mkdir()
+        (project / "pyproject.toml").write_text("[project]\nname = 'extproj'\n", encoding="utf-8")
+
+        third, main = site / "thirdparty_pkg" / "work.py", project / "main.py"
+
+        answers = _answers_installed(site, tmp_path / "system_site", third, main)
+
+        assert answers == [[None, None], [None, ["extproj", str(project.resolve())]]]
+
+
 class TestSetupExternalRouting:
     """Tests for external project log routing in setup_individual_logger."""
 
@@ -316,7 +397,7 @@ class TestSetupExternalRouting:
         assert len(get_calls) == 0
 
     def test_a_project_system_logs_that_cannot_be_made_mutes_that_tier_and_never_raises(
-        self, mock_prax_infrastructure, monkeypatch, tmp_path, caplog
+        self, mock_prax_infrastructure, monkeypatch, tmp_path
     ):
         """An unmakeable <project>/system_logs mutes that tier; the logger call never raises."""
         project_dir = tmp_path / "Compass"
@@ -327,10 +408,9 @@ class TestSetupExternalRouting:
         monkeypatch.setattr(setup_handler, "_captured_loggers", {})
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "")
 
-        with caplog.at_level(logging.ERROR, logger=setup_handler.logger.name):
-            built = setup_handler.setup_individual_logger("navigator", caller_path=str(project_dir / "nav.py"))
+        built = setup_handler.setup_individual_logger("navigator", caller_path=str(project_dir / "nav.py"))
         try:
-            failed = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Log handler failed")]
+            failed = _handler_failures(mock_prax_infrastructure)
             handler_types = [type(h) is logging.NullHandler for h in built.handlers]
             local_is_a_file = isinstance(built.handlers[1], RotatingFileHandler)
             local_file = Path(getattr(built.handlers[1], "baseFilename"))
@@ -339,8 +419,7 @@ class TestSetupExternalRouting:
                 handler.close()
                 built.removeHandler(handler)
 
-        assert len(failed) == 1
-        assert failed[0].startswith("Log handler failed for compass_navigator.log: ")
+        assert [r["file"] for r in failed] == ["compass_navigator.log"]
         assert handler_types == [True, False]
         assert local_is_a_file
         assert local_file == project_dir / "logs" / "navigator.log"
@@ -444,32 +523,44 @@ class TestSameModuleNameInTwoBranches:
         assert "captured_config" in api_local
 
 
+def _handler_failures(log_root: Path) -> list:
+    """The "Log handler failed" records on setup's trail under the test log root."""
+    trail_file = log_root / "prax" / "logs" / "setup.jsonl"
+    records = [json.loads(line) for line in trail_file.read_text(encoding="utf-8").splitlines()]
+    return [r for r in records if r["msg"] == "Log handler failed"]
+
+
 class TestAnUnwritableLogHome:
     """A logger call degrades to 'Log handler failed' over a log home it cannot make."""
 
-    # The only route to an unwritable log home is a permission bit: Windows has
-    # none to set, and root writes through it.
+    # The only route to an unwritable log home is a permission bit, and root writes through it.
     @pytest.mark.skipif(
-        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        os.geteuid() == 0,
         reason="needs a POSIX permission bit that binds the writer",
     )
-    def test_a_first_line_over_an_unwritable_home_is_reported_and_never_raised(self, monkeypatch, tmp_path, caplog):
-        """FPLAN-0642: the first log line of a uv tool install raised Errno 13 into `aipass install`."""
-        locked = tmp_path / "locked"
-        locked.mkdir()
-        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(locked))
-        monkeypatch.setattr(setup_handler, "_captured_loggers", {})
-        locked.chmod(0o500)
-        try:
-            with caplog.at_level(logging.ERROR, logger=setup_handler.logger.name):
-                built = setup_handler.setup_individual_logger("homeless_probe", caller_branch="probe")
-                built.info("a line with nowhere to go")
-        finally:
-            locked.chmod(0o700)
+    def test_a_first_line_over_an_unwritable_home_is_reported_and_never_raised(self, monkeypatch, tmp_path):
+        """FPLAN-0642: the first log line of a uv tool install raised Errno 13 into `aipass install`.
 
-        failed = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Log handler failed")]
-        assert len(failed) == 2  # both tiers, central and local
-        assert list(locked.iterdir()) == []
+        HELD fallback (a NullHandler tier); its report rides prax's trail, whose directory stays writable here.
+        """
+        home = tmp_path / "home"
+        (home / "prax" / "logs").mkdir(parents=True)
+        (home / "system").mkdir()
+        (home / "probe").mkdir()
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(home))
+        monkeypatch.setattr(setup_handler, "_captured_loggers", {})
+        locked = (home / "system", home / "probe")
+        for d in locked:
+            d.chmod(0o500)
+        try:
+            built = setup_handler.setup_individual_logger("homeless_probe", caller_branch="probe")
+            built.info("a line with nowhere to go")
+        finally:
+            for d in locked:
+                d.chmod(0o700)
+
+        assert len(_handler_failures(home)) == 2  # both tiers, central and local
+        assert [list(d.iterdir()) for d in locked] == [[], []]
 
 
 class TestGetCallerInfo:
@@ -478,7 +569,6 @@ class TestGetCallerInfo:
     def test_returns_tuple_of_three(self, mock_prax_infrastructure, monkeypatch):
         """get_caller_info returns the 3-tuple (name, path, branch) of its caller, this file."""
         monkeypatch.delenv("AIPASS_LOG_NAME", raising=False)
-        monkeypatch.delenv("AIPASS_BOT_ID", raising=False)
 
         result = get_caller_info()
         assert result == ("test_logging", __file__, str(_aipass_package_root() / "prax"))
@@ -486,7 +576,6 @@ class TestGetCallerInfo:
     def test_module_name_is_string(self, mock_prax_infrastructure, monkeypatch):
         """The caller is this file, so the name is this file's stem; env overrides cleared first."""
         monkeypatch.delenv("AIPASS_LOG_NAME", raising=False)
-        monkeypatch.delenv("AIPASS_BOT_ID", raising=False)
 
         module_name, path, branch = get_caller_info()
         assert isinstance(module_name, str)

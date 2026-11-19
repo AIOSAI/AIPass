@@ -20,12 +20,12 @@ from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
-from aipass.memory.apps.modules import fleet
+from aipass.memory import declared_roots
 from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 from aipass.devpulse.apps.handlers.json import json_handler
-from aipass.ai_mail.apps.modules.door_session_pointer import (
+from aipass.ai_mail import (
     CLAUDE,
     CODEX,
     OPENCODE,
@@ -107,10 +107,8 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
         if result is not None:
             return result
 
-        # After the main registry, so a local branch wins a name collision. Windows globs
-        # case-insensitively: re-check the suffix so a *_registry.json is never a trust anchor.
-        project_regs = (repo_root / "projects").glob("*/*_REGISTRY.json")
-        for reg in sorted(p for p in project_regs if p.name.endswith("_REGISTRY.json")):
+        # After the main registry, so a local branch wins a name collision.
+        for reg in sorted((repo_root / "projects").glob("*/*_REGISTRY.json")):
             result = _search_registry(reg, target)
             if result is not None:
                 return result
@@ -122,7 +120,7 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
     if caller_cwd:
         search_roots.append(Path(caller_cwd))
     if repo_root is not None:
-        search_roots.extend(fleet.declared_roots(repo_root))
+        search_roots.extend(declared_roots(repo_root))
 
     seen = set()
     if repo_root:
@@ -131,8 +129,6 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
         if not root.is_dir():
             continue
         for reg in root.glob("*_REGISTRY.json"):
-            if not reg.name.endswith("_REGISTRY.json"):
-                continue  # Windows globs case-insensitively; exact-case names only
             resolved = reg.resolve()
             if resolved in seen:
                 continue
@@ -144,7 +140,7 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
 
 
 def _pid_alive(pid: int) -> bool:
-    """registry.py owns the one liveness rule (Windows OpenProcess, zombie check); a probe that raises is seen."""
+    """registry.py owns the one liveness rule (zombie check); a probe that raises is seen."""
     return _registry.is_pid_alive(pid)
 
 
@@ -318,7 +314,7 @@ class TranscriptScanner:
 
     def _note_watched(self, path: str) -> None:
         if self._watched != (self.provider, path):
-            self._watched = (self.provider, path)
+            self._watched = (self.provider, path)  # type: ignore[assignment]  # door names type as Any
             logger.debug("[watchdog.agent] scanner watching provider=%s path=%s", self.provider, path)
 
     def _claude_paths(self) -> tuple[list[str], dict[str, str]]:

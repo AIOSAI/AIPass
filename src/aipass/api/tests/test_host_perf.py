@@ -3,7 +3,7 @@
 # Description: Tests for the host API's cost doctrine — threadpool, cache, pin
 # Version: 1.0.5
 # Created: 2026-08-18
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/server.py's cost doctrine: threadpool routes, the fleet cache, the pump cap."""
@@ -17,7 +17,6 @@
 
 import contextlib
 import json
-import signal
 import sys
 import threading
 import time
@@ -370,7 +369,6 @@ class TestTheSnapshotIsCoalesced:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The TTL expires — against a clock this test drives, not one it hopes for."""
-        # Windows' monotonic ticks in ~15.6ms steps, so a sleep can land on the same tick.
         # read_cache's OWN `time` name: a global time.monotonic patch would freeze pytest-timeout's clock too.
         clock = [1000.0]
         monkeypatch.setattr(host_read_cache, "time", SimpleNamespace(monotonic=lambda: clock[0]))
@@ -608,13 +606,6 @@ class TestTheRegistryIsPinnedAtBoot:
         assert calls == ["pinned", {"host": "127.0.0.1", "port": 8787, "access_log": False}]
 
 
-# An honest skip: the attach lane is POSIX-only (open_attach refuses on PTY_AVAILABLE first).
-sighup_required = pytest.mark.skipif(
-    not hasattr(signal, "SIGHUP"),
-    reason="hangup detaches with SIGHUP, which this platform does not have",
-)
-
-
 @pytest.fixture
 def full_pump(monkeypatch: pytest.MonkeyPatch) -> list:
     """A cap of one, already taken, on a host open_attach would otherwise serve."""
@@ -622,7 +613,6 @@ def full_pump(monkeypatch: pytest.MonkeyPatch) -> list:
     slots.acquire()
     spawned: list = []
     monkeypatch.setattr(host_attach, "_PUMP_SLOTS", slots)
-    monkeypatch.setattr(host_attach, "PTY_AVAILABLE", True)
     monkeypatch.setattr(host_attach, "TMUX_BINARY", sys.executable)
     monkeypatch.setattr(host_attach, "pty", SimpleNamespace(openpty=lambda: spawned.append("pty") or (-7, -8)))
     monkeypatch.setattr(host_attach, "set_winsize", lambda *a: spawned.append("winsize"))
@@ -681,7 +671,6 @@ class TestThePumpPoolIsBoundedOutLoud:
 
         assert full_pump == [], "a PTY was opened for a session that was then refused"
 
-    @sighup_required
     def test_a_hangup_gives_the_thread_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Otherwise the server refuses terminals while pumping none."""
         # Hung up TWICE: a socket that errors then closes does that, and a second release would over-credit.

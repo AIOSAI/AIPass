@@ -6,69 +6,22 @@
   },
   "bypass": [
     {
-      "standard": "through_the_command",
-      "file": "tests/test_watchdog_wire.py",
-      "lines": [95, 701, 702, 703, 720, 727, 759, 768, 775, 784, 794, 802, 810],
-      "reason": "Wire-identity primitives (_stdout_target, _session_dir_of, _cmdline, _looks_like_ours). Their one public caller, arm_wire, registers a live wire, installs a SIGTERM handler, and sweeps and signals other live wires by pid, so a test through it acts on real processes. Each row pins one primitive's answer for one platform, with the platform pretended on wire's own sys name and ps/lsof stubbed. 95 is the host probe that decides whether this machine can see fd/1 (fleet green, 2026-10-04)."
-    },
-    {
-      "standard": "through_the_command",
-      "file": "tests/test_watchdog_agent.py",
-      "lines": [704],
-      "reason": "Pins a cache guarantee no public answer shows: an unchanged transcript is parsed once, then every tick reuses the verdict. The counter wraps the real _tail_lines and returns its answer, so the verdicts asserted are the product's."
-    },
-    {
-      "standard": "stdlib_patch",
-      "file": "tests/test_watchdog_agent.py",
-      "reason": "File-wide because the stdlib_patch checker passes no line; the one patch it covers is _case_insensitive_glob. Every other stdlib name in this file is swapped on the module under test only (pretend_platform). It emulates a case-insensitive (Windows) directory listing so the exact-case *_REGISTRY.json filter can be shown load-bearing from Linux, where the effect cannot occur on disk. The wrapper widens the real glob and monkeypatch restores it; a product seam per glob would be a door for tests alone. Same reason as memory's case-fold fixtures (leg 11)."
-    },
-    {
-      "standard": "through_the_command",
-      "file": "tests/test_watchdog_dispatches.py",
-      "lines": [91],
-      "reason": "An identity pin, not a reach: seat_email's owner lookup must BE guard.owner_address, one implementation of 'who owns this project' (the 2026-08-21 two-answers bug). No behaviour shows the difference until a second copy drifts."
-    },
-    {
-      "standard": "through_the_command",
-      "file": "tests/test_watchdog_registry.py",
-      "lines": [500, 512, 513],
-      "reason": "The default store location is the contract (next to the code that owns it, from any cwd). Its public routes, register() and wake_in() with no store named, write the live .watchdog/ of the seat running the suite, which the conftest seal exists to prevent (2026-09-27, a test armed a real wire). The test carries live_default_store and only resolves the path."
-    },
-    {
       "standard": "logged_fallback",
       "file": "apps/devpulse.py",
-      "lines": [116],
+      "lines": [107],
       "reason": "route_command's bool is the module's claim on the command, not its verdict. A module that raised is reported by name through error(), which marks the command failed, so resolve_exit answers 2 and a chained next step does not run; the shell can tell. A re-raise would hand drone a traceback for a module defect, and False would exit 1 as 'unknown command', which it is not (pinned in tests/test_devpulse.py test_route_command_catches_module_errors)."
     },
     {
       "standard": "logged_fallback",
       "file": "apps/modules/compass.py",
-      "lines": [201, 222, 254, 278, 293, 306, 352, 377, 388, 396, 416, 427, 450, 465, 488],
+      "lines": [199, 220, 252, 276, 291, 304, 350, 375, 386, 394, 414, 425, 448, 463, 486],
       "reason": "CLI handler contract (fleet green, devpulse 2026-10-04; ai_mail leg 9 precedent). A _handle_* return is 'command recognised', not 'it worked': the router stops on True. Every line follows a cli error(), which marks the command failed and sets the non-zero exit, so the caller is told by that flag, never by the bool."
     },
     {
       "standard": "logged_fallback",
-      "file": "apps/modules/watchdog.py",
-      "lines": [249, 277, 340],
-      "reason": "CLI handler contract, as compass.py: each True follows a cli error(), which marks the command failed and sets the exit."
-    },
-    {
-      "standard": "logged_fallback",
-      "file": "apps/devpulse.py",
-      "lines": [129],
-      "reason": "Router contract: a module that raised is reported through cli error() (exit non-zero, 'A defect in the module, not an unknown command'); True stops the router from answering 'Unknown command' on top of it."
-    },
-    {
-      "standard": "logged_fallback",
       "file": "apps/handlers/owner/admin_grant.py",
-      "lines": [53, 132],
+      "lines": [52, 139],
       "reason": "Fail closed. 53: a key file that exists but is not hex reads as no key, so nothing is signed or verified (logged as an error). 132: an unreadable caller passport answers '', which matches no seat, so the ceremony refuses. Neither can grant anything."
-    },
-    {
-      "standard": "logged_fallback",
-      "file": "apps/handlers/owner/guard.py",
-      "lines": [78, 84],
-      "reason": "owner_address answers None for 'no owner resolved' by contract (docstring): its callers are refusal-message builders, which word it as 'no owner is sealed or readable', and the watchdog dispatch register, which raises RegisterUnavailable on it. The access decision does not read it: _owner_decision refuses an unreadable registry on its own (2026-10-04)."
     },
     {
       "standard": "logged_fallback",
@@ -79,62 +32,57 @@
     {
       "standard": "logged_fallback",
       "file": "apps/handlers/release_notify/managers.py",
-      "lines": [107],
+      "lines": [106],
       "reason": "None is 'cannot read this passport', and its one caller (discover_managers) lists that path in skipped with reason 'passport unreadable - see the log', which the run reports. Never counted as a non-manager."
-    },
-    {
-      "standard": "logged_fallback",
-      "file": "apps/handlers/watchdog/agent.py",
-      "lines": [174, 179, 182, 185, 213, 380],
-      "reason": "174/182: liveness fails safe to alive (a check that cannot run never declares a running agent dead; the lock and timeout still end the watch). 179: ProcessLookupError is the answer 'dead', not a failure. 185: any other os.kill error is an invalid pid, dead. 213: an unreadable transcript tail feeds only the advisory stall signal, never the exit verdict. 380: FileNotFoundError between exists() and read is a lock released in that instant, absent. The unreadable lock itself answers {} (held), 2026-10-04."
-    },
-    {
-      "standard": "logged_fallback",
-      "file": "apps/handlers/watchdog/registry.py",
-      "lines": [174, 217, 220],
-      "reason": "Liveness, as agent.py: an unreadable /proc status is not proof of a zombie, ps answers (174); ProcessLookupError is the answer absent (217); PermissionError means the process exists, another user's (220). A probe that cannot run raises (is_pid_alive on Windows), never assumes alive. A wrong 'alive' costs a slower reap; a wrong 'dead' would drop a live watch."
-    },
-    {
-      "standard": "logged_fallback",
-      "file": "apps/handlers/watchdog/wire.py",
-      "lines": [109],
-      "reason": "None is the documented 'stdout target unknown', the same answer /proc gives for an unreadable fd/1 (_stdout_target docstring); the wrapper is then classified as having no session, never as a wrong one."
     },
     {
       "standard": "json_structure",
       "file": "devpulse_json/compass",
-      "reason": "compass/ is the devpulse-owned Compass decision store (SQLite/FTS5 \u2014 db + wal + shm) which needs its own directory. Legitimate data subdir, not operator-config (custom_config/) nor auto-gen root data. Sanctioned exception per #643."
+      "reason": "compass/ is the devpulse-owned Compass decision store (SQLite/FTS5 — db + wal + shm) which needs its own directory. Legitimate data subdir, not operator-config (custom_config/) nor auto-gen root data. Sanctioned exception per #643."
+    },
+    {
+      "standard": "json_structure",
+      "file": "apps/handlers/file_lock.py",
+      "reason": "A lock primitive with no operation of its own to log; its callers (watch registry, feedback inbox) log the reads and writes it guards. Its one log_operation was the fcntl-absent (Windows) path, removed with Linux only (2026-11-14)."
     },
     {
       "standard": "cli",
       "file": "apps/handlers/watchdog/presenter.py",
-      "reason": "Watchdog presentation layer \u2014 console.print() IS the output. Same sanctioned shape as the feedback display handlers below: every function here renders a handler result dict for the operator and decides nothing. Split out of apps/modules/watchdog.py on 2026-08-22, which had reached 692 lines across r2/r3/r4 and broke the 600-line module ceiling; the display functions were the cohesive third that shared no state with the routing code."
+      "reason": "Watchdog presentation layer — console.print() IS the output. Same sanctioned shape as the feedback display handlers below: every function here renders a handler result dict for the operator and decides nothing. Split out of apps/modules/watchdog.py on 2026-08-22, which had reached 692 lines across r2/r3/r4 and broke the 600-line module ceiling; the display functions were the cohesive third that shared no state with the routing code."
     },
     {
       "standard": "cli",
       "file": "apps/handlers/feedback/compose.py",
-      "reason": "Feedback handler \u2014 console.print() IS the output. Display functions are the handler's purpose."
+      "reason": "Feedback handler — console.print() IS the output. Display functions are the handler's purpose."
     },
     {
       "standard": "cli",
       "file": "apps/handlers/feedback/inbox.py",
-      "reason": "Feedback handler \u2014 console.print() IS the output. Display functions are the handler's purpose."
+      "reason": "Feedback handler — console.print() IS the output. Display functions are the handler's purpose."
     },
-    {
-      "standard": "naming",
-      "file": "apps/handlers/watchdog/registry.py",
-      "reason": "_FileLock uses Python _PrivateClass convention (underscore prefix + PascalCase)."
-    },
-    {
-      "standard": "imports",
-      "file": "apps/handlers/feedback/compose.py",
-      "reason": "_AIPASS_ROOT fallback for ai_mail inbox resolution. Known gap \u2014 needs registry-based path resolution."
-    },
-    {
-      "standard": "unused_function",
-      "file": "apps/handlers/watchdog/schedule.py",
-      "reason": "format_wait() has 5 passing tests. Public utility for schedule display, not called in production yet."
-    }
+    {"standard": "unused_function", "file": "apps/handlers/watchdog/schedule.py", "functions": ["format_wait"], "reason": "format_wait() has 5 passing tests. Public utility for schedule display, not called in production yet."},
+    {"standard": "fallback", "file": "apps/devpulse.py", "functions": ["discover_modules"], "reason": "A module that fails to import is skipped so the other verbs still run. Who finds out: the caller, on stderr, on every invocation (warning 'module X failed to load'), plus the ERROR line in devpulse's log that medic picks up."},
+    {"standard": "fallback", "file": "apps/handlers/owner/admin_grant.py", "functions": ["_read_key"], "reason": "A key that is not valid hex reads as no key: fails closed. Who finds out: the caller, whose admin action is refused with the reason, and the ERROR line in devpulse's log."},
+    {"standard": "fallback", "file": "apps/handlers/owner/admin_grant.py", "functions": ["_resolve_verified_caller"], "reason": "An unreadable caller passport reads as no caller: unverifiable means refused. Who finds out: the caller, refused at the gate, and the WARNING line in devpulse's log."},
+    {"standard": "fallback", "file": "apps/handlers/owner/admin_grant.py", "functions": ["grant_status"], "reason": "Status is a read-out: an unreadable cert shows as empty fields, and the same call runs verify_admin_grant and prints its failing leg. Who finds out: whoever ran status, on screen."},
+    {"standard": "fallback", "file": "apps/handlers/release_notify/compose.py", "functions": ["changelog_headline"], "reason": "An unreadable CHANGELOG sends the release mail without its headline rather than no mail. Who finds out: medic, from the ERROR line; every manager sees a mail with no headline."},
+    {"standard": "fallback", "file": "apps/handlers/release_notify/deliver.py", "functions": ["load_state"], "reason": "An unreadable stamp file reads as empty and flagged unreadable, never as already sent: a duplicate mail beats a silent release. Who finds out: medic, from the ERROR line; managers get the mail twice."},
+    {"standard": "fallback", "file": "apps/handlers/release_notify/managers.py", "functions": ["read_passport"], "reason": "One unreadable passport must not stop the release mail to every other manager. Who finds out: devpulse, from the WARNING line naming the path; that one seat misses the mail."},
+    {"standard": "fallback", "file": "apps/handlers/watchdog/agent.py", "functions": ["_tail_lines"], "reason": "None means unknown, not idle: the caller treats an unreadable transcript as in flight and never caches it, so the watch keeps running. Who finds out: the watcher, who sees the agent stay in flight."},
+    {"standard": "fallback", "file": "apps/handlers/watchdog/agent.py", "functions": ["_inflight_from_lines"], "reason": "A transcript line caught mid-write is skipped so the walk reaches the last line with a role. Who finds out: nobody needs to; the next poll reads the finished line."},
+    {"standard": "fallback", "file": "apps/handlers/watchdog/agent.py", "functions": ["_codex_inflight_from_lines"], "reason": "An unparseable last rollout line is Codex mid-write and counts as in flight, the loud direction: the watch keeps running. Who finds out: the watcher, on the next poll."},
+    {"standard": "fallback", "file": "apps/handlers/watchdog/agent.py", "functions": ["_stat_pass"], "reason": "A transcript rolled or cleaned between polls is dropped from the scan: deletion is not activity. Who finds out: the log line names the file; the watch goes on with the files that remain."},
+    {"standard": "fallback", "file": "apps/handlers/watchdog/agent.py", "functions": ["_check_sent_for_reply"], "reason": "The strptime loops try the two timestamp formats mail writes; an unreadable sent file is skipped. A miss reads as no reply, the loud direction. Who finds out: the watcher, told completed_silent, CHECK DELIVERABLES."},
+    {"standard": "fallback", "file": "apps/handlers/watchdog/feed.py", "functions": ["_stat_key"], "reason": "A feed file that does not exist yet has no stat: None means nothing to drain. Who finds out: nobody needs to; the feed appears with the first event."},
+    {"standard": "fallback", "file": "apps/handlers/watchdog/feed.py", "functions": ["drain_feed"], "reason": "An unreadable feed drains nothing and keeps the cursor, so the same lines are tried again on the next tick. Who finds out: devpulse, from the WARNING line each tick."},
+    {"standard": "fallback", "file": "apps/handlers/watchdog/feed.py", "functions": ["grounding_reading"], "reason": "No usable grounding receipt leaves the reading blank on the completion line; it is a display field, never a verdict. Who finds out: the reader, who sees no grounding shown."},
+    {"standard": "fallback", "file": "apps/handlers/watchdog/registry.py", "functions": ["_is_zombie_linux"], "reason": "None means /proc had no entry: not an answer about the state, and the caller treats it so. Who finds out: the liveness check that follows, which reports the pid gone."},
+    {"standard": "fallback", "file": "apps/handlers/watchdog/timer.py", "functions": ["_short_time"], "reason": "Display only: a stamp that is not ISO is printed as it is. Who finds out: the reader, who sees the raw stamp."},
+    {"standard": "fallback", "file": "apps/handlers/watchdog/wire.py", "functions": ["stdout_target"], "reason": "None means the pid is gone or fd/1 unreadable: the target is unknown and callers treat unknown as not this wire. Who finds out: the dead-monitor check, which ends the wire with a report."},
+    {"standard": "fallback", "file": "apps/handlers/watchdog/wire.py", "functions": ["cmdline"], "reason": "An empty cmdline means the process is gone; callers match on content, so empty matches nothing. Who finds out: the caller, which reports the pid as not a watchdog."},
+    {"standard": "fallback", "file": "apps/handlers/watchdog/wire.py", "functions": ["_load_announced"], "reason": "An unreadable dead-cursor reads as nothing announced, the loud direction: a DEAD dispatch is announced again. Who finds out: devpulse, woken twice, and the WARNING line."},
+    {"standard": "fallback", "file": "apps/handlers/watchdog/wire.py", "functions": ["_clock"], "reason": "Display only: a register stamp that is not ISO is shown verbatim. Who finds out: the reader, who sees the raw stamp."},
+    {"standard": "fallback", "file": "apps/modules/watchdog.py", "functions": ["_handle_agent"], "reason": "With no sealed seat the reply hint drops its address; the CHECK DELIVERABLES line still prints. Who finds out: the reader, who sees the hint without an address."}
   ],
   "notes": {
     "usage": "Add entries to bypass specific sentry standard violations",

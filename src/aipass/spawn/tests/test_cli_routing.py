@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for CLI routing and help output
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-27
-# Modified: 2026-11-09
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/spawn.py's CLI routing, help output, and introspection."""
@@ -442,7 +442,7 @@ class TestFleetCommandsNeverSayAllClearAfterAFailure:
         assert handle_export_seeds(["--root", str(tmp_path)]) == 1
         captured = capsys.readouterr()
         assert "already current" not in captured.out
-        assert "nothing was scanned" in captured.err
+        assert "no *_REGISTRY.json" in captured.err
 
     def test_export_seeds_with_only_errors_prints_no_all_clear(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         trinity = tmp_path / "src" / "aipass" / "wanderer" / ".trinity"

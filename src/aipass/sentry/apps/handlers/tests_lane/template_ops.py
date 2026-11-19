@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_ops.py
 # Description: Test-template distribution — gold manifest, per-branch receipts, the bump
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-09-21
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Test-template distribution, on @memory's trinity pattern.
@@ -18,10 +18,9 @@ from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.audit import discovery
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.module_root import module_file
 
 
-GOLD_DIR = module_file(__file__).parent.parent.parent.parent / "templates"
+GOLD_DIR = Path(__file__).resolve().parent.parent.parent.parent / "templates"
 MANIFEST_FILE = "templates.json"
 PAGE_FILE = "test_template_v1.md"
 

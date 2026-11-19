@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: chroma_subprocess.py
 # Description: ChromaDB Subprocess Handler
-# Version: 1.7.0
+# Version: 1.8.1
 # Created: 2025-11-27
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -15,19 +15,15 @@ Runs in the memory venv (AIPASS_MEMORY_PYTHON): JSON request on stdin, JSON resu
 import sys
 import json
 import subprocess
-import logging
 import hashlib
 from pathlib import Path
 from typing import TextIO
-from aipass.memory.apps.handlers.repo_root import module_file
 
-logger = logging.getLogger(__name__)
-
-_MEMORY_ROOT = module_file(__file__).parents[3]
+_MEMORY_ROOT = Path(__file__).resolve().parents[3]
 _DEFAULT_DB_PATH = _MEMORY_ROOT / ".chroma"
 
 # The store owns the model choice: two models in one collection give silently wrong neighbours.
-_EMBED_SCRIPT = module_file(__file__).parent.parent / "vector" / "embed_subprocess.py"
+_EMBED_SCRIPT = Path(__file__).resolve().parent.parent / "vector" / "embed_subprocess.py"
 
 _clients = {}
 
@@ -98,11 +94,13 @@ def embedder_reason(completed) -> str:
 
     Every caller of embed_subprocess.py reads its refusal through this one function.
     """
+    stderr = (completed.stderr or "").strip() or "empty"
+    if not (completed.stdout or "").strip():
+        return f"no JSON reply on stdout (it was empty); stderr: {stderr}"
     try:
         reply = json.loads(completed.stdout)
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
-        logger.warning(f"[chroma_subprocess] Failed embed run left no JSON reason on stdout ({exc}); reading stderr")
-        reply = None
+        return f"no JSON reply on stdout ({exc}); stderr: {stderr}"
     if isinstance(reply, dict) and reply.get("error"):
         return str(reply["error"])
     return (completed.stderr or "").strip() or "no reason given"
@@ -135,11 +133,9 @@ def _vectorize_and_store(branch, memory_type, texts, metadatas, db_path=None):
             text=True,
             timeout=timeout,
         )
-    except subprocess.TimeoutExpired:
-        logger.warning(f"[chroma_subprocess] Embedding timed out after {timeout}s for {len(texts)} texts")
-        return {"success": False, "error": f"Embedding timed out after {timeout}s"}
-    except Exception as e:
-        logger.warning(f"[chroma_subprocess] Embed subprocess failed: {e}")
+    except subprocess.TimeoutExpired as e:
+        return {"success": False, "error": f"Embedding timed out after {timeout}s: {e}"}
+    except (OSError, subprocess.SubprocessError) as e:
         return {"success": False, "error": f"Embedding subprocess failed: {e}"}
 
     if completed.returncode != 0:
@@ -152,7 +148,6 @@ def _vectorize_and_store(branch, memory_type, texts, metadatas, db_path=None):
         embed_reply = json.loads(completed.stdout)
     except (json.JSONDecodeError, TypeError, ValueError) as e:
         # Unreadable output is not evidence of success.
-        logger.warning(f"[chroma_subprocess] Unreadable embedder reply: {e}")
         return {"success": False, "error": f"Unreadable embedder reply: {e}"}
 
     if not isinstance(embed_reply, dict) or not embed_reply.get("success"):
@@ -208,17 +203,18 @@ def _check_plan(plan_label, db_path=None):
     """Check if a plan has been vectorized in ChromaDB."""
     client = _get_client(db_path)
 
+    from chromadb.errors import NotFoundError
+
     collection_name = "flow_plans"
     try:
         collection = client.get_collection(collection_name, embedding_function=None)
-    except Exception as e:
-        logger.warning(f"[chroma_subprocess] Collection '{collection_name}' not found during plan check: {e}")
+    except NotFoundError as e:
         return {
             "success": True,
             "found": False,
             "count": 0,
             "source_files": [],
-            "message": f"Collection {collection_name} does not exist",
+            "message": f"Collection {collection_name} does not exist: {e}",
         }
 
     result = collection.get(include=["metadatas"])
@@ -239,10 +235,11 @@ def _get_by_source(collection_name, source_pattern, n_results=5, db_path=None):
     """Fetch documents whose source_file metadata contains a pattern."""
     client = _get_client(db_path)
 
+    from chromadb.errors import NotFoundError
+
     try:
         collection = client.get_collection(collection_name, embedding_function=None)
-    except Exception as e:
-        logger.warning(f"[chroma_subprocess] Collection '{collection_name}' not found in get_by_source: {e}")
+    except NotFoundError as e:
         return {"success": False, "error": f"Collection '{collection_name}' not found: {e}"}
 
     result = collection.get(include=["metadatas", "documents"])
@@ -269,10 +266,11 @@ def _delete_by_source(collection_name, source_pattern, db_path=None):
     """Delete vectors whose source_file metadata contains a pattern."""
     client = _get_client(db_path)
 
+    from chromadb.errors import NotFoundError
+
     try:
         collection = client.get_collection(collection_name, embedding_function=None)
-    except Exception as e:
-        logger.warning(f"[chroma_subprocess] Collection '{collection_name}' not found in delete_by_source: {e}")
+    except NotFoundError as e:
         return {"success": False, "error": f"Collection '{collection_name}' not found: {e}"}
 
     result = collection.get(include=["metadatas"])
@@ -296,10 +294,11 @@ def _get_by_ids(collection_name, ids, db_path=None):
     """
     client = _get_client(db_path)
 
+    from chromadb.errors import NotFoundError
+
     try:
         collection = client.get_collection(collection_name, embedding_function=None)
-    except Exception as e:
-        logger.warning(f"[chroma_subprocess] Collection '{collection_name}' not found in get_by_ids: {e}")
+    except NotFoundError as e:
         return {"success": False, "error": f"Collection '{collection_name}' not found: {e}"}
 
     ids = list(ids or [])
@@ -351,6 +350,7 @@ def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5,
         return {"success": True, "results": [], "message": "No matching collections"}
 
     all_results = []
+    failed = []
     for cname in collection_names:
         try:
             collection = client.get_collection(cname, embedding_function=None)
@@ -367,15 +367,20 @@ def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5,
                         }
                     )
         except Exception as e:
-            logger.warning(f"[chroma_subprocess] Skipping collection '{cname}' during search: {e}")
-            continue
+            failed.append({"collection": cname, "error": f"{type(e).__name__}: {e}"})
+
+    # A collection that raised was not searched; if none could be, the search did not run.
+    if len(failed) == len(collection_names):
+        names = ", ".join(f["collection"] for f in failed)
+        return {"success": False, "error": f"Every collection failed: {names}", "collections_failed": failed}
 
     all_results.sort(key=lambda x: x["distance"] if x["distance"] is not None else float("inf"))
 
     return {
         "success": True,
         "results": all_results,
-        "collections_searched": len(collection_names),
+        "collections_searched": len(collection_names) - len(failed),
+        "collections_failed": failed,
         "total_results": len(all_results),
     }
 
@@ -442,7 +447,6 @@ def main(stdin: TextIO | None = None):
         print(json.dumps(result))
 
     except Exception as e:
-        logger.error(f"[chroma_subprocess] Subprocess operation failed: {e}")
         print(json.dumps({"success": False, "error": str(e)}))
         sys.exit(1)
 

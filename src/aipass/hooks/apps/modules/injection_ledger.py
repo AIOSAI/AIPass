@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: injection_ledger.py
-# Version: 1.1.0
+# Version: 1.1.2
 # Description: Per-turn record of what the engine injected into a session, keyed on cadence's turn token (warn-only)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-16
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """What a seat was told, and when — one JSONL record per injecting dispatch.
@@ -19,11 +19,11 @@ import importlib
 import os
 import time
 
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config import ledger_store
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 HELP_COMMANDS = [
     ("ledger", "What this session was told, one line per turn (--session <id>, --last N)"),
@@ -36,7 +36,7 @@ def _turn_token_and_number(payload: dict) -> tuple[int | None, int | None]:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         return cadence.turn_token(payload), cadence.current_turn()
     except Exception as exc:  # a ledger line without a turn is still a record
-        logger.info("[HOOKS] injection_ledger: turn unreadable, recorded without it: %s", exc)
+        logger.warning("[HOOKS] injection_ledger: turn unreadable, recorded without it: %s", exc)
         return None, None
 
 
@@ -48,7 +48,7 @@ def _automated(event_type: str, payload: dict) -> bool | None:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         return bool(cadence.is_automated(payload))
     except Exception as exc:  # a ledger line without the flag is still a record
-        logger.info("[HOOKS] injection_ledger: automated flag unreadable, recorded without it: %s", exc)
+        logger.warning("[HOOKS] injection_ledger: automated flag unreadable, recorded without it: %s", exc)
         return None
 
 
@@ -89,6 +89,14 @@ def print_introspection() -> None:
     console.print("  Connected Handlers: handlers/config/ - ledger_store.py")
 
 
+def _positive(value: str) -> int:
+    """--last's count: a whole number above zero, else argparse refuses it with exit 2."""
+    count = int(value)
+    if count < 1:
+        raise argparse.ArgumentTypeError(f"--last takes a count above zero, not {value}")
+    return count
+
+
 def handle_command(command: str, args: list) -> bool:
     """Route `drone @hooks ledger`."""
     if command != "ledger":
@@ -104,8 +112,10 @@ def handle_command(command: str, args: list) -> bool:
 
     parser = argparse.ArgumentParser(prog="drone @hooks ledger", add_help=False)
     parser.add_argument("--session", default="")
-    parser.add_argument("--last", type=int, default=20)
-    opts, _unknown = parser.parse_known_args(args)
+    parser.add_argument("--last", type=_positive, default=20)
+    opts, unknown = parser.parse_known_args(args)
+    if unknown:
+        return False
     session_id, chosen = (opts.session, "named") if opts.session else _default_session()
     if not session_id:
         console.print("No injection ledger found in the temp dir (nothing has been injected since it was cleared).")
@@ -114,7 +124,7 @@ def handle_command(command: str, args: list) -> bool:
     rows = ledger_store.read_turns(session_id)
     json_handler.log_operation("ledger_read", {"session": session_id, "rows": len(rows)})
     console.print(f"[bold]ledger[/bold] session {session_id} ({chosen}) — {len(rows)} injection moment(s)")
-    for row in rows[-max(opts.last, 1) :]:
+    for row in rows[-opts.last :]:
         stamp = time.strftime("%H:%M:%S", time.localtime(row.get("ts", 0)))
         turn = row.get("turn")
         parts = " ".join(f"{name}={meta.get('chars', 0)}" for name, meta in row["hooks"].items())

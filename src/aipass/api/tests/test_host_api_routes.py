@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_api_routes.py
 # Description: Tests for the host API's live app — the extra guard, ping, bearer auth, scopes, the declared routes
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-10-08
-# Modified: 2026-11-08
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for create_app(), its auth and the declared routes in apps/handlers/host/server.py."""
@@ -38,6 +38,7 @@ from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import settings as host_settings
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.tests.support_host_api import FakeBaud, agent_row
+from aipass.skills import SYSTEM_STATUS_REASON_SWITCH_UNREADABLE, SYSTEM_STATUS_REASON_SWITCHED_OFF
 
 # The patch target stays this file's own constant: sentry's discarded_patch
 # rule reads a target imported from this branch's package as one it judges,
@@ -50,8 +51,8 @@ PATCH_DENIALS_LOGGER = "aipass.api.apps.handlers.host.denials.logger"
 PATCH_DENIALS_JSON = "aipass.api.apps.handlers.host.denials.json_handler"
 PATCH_MACHINE_LOGGER = "aipass.api.apps.handlers.host.machine.logger"
 PATCH_MACHINE_JSON = "aipass.api.apps.handlers.host.machine.json_handler"
-# @skills' process door, patched where it lives: machine.py imports it inside the call.
-PATCH_PROCESSES_DOOR = "aipass.skills.lib.system_status.handler.machine_processes"
+# @skills' process door, mock.patch on the package: machine.py imports it inside the call.
+PATCH_PROCESSES_DOOR = "aipass.skills.machine_processes"
 
 
 # =============================================
@@ -793,18 +794,26 @@ class TestTheMachineProcessesRoute:
         door.assert_not_called()
 
     @pytest.mark.parametrize(
-        ("reason", "detail"),
+        ("reason", "detail", "levels"),
         [
-            ("psutil_missing", "pip install psutil, the recipe"),
-            ("switched_off", "Skill 'system_status' is switched OFF and takes no readings."),
+            ("psutil_missing", "pip install psutil, the recipe", ({"warning"}, {"warning"})),
+            (SYSTEM_STATUS_REASON_SWITCHED_OFF, "Skill 'system_status' is switched OFF.", ({"info"}, {"info"})),
+            (SYSTEM_STATUS_REASON_SWITCH_UNREADABLE, "The switch state could not be read.", ({"error"}, {"warning"})),
         ],
     )
-    def test_a_refusal_maps_the_way_the_vitals_refusal_does(self, processes: Any, reason: str, detail: str) -> None:
-        """ok False: 503 machine_refused, the code in `reason`, the fixed sentence, the detail off the wire."""
-        api, read, door, _ = processes
+    def test_a_refusal_maps_the_way_the_vitals_refusal_does(
+        self, processes: Any, reason: str, detail: str, levels: tuple
+    ) -> None:
+        """503 machine_refused with the code, sentence and ref; logged by the owner's table on both sites."""
+        api, read, door, handler_log = processes
         door.return_value = {"ok": False, "reason": reason, "detail": detail}
 
-        response = api.get("/v1/machine/processes", headers=read)
+        with patch(PATCH_DENIALS_LOGGER) as denial_log:
+            response = api.get("/v1/machine/processes", headers=read)
+
+        called = ("debug", "info", "warning", "error")
+        assert {name for name in called if getattr(handler_log, name).called} == levels[0]
+        assert {name for name in called if getattr(denial_log, name).called} == levels[1]
 
         assert response.status_code == 503
         error = response.json()["error"]
@@ -881,7 +890,6 @@ def agents(store: Path, host_app: Any, tmp_path: Path, monkeypatch: pytest.Monke
     from fastapi.testclient import TestClient
 
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setattr(host_fleet, "snapshot_binary", lambda: "baud")
     monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
     fake = FakeBaud([agent_row()])
@@ -994,6 +1002,108 @@ class TestTheFeedReadsAClaudeSession:
         assert (len(lines), lines[0]["text"], lines[-1]["text"]) == (80, "line 20", "line 99")
 
 
+def _call(call: str, name: str, **args: Any) -> dict:
+    """One Claude tool_use part."""
+    return {"type": "tool_use", "id": call, "name": name, "input": {"file_path": "/srv/x/f.py", **args}}
+
+
+def _answer(call: str, result: Any, error: bool = False) -> dict:
+    """The user row answering one tool call, Claude Code's toolUseResult beside it."""
+    part = {"type": "tool_result", "tool_use_id": call, "content": "ok", **({"is_error": True} if error else {})}
+    return _claude("user", [part], toolUseResult=result)
+
+
+@fastapi_required
+class TestEditAndWriteLinesCarryTheirChange:
+    """A Claude Edit or Write tool line carries `change`, read from its result row only."""
+
+    def test_edits_and_writes_carry_counts_text_and_start_even_past_the_hunk(self, agents: Any, tmp_path: Path) -> None:
+        head = "h\nh\nh\nh\nh\n"
+        # (old, new, the first hunk's oldStart and lines): inside it, past its context, a drifted insert,
+        # a trailing newline, a block repeated after
+        edits = [
+            ("b\nc", "b\nC\nd", 1, [" a", " b", "-c", "+C", "+d", " e"]),
+            (head + "X", head + "Y", 12, [" h", " h", " h", "-X", "+Y", " h", " h", " h"]),
+            ("p\nq\nr", "p\nq\nr\n\nN", 11, [" q", " r", " ", "+", "+N", " z"]),
+            ("/b/\n", "/b/\n/c/\n", 1, [" /a/", " /b/", "+/c/"]),
+            ("A\nB\nC\nX", "A\nB\nC\nY", 20, [" C", "-X", "+Y", " A", " B", " C"]),
+        ]
+        rows = [
+            _claude(
+                "assistant", [_call(f"e{i}", "Edit") for i in range(5)] + [_call("w1", "Write"), _call("w2", "Write")]
+            )
+        ]
+        for i, (old, new, start, lines) in enumerate(edits):
+            patch = [{"oldStart": start, "lines": lines}]
+            rows.append(_answer(f"e{i}", {"oldString": old, "newString": new, "structuredPatch": patch}))
+        update = [{"oldStart": 1, "lines": ["-x", "+y"]}]
+        rows.append(
+            _answer("w1", {"type": "update", "originalFile": "x\n", "content": "y\n", "structuredPatch": update})
+        )
+        rows.append(_answer("w2", {"type": "create", "content": "1\n2\n", "structuredPatch": []}))
+        _jsonl(tmp_path / CLAUDE_FILE, rows)
+
+        changes = [line.get("change") for line in _feed(agents).json()["lines"]]
+
+        path = "/srv/x/f.py"
+        assert changes == [
+            {"path": path, "added": 2, "removed": 1, "start": 2, "old": "b\nc", "new": "b\nC\nd"},
+            {"path": path, "added": 1, "removed": 1, "start": 10, "old": head + "X", "new": head + "Y"},
+            {"path": path, "added": 2, "removed": 0, "start": 10, "old": "p\nq\nr", "new": "p\nq\nr\n\nN"},
+            {"path": path, "added": 1, "removed": 0, "start": 2, "old": "/b/\n", "new": "/b/\n/c/\n"},
+            {"path": path, "added": 1, "removed": 1, "start": 18, "old": "A\nB\nC\nX", "new": "A\nB\nC\nY"},
+            {"path": path, "added": 1, "removed": 1, "before": "x\n", "after": "y\n"},
+            {"path": path, "added": 2, "removed": 0, "before": None, "after": "1\n2\n"},
+        ]
+
+    def test_a_failed_unanswered_or_unplaceable_edit_carries_no_change(self, agents: Any, tmp_path: Path) -> None:
+        patch_ok = {"oldString": "a", "newString": "b", "structuredPatch": [{"oldStart": 1, "lines": ["-a", "+b"]}]}
+        twice = {
+            "oldString": "x",
+            "newString": "x\ny",
+            "structuredPatch": [{"oldStart": 1, "lines": [" ax", " xb", "+y"]}],
+        }
+        calls = [_call("e1", "Edit"), _call("e2", "Edit"), _call("e3", "Edit")]
+        rows = [_claude("assistant", calls), _answer("e1", patch_ok, error=True), _answer("e3", twice)]
+        _jsonl(tmp_path / CLAUDE_FILE, rows)
+
+        lines = _feed(agents).json()["lines"]
+
+        assert [("change" in line, line["text"]) for line in lines] == [(False, "edited f.py")] * 3
+
+    def test_a_line_polled_before_its_result_comes_again_with_its_change(self, agents: Any, tmp_path: Path) -> None:
+        call = _claude("assistant", [_call("w1", "Write")])
+        _jsonl(tmp_path / CLAUDE_FILE, [call])
+        early = _feed(agents).json()["lines"]
+        answer = _answer("w1", {"type": "create", "content": "1\n", "structuredPatch": []})
+        said = _claude("assistant", [{"type": "text", "text": "done"}])
+        _jsonl(tmp_path / CLAUDE_FILE, [call, answer, said])
+
+        again = _feed(agents, since=early[0]["n"]).json()["lines"]
+        settled = _feed(agents, since=again[-1]["n"]).json()["lines"]
+
+        assert "change" not in early[0]
+        assert [(line["n"], line.get("change", {}).get("added")) for line in again] == [
+            (early[0]["n"], 1),
+            (again[-1]["n"], None),
+        ]
+        assert settled == []
+
+    def test_a_change_past_the_cap_keeps_only_path_and_counts(self, agents: Any, tmp_path: Path) -> None:
+        big = "".join(f"{i}\n" for i in range(401))
+        _jsonl(
+            tmp_path / CLAUDE_FILE,
+            [
+                _claude("assistant", [_call("w1", "Write")]),
+                _answer("w1", {"type": "create", "content": big, "structuredPatch": []}),
+            ],
+        )
+
+        change = _feed(agents).json()["lines"][0]["change"]
+
+        assert change == {"path": "/srv/x/f.py", "added": 401, "removed": 0, "large": True}
+
+
 def _item(**payload: Any) -> dict:
     """One Codex rollout response_item row."""
     return {"type": "response_item", "timestamp": "t", "payload": payload}
@@ -1018,7 +1128,10 @@ class TestTheFeedReadsACodexRollout:
 
     def test_rollout_rows_become_lines_with_the_turns_model(self, agents: Any, tmp_path: Path) -> None:
         agents[2].rows[:] = [agent_row(provider="codex", session="c-1")]
-        script = 'tools.exec_command({cmd:"ls -la"}); tools.write_stdin({}); tools.apply_patch("*** Begin Patch\\n*** Update File: src/app.py")'
+        script = (
+            'tools.exec_command({cmd:"ls -la"}); tools.write_stdin({}); '
+            'tools.apply_patch("*** Begin Patch\\n*** Update File: src/app.py")'
+        )
         _jsonl(
             tmp_path / CODEX_FILE,
             [
@@ -1210,12 +1323,10 @@ def _no_model_or_usage_cache_between_tests() -> Any:
 def catalog(client: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """The real app, a read token, HOME in tmp_path; subprocess left real, so a script can stand in for opencode."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     _, raw = host_tokens.issue_token("extension", "read")
     return client, {"Authorization": f"Bearer {raw}"}, None
 
 
-@pytest.mark.skipif(os.name != "posix", reason="a shell script stands in for the opencode binary")
 @fastapi_required
 class TestTheModelCatalog:
     """GET /v1/models: the deck's {claude, codex, opencode, switch} catalog."""

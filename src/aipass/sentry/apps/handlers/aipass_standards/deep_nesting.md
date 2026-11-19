@@ -133,7 +133,7 @@ Add an entry to `.sentry/bypass.json`:
 }
 ```
 
-Or bypass a specific function by line number:
+Or bypass one function, by its `def` line or by its name:
 
 ```json
 {
@@ -142,6 +142,17 @@ Or bypass a specific function by line number:
     "lines": [15]
 }
 ```
+
+```json
+{
+    "standard": "deep_nesting",
+    "file": "path/to/file.py",
+    "functions": ["load_inbox"]
+}
+```
+
+Each function over the limit is its own site, and the message names every one no row waives. A
+scoped row waives the functions it names; every other deep function in the file still convicts.
 
 ---
 

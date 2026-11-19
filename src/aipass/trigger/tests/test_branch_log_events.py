@@ -3,7 +3,7 @@
 # Description: Unit tests for branch_log_events module
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-11-08
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for the branch_log_events module (apps/modules/branch_log_events.py)."""
@@ -14,7 +14,7 @@
 import pytest
 from unittest.mock import MagicMock, call, patch
 
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.trigger.apps.modules import branch_log_events
 
 _MOCKS: dict = {}
@@ -44,7 +44,6 @@ def _mock_infrastructure(monkeypatch, tmp_path):
     mock_log_watcher.get_watcher_status = MagicMock(
         return_value={
             "active": True,
-            "watchdog_available": True,
             "seen_hashes_count": 0,
             "pending_flush": False,
             "aipass_root": "/fake/path",
@@ -125,7 +124,6 @@ def test_status_returns_dict_from_handler():
     result = mod.status()
     assert isinstance(result, dict)
     assert result["active"] is True
-    assert result["watchdog_available"] is True
     assert result["seen_hashes_count"] == 0
     assert result["aipass_root"] == "/fake/path"
 
@@ -310,13 +308,12 @@ def test_print_help_outputs_commands(capsys):
 
 
 def test_handle_command_status_prints_all_fields(capsys):
-    """handle_command('status', []) prints service, process, watchdog, hashes, pending flush, root, fleet dirs."""
+    """handle_command('status', []) prints service, process, hashes, pending flush, root, fleet dirs."""
     mod = _import_module()
     mod.handle_command("status", [])
     output = capsys.readouterr().out
     assert "Service: unknown" in output
     assert "This process:" in output
-    assert "Watchdog available:" in output
     assert "Seen error hashes:" in output
     assert "Pending flush: False" in output
     assert "AIPASS root:" in output

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_fence.py
 # Description: Fence probe for test_handlers_fence.py, run from a kin seat and from foreign copies
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-07
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Probe for the handlers fence of apps/handlers/__init__.py (no test_ prefix: never collected)."""
@@ -21,7 +21,7 @@ import aipass
 BRANCH = "aipass"
 HANDLERS = f"aipass.{BRANCH}.apps.handlers"
 A_HANDLER = f"{HANDLERS}.json.json_handler"
-A_DOOR = "aipass.aipass.apps.modules.feedback"
+A_DOOR = "aipass.aipass.apps.modules.read"
 KIN_PROBE = f"aipass.{BRANCH}.tests.support_fence"
 
 

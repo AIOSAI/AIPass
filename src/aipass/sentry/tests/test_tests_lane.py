@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_tests_lane.py
 # Description: Template v1 — tests_lane module, retire_ops and template_ops
-# Version: 1.0.7
+# Version: 1.0.8
 # Created: 2026-09-21
-# Modified: 2026-11-07
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/tests_lane.py and the handlers it drives."""
@@ -476,6 +476,22 @@ class TestPinning:
         tests_lane.handle_command("tests", ["pinning", "AGENTS.md"])
 
         assert capsys.readouterr().out.splitlines() == ["tests/test_pin.py"]
+
+    def test_a_path_outside_the_repository_is_named_and_skipped_not_a_crash(self, capsys, pinned_repo, tmp_path):
+        """THE DEFECT: trigger ad0e7ab5, a seed-repo path crashed relative_to; the AIPass paths were never searched."""
+        outside = tmp_path / "seed" / "door.md"
+        assert tests_lane.handle_command("tests", ["pinning", str(outside), ".claude/commands/codex.md"]) is True
+
+        out, err = capsys.readouterr()
+        assert len(out.splitlines()) == 3
+        assert "door.md: outside the repository" in err and "skipped" in err
+
+    def test_only_paths_outside_the_repository_refuse_with_nothing_to_check(self, capsys, pinned_repo, tmp_path):
+        with pytest.raises(CommandRefused) as refusal:
+            tests_lane.handle_command("tests", ["pinning", str(tmp_path / "seed" / "door.md")])
+
+        assert refusal.value.code == 3
+        assert capsys.readouterr().out == ""
 
     def test_an_absolute_path_and_a_python_file_and_a_miss_each_say_so_on_stderr(self, capsys, pinned_repo):
         args = ["pinning", str(pinned_repo / ".claude" / "commands" / "codex.md"), "apps/x.py", "README.md"]

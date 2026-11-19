@@ -110,7 +110,7 @@ def scan(branch_root: Path) -> List[Tuple[Path, int, str]]:
 
 
 def reported_path(path: PurePath, root: PurePath) -> str:
-    """The path from root as the finding prints it: ``tests/conftest.py``, forward slashes on every host."""
+    """The path from root as the finding prints it: ``tests/conftest.py``."""
     return path.relative_to(root).as_posix()
 
 

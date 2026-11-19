@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake_managers.py
 # Description: Tests for the wake's manager lanes, the wake-back opt-out, the Fable grant read and the dashboard refresh
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's manager lanes, wake-back and wake_dashboard.py's refresh."""
@@ -22,7 +22,8 @@ from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 import aipass.ai_mail.apps.handlers.dispatch.wake_dashboard as wake_dashboard_mod
-import aipass.prax.apps.modules.dashboard as prax_dashboard_mod
+import aipass.prax
+from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import TRANSCRIPT_NAMES
 from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
 from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import refresh_recipient_dashboard
 from aipass.ai_mail.apps.handlers.dispatch.wake import (
@@ -339,7 +340,7 @@ class TestWakeBackOptOut:
             "@testbranch",
             str(branch_path / ".ai_mail.local" / ".dispatch.lock"),
             "@devpulse",
-            str(branch_path / "logs" / "dispatch_stderr.log"),
+            str(branch_path / "logs" / "dispatch_stderr.out"),
             "--",
         ]
         assert "--no-wake-back" not in cmd
@@ -423,7 +424,8 @@ class TestIsManager:
 class TestTheGrantIsReadFromTheUntrackedConfig:
     """fable_allowed() — The owner edits the grant, the repo does not ship it.
 
-    Every fallback fails toward the written default, never toward an empty grant (a silent demotion).
+    A missing config (or one without the key) keeps the written default; an unreadable or
+    wrong-shape one grants nobody, at ERROR (the owner's 2026-11-14 ruling: fail closed, loudly).
     """
 
     def test_a_missing_config_falls_back_to_the_written_default(self, monkeypatch, tmp_path):
@@ -432,12 +434,19 @@ class TestTheGrantIsReadFromTheUntrackedConfig:
         assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
         assert "@devpulse" in wake_mod.fable_allowed()
 
-    def test_an_unparseable_config_falls_back_to_the_default(self, monkeypatch, tmp_path):
+    def test_an_unparseable_config_grants_nobody(self, monkeypatch, tmp_path):
         config = tmp_path / "safety_config.json"
         config.write_text("{not json{{{", encoding="utf-8")
         monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
 
-        assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
+        assert wake_mod.fable_allowed() == frozenset()
+
+    def test_a_config_that_is_not_an_object_grants_nobody(self, monkeypatch, tmp_path):
+        config = tmp_path / "safety_config.json"
+        config.write_text(json.dumps(["@devpulse"]), encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
+
+        assert wake_mod.fable_allowed() == frozenset()
 
     def test_a_config_without_the_key_falls_back_to_the_default(self, monkeypatch, tmp_path):
         config = tmp_path / "safety_config.json"
@@ -446,15 +455,14 @@ class TestTheGrantIsReadFromTheUntrackedConfig:
 
         assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
 
-    def test_a_grant_that_is_not_a_list_falls_back_to_the_default(self, monkeypatch, tmp_path):
+    def test_a_grant_that_is_not_a_list_grants_nobody(self, monkeypatch, tmp_path):
         """The typo shape: a bare string instead of a list. Iterating it would
-        grant '@', '@d', '@e' — a frozenset of letters that matches nobody, i.e.
-        a silent revocation dressed as a config."""
+        grant '@', '@d', '@e'; it is refused whole instead, at ERROR."""
         config = tmp_path / "safety_config.json"
         config.write_text(json.dumps({"fable_allowed": "@devpulse"}), encoding="utf-8")
         monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
 
-        assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
+        assert wake_mod.fable_allowed() == frozenset()
 
     def test_a_written_grant_replaces_the_default_entirely(self, monkeypatch, tmp_path):
         """The owner moving the seat means the default no longer applies — this is
@@ -486,6 +494,18 @@ class TestTheGrantIsReadFromTheUntrackedConfig:
     def test_the_grant_lives_where_the_repo_does_not_ship_it(self):
         """The config path is inside .ai_mail.local/, which is gitignored."""
         assert wake_mod.CONFIG_FILE.parent.name == ".ai_mail.local"
+
+
+class TestTranscriptNamesAreACrossBranchContract:
+    """Sentry's log_structure check and devpulse's usage tool spell these names out: a rename breaks them."""
+
+    def test_the_transcript_names_never_end_in_log(self):
+        assert TRANSCRIPT_NAMES == {
+            "stdout": "dispatch_stdout.out",
+            "stderr": "dispatch_stderr.out",
+            "attempt": "dispatch_stdout.attempt-{n}.out",
+            "rotated": ".out.1",
+        }
 
 
 class TestDispatchStatusLabelsAreACrossBranchContract:
@@ -574,9 +594,8 @@ class TestRecipientDashboardRefresh:
 
     @staticmethod
     def _prax(monkeypatch, fake=None, fleet_guard=True):
-        """Patch the prax entry point where the wake imports it from — the
-        MODULE door (apps/modules/dashboard.py), prax's published surface."""
-        prax_refresh = prax_dashboard_mod
+        """Patch the refresh at its home: the wake takes it from the uncached prax door at call time."""
+        prax_refresh = sys.modules[aipass.prax.refresh_single_dashboard.__module__]
 
         if fake is not None:
             monkeypatch.setattr(prax_refresh, "refresh_single_dashboard", fake)

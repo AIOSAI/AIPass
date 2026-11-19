@@ -1,28 +1,20 @@
 # =================== AIPass ====================
 # Name: log_health.py
 # Description: PRAX Log Health Command — rate overview
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-14
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """
 PRAX Log Health Module
 """
 
-import os
 import sys
 from typing import List
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.cli.help_flags import wants_help
 from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument, refuse
@@ -134,14 +126,10 @@ def _display_rates(results: list, is_scan: bool) -> None:
 
 
 def _get_event_callback():
-    """Return trigger.fire if available, else None."""
-    try:
-        from aipass.trigger.apps.modules.core import trigger
+    """trigger.fire, imported at call time: trigger imports prax's logger."""
+    from aipass.trigger import trigger
 
-        return trigger.fire
-    except (ImportError, OSError) as exc:
-        logger.info("[log-health] trigger not available: %s", exc)
-        return None
+    return trigger.fire
 
 
 def handle_command(command: str, args: List[str]) -> bool:

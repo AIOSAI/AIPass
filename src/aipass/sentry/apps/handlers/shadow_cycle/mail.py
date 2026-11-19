@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mail.py
 # Description: hand the cycle summary to ai_mail through drone - email, never a dispatch
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-02
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -16,12 +16,11 @@ from typing import Optional
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.module_root import module_file
 
 MODULE_NAME = "shadow_cycle.mail"
 
 #: ai_mail reads the sender's passport from the cwd, so the send runs from here.
-SENTRY_ROOT = module_file(__file__).parents[3]
+SENTRY_ROOT = Path(__file__).resolve().parents[3]
 
 MAIL_COMMAND: tuple = ("drone", "@ai_mail", "email")
 

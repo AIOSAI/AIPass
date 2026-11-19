@@ -12,25 +12,18 @@ ai_mail Branch - Main Orchestrator
 Main handles routing; auto-discovered modules implement functionality.
 """
 
-import os
 import sys
 import importlib
 import signal
 from pathlib import Path
 from typing import Any, List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
+from aipass.cli import console, error, reset_command_state, resolve_exit
 
 _UPDATE_SECTION = None  # type: ignore
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 MODULE_ROOT = Path(__file__).parent
 
@@ -126,24 +119,21 @@ def discover_modules() -> List[Any]:
             logger.info(f"  [door] {module_name}")
             continue
 
-        try:
-            module = importlib.import_module(module_name)
+        # A module that cannot import raises: main says which and why, never "No modules found".
+        module = importlib.import_module(module_name)
 
-            if hasattr(module, "handle_command"):
-                modules.append(module)
-                logger.info(f"  [+] {module_name}")
-            else:
-                logger.warning(f"  [!] {module_name} - missing handle_command()")
-
-        except Exception as e:
-            logger.error(f"  [-] {module_name} - import error: {e}")
+        if hasattr(module, "handle_command"):
+            modules.append(module)
+            logger.info(f"  [+] {module_name}")
+        else:
+            logger.warning(f"  [!] {module_name} - missing handle_command()")
 
     logger.info(f"[{Path(__file__).stem}] Discovered {len(modules)} modules")
     return modules
 
 
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
-    """Route command to appropriate module"""
+    """Route command to appropriate module; a module that raises propagates, so main reports that command failing."""
     for module in modules:
         try:
             if module.handle_command(command, args):
@@ -151,8 +141,6 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
         except BrokenPipeError:
             logger.info(f"[ai_mail] Broken pipe in {module.__name__} (stdout closed early)")
             return True
-        except Exception as e:
-            logger.error(f"Module {module.__name__} error: {e}")
 
     return False
 
@@ -207,19 +195,26 @@ def main():
             error(refusal)
             return 2
 
-        if route_command(command, remaining_args, modules):
+        try:
+            handled = route_command(command, remaining_args, modules)
+        except Exception as e:
+            # A module recognised the command and crashed in it: its failure (exit 2), not "Unknown command".
+            logger.error(f"Module error in {command}: {e}")
+            error(f"{command} failed: {type(e).__name__}: {e}")
+            return 2
+
+        if handled:
             return resolve_exit(True)
-        else:
-            error(f"Unknown command: {command}")
-            return 1
+        error(f"Unknown command: {command}")
+        return 1
 
     except Exception as exc:
         logger.error("[ai_mail] Unhandled error in main: %s", exc)
+        error(f"{type(exc).__name__}: {exc}")
         return 1
 
 
 if __name__ == "__main__":
     # Set SIGPIPE here, never at import: an importer (a pytest worker) would die silently on its first EPIPE.
-    if hasattr(signal, "SIGPIPE"):
-        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     sys.exit(main())

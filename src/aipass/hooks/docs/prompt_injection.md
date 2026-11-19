@@ -24,6 +24,8 @@ fire: the kernel and the two notice channels (alerts, mail). Navmap, branch and 
 not replaced. The mode does not force turn 0, because turn 0 fires *every* loader, the whole grounding
 stack (~21,000 chars) on every prompt. cadence logs one WARNING per degraded turn from the kernel's decision
 (`[HOOKS] cadence DEGRADED loader=tier0 fires: turns cannot be counted, … — <cause>`) and the rest at INFO.
+A `should_fire` that raises instead of answering withholds navmap, branch and identity too: each raise is the
+engine's ERROR fault line, one marker per loader that stays the same every prompt, so medic hears it once.
 Dropping alerts and mail from `DEGRADED_LOADERS` makes the mode literally kernel-only. It is a rare path,
 made cheap and loud.
 
@@ -44,6 +46,13 @@ UserPromptSubmit handler (`temporal`, `context_gauge`, `presence_gate`, …) fir
 and never on the period. `identity`, `alert` and mail beat every 5th turn and `branch` on the global
 period (5), all at offset 0. An operator's `cadence_config.json` merges over each entry, so
 `{"loaders": {"tier0": {"beat": true}}}` puts the kernel back on the beat.
+
+**The mail line names the kinds.** `notification/email.py` counts the branch's unread inbox rows by
+their `kind` (@ai_mail `docs/mail_kinds.md`): `You have 4 new emails: 1 medic, 1 rounds, 2 mail - check
+with: drone @ai_mail inbox | then: drone @ai_mail view <id> | close with: drone @ai_mail close <id>`.
+`notice` rows (`Dispatch complete:` and the like) are neither counted nor named, so an inbox of only notices
+prints no line and cadence sees zero. A stored kind outside the contract is named as it is; a row with no
+`kind` is read by `aipass.ai_mail.mail_kind`.
 
 **A turn the harness sent is not a turn.** A Monitor that expires wakes the seat with a `<task-notification>`
 prompt, and UserPromptSubmit hooks fire on it. `cadence.is_automated` reads the payload's `source` first

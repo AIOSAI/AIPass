@@ -3,7 +3,7 @@
 # Description: Tests for cli's entry point routing, help and introspection
 # Version: 1.2.0
 # Created: 2026-09-03
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/cli.py — routing, help, introspection and the exit seam."""
@@ -111,6 +111,15 @@ def test_discovery_hands_main_the_imported_modules_not_copies():
 
     assert display.command_failed() is True
     assert branch_entry.resolve_exit(True) == 2
+
+
+def test_discovery_raises_on_a_module_that_cannot_import_rather_than_dropping_it(monkeypatch, tmp_path):
+    """A dropped module made its verbs exit 1 as unknown commands, hiding the import error."""
+    (tmp_path / "unimportable.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(branch_entry, "MODULES_DIR", tmp_path)
+
+    with pytest.raises(ModuleNotFoundError, match="unimportable"):
+        branch_entry.discover_modules()
 
 
 def test_no_args_triggers_introspection(monkeypatch, capsys):

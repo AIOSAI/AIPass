@@ -3,7 +3,7 @@
 # Description: Host API settings handler — the desktop's gear rules, held in Python
 # Version: 1.2.0
 # Created: 2026-08-16
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/host/settings.py, the desktop's settings lane."""
@@ -23,7 +23,7 @@ import pytest
 
 from aipass.api.apps.handlers.host import settings as host_settings
 
-WHERE_THE_FLAG_LIVES = "from aipass.hooks.apps import sound; print(sound.SOUND_FLAG)"
+WHERE_THE_FLAG_LIVES = "from aipass.hooks import SOUND_FLAG; print(SOUND_FLAG)"
 
 
 def _where_the_door_would_write() -> Path:
@@ -114,7 +114,6 @@ class TestAgentSettings:
         assert view["model"] == "sonnet"
         assert view["auto_compact_window"] == 350_000
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode bits; Windows has none to keep")
     def test_a_write_keeps_the_files_mode(self, tmp_path) -> None:
         """The staged file is born 0600; the replaced file must keep the mode it had."""
         path = agent_file(tmp_path)
@@ -285,7 +284,6 @@ class TestHooksSound:
 
         flag = tmp_path / ".aipass" / operator_flag.name
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         # TMPDIR too: the door moves a legacy temp-dir flag once, and the operator's must never be the one moved.
         monkeypatch.setenv("TMPDIR", str(tmp_path))
 
@@ -325,7 +323,6 @@ class TestTheGuardsOnTheLiveDoorTest:
         operator_flag = _where_the_door_would_write()
         elsewhere = tmp_path / "elsewhere"
         monkeypatch.setenv("HOME", str(elsewhere))
-        monkeypatch.setenv("USERPROFILE", str(elsewhere))
 
         would_write = _where_the_door_would_write()
 
@@ -366,16 +363,7 @@ class TestAnUnreadableFileIsNeverBlank:
 
         assert "settings.local.json" in str(refusal.value)
 
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="chmod 0o000 cannot construct an unreadable file here - no POSIX mode bits",
-    )
-    # Trap: these evaluate at collection. test_windows_import hides os.geteuid with
-    # os.name still "posix", so a bare os.geteuid() takes the whole file down; keep the getattr.
-    @pytest.mark.skipif(
-        sys.platform == "win32" or getattr(os, "geteuid", lambda: -1)() == 0,
-        reason="a file mode only means something to a non-root POSIX process",
-    )
+    @pytest.mark.skipif(os.geteuid() == 0, reason="a file mode only means something to a non-root process")
     def test_a_file_we_may_not_read_is_a_fault_not_a_blank(self, tmp_path) -> None:
         """The one that would have cost real settings: unreadable, not empty."""
         secret = tmp_path / "settings.local.json"
@@ -393,13 +381,14 @@ class TestAFailedWriteLeavesNothingBehind:
     """The staged file is cleanup, and cleanup that fails is still reported."""
 
     def test_the_staged_file_does_not_survive_a_failed_write(self, tmp_path) -> None:
-        path = tmp_path / "settings.local.json"
+        # Its own directory: autouse fixtures put their feeds in tmp_path itself.
+        path = tmp_path / ".claude" / "settings.local.json"
 
         with pytest.raises(TypeError):
             host_settings.write_atomically(path, {"unserialisable": object()})
 
         assert not path.exists()
-        assert list(tmp_path.iterdir()) == []
+        assert list(path.parent.iterdir()) == []
 
     def test_a_cleanup_that_itself_fails_is_logged_not_swallowed(self, tmp_path, monkeypatch) -> None:
         """
@@ -431,20 +420,13 @@ class TestTheCorpusForcedTwoFixes:
     def test_a_parent_that_is_a_file_is_a_fault_not_a_fresh_branch(self, tmp_path) -> None:
         """
         Divergence 2. A missing directory on the way to the file means nobody
-        has written settings yet; where the OS reads it as missing (Windows), blank is the answer."""
+        has written settings yet; a file in the way is NotADirectoryError, a fault."""
         blocking = tmp_path / "claude-settings"
         blocking.write_text("I am a file, not a directory", encoding="utf-8")
         target = blocking / "settings.local.json"
 
-        with pytest.raises(OSError) as blocked:
-            target.read_bytes()
-        world_distinguishes_the_fault = not isinstance(blocked.value, FileNotFoundError)
-
-        if world_distinguishes_the_fault:
-            with pytest.raises(host_settings.SettingsUnavailable):
-                host_settings.read_object(target)
-        else:
-            assert host_settings.read_object(target) == {}
+        with pytest.raises(host_settings.SettingsUnavailable):
+            host_settings.read_object(target)
 
     def test_a_negative_window_reads_as_null_not_as_a_negative(self, tmp_path) -> None:
         """

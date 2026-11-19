@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unused_function_check.py
 # Description: Unused Function Standards Checker Handler
-# Version: 1.1.2
+# Version: 1.3.0
 # Created: 2026-03-22
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -22,7 +22,8 @@ from pathlib import Path
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
-from aipass.sentry.apps.handlers.bypass.ignore_handler import is_sentry_ignored, load_ignore_entries
+from aipass.sentry.apps.handlers.bypass.ignore_handler import find_repo_root, is_sentry_ignored, load_ignore_entries
+from aipass.sentry.apps.handlers.aipass_standards.front_door_count import door_names
 from aipass.sentry.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir, is_disabled_file
 
 # APPLIES_TO: same discovery problem as dead_code - a test function has no caller by name.
@@ -73,10 +74,50 @@ def _collect_python_files(branch_path: Path, ignore_entries: list) -> list[Path]
     if not branch_path.is_dir():
         return files
     for py_file in branch_path.rglob("*.py"):
-        if _should_skip(py_file, branch_path, ignore_entries):
+        if not py_file.is_file() or _should_skip(py_file, branch_path, ignore_entries):
             continue
         files.append(py_file)
     return sorted(files)
+
+
+#: Per process: a fleet audit reads each sibling once, not once per branch.
+_SIBLING_SOURCES: dict[Path, list[tuple[Path, str]]] = {}
+_STRIPPED: dict[Path, str] = {}
+
+
+def _outside_callers(branch: Path) -> str:
+    """Code outside the branch that may call into it: the handlers the repo's hooks.json names
+    under ``aipass.<branch>.``, and every sibling branch's product file that names ``aipass.<branch>``."""
+    prefix = f"aipass.{branch.name}"
+    parent = branch.parent
+    if parent not in _SIBLING_SOURCES:
+        _SIBLING_SOURCES[parent] = [
+            (py_file, py_file.read_text(encoding="utf-8", errors="ignore"))
+            for sibling in sorted(p for p in parent.iterdir() if p.is_dir())
+            for py_file in _collect_python_files(sibling, [])
+        ]
+    mention = re.compile(rf"\b{re.escape(prefix)}\b")
+    parts: list[str] = []
+    for py_file, raw in _SIBLING_SOURCES[parent]:
+        if not py_file.is_relative_to(branch) and mention.search(raw):
+            if py_file not in _STRIPPED:
+                _STRIPPED[py_file] = _strip_non_code(raw)
+            parts.append(_STRIPPED[py_file])
+    repo = find_repo_root(branch)
+    hooks_json = repo / ".aipass" / "hooks.json" if repo else None
+    if hooks_json is not None and hooks_json.is_file():
+        handlers = re.findall(r'"handler"\s*:\s*"([\w.]+)"', hooks_json.read_text(encoding="utf-8"))
+        parts += [h.rsplit(".", 1)[1] for h in handlers if h.startswith(prefix + ".")]
+    return "\n".join(parts)
+
+
+def _own_door_names(branch: Path) -> str:
+    """The names the branch's own package top file hands out: the door is how other branches reach them."""
+    top = branch / "__init__.py"
+    if not top.is_file():
+        return ""
+    # Unparseable raises: a package top file Python cannot read breaks every import of the branch.
+    return " ".join(door_names(top.read_text(encoding="utf-8", errors="ignore")))
 
 
 def _strip_non_code(source: str) -> str:
@@ -410,7 +451,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             continue
         file_sources[py_file] = _strip_non_code(raw)
 
-    corpus = "\n".join(file_sources.values())
+    corpus = "\n".join([*file_sources.values(), _outside_callers(branch), _own_door_names(branch)])
 
     all_functions: list[tuple[str, int, int, Path]] = []
     unparsed: list[str] = []
@@ -482,14 +523,15 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             details.append(f"  ... and {len(unused_functions) - 15} more")
         detail_text = "\n".join(details)
 
-        # Says "no caller in this branch", never "unused": cross-branch and importlib callers are invisible.
+        # Says "no caller in this branch", never "unused": a caller that never names the branch is invisible.
         checks = [
             {
                 "name": "Unused functions",
                 "passed": passed,
                 "message": (
                     f"{len(unused_functions)} with no caller in this branch, out of "
-                    f"{total_functions} functions ({score}% clean) — a static per-branch scan; "
+                    f"{total_functions} functions ({score}% clean) — a static scan of this branch, "
+                    f"sibling branches that name its package, and hooks.json handlers; other "
                     f"cross-branch and dynamic (importlib) callers are NOT visible to it, so "
                     f"confirm before deleting\n{detail_text}"
                 ),

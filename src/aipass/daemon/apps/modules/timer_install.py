@@ -3,7 +3,7 @@
 # Description: Idempotent systemd user timer installer for daemon scheduler
 # Version: 1.2.0
 # Created: 2026-06-25
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -19,12 +19,11 @@ from pathlib import Path
 from typing import List, Optional
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
-from aipass.daemon.apps.handlers.module_root import module_file
 
-_DAEMON_ROOT = module_file(__file__).parents[2]
+_DAEMON_ROOT = Path(__file__).resolve().parents[2]
 _UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 
 # A module constant, not a Path.home() call in _install(): a call-time path has no test seam,
@@ -191,14 +190,12 @@ def _uninstall() -> int:
         console.print(f"  [dim]Not installed:[/dim] no daemon-tick unit in {_UNIT_DIR}, nothing to remove")
         logger.info("[timer_install] uninstall: no daemon-tick unit file, nothing to remove")
 
+    from aipass.trigger import trigger
+
     for dst in installed:
         dst.unlink()
         try:
-            from aipass.trigger.apps.modules.core import trigger
-
             trigger.fire("file_deleted", path=str(dst), source="timer_install")
-        except ImportError:
-            logger.info("[timer_install] Trigger module not available, skipping event fire")
         except Exception as e:
             logger.warning("[timer_install] Trigger fire failed (non-critical): %s", e)
         console.print(f"  [yellow]Removed:[/yellow] {dst}")

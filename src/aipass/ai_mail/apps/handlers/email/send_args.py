@@ -1,19 +1,20 @@
 # =================== AIPass ====================
 # Name: send_args.py
 # Description: Email Send Argument Parsing Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
 Email Send Argument Parsing Handler
 """
 
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import List, Dict, Optional, Any
 
 from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.handlers.email.mail_kind import MAIL_KINDS
 
 
 def _flag_error(error: str, **parsed: Any) -> Dict[str, Any]:
@@ -27,6 +28,7 @@ def _flag_error(error: str, **parsed: Any) -> Dict[str, Any]:
         "subject": None,
         "message": None,
         "upsert_key": None,
+        "kind": None,
         "mode": "error",
         "error": error,
     }
@@ -88,6 +90,21 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
                 from_branch=from_branch,
             )
 
+    kind = None
+    if "--kind" in working_args:
+        idx = working_args.index("--kind")
+        kind = working_args[idx + 1] if idx + 1 < len(working_args) else None
+        if kind not in MAIL_KINDS:
+            return _flag_error(
+                f"--kind needs one of {', '.join(MAIL_KINDS)} (got {kind!r})",
+                auto_execute=auto_execute,
+                no_memory_save=no_memory_save,
+                reply_to=reply_to,
+                from_branch=from_branch,
+                upsert_key=upsert_key,
+            )
+        working_args = working_args[:idx] + working_args[idx + 2 :]
+
     recipients = []
     rest = []
     for a in working_args:
@@ -120,6 +137,7 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
         "subject": subject,
         "message": message,
         "upsert_key": upsert_key,
+        "kind": kind,
         "mode": mode,
         "error": None if mode != "error" else "Usage: send @recipient [subject] [message]",
     }
@@ -134,11 +152,8 @@ def resolve_dispatch_target(
     if not auto_execute:
         return None
 
-    # A Windows path starts with a drive, not a slash: PureWindowsPath knows it
-    # on every host, where Path.is_absolute only knows the host's own form.
-    windows_absolute = PureWindowsPath(branch).is_absolute()
-    if branch.startswith("/") or branch.startswith("~") or windows_absolute:
-        name = (PureWindowsPath(branch) if windows_absolute else Path(branch)).name.lower()
+    if branch.startswith("/") or branch.startswith("~"):
+        name = Path(branch).name.lower()
         if get_branch_info_fn:
             branch_info = get_branch_info_fn(Path(branch))
             if branch_info:

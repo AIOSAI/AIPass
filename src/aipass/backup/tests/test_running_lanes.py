@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_running_lanes.py
 # Description: Tests for the running-lane progress files every lane writes under .backup/running/
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-16
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
-"""Tests for apps/handlers/state/progress.py as snapshot, versioned, all and drive_sync drive it."""
+"""Tests for apps/handlers/state/progress.py as snapshot, all and drive_sync drive it."""
 
 # A new file for DPLAN-0412 item 1: the progress file is one behaviour shared by
 # four lanes, so it reads as one unit here rather than four slices in four files.
@@ -164,7 +164,7 @@ class TestTheSnapshotLaneWritesItsProgressFile:
 
 
 class TestAllWritesEachSubLaneInTurn:
-    """Under all, snapshot then versioned each write their own file with verb all and the one pid."""
+    """Under all, snapshot writes its own file with verb all and the one pid."""
 
     def test_each_sub_lane_file_says_verb_all_with_the_same_pid_and_none_is_left_behind(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, writes: list
@@ -178,7 +178,7 @@ class TestAllWritesEachSubLaneInTurn:
         for name, _doc in writes:
             if not lanes_in_order or lanes_in_order[-1] != name:
                 lanes_in_order.append(name)
-        assert lanes_in_order == ["snapshot.json", "versioned.json"]
+        assert lanes_in_order == ["snapshot.json"]
         assert {doc["verb"] for _n, doc in writes} == {"all"}
         assert {doc["lane"] + ".json" == name for name, doc in writes} == {True}
         assert {doc["pid"] for _n, doc in writes} == {os.getpid()}
@@ -261,7 +261,7 @@ class TestTheReaderDropsStaleFiles:
     def test_a_file_for_this_live_process_is_listed_as_written(self, tmp_path: Path) -> None:
         root = tmp_path / "proj"
         (root / ".backup").mkdir(parents=True)
-        lane = progress.LaneProgress(str(root), "versioned", "all")
+        lane = progress.LaneProgress(str(root), "snapshot", "all")
         lane.start()
         try:
             listed = progress.read_running(str(root))
@@ -269,7 +269,7 @@ class TestTheReaderDropsStaleFiles:
             lane.close()
 
         assert len(listed) == 1
-        assert listed[0]["verb"] == "all" and listed[0]["lane"] == "versioned"
+        assert listed[0]["verb"] == "all" and listed[0]["lane"] == "snapshot"
         assert listed[0]["pid"] == os.getpid() and listed[0]["progress"] is None
         assert progress.read_running(str(root)) == []
 

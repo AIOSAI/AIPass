@@ -32,8 +32,10 @@ under `lib/` — and the first match for a name wins, so a project can shadow a
 built-in without editing it. Before running anything, a skill can be asked
 whether its requirements are actually met on this machine: Python packages,
 binaries on PATH, config keys. Each skill also has an off-switch that survives a
-reboot; switching one off stops the processes it declares, blocks their respawn,
-and makes the runner refuse to start it.
+reboot. Off means no code of the skill runs: its declared processes stop and
+cannot respawn, `run` refuses, `info` and `validate` import nothing, and every
+function served from the package refuses. Off cannot stop someone reading a
+SKILL.md off disk.
 
 The skills that ship with AIPass live in `lib/`: branch health, drone command
 reference, GitHub, inbox check, screen lock and system status.
@@ -66,10 +68,8 @@ under `apps/handlers/`. Discovery scans the search paths and parses frontmatter;
 the loader parses a full `SKILL.md` and imports a handler dynamically; the runner
 dispatches an action or renders a markdown-only skill; the creator stamps a new
 skill from a template; the validator checks requirements; the switch owns the
-on/off state and its systemd actuation. Two handlers are infrastructure rather
-than a verb: `module_paths.py`, which locates a module without ever reading the
-working directory, and the `json/` shim, which binds the fleet's one JSON
-service. `apps/handlers/__init__.py` is a fence: another branch that imports
+on/off state and its systemd actuation. One handler is infrastructure rather
+than a verb: the `json/` shim, which binds the fleet's one JSON service. `apps/handlers/__init__.py` is a fence: another branch that imports
 this branch's handlers is refused.
 
 Built-in skills live under `lib/`, one directory each, and the templates the
@@ -85,7 +85,6 @@ re-derived from the real tree and read on every prompt.
 | [docs/off_switch.md](docs/off_switch.md) | What OFF means, what it stops, how it fails closed |
 | [docs/runner_notes.md](docs/runner_notes.md) | How a skill is executed, and the doors that bypass the runner |
 | [docs/system_status.md](docs/system_status.md) | The system_status skill and its published reads, `machine_vitals()` and `machine_processes()` |
-| [docs/dead_cwd.md](docs/dead_cwd.md) | Importing without a readable working directory |
 | [docs/json_handler.md](docs/json_handler.md) | Why the JSON handler is a shim, and what may not be added to it |
 
 The same index, with the pages beside each other, is in [docs/](docs/).
@@ -109,10 +108,15 @@ The same index, with the pages beside each other, is in [docs/](docs/).
 - **Agents** — discoverable capability units, through `drone`.
 - **Projects** — local skill scaffolding, written into the project's own
   `.aipass/skills/`.
-- **@api** — `machine_vitals()` from the system_status skill, relayed on the
-  host API's machine route and drawn by the phone monitor; and `lock_state()`
-  from the screen_lock skill, beside the lock verb. Both are imported
-  in-process, so both consult the off-switch themselves.
+- **@api** — `machine_vitals()` and `machine_processes()` from the
+  system_status skill, relayed on the host API's machine route and drawn by
+  the phone monitor; and `lock_state()` and `lock_screen()` from the
+  screen_lock skill, beside the lock verb. Each is imported in-process
+  through the package door, `from aipass.skills import machine_vitals`, so the
+  runner's off-switch gate never sees it: all four consult the switch
+  themselves, and off means off. The door also serves the two skills'
+  contract constants under skill-prefixed names (`SYSTEM_STATUS_REASONS`,
+  `SCREEN_LOCK_REASON_NO_SESSION` and the rest).
 
 ---
 

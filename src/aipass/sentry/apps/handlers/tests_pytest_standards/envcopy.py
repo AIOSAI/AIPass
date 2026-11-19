@@ -3,7 +3,7 @@
 # Description: copy-first scratch environment for the pytest adapter (Law M10)
 # Version: 1.4.1
 # Created: 2026-08-29
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """The scratch environment a suite is measured inside. Law M10 made concrete.
@@ -47,7 +47,7 @@ RSYNC_EXCLUDES: Tuple[str, ...] = (
     ".*_*.tmp",
 )
 
-#: Repo-root directories whose tracked files suites read by path (bootstrap, cross_os).
+#: Repo-root directories whose tracked files suites read by path.
 ROOT_DIRS: Tuple[str, ...] = (".aipass", "tests")
 
 TRACKED_QUERY: Tuple[str, ...] = ("drone", "@git", "tracked")

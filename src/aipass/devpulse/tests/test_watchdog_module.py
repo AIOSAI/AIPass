@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog module router
 # Version: 1.2.0
 # Created: 2026-04-14
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/watchdog.py, the watchdog module router (Phase 1, FPLAN-0186)."""
@@ -20,10 +20,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import aipass.devpulse.apps.handlers.owner.guard as owner_guard
-from aipass.spawn.apps.modules import door_owner as spawn_registry
 import pytest
 
-from aipass.cli.apps.modules import display as cli_display
+from aipass.cli import display as cli_display
 from aipass.devpulse.apps.handlers.watchdog import dispatches as wd_dispatches
 from aipass.devpulse.apps.handlers.watchdog import presenter as wd_presenter
 from aipass.devpulse.apps.handlers.watchdog import registry as wd_registry
@@ -153,7 +152,7 @@ def test_the_refusal_still_refuses_when_the_owner_cannot_be_named(capsys, monkey
     def explode(*_args, **_kwargs):
         raise RuntimeError("registry unreadable")
 
-    monkeypatch.setattr(spawn_registry, "get_owner", explode)
+    monkeypatch.setattr(owner_guard, "get_owner", explode)
 
     wd_mod.handle_command("watchdog", ["baseline"])
 
@@ -465,6 +464,24 @@ def test_silent_finish_hint_replies_to_the_callers_seat(capsys, monkeypatch):
     assert "email @vera" in out and "email @devpulse" not in out
 
 
+def test_silent_finish_hint_names_no_address_without_a_seat(capsys, monkeypatch):
+    """No sealed seat: the hint must not invent one (it used to say @devpulse on any project)."""
+    fake_module = type(sys)("fake_agent_mod")
+    fake_module.watch_agent = lambda agent_id, timeout_seconds=1800: {"agent_state": "completed_silent"}
+    _serve_agent_handler(monkeypatch, fake_module)
+
+    def _no_seat(repo_root=None):
+        raise wd_dispatches.RegisterUnavailable("no sealed owner")
+
+    monkeypatch.setattr(wd_dispatches, "seat_email", _no_seat)
+
+    wd_mod.handle_command("watchdog", ["agent", "@writer"])
+
+    out = capsys.readouterr().out
+    out = " ".join(out.split())  # rich wraps the console line
+    assert "Please reply with your results now." in out and "email @" not in out
+
+
 def test_agent_subcommand_parses_timeout_flag(monkeypatch):
     """--timeout flag is parsed and passed to the handler."""
     captured_args = {}
@@ -543,7 +560,7 @@ def test_agent_subcommand_emits_next_action_breadcrumb(capsys, monkeypatch):
 
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    # Rich wraps differently across terminal widths (narrower on Windows CI).
+    # Rich wraps differently across terminal widths.
     normalized = " ".join(combined.split())
     assert "Next: drone @ai_mail dispatch @drone" in normalized
     assert "state=completed" in normalized

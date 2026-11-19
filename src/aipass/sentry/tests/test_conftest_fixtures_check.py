@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_conftest_fixtures_check.py
 # Description: conftest_fixtures_check — test template v1 item 20, the branch conftest
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/conftest_fixtures_check.py."""
@@ -27,7 +27,7 @@ MODEL = Path(__file__).resolve().parent / "conftest.py"
 
 #: The import that makes a name a PRODUCT console. Without it the same fixture
 #: text pins a console the product never prints to.
-IMPORT = "from aipass.cli.apps.modules import display\n"
+IMPORT = "from aipass.cli import display\n"
 
 #: C1 as the template page spells it.
 PIN = (

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared fixtures for the drone suite
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Shared pytest fixtures for drone tests."""
@@ -25,10 +25,15 @@ from typing import Any, Generator
 
 import pytest
 
-from aipass.cli.apps.modules import display
+import aipass.ai_mail as ai_mail
+from aipass.cli import display
 from aipass.drone.apps.handlers import registry_handler, router_handler
 from aipass.drone.apps.handlers.git import session_home
 from aipass.drone.apps.handlers.json import json_handler
+
+# @ai_mail's verified-caller rail: the names' home module, reached through the door (its handlers fence a direct
+# import). The door reads the names there on every access, so a patch on it reaches repo_door's lazy import.
+RAIL = sys.modules[ai_mail.is_verified_admin_caller.__module__]
 
 # Not imported from sentry: its guard refuses another branch's caller.
 SANDBOX_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
@@ -39,7 +44,7 @@ collect_ignore_glob = [".archive/*", "**/.archive/*"]
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Pin Rich's width: unpinned it is 80 on POSIX, 79 on Windows, or the terminal's."""
+    """Pin Rich's width: unpinned it is 80, or the terminal's."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 
@@ -75,8 +80,7 @@ def _isolate_deletion_log(tmp_path: Path) -> Generator[None, None, None]:
 def temp_test_dir() -> Generator[Path, None, None]:
     """Creates temporary directory for testing, cleans up after.
 
-    Teardown steps OUT first: autouse monkeypatch undoes its chdir after this runs,
-    and Windows cannot rmtree the cwd (WinError 32).
+    Teardown steps OUT first: autouse monkeypatch undoes its chdir after this runs.
     """
     test_dir = Path(tempfile.mkdtemp())
     yield test_dir
@@ -194,49 +198,12 @@ def sample_registry(temp_test_dir: Path) -> Path:
     return registry_path
 
 
-DELETABLE_CWD_MARKER = "deletable_cwd"
-
-WINDOWS_CWD_REASON = (
-    "This test builds its world by deleting the directory the process stands in. "
-    "Windows holds the current directory open without delete sharing, so rmtree(cwd) "
-    "raises PermissionError WinError 32 and the directory is never removed — the RECIPE "
-    "is unavailable there, not the STATE. A disconnected share or an ejected volume still "
-    "leaves a live Windows process whose getcwd() raises, so the guards themselves stay "
-    "pinned on every OS by the patched-Path.cwd construction (tests/test_no_cwd_sweep.py "
-    "and the portable siblings beside each skipped test). What Windows loses is only the "
-    "end-to-end half: that a real deletion actually produces the state."
-)
-
-
-def pytest_configure(config):
-    """Register the marker here, not pytest.ini: the root CI run uses another inifile with --strict-markers."""
-    config.addinivalue_line(
-        "markers",
-        f"{DELETABLE_CWD_MARKER}: needs a process to delete the directory it stands in (POSIX only)",
-    )
-
-
 def python_sources(root: Path) -> list[Path]:
     """Every ``.py`` under *root*, sorted, skipping SANDBOX_DIRS judged only BELOW *root*.
 
     A root that itself stands inside a dropbox is still walked.
     """
     return sorted(p for p in root.rglob("*.py") if not SANDBOX_DIRS.intersection(p.relative_to(root).parts[:-1]))
-
-
-def host_platform() -> str:
-    """``sys.platform``, as a seam so the Windows branch is testable without patching sys."""
-    return sys.platform
-
-
-def pytest_collection_modifyitems(config, items):
-    """Skip deletable-cwd tests on Windows only, and say the whole reason."""
-    if host_platform() != "win32":
-        return
-    skip = pytest.mark.skip(reason=WINDOWS_CWD_REASON)
-    for item in items:
-        if DELETABLE_CWD_MARKER in item.keywords:
-            item.add_marker(skip)
 
 
 @pytest.fixture(autouse=True)
@@ -332,3 +299,54 @@ def builder_seat(aipass_github: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     monkeypatch.chdir(seat)
     return seat
+
+
+# The drone rm suites' shared ground: test_rm, test_rm_archive, test_rm_stale and test_rm_dot.
+@pytest.fixture()
+def project_dir(tmp_path):
+    """Fake project root with a registry file and src/aipass layout."""
+    (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+    return tmp_path
+
+
+@pytest.fixture()
+def project_with_branches(project_dir):
+    """Project root with branch dirs containing .trinity/ markers."""
+    for branch in ("drone", "api", "flow"):
+        d = project_dir / "src" / "aipass" / branch
+        d.mkdir(parents=True)
+        (d / ".trinity").mkdir()
+        (d / "README.md").write_text(f"# {branch}", encoding="utf-8")
+    return project_dir
+
+
+@pytest.fixture()
+def at_drone_beside_api(project_with_branches, monkeypatch):
+    """Standing in @drone; @api is the sibling whose tree the admin may enter."""
+    monkeypatch.chdir(project_with_branches / "src" / "aipass" / "drone")
+    return project_with_branches / "src" / "aipass" / "api"
+
+
+def rm_ledger(tmp_path: Path) -> list[dict]:
+    """Every record the autouse deletion-log fixture captured in this test."""
+    store = tmp_path / "deletions.jsonl"
+    if not store.exists():
+        return []
+    return [json.loads(line) for line in store.read_text(encoding="utf-8").splitlines()]
+
+
+def rail_answers(monkeypatch, verdict):
+    """Stand in for @ai_mail's verified-caller rail (another branch's edge): True, False, or an exception to raise."""
+
+    def answer():
+        if isinstance(verdict, Exception):
+            raise verdict
+        return verdict
+
+    monkeypatch.setattr(RAIL, "is_verified_admin_caller", answer)
+    monkeypatch.setattr(RAIL, "resolve_verified_caller", lambda: "@devpulse" if verdict is True else "@drone")
+
+
+def logged_lines(method) -> list[str]:
+    """Every call of one patched prax method, rendered as the logger renders it."""
+    return [call.args[0] % tuple(call.args[1:]) for call in method.call_args_list]

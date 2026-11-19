@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: loader_handler.py
 # Description: Skill loading handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -44,8 +44,8 @@ def import_handler(skill_path, skill_name):
     return module
 
 
-def load_skill(name, registry):
-    """Load a skill by name from a pre-built registry."""
+def load_skill(name, registry, import_code=True):
+    """Load a skill by name from a pre-built registry; import_code=False reads SKILL.md and never imports handler.py."""
     skill_entry = get_skill(name, registry)
 
     if skill_entry is None:
@@ -73,7 +73,7 @@ def load_skill(name, registry):
         }
 
     handler = None
-    if isinstance(metadata, dict) and metadata.get("has_handler", False):
+    if import_code and isinstance(metadata, dict) and metadata.get("has_handler", False):
         try:
             handler = import_handler(skill_path, name)
         except Exception as exc:

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: post_compact_regrounding.py
-# Version: 2.2.0
+# Version: 2.3.0
 # Description: Mid-turn grounding backstop after compaction, budgeted per fire (PostToolUse, DPLAN-0276, #752)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-31
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """Re-grounds the agent after compaction even when no UserPromptSubmit arrives.
@@ -21,7 +21,8 @@ left; the last part stamps completion so the next turn-0 fire-all stands down.
 import importlib
 import json
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 #: 10% under Claude Code's 10,000-unit limit; the hard ceiling for every fire, headers and markers included.
 REGROUP_FIRE_BUDGET = 9000
@@ -80,7 +81,7 @@ def _load_sections(hook_data: dict) -> list[tuple[str, str]]:
         release_notice = importlib.import_module("aipass.hooks.apps.modules.release_notice")
         notice = release_notice.build_notice(hook_data)
     except Exception as exc:
-        logger.info("[HOOKS] post_compact_regrounding: release notice failed: %s", exc)
+        logger.warning("[HOOKS] post_compact_regrounding: release notice failed: %s", exc)
         notice = ""
     if notice:
         if sections[0][0] == "branch":
@@ -185,45 +186,45 @@ def _pack_once(sections: list[tuple[str, str]], instruction: str, budget: int, t
 
 
 def handle(hook_data: dict) -> dict:
+    """Inject the next due re-ground part; each call leaves one json trail entry."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Inject the next budgeted part of the post-compact re-ground, if one is due."""
-    try:
-        cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
-        part = cadence.pop_regroup_part(hook_data)
-        if part is None:
-            if not cadence.consume_regroup_pending(hook_data):
-                return _SILENT
-            index = 1
-        else:
-            index = part[0]
-    except Exception as exc:
-        logger.info("[HOOKS] post_compact_regrounding: cadence check failed: %s", exc)
+    # Uncaught: a raise here is the engine's ERROR and engine.jsonl row, never a quiet skip.
+    cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+    part = cadence.pop_regroup_part(hook_data)
+    if part is None:
+        if not cadence.consume_regroup_pending(hook_data):
+            return _SILENT
+        index = 1
+    else:
+        index = part[0]
+
+    grounding_content = importlib.import_module("aipass.hooks.apps.modules.grounding_content")
+    sections = _load_sections(hook_data)
+    if not sections:
         return _SILENT
 
-    try:
-        grounding_content = importlib.import_module("aipass.hooks.apps.modules.grounding_content")
-        sections = _load_sections(hook_data)
-        if not sections:
-            return _SILENT
+    fires = _pack(sections, grounding_content.STARTUP_REGROUND_INSTRUCTION)
+    if index == 1 and len(fires) > 1:
+        cadence.queue_regroup_parts(len(fires), hook_data)
+    if index > len(fires):
+        return _SILENT
 
-        fires = _pack(sections, grounding_content.STARTUP_REGROUND_INSTRUCTION)
-        if index == 1 and len(fires) > 1:
-            cadence.queue_regroup_parts(len(fires), hook_data)
-        if index > len(fires):
-            return _SILENT
-
-        context, labels = fires[index - 1]
-        cadence.log_regroup_fire(labels, index, len(fires), context, REGROUP_FIRE_BUDGET, hook_data)
-        if index == len(fires) and sections[0][0] != "degraded":
-            # A degraded re-ground did not ground the seat, so only a whole one stands in for turn 0.
-            cadence.stamp_regroup_complete(hook_data)
-        result = {
-            "hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
-                "additionalContext": context,
-            }
+    context, labels = fires[index - 1]
+    cadence.log_regroup_fire(labels, index, len(fires), context, REGROUP_FIRE_BUDGET, hook_data)
+    if index == len(fires) and sections[0][0] != "degraded":
+        # A degraded re-ground did not ground the seat, so only a whole one stands in for turn 0.
+        cadence.stamp_regroup_complete(hook_data)
+    result = {
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": context,
         }
-        return {"stdout": json.dumps(result), "exit_code": 0, "sound": "post compact reground"}
-
-    except Exception as exc:
-        logger.info("[HOOKS] post_compact_regrounding: unexpected error: %s", exc)
-        return _SILENT
+    }
+    return {"stdout": json.dumps(result), "exit_code": 0, "sound": "post compact reground"}

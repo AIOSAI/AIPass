@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_json_handler.py
 # Description: Tests for the fleet json service through prax's own shim
-# Version: 2.2.0
+# Version: 2.6.0
 # Created: 2026-03-28
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py and apps/handlers/json/json_service.py."""
@@ -14,15 +14,19 @@
 # sentry: no-test-needed(json_handler) — that json_handler.py binds byte-identically fleet-wide
 
 import json
-import logging
 import os
 import stat
+import subprocess
+import sys
+import sysconfig
+import time
 from datetime import date
-from unittest.mock import patch
+from pathlib import Path
 
 import pytest
 
 import aipass.prax
+from aipass.prax.apps.handlers import state_root
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.json import json_service
 from aipass.prax.apps.handlers.monitoring import rate_tracker
@@ -66,12 +70,8 @@ class TestForModule:
 
         assert resolved.branch_root == tmp_path / "notabranch"
 
-    @pytest.mark.skipif(os.name == "nt", reason="creating a directory symlink needs privileges on Windows")
     def test_a_symlinked_path_is_not_followed(self, tmp_path):
-        """resolve() would walk the link to its target and name the WRONG branch.
-
-        The skip asks the machine (``os.name``) only: a skip in an ``except`` turned any OSError into a pass.
-        """
+        """resolve() would walk the link to its target and name the WRONG branch."""
         real = tmp_path / "real_branch" / "apps" / "handlers" / "json"
         real.mkdir(parents=True)
         (real / "json_handler.py").write_text("", encoding="utf-8")
@@ -82,6 +82,66 @@ class TestForModule:
 
         assert resolved.branch_root == link
         assert resolved.branch_root.name == "linked_branch"
+
+    @pytest.mark.parametrize(
+        ("caller", "root"),
+        [
+            pytest.param("hooks/.live-20261118T002411Z/handlers/json/json_handler.py", "hooks", id="hooks-snapshot"),
+            pytest.param(
+                "spawn/templates/citizen/apps/handlers/json/json_handler.py", "spawn/templates/citizen", id="template"
+            ),
+            pytest.param("prax/apps/handlers/monitoring/rate_tracker.py", "prax", id="rate-tracker"),
+            pytest.param("flow/apps/handlers/json/json_handler.py", "flow", id="branch-shim"),
+        ],
+    )
+    def test_every_caller_layout_in_the_fleet_gets_its_branch_root(self, tmp_path, caller, root):
+        """The hook engine runs its shim from a snapshot with no apps/: a root it cannot get refuses every tool."""
+        resolved = json_service.for_module(tmp_path / caller)
+
+        assert resolved.branch_root == tmp_path / root
+
+
+_SOURCE = Path(aipass.prax.__path__[0]).parent
+
+
+class TestForBranch:
+    """for_branch(name): the handle for_module gives a file in that branch's apps/, found by name, never by depth."""
+
+    @pytest.mark.parametrize("name", ["hooks", "prax", "flow", "ai_mail", "sentry"])
+    def test_the_name_gives_what_the_branchs_own_shim_gets(self, name):
+        shim = _SOURCE / name / "apps" / "handlers" / "json" / "json_handler.py"
+        by_file = json_service.for_module(shim)
+
+        by_name = json_service.for_branch(name)
+
+        assert by_name.branch_root == by_file.branch_root
+        assert by_name.json_dir == by_file.json_dir
+        assert by_name.get_json_path("probe", "log") == by_file.get_json_path("probe", "log")
+
+    def test_the_hook_engines_snapshot_gets_the_hooks_branch_by_name(self):
+        """From .live-<stamp>/ the depth lands on hooks/ only by coincidence; the name lands there by definition."""
+        pointer = _SOURCE / "hooks" / ".live-current"
+        if not pointer.is_file():
+            pytest.skip("no hook engine snapshot on this machine")
+        shim = _SOURCE / "hooks" / pointer.read_text(encoding="utf-8").strip() / "handlers" / "json" / "json_handler.py"
+
+        assert json_service.for_branch("hooks").json_dir == json_service.for_module(shim).json_dir
+
+    @pytest.mark.parametrize("name", ["no_such_branch", "", "../prax", "prax.apps"])
+    def test_a_name_that_is_no_branch_raises_lookup_error(self, name):
+        """Loud at the shim's import, one exception type to catch; never a default branch."""
+        with pytest.raises(LookupError, match="no AIPass branch"):
+            json_service.for_branch(name)
+
+    def test_a_package_without_apps_is_not_a_branch(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(json_service, "branch_root", lambda name: tmp_path / name)
+        (tmp_path / "loose").mkdir()
+
+        with pytest.raises(LookupError, match="no AIPass branch"):
+            json_service.for_branch("loose")
+
+    def test_the_door_serves_it(self):
+        assert aipass.prax.json_handler.for_branch is json_service.for_branch
 
 
 class TestTheJsonDirectoryIsResolvedPerCall:
@@ -130,6 +190,116 @@ class TestTheJsonDirectoryIsResolvedPerCall:
         built = resolved.get_json_path("probe", "config")
 
         assert built == tmp_path / "prax" / "prax_json" / "probe_config.json"
+
+
+_STATE_PROBE = """
+import json, sys, sysconfig
+from pathlib import Path
+if sys.argv[1]:
+    real = sysconfig.get_paths
+    sysconfig.get_paths = lambda *a, **k: {**real(*a, **k), "purelib": sys.argv[1], "platlib": sys.argv[1]}
+from aipass.prax import branch_state_root
+from aipass.prax.apps.handlers.config import load
+from aipass.prax.apps.handlers.json import json_handler, json_service
+from aipass.prax.apps.handlers.logging import trail
+from aipass.prax.apps.handlers.monitoring import instance_lock
+print(json.dumps({
+    "trail": str(trail.PRAX_LOGS),
+    "prax_json": str(load.PRAX_JSON_DIR),
+    "lock": str(instance_lock.get_lock_path()),
+    "json_dir": str(json_service.for_module(json_handler.__file__).json_dir),
+    "door": str(branch_state_root("prax")),
+    "flow_logs": str(load.get_module_logs_dir("flow")),
+    "system_logs": str(load.get_system_logs_dir()),
+}))
+"""
+
+
+def _state_paths(home: Path, install_dir: str = "") -> dict:
+    """Every prax state path a fresh interpreter answers, with install_dir posing as purelib and platlib."""
+    env = {k: v for k, v in os.environ.items() if k not in ("AIPASS_TEST_LOG_DIR", "PYTEST_CURRENT_TEST")}
+    result = subprocess.run(
+        [sys.executable, "-c", _STATE_PROBE, install_dir],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={**env, "HOME": str(home)},
+        timeout=120,
+    )
+    assert result.returncode == 0, f"probe failed: {result.stderr}"
+    return {key: Path(value) for key, value in json.loads(result.stdout.strip().splitlines()[-1]).items()}
+
+
+_PRAX = Path(aipass.prax.__path__[0]).resolve()
+
+
+class TestTheStateRoot:
+    """Where a branch keeps logs/ and <branch>_json/: beside its code, or ~/.aipass/state when installed."""
+
+    def test_a_checkout_keeps_every_path_it_had(self, tmp_path):
+        """Not one byte moves for a checkout or an editable install, whatever HOME says."""
+        paths = _state_paths(tmp_path)
+
+        assert paths["trail"] == _PRAX / "logs"
+        assert paths["prax_json"] == _PRAX / "prax_json"
+        assert paths["lock"] == _PRAX / "prax_json" / "monitor.lock"
+        assert paths["json_dir"] == _PRAX / "prax_json"
+        assert paths["door"] == _PRAX
+        assert paths["flow_logs"] == _PRAX.parent / "flow" / "logs"
+        assert paths["system_logs"] == _PRAX.parents[2] / "system_logs"
+
+    def test_an_install_under_src_keeps_state_under_the_home_folder(self, tmp_path):
+        """A venv at ~/src/proj/.venv: the src/ in its path must not pass it off as a checkout."""
+        state = tmp_path / ".aipass" / "state"
+
+        paths = _state_paths(tmp_path, install_dir=str(_PRAX.parents[1]))
+
+        assert paths["trail"] == state / "prax" / "logs"
+        assert paths["prax_json"] == state / "prax" / "prax_json"
+        assert paths["lock"] == state / "prax" / "prax_json" / "monitor.lock"
+        assert paths["json_dir"] == state / "prax" / "prax_json"
+        assert paths["door"] == state / "prax"
+        assert paths["flow_logs"] == state / "flow" / "logs"
+        assert paths["system_logs"] == tmp_path / ".aipass" / "system_logs"
+
+    def test_site_packages_is_installed_and_a_checkout_is_not(self, monkeypatch, tmp_path):
+        """The install directories decide, not a folder name: the branch's name carries over to the home folder."""
+        site = tmp_path / "lib" / "site-packages"
+        installed = site / "aipass" / "flow"
+        installed.mkdir(parents=True)
+        checkout = tmp_path / "checkout" / "src" / "aipass" / "flow"
+        checkout.mkdir(parents=True)
+        monkeypatch.setattr(sysconfig, "get_paths", lambda *a, **k: {"purelib": str(site), "platlib": str(site)})
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+        assert state_root.state_home(installed) == tmp_path / "home" / ".aipass" / "state" / "flow"
+        assert state_root.state_home(checkout) == checkout
+
+    def test_the_test_folder_wins_over_an_install(self, monkeypatch, tmp_path):
+        """AIPASS_TEST_LOG_DIR first, read per call, through the door other branches take."""
+        prax_parent = str(_PRAX.parent)
+        monkeypatch.setattr(sysconfig, "get_paths", lambda *a, **k: {"purelib": prax_parent, "platlib": prax_parent})
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+
+        assert aipass.prax.branch_state_root("flow") == tmp_path / "flow"
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root writes through a read-only mode")
+    def test_an_unwritable_state_folder_raises_naming_it_and_the_errno(self, monkeypatch, tmp_path):
+        """The one raise in log_operation: with no state folder there is nowhere left to report a False."""
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        locked.chmod(0o500)
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(locked))
+        handle = json_service.for_module(json_handler.__file__)
+
+        try:
+            with pytest.raises(state_root.StateRootUnwritable) as raised:
+                handle.log_operation("doomed", module_name="ops")
+        finally:
+            locked.chmod(0o700)
+
+        assert str(locked / "prax" / "prax_json") in str(raised.value)
+        assert "EACCES" in str(raised.value)
 
 
 class TestReadJson:
@@ -218,13 +388,13 @@ class TestWriteJson:
 
     def test_a_failed_write_answers_false_and_never_raises(self, handle, tmp_path, monkeypatch):
         """OSError anywhere on the way answers False: the six production bool consumers depend on it."""
-        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service.os, "replace", _raise_oserror)
 
         assert handle.write_json(tmp_path / "doc.json", {"a": 1}) is False
 
     def test_a_failed_write_cleans_up_its_temp_file(self, handle, tmp_path, monkeypatch):
         """A staged file left behind is litter that accumulates silently."""
-        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service.os, "replace", _raise_oserror)
 
         handle.write_json(tmp_path / "doc.json", {"a": 1})
 
@@ -234,32 +404,18 @@ class TestWriteJson:
         """The staged-write guarantee: a write that cannot land destroys nothing."""
         target = tmp_path / "doc.json"
         target.write_text(json.dumps({"live": True}), encoding="utf-8")
-        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service.os, "replace", _raise_oserror)
 
         handle.write_json(target, {"replacement": True})
 
         assert json.loads(target.read_text(encoding="utf-8")) == {"live": True}
 
-    def test_a_caller_fails_the_real_replace_through_the_package_path(self, handle, tmp_path):
-        """The seam another branch's test uses to fail the replace: aipass.prax.json_handler.replace_with_retry,
-        a package path that never names these handlers, so the fence and the encapsulation wall stand."""
-        target = tmp_path / "doc.json"
-        target.write_text(json.dumps({"live": True}), encoding="utf-8")
-
-        with patch("aipass.prax.json_handler.replace_with_retry", side_effect=_raise_oserror):
-            landed = handle.write_json(target, {"replacement": True})
-
-        assert landed is False
-        assert json.loads(target.read_text(encoding="utf-8")) == {"live": True}
-        assert list(tmp_path.glob("*.tmp")) == []
-
 
 def _raise_oserror(source, destination):
-    """Stand-in for the bounded replace that always fails."""
+    """Stand-in for an os.replace that always fails."""
     raise OSError("replace refused")
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits — Windows has no mode to preserve")
 class TestTheWriteNeverChoosesTheDocumentsMode:
     """A write must not change permissions the caller never asked it to change.
 
@@ -302,62 +458,6 @@ class TestTheWriteNeverChoosesTheDocumentsMode:
         handle.ensure_json_exists("mode_probe", "config")
 
         assert stat.S_IMODE((sandbox / "mode_probe_config.json").stat().st_mode) == expected
-
-
-class TestTheBoundedReplaceRetry:
-    """os.replace on Windows fails while any reader holds the target open."""
-
-    def test_a_transient_sharing_violation_is_survived(self, handle, monkeypatch, tmp_path):
-        """Through write_json, the door every writer uses."""
-        attempts = {"count": 0}
-        real_replace = os.replace
-
-        def flaky(source, destination):
-            attempts["count"] += 1
-            if attempts["count"] < 3:
-                raise PermissionError("sharing violation")
-            real_replace(source, destination)
-
-        monkeypatch.setattr(json_service.os, "replace", flaky)
-        target = tmp_path / "live.json"
-
-        assert handle.write_json(target, {"payload": 1}) is True
-
-        assert attempts["count"] == 3
-        assert json.loads(target.read_text(encoding="utf-8")) == {"payload": 1}
-
-    def test_the_retry_is_bounded_and_then_fails_honestly(self, handle, monkeypatch, tmp_path):
-        """Bounded, then honest: a permanent permission problem is not retried forever; write_json answers False."""
-        attempts = {"count": 0}
-
-        def always_blocked(source, destination):
-            attempts["count"] += 1
-            raise PermissionError("sharing violation")
-
-        monkeypatch.setattr(json_service.os, "replace", always_blocked)
-        monkeypatch.setattr(json_service, "_REPLACE_BACKOFF_SECONDS", 0)
-        # The bound is set here, so the count is the test's own number, never a copy of the product's.
-        monkeypatch.setattr(json_service, "_REPLACE_ATTEMPTS", 3)
-        target = tmp_path / "live.json"
-
-        assert handle.write_json(target, {"payload": 1}) is False
-
-        assert attempts["count"] == 3
-        assert target.exists() is False
-
-    def test_a_non_sharing_oserror_is_not_retried(self, handle, monkeypatch, tmp_path):
-        """Only the Windows sharing violation is transient; retrying a genuine failure only hides it."""
-        attempts = {"count": 0}
-
-        def wrong_kind(source, destination):
-            attempts["count"] += 1
-            raise FileNotFoundError("no such file")
-
-        monkeypatch.setattr(json_service.os, "replace", wrong_kind)
-
-        assert handle.write_json(tmp_path / "live.json", {"payload": 1}) is False
-
-        assert attempts["count"] == 1
 
 
 class TestValidateJsonStructure:
@@ -424,26 +524,31 @@ class TestEnsureJsonExists:
 
         assert json.loads((sandbox / "keep_config.json").read_text(encoding="utf-8")) == original
 
-    def test_an_unreadable_document_is_regenerated(self, handle, sandbox):
+    @pytest.mark.parametrize(
+        "content",
+        ["{not json", "", json.dumps(["a", "list"])],
+        ids=["unreadable", "empty", "misshaped"],
+    )
+    def test_a_bad_document_raises_and_is_never_overwritten(self, handle, sandbox, content):
+        """A corrupt config read as absent and replaced by the default loses the owner's keys."""
         sandbox.mkdir(parents=True, exist_ok=True)
-        (sandbox / "broken_config.json").write_text("{not json", encoding="utf-8")
+        target = sandbox / "broken_config.json"
+        target.write_text(content, encoding="utf-8")
 
-        assert handle.ensure_json_exists("broken", "config") is True
-        assert json.loads((sandbox / "broken_config.json").read_text(encoding="utf-8"))["module_name"] == "broken"
+        with pytest.raises(json_service.InvalidDocument, match="not overwritten"):
+            handle.ensure_json_exists("broken", "config")
 
-    def test_an_empty_document_is_regenerated(self, handle, sandbox):
+        assert target.read_text(encoding="utf-8") == content
+
+    def test_a_misshaped_log_on_disk_answers_false_and_is_left_as_it_was(self, handle, sandbox):
+        """log_operation is telemetry: a bad document is refused without raising and without a rewrite."""
         sandbox.mkdir(parents=True, exist_ok=True)
-        (sandbox / "empty_config.json").write_text("", encoding="utf-8")
+        target = sandbox / "bad_log.json"
+        target.write_text(json.dumps({"not": "a list"}), encoding="utf-8")
 
-        assert handle.ensure_json_exists("empty", "config") is True
-        assert json.loads((sandbox / "empty_config.json").read_text(encoding="utf-8"))["module_name"] == "empty"
+        assert handle.log_operation("probe", module_name="bad") is False
 
-    def test_a_structurally_invalid_document_is_regenerated(self, handle, sandbox):
-        sandbox.mkdir(parents=True, exist_ok=True)
-        (sandbox / "wrong_config.json").write_text(json.dumps(["a", "list"]), encoding="utf-8")
-
-        assert handle.ensure_json_exists("wrong", "config") is True
-        assert isinstance(json.loads((sandbox / "wrong_config.json").read_text(encoding="utf-8")), dict)
+        assert json.loads(target.read_text(encoding="utf-8")) == {"not": "a list"}
 
     def test_ensure_module_jsons_creates_all_three(self, handle, sandbox):
         assert handle.ensure_module_jsons("trio") is True
@@ -500,7 +605,7 @@ class TestSaveJson:
 
     def test_a_write_that_cannot_land_raises_writefailed(self, handle, monkeypatch):
         """A lost document must not look like success, nor like a caller's validation mistake."""
-        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service.os, "replace", _raise_oserror)
 
         with pytest.raises(json_service.WriteFailed):
             handle.save_json("doomed", "log", [])
@@ -557,7 +662,7 @@ class TestLogOperation:
 
     def test_a_write_failure_answers_false_and_does_not_raise(self, handle, monkeypatch):
         """log_operation runs on the monitor's threads: a raising writer there is silent half-death."""
-        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service.os, "replace", _raise_oserror)
 
         assert handle.log_operation("doomed", module_name="ops") is False
 
@@ -575,6 +680,129 @@ class TestLogOperation:
 
         entries = json.loads((sandbox / "test_json_handler_log.json").read_text(encoding="utf-8"))
         assert entries[-1]["operation"] == "auto"
+
+
+def _trail_errors(tmp_path):
+    """ERROR lines on the json service's trail under the seam."""
+    trail_file = tmp_path / "prax" / "logs" / "json_service.jsonl"
+    if not trail_file.exists():
+        return []
+    lines = [json.loads(line) for line in trail_file.read_text(encoding="utf-8").splitlines()]
+    return [line for line in lines if line["level"] == "ERROR"]
+
+
+def _one_more(document):
+    """An update that counts its own rounds."""
+    document["rounds"] = document.get("rounds", 0) + 1
+    return document
+
+
+class TestUpdateJson:
+    """One read-modify-write under the module's lock: lands whole, or not at all and loudly."""
+
+    def test_a_missing_document_starts_from_the_default_and_takes_the_change(self, handle, sandbox):
+        assert handle.update_json("fresh", "data", _one_more) is True
+
+        saved = _read_data(sandbox, "fresh")
+        assert saved["rounds"] == 1
+        assert saved["created"] == saved["last_updated"] == date.today().isoformat()
+
+    def test_a_raising_fn_leaves_the_document_byte_for_byte_and_the_lock_free(self, handle, sandbox):
+        handle.update_json("held", "data", _one_more)
+        before = (sandbox / "held_data.json").read_bytes()
+
+        def half_done(document):
+            document["rounds"] = 99
+            raise RuntimeError("fn failed")
+
+        with pytest.raises(RuntimeError, match="fn failed"):
+            handle.update_json("held", "data", half_done)
+
+        assert (sandbox / "held_data.json").read_bytes() == before
+        assert handle.update_json("held", "data", _one_more) is True
+        assert _read_data(sandbox, "held")["rounds"] == 2
+
+    def test_asking_again_for_the_held_lock_is_refused_at_once_with_one_error(
+        self, handle, sandbox, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(json_service, "LOCK_DEADLINE_SECONDS", 0.5)
+        handle.update_json("nested", "data", _one_more)
+        before = (sandbox / "nested_data.json").read_bytes()
+
+        started = time.monotonic()
+        with pytest.raises(json_service.LockReentry):
+            handle.update_json("nested", "data", lambda document: handle.update_json("nested", "data", _one_more))
+        waited = time.monotonic() - started
+
+        assert waited < 0.25
+        assert (sandbox / "nested_data.json").read_bytes() == before
+        assert [(e["msg"], e["module"]) for e in _trail_errors(tmp_path)] == [
+            ("json_service: update_json lock not acquired", "nested")
+        ]
+
+    def test_log_operation_inside_fn_answers_false_and_the_update_still_lands(
+        self, handle, sandbox, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(json_service, "LOCK_DEADLINE_SECONDS", 0.5)
+        answers = []
+
+        def logs_inside(document):
+            answers.append(handle.log_operation("inside", module_name="nested"))
+            return _one_more(document)
+
+        started = time.monotonic()
+        assert handle.update_json("nested", "data", logs_inside) is True
+
+        assert time.monotonic() - started < 0.25
+        assert answers == [False]
+        assert _read_data(sandbox, "nested")["rounds"] == 1
+        assert not (sandbox / "nested_log.json").exists()
+        assert [e["msg"] for e in _trail_errors(tmp_path)] == ["json_service: log_operation lock not acquired"]
+
+    @pytest.mark.parametrize("bad", ["{not json", "[1, 2]"], ids=["corrupt", "misshaped"])
+    def test_a_bad_document_is_set_aside_refused_once_and_rebuilt_on_the_next_call(
+        self, handle, sandbox, tmp_path, bad
+    ):
+        sandbox.mkdir(parents=True)
+        (sandbox / "broken_data.json").write_text(bad, encoding="utf-8")
+
+        with pytest.raises(json_service.InvalidDocument):
+            handle.update_json("broken", "data", _one_more)
+
+        kept = list(sandbox.glob("broken_data.json.corrupt-*"))
+        assert [path.read_text(encoding="utf-8") for path in kept] == [bad]
+        errors = _trail_errors(tmp_path)
+        assert [(e["msg"], e["kept"]) for e in errors] == [
+            ("json_service: update_json refused a corrupt document", str(kept[0]))
+        ]
+
+        assert handle.update_json("broken", "data", _one_more) is True
+        assert _read_data(sandbox, "broken")["rounds"] == 1
+
+    def test_a_misshaped_result_from_fn_is_refused_and_the_good_document_stays(self, handle, sandbox):
+        handle.update_json("kept", "data", _one_more)
+        before = (sandbox / "kept_data.json").read_bytes()
+
+        with pytest.raises(json_service.InvalidDocument):
+            handle.update_json("kept", "data", lambda document: None)
+
+        assert (sandbox / "kept_data.json").read_bytes() == before
+        assert not list(sandbox.glob("kept_data.json.corrupt-*"))
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root reads a 000 file: the unreadable route needs a non-root user")
+    def test_an_unreadable_document_is_left_in_place_not_set_aside(self, handle, sandbox, tmp_path):
+        handle.update_json("locked", "data", _one_more)
+        target = sandbox / "locked_data.json"
+        target.chmod(0)
+        try:
+            with pytest.raises(json_service.InvalidDocument):
+                handle.update_json("locked", "data", _one_more)
+        finally:
+            target.chmod(0o644)
+
+        assert _read_data(sandbox, "locked")["rounds"] == 1
+        assert not list(sandbox.glob("locked_data.json.corrupt-*"))
+        assert _trail_errors(tmp_path)[0]["kept"].startswith("left in place: ")
 
 
 def _seed_data(sandbox, module_name, document):
@@ -606,19 +834,16 @@ class TestTheDataLegIsHealedNotReplaced:
             "last_updated": date.today().isoformat(),
         }
 
-    def test_the_config_leg_is_still_regenerated_not_merged(self, handle, sandbox):
-        """The heal is the data leg's alone: an invalid config comes back as the default."""
-        # The default, as the same door writes it for a missing document.
-        assert handle.ensure_json_exists("stray", "config") is True
-        default = json.loads((sandbox / "stray_config.json").read_text(encoding="utf-8"))
-        (sandbox / "stray_config.json").write_text(
-            json.dumps({"module_name": "stray", "stray": True}), encoding="utf-8"
-        )
+    def test_the_config_leg_is_refused_not_merged(self, handle, sandbox):
+        """The heal is the data leg's alone: an invalid config raises and keeps its keys."""
+        sandbox.mkdir(parents=True, exist_ok=True)
+        stray = {"module_name": "stray", "stray": True}
+        (sandbox / "stray_config.json").write_text(json.dumps(stray), encoding="utf-8")
 
-        assert handle.ensure_json_exists("stray", "config") is True
+        with pytest.raises(json_service.InvalidDocument):
+            handle.ensure_json_exists("stray", "config")
 
-        written = json.loads((sandbox / "stray_config.json").read_text(encoding="utf-8"))
-        assert written == default
+        assert json.loads((sandbox / "stray_config.json").read_text(encoding="utf-8")) == stray
 
     def test_a_data_document_that_cannot_be_written_back_is_left_as_it_was(self, handle, sandbox):
         """json.load reads NaN, the writer refuses it: the document is left as it was, the log leg works."""
@@ -715,9 +940,9 @@ class TestEveryLogWriteBumpsTheDataLeg:
         ],
         ids=["writefailed", "invaliddocument", "typeerror"],
     )
-    def test_a_failed_bump_never_breaks_the_log(self, handle, sandbox, monkeypatch, caplog, failure):
+    def test_a_failed_bump_never_breaks_the_log(self, handle, sandbox, monkeypatch, tmp_path, failure):
         """Telemetry on the monitor's threads: the log entry already landed, so
-        the answer stays the log's own True and the failure is a warning."""
+        the answer stays the log's own True and the failure is a warning on prax's trail."""
         real_save = handle.save_json
 
         def refuse_the_data(module_name, json_type, data):
@@ -727,56 +952,49 @@ class TestEveryLogWriteBumpsTheDataLeg:
 
         monkeypatch.setattr(handle, "save_json", refuse_the_data)
 
-        with caplog.at_level(logging.WARNING, logger=json_service.logger.name):
-            answer = handle.log_operation("survives", module_name="fragile")
+        answer = handle.log_operation("survives", module_name="fragile")
 
         assert answer is True
         entries = json.loads((sandbox / "fragile_log.json").read_text(encoding="utf-8"))
         assert [entry["operation"] for entry in entries] == ["survives"]
         assert "operations_total" not in _read_data(sandbox, "fragile")
-        warned = [
-            record.getMessage()
-            for record in caplog.records
-            if record.name == json_service.logger.name and record.levelno == logging.WARNING
-        ]
-        assert any("fragile" in message and str(failure) in message for message in warned), warned
+        trail_file = tmp_path / "prax" / "logs" / "json_service.jsonl"
+        warned = [json.loads(line) for line in trail_file.read_text(encoding="utf-8").splitlines()]
+        assert [(r["level"], r["module"], r["error"]) for r in warned] == [("WARNING", "fragile", str(failure))]
+
+
+def _real_tracker(monkeypatch, tmp_path):
+    """The real tracker on the real shim with a fresh process's state; returns the one log file it scans."""
+    logs = tmp_path / "scanned_logs"
+    logs.mkdir()
+    log_file = logs / "a.log"
+    log_file.write_bytes(b"x" * 4096)
+    monkeypatch.setattr(rate_tracker, "json_handler", json_handler)
+    monkeypatch.setattr(rate_tracker, "_tracked", {})
+    monkeypatch.setattr(rate_tracker, "_state_loaded", False)
+    monkeypatch.setattr(rate_tracker, "_logs_dir", None)
+    monkeypatch.setattr(rate_tracker, "_suppressed_files", set())
+    rate_tracker.configure(logs_dir=logs)
+    return log_file
 
 
 class TestRateTrackerKeepsKeysItDoesNotOwn:
     """rate_tracker_data.json is both the tracker's state and its data leg."""
 
     def test_the_counters_and_the_trackers_files_survive_each_others_writes(self, sandbox, monkeypatch, tmp_path):
-        """The real tracker against the real shim, both writing one document.
-
-        Each writer sets only its own keys; the clock is frozen a day after the seed, so a re-stamp shows.
-        """
-
-        class _FrozenDate(date):
-            @classmethod
-            def today(cls):
-                return cls(2030, 6, 15)
-
-        monkeypatch.setattr(rate_tracker, "date", _FrozenDate)
-        logs = tmp_path / "scanned_logs"
-        logs.mkdir()
-        log_file = logs / "a.log"
-        log_file.write_bytes(b"x" * 4096)
-        monkeypatch.setattr(rate_tracker, "json_handler", json_handler)
-        monkeypatch.setattr(rate_tracker, "_tracked", {})
-        monkeypatch.setattr(rate_tracker, "_state_loaded", False)
-        monkeypatch.setattr(rate_tracker, "_logs_dir", None)
-        monkeypatch.setattr(rate_tracker, "_suppressed_files", set())
-        _seed_data(sandbox, "rate_tracker", {"created": "2020-01-01", "last_updated": "2020-01-01"})
+        """The real tracker against the real shim, both writing one document; each sets only its own keys."""
+        log_file = _real_tracker(monkeypatch, tmp_path)
+        seed = {"created": "2020-01-01", "last_updated": "2020-01-01"}
+        _seed_data(sandbox, "rate_tracker", seed)
 
         json_handler.log_operation("runaway_detected", module_name="rate_tracker")
         json_handler.log_operation("runaway_detected", module_name="rate_tracker")
-        rate_tracker.configure(logs_dir=logs)
         rate_tracker.scan_rates()
 
         saved = _read_data(sandbox, "rate_tracker")
         assert saved["operations_total"] == 2
         assert saved["last_operation"] == "runaway_detected"
-        assert saved["created"] == "2020-01-01"
+        assert saved["created"] == seed["created"]
         assert saved["module_name"] == "rate_tracker"
         assert list(saved["files"]) == [str(log_file)]
         assert saved["files"][str(log_file)]["last_offset"] == 4096
@@ -786,6 +1004,22 @@ class TestRateTrackerKeepsKeysItDoesNotOwn:
         bumped = _read_data(sandbox, "rate_tracker")
         assert bumped["operations_total"] == 3
         assert bumped["files"] == saved["files"]
+
+    def test_a_corrupt_document_is_set_aside_by_one_scan_and_rebuilt_by_the_next(self, sandbox, monkeypatch, tmp_path):
+        log_file = _real_tracker(monkeypatch, tmp_path)
+        sandbox.mkdir(parents=True)
+        (sandbox / "rate_tracker_data.json").write_text("{torn", encoding="utf-8")
+
+        rate_tracker.scan_rates()
+
+        assert [path.read_text(encoding="utf-8") for path in sandbox.glob("rate_tracker_data.json.corrupt-*")] == [
+            "{torn"
+        ]
+        assert [e["msg"] for e in _trail_errors(tmp_path)] == ["json_service: update_json refused a corrupt document"]
+
+        rate_tracker.scan_rates()
+
+        assert list(_read_data(sandbox, "rate_tracker")["files"]) == [str(log_file)]
 
 
 class TestTheShimBindsAndNeverWraps:

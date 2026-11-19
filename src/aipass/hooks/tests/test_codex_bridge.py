@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.10.0
-# Description: Tests for the Codex, OpenCode and Seed bridges: payload mapping, output envelope, apply_patch, fail closed
+# Version: 2.13.0
+# Description: Tests for Codex, OpenCode and Seed bridges: payload mapping, output envelope, apply_patch, fail closed
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-11-04
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for bridges/codex.py, bridges/opencode.py and its plugin opencode_plugin.ts, and bridges/seed.py."""
@@ -24,12 +24,23 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from aipass.hooks.apps.handlers.bridges import codex, opencode, seed
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules import engine
-from aipass.prax.apps.modules import logger as prax_logger
+import aipass.prax as prax
+
+
+def _prax_down(name: str):
+    raise ImportError(f"prax is down: {name}")
+
+
+def _without_prax():
+    """Every name read through prax's door raises ImportError, as an unloadable prax does; the door caches nothing."""
+    return patch.object(prax, "__getattr__", _prax_down)
 
 
 class Bridge:
@@ -183,6 +194,38 @@ class TestWrapOutput:
         assert bridge.run("UserPromptSubmit", {"prompt": "hi"}) == block
 
 
+class TestEveryCallLeavesATrailEntry:
+    """Each codex bridge call appends one entry to its own json trail, an allow as well as a block."""
+
+    BLOCK: tuple[str, int] = (json.dumps({"decision": "block", "reason": "git write blocked"}), 2)
+
+    @pytest.fixture
+    def trail(self, tmp_path, monkeypatch) -> Path:
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        return tmp_path / "hooks" / "hooks_json" / "codex_log.json"
+
+    def _allow_then_block(self, bridge) -> tuple[dict, dict]:
+        allowed = bridge.run("PreToolUse", {"tool_name": "Bash"})
+        bridge.default = self.BLOCK
+        return allowed, bridge.run("PreToolUse", {"tool_name": "Bash"})
+
+    def test_an_allow_and_a_block_each_write_their_exit_code(self, bridge, trail: Path):
+        self._allow_then_block(bridge)
+        entries = json.loads(trail.read_text(encoding="utf-8"))
+        assert [(entry["operation"], entry["data"]) for entry in entries] == [
+            ("bridge", {"event": "PreToolUse", "exit_code": 0}),
+            ("bridge", {"event": "PreToolUse", "exit_code": 2}),
+        ]
+
+    def test_a_trail_that_cannot_be_written_changes_no_answer(self, bridge, trail: Path):
+        with patch.object(json_handler, "log_operation", return_value=False) as logged:
+            allowed, blocked = self._allow_then_block(bridge)
+        assert allowed == {}
+        assert blocked["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert [call.args[0] for call in logged.call_args_list].count("bridge") == 2
+        assert not trail.exists()
+
+
 class TestApplyPatchMapping:
     def test_each_file_reaches_the_gates_as_the_claude_call_it_amounts_to(self, bridge, tmp_path):
         patch = (
@@ -253,22 +296,48 @@ class TestApplyPatchMapping:
         assert result["hookSpecificOutput"]["additionalContext"] == "lint fixed in new.py\nlint fixed in old.py"
 
 
+class TestTheBridgeLogsThroughPrax:
+    def test_a_log_line_goes_to_prax_and_never_to_stderr(self, bridge, monkeypatch, capsys, tmp_path):
+        logged: list[tuple[str, str]] = []
+
+        class _Spy:
+            def warning(self, message, *args):
+                logged.append(("warning", message % args))
+
+        with patch("aipass.prax.logger", _Spy()):
+            result = bridge.run("PreToolUse", _patch_payload(tmp_path, "*** Begin Patch\n*** End Patch"))
+        assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert [level for level, _ in logged] == ["warning"]
+        assert "apply_patch names no file" in logged[0][1]
+        assert capsys.readouterr().err == ""
+
+    def test_with_prax_down_a_log_line_is_a_broken_engine_refused_not_a_stderr_line(
+        self, bridge, monkeypatch, capsys, tmp_path
+    ):
+        monkeypatch.setattr(codex, "BREAK_LOG", str(tmp_path / "bridge.log"))
+        with _without_prax():
+            result = bridge.run("PreToolUse", _patch_payload(tmp_path, "*** Begin Patch\n*** End Patch"))
+        assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "HOOKS BROKEN" in result["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "prax unavailable" not in capsys.readouterr().err
+
+
 class TestBrokenEngine:
     def test_with_prax_unimportable_a_broken_engine_still_denies_pretooluse(self, monkeypatch, capsys, tmp_path):
-        monkeypatch.delattr(prax_logger, "system_logger")
-        spec = importlib.util.spec_from_file_location("_codex_bridge_fresh", codex.__file__)
-        assert spec is not None and spec.loader is not None
-        fresh = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(fresh)
+        with _without_prax():
+            spec = importlib.util.spec_from_file_location("_codex_bridge_fresh", codex.__file__)
+            assert spec is not None and spec.loader is not None
+            fresh = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(fresh)
 
-        def _engine_gone():
-            raise ImportError("engine gone")
+            def _engine_gone():
+                raise ImportError("engine gone")
 
-        monkeypatch.setattr(fresh, "_mount", _engine_gone)
-        monkeypatch.setattr(fresh, "BREAK_LOG", str(tmp_path / "bridge.log"))
-        monkeypatch.setattr(sys, "argv", ["codex.py", "PreToolUse"])
-        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {}})))
-        fresh.main()
+            monkeypatch.setattr(fresh, "_mount", _engine_gone)
+            monkeypatch.setattr(fresh, "BREAK_LOG", str(tmp_path / "bridge.log"))
+            monkeypatch.setattr(sys, "argv", ["codex.py", "PreToolUse"])
+            monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {}})))
+            fresh.main()
         out, err = capsys.readouterr()
         answer = json.loads(out)["hookSpecificOutput"]
         assert answer["permissionDecision"] == "deny"
@@ -453,19 +522,22 @@ class TestOpenCodeAnswer:
 
 
 class TestMountOrSource:
-    def test_a_missing_promoted_copy_serves_the_source_and_says_so_with_prax_down(self, monkeypatch, capsys, tmp_path):
+    def test_a_missing_promoted_copy_serves_the_source_and_says_so_without_prax(self, monkeypatch, capsys, tmp_path):
+        """Prax is not on this path: a bad promote and a broken prax can be one event."""
         monkeypatch.delenv("AIPASS_HOOKS_LIVE", raising=False)
-        monkeypatch.delattr(prax_logger, "system_logger")
-        spec = importlib.util.spec_from_file_location("_mount_fresh", Path(codex.__file__).with_name("mount.py"))
-        assert spec is not None and spec.loader is not None
-        mount = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mount)
         (tmp_path / ".live-current").write_text(".live-gone", encoding="utf-8")
+        (tmp_path / "logs").mkdir()
         bridge_file = tmp_path / "apps" / "handlers" / "bridges" / "codex.py"
-        assert mount.mount_or_source(str(bridge_file), "codex") == "source (fallback)"
+        with _without_prax():
+            spec = importlib.util.spec_from_file_location("_mount_fresh", Path(codex.__file__).with_name("mount.py"))
+            assert spec is not None and spec.loader is not None
+            mount = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mount)
+            assert mount.mount_or_source(str(bridge_file), "codex") == "source (fallback)"
         err = capsys.readouterr().err
-        assert "[HOOKS:codex] promoted copy unusable, serving the source tree:" in err
-        assert "missing" in err and "prax unavailable" in err
+        assert "[HOOKS:codex] promoted copy unusable, serving the source tree:" in err and "missing" in err
+        (line,) = (tmp_path / "logs" / "bridge.log").read_text(encoding="utf-8").splitlines()
+        assert " | bridges.codex | ERROR | [HOOKS:codex] promoted copy unusable" in line
 
 
 class TestOpenCodeBrokenEngine:
@@ -555,7 +627,8 @@ for (const [mode, event, hook] of cases) {
   stop?.()
 }
 const stopRows = [{ event: "Stop", command: "py bridge stop" }]
-writeFileSync(join(home, ".claude", "provider_manifest.json"), JSON.stringify({ cli: { opencode: { hooks: stopRows } } }))
+writeFileSync(join(home, ".claude", "provider_manifest.json"),
+  JSON.stringify({ cli: { opencode: { hooks: stopRows } } }))
 const ended = { type: "session.execution.succeeded", data: { sessionID: "s1" } }
 const ctx = {
   location: { directory: home },
@@ -570,8 +643,52 @@ process.stdout.write(JSON.stringify({ results, seen }) + "\n")
 """
 
 
+# The plugin started with no AIPASS_HOME: every row would resolve relative to the server's cwd.
+_UNSET_HOME_HARNESS = r"""
+import { register } from "node:module"
+import { pathToFileURL } from "node:url"
+const [plugin] = process.argv.slice(2)
+const stub = "data:text/javascript,export const Plugin = { define: (p) => p }"
+const resolver = `export async function resolve(s, c, next) {
+  return s === "@opencode/plugin" ? { url: "${stub}", shortCircuit: true } : next(s, c)
+}`
+register("data:text/javascript," + encodeURIComponent(resolver))
+globalThis.Bun = { spawn() { throw new Error("no row may run") }, spawnSync() { throw new Error("no row may run") } }
+const { default: def } = await import(pathToFileURL(plugin).href)
+const hooks = {}
+await def.setup({
+  location: { directory: process.cwd() },
+  session: { hook: async () => {} },
+  tool: { hook: async (name, fn) => { hooks[name] = fn } },
+  event: { subscribe: async function* () {} },
+})
+let message = ""
+try {
+  await hooks["execute.before"]({ tool: "shell", sessionID: "s1", id: "c1", input: { command: "ls" } })
+} catch (e) {
+  message = String(e.message)
+}
+process.stdout.write(JSON.stringify({ message }) + "\n")
+"""
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="the plugin runs under Node; a host without it cannot load it")
 class TestOpenCodePlugin:
+    def test_with_aipass_home_unset_every_tool_is_refused_and_no_line_lands_elsewhere(self, tmp_path):
+        harness = tmp_path / "harness.mjs"
+        harness.write_text(_UNSET_HOME_HARNESS, encoding="utf-8")
+        stray = tmp_path / "src" / "aipass" / "hooks" / "logs"
+        stray.mkdir(parents=True)
+        plugin = Path(opencode.__file__).with_name("opencode_plugin.ts")
+        env = {k: v for k, v in os.environ.items() if k != "AIPASS_HOME"}
+        argv = ["node", "--no-warnings", "--experimental-strip-types", str(harness), str(plugin)]
+        done = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", timeout=60, cwd=tmp_path, env=env)
+        assert done.returncode == 0, done.stderr
+        message = json.loads(done.stdout.splitlines()[-1])["message"]
+        assert message.startswith("HOOKS BROKEN") and "AIPASS_HOME is not set" in message
+        assert not (stray / "bridge.log").exists(), "a relative path lands the line where medic never reads"
+        assert "not in bridge.log: AIPASS_HOME is not set" in done.stderr
+
     def test_a_deny_or_a_broken_row_throws_before_the_tool_and_a_report_reaches_its_result(self, tmp_path):
         harness = tmp_path / "harness.mjs"
         harness.write_text(_PLUGIN_HARNESS, encoding="utf-8")
@@ -735,3 +852,146 @@ class TestSeedBrokenEngine:
         _, err, _ = sd.run("PreToolUse", _SEED_PAYLOAD)
         assert "HOOKS BROKEN" in err, "the break must happen for the pin to mean anything"
         assert (live.read_bytes() if live.exists() else b"") == before, "medic reads that log as a real break"
+
+
+class _Unwritable:
+    """A break log whose every use raises something that is not an OSError."""
+
+    def __fspath__(self) -> str:
+        raise RuntimeError("the record itself broke")
+
+    def __str__(self) -> str:
+        return "<unwritable break log>"
+
+
+class _DeadStream:
+    """A stream whose reader has gone: every write is a broken pipe."""
+
+    def write(self, _text: str) -> int:
+        raise BrokenPipeError("reader gone")
+
+    def flush(self) -> None:
+        raise BrokenPipeError("reader gone")
+
+
+def _engine_gone():
+    raise ImportError("engine gone")
+
+
+class _Unprintable(Exception):
+    """An exception whose message itself raises."""
+
+    def __str__(self) -> str:
+        raise RuntimeError("no message")
+
+
+def _exits_quietly():
+    raise SystemExit(0)
+
+
+def _unprintable():
+    raise _Unprintable()
+
+
+def _not_utf8_stdin() -> io.TextIOWrapper:
+    return io.TextIOWrapper(io.BytesIO(b'{"tool": "shell", "tool_name": "Bash", "x": "\xff"}'), encoding="utf-8")
+
+
+def _denied(module, out: str) -> str:
+    """The deny reason in each bridge's answer, or "" when the answer is no deny."""
+    doc = json.loads(out)
+    if module is codex:
+        return doc.get("hookSpecificOutput", {}).get("permissionDecisionReason", "")
+    return doc.get("deny", "")
+
+
+class TestNothingAfterTheBreakLetsTheToolRun:
+    """The refusal leaves first; a record that raises, or a payload that cannot be read, never turns it into a run."""
+
+    @pytest.mark.parametrize("module", (codex, opencode), ids=("codex", "opencode"))
+    def test_a_record_that_raises_anything_still_denies(self, module, monkeypatch, capsys):
+        monkeypatch.setattr(module, "_mount", _engine_gone)
+        monkeypatch.setattr(module, "BREAK_LOG", _Unwritable())
+        monkeypatch.setattr(sys, "argv", [f"{module.PROVIDER}.py", "PreToolUse"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool": "shell", "tool_name": "Bash"})))
+        module.main()
+        out, err = capsys.readouterr()
+        assert _denied(module, out).startswith("HOOKS BROKEN")
+        assert "the record itself broke" in err
+
+    @pytest.mark.parametrize("module", (codex, opencode), ids=("codex", "opencode"))
+    def test_a_payload_that_is_not_utf8_is_denied_not_run(self, module, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(module, "BREAK_LOG", str(tmp_path / "bridge.log"))
+        monkeypatch.setattr(sys, "argv", [f"{module.PROVIDER}.py", "PreToolUse"])
+        monkeypatch.setattr(sys, "stdin", _not_utf8_stdin())
+        module.main()
+        assert "UnicodeDecodeError" in _denied(module, capsys.readouterr().out)
+
+    def test_seed_a_record_that_raises_anything_still_refuses_with_exit_2(self, sd, monkeypatch):
+        monkeypatch.setattr(seed, "_mount", _engine_gone)
+        monkeypatch.setattr(seed, "BREAK_LOG", _Unwritable())
+        out, err, code = sd.run("PreToolUse", {**_SEED_PAYLOAD, "tool_name": "Bash"})
+        assert (out, code) == ("", 2)
+        assert err.startswith("HOOKS BROKEN") and "the record itself broke" in err
+
+    def test_seed_a_payload_that_is_not_utf8_is_refused_with_exit_2(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(seed, "BREAK_LOG", str(tmp_path / "bridge.log"))
+        monkeypatch.setattr(sys, "argv", ["seed.py", "PreToolUse"])
+        monkeypatch.setattr(sys, "stdin", _not_utf8_stdin())
+        with pytest.raises(SystemExit) as refused:
+            seed.main()
+        assert refused.value.code == 2
+        assert "UnicodeDecodeError" in capsys.readouterr().err
+
+    def test_seed_an_engine_refusal_naming_a_non_utf8_path_still_exits_2(self, sd):
+        sd.answer = (f"refused: {os.fsdecode(b'bad' + bytes([255]))}", 2)
+        _, err, code = sd.run("PreToolUse", {**_SEED_PAYLOAD, "tool_name": "Bash"})
+        assert code == 2
+        assert "refused: bad" in err
+
+    @pytest.mark.parametrize("module", (codex, opencode), ids=("codex", "opencode"))
+    def test_the_answer_is_out_before_the_record_is_attempted(self, module, monkeypatch, capsys):
+        """A record that hangs can then cost a timeout, never the deny."""
+        seen: list[str] = []
+        monkeypatch.setattr(module, "_mount", _engine_gone)
+        monkeypatch.setattr(module, "_record_break", lambda *_: seen.append(capsys.readouterr().out))
+        monkeypatch.setattr(sys, "argv", [f"{module.PROVIDER}.py", "PreToolUse"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool": "shell", "tool_name": "Bash"})))
+        module.main()
+        assert _denied(module, seen[0]).startswith("HOOKS BROKEN")
+
+    def test_seed_a_stderr_that_cannot_be_written_still_refuses_with_exit_2(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(seed, "_mount", _engine_gone)
+        monkeypatch.setattr(seed, "BREAK_LOG", str(tmp_path / "bridge.log"))
+        monkeypatch.setattr(sys, "argv", ["seed.py", "PreToolUse"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(_SEED_PAYLOAD)))
+        monkeypatch.setattr(sys, "stderr", _DeadStream())
+        with pytest.raises(SystemExit) as refused:
+            seed.main()
+        assert refused.value.code == 2
+
+    def test_seed_an_engine_refusal_with_a_dead_stderr_still_exits_2(self, sd, monkeypatch):
+        sd.answer = ('{"decision": "block", "reason": "no"}', 2)
+        monkeypatch.setattr(sys, "stderr", _DeadStream())
+        assert sd.run("PreToolUse", {**_SEED_PAYLOAD, "tool_name": "Bash"})[2] == 2
+
+    @pytest.mark.parametrize("module", (codex, opencode), ids=("codex", "opencode"))
+    @pytest.mark.parametrize("breaks", (_exits_quietly, _unprintable), ids=("system_exit_0", "unprintable"))
+    def test_any_break_however_it_is_raised_still_denies(self, module, breaks, monkeypatch, capsys, tmp_path):
+        """Codex runs the tool on any exit with no deny on stdout (a real run, 2026-11-15): the deny must be written."""
+        monkeypatch.setattr(module, "_mount", breaks)
+        monkeypatch.setattr(module, "BREAK_LOG", str(tmp_path / "bridge.log"))
+        monkeypatch.setattr(sys, "argv", [f"{module.PROVIDER}.py", "PreToolUse"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool": "shell", "tool_name": "Bash"})))
+        module.main()
+        assert _denied(module, capsys.readouterr().out).startswith("HOOKS BROKEN")
+
+    @pytest.mark.parametrize("breaks", (_exits_quietly, _unprintable), ids=("system_exit_0", "unprintable"))
+    def test_seed_any_break_however_it_is_raised_still_refuses_with_exit_2(self, breaks, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(seed, "_mount", breaks)
+        monkeypatch.setattr(seed, "BREAK_LOG", str(tmp_path / "bridge.log"))
+        monkeypatch.setattr(sys, "argv", ["seed.py", "PreToolUse"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(_SEED_PAYLOAD)))
+        with pytest.raises(SystemExit) as refused:
+            seed.main()
+        assert refused.value.code == 2

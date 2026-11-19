@@ -3,7 +3,7 @@
 # Description: Subprocess executor - capture, stream, timeout and kill paths
 # Version: 1.0.3
 # Created: 2026-03-14
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/executor.py, the subprocess executor."""
@@ -180,7 +180,6 @@ class TestFileNotFoundWrapping:
             )
         cause = exc_info.value.__cause__
         assert isinstance(cause, FileNotFoundError)
-        # Not cause.filename: Windows leaves it None for a missing executable.
         assert "this_executable_does_not_exist_xyz" in str(exc_info.value)
 
 

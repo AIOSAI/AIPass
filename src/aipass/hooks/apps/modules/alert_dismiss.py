@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: alert_dismiss.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Dismiss alerts from .aipass/alerts.json via drone @hooks dismiss
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-14
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Dismiss alerts from .aipass/alerts.json by ID."""
@@ -14,11 +14,11 @@ import json
 import sys
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 CONSOLE = err_console
 
@@ -110,6 +110,8 @@ def handle_command(command: str, args: list) -> bool:
 
     # A miss exits non-zero so a script can tell a dismissal from a miss; sys.exit, not a return,
     # because handle_command's bool means "I routed this", not "it worked".
+    if len(args) != 1:
+        return False
     if not _dismiss_alert(args[0]):
         sys.exit(1)
     return True

@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 from aipass.hooks.apps.handlers.config.output_merge import CONTEXT_LIMIT
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 #: The events whose output can reach the model; PreCompact and Stop output never does.
 LEDGER_EVENTS = frozenset({"UserPromptSubmit", "SessionStart", "PreToolUse", "PostToolUse"})

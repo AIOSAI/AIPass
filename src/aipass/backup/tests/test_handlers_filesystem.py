@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_handlers_filesystem.py
 # Description: Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/
-# Version: 1.2.6
+# Version: 1.2.7
 # Created: 2026-06-12
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/."""
@@ -69,8 +69,8 @@ class TestScanWalk:
         assert result == []
 
     @pytest.mark.skipif(
-        os.name == "nt" or getattr(os, "geteuid", lambda: -1)() == 0,
-        reason="an unlistable directory needs POSIX modes and a non-root reader",
+        os.geteuid() == 0,
+        reason="an unlistable directory needs a non-root reader",
     )
     def test_a_directory_the_walk_cannot_list_raises_instead_of_dropping_out(self, tmp_path: Path) -> None:
         proj = tmp_path / "proj"
@@ -123,7 +123,7 @@ class TestIgnorePatterns:
         assert is_ignored("src/main.py", spec) is False
 
     def test_spec_enforces_the_backupignore_patterns(self, tmp_path: Path) -> None:
-        """.backupignore's patterns ignore their matches, backslash-separated too, and spare the rest."""
+        """.backupignore's patterns ignore their matches and spare the rest."""
         ignore = tmp_path / ".backupignore"
         ignore.write_text("*.pyc\n__pycache__/\n", encoding="utf-8")
 
@@ -131,7 +131,6 @@ class TestIgnorePatterns:
 
         assert is_ignored("a.pyc", spec) is True
         assert is_ignored("__pycache__/mod.py", spec) is True
-        assert is_ignored("__pycache__\\mod.py", spec) is True
         assert is_ignored("src/main.py", spec) is False
 
 
@@ -215,7 +214,7 @@ class TestBackupResult:
     def test_format_result_renders_the_counts_the_result_carries(self, tmp_path: Path) -> None:
         """The counts a result carries are the counts the report renders."""
         result = BackupResult(
-            mode="versioned",
+            mode="snapshot",
             project_root=str(tmp_path),
             files_copied=10,
             bytes_copied=1024,
@@ -225,7 +224,7 @@ class TestBackupResult:
 
         assert summary == "\n".join(
             [
-                "Backup complete (versioned)",
+                "Backup complete (snapshot)",
                 f"  Project:  {tmp_path}",
                 "  Files:    10",
                 "  Size:     1.0 KB",

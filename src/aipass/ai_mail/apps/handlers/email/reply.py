@@ -11,25 +11,16 @@ Email Reply Handler
 """
 
 import json
-import os
-import sys
 import uuid
 from pathlib import Path
 from typing import Dict, Tuple, Optional
 from datetime import datetime
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import registries_in
 from aipass.ai_mail.apps.handlers.email.delivery import deliver_to_inbox_file
 from aipass.ai_mail.apps.handlers.dispatch.report import stamp_dispatch_id
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 
 def get_email_by_id(inbox_file: Path, message_id: str) -> Optional[Dict]:
@@ -224,7 +215,7 @@ def _deliver_via_reply_path(
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("\n" + "=" * 70)
     console.print("EMAIL REPLY HANDLER")

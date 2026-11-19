@@ -4,13 +4,11 @@
 # Target env: ubuntu-latest, Python 3.13 ONLY.
 # That narrowness is load-bearing — build's marker-gated deps are all excluded
 # at this target and therefore absent from build.txt:
-#   colorama          ; os_name == "nt"            -> posix runner, not needed
 #   tomli             ; python_version < "3.11"    -> 3.13, not needed
 #   importlib-metadata; python_full_version < "3.10.2" -> 3.13, not needed
-# If publish.yml ever gains a Windows runner or a <3.11 Python, regenerate this
+# If publish.yml ever gains a <3.11 Python, regenerate this
 # file on that target (or add the dep explicitly) or --require-hashes will fail
 # with "all requirements must have their versions pinned".
-# See e2e.in for the cross-OS variant that handles this.
 #
 # Regenerate:
 #   pip-compile --allow-unsafe --generate-hashes --no-emit-index-url --output-file=build.txt build.in

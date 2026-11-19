@@ -3,7 +3,7 @@
 # Description: Tests for the host API's config, face dir, baud binary and tokens — the bind gate and the store
 # Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-06
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/host/config.py (bind gate, face dir, baud binary) and apps/handlers/host/tokens.py."""
@@ -12,7 +12,6 @@
 # sentry: no-test-needed(stdlib) — hashlib.sha256 and secrets.token_urlsafe themselves, behind issue_token()
 
 import json
-import sys
 from pathlib import Path
 from typing import Any, Optional
 from unittest.mock import patch
@@ -314,9 +313,6 @@ class TestFaceDir:
         assert config == {"host": "127.0.0.1", "port": 9100, "face_dir": str(bundle)}
 
 
-posix_permissions = pytest.mark.skipif(sys.platform == "win32", reason="os.access X_OK is always true on Windows")
-
-
 class TestBaudBin:
     """The baud binary the host lanes exec, stored beside face_dir."""
 
@@ -356,7 +352,6 @@ class TestBaudBin:
 
         assert host_config.baud_bin() is None
 
-    @posix_permissions
     def test_a_file_without_the_executable_bit_is_refused(self, store: Path, tmp_path: Path) -> None:
         """Leg four: a download nobody chmodded would fail at every exec instead."""
         binary = _baud_binary(tmp_path / "baud-cli", mode=0o644)
@@ -541,12 +536,15 @@ class TestVerifyToken:
         assert host_tokens.verify_token(raw) is None
 
     def test_malformed_store_denies_everything(self, store: Path) -> None:
-        """A broken store must fail closed — deny all, never admit one."""
+        """A broken store fails closed out loud: verify raises, admits no one, and leaves the file as it found it."""
         _, raw = host_tokens.issue_token("pixel-8")
+        broken = json.dumps(["not", "an", "envelope"])
+        _seed(store, TOKENS_ENTRY, broken)
 
-        _seed(store, TOKENS_ENTRY, json.dumps(["not", "an", "envelope"]))
+        with pytest.raises(host_tokens.secrets_store.SecretsUnavailable, match="not a tokens document"):
+            host_tokens.verify_token(raw)
 
-        assert host_tokens.verify_token(raw) is None
+        assert (store / TOKENS_ENTRY).read_text(encoding="utf-8") == broken
 
 
 class TestRevokeToken:

@@ -14,7 +14,6 @@
 ```bash
 drone @backup register /path/to/project --name myapp   # register and scaffold .backup/
 drone @backup snapshot @myapp                          # full mirror copy
-drone @backup versioned @myapp                         # incremental, timestamped
 drone @backup status @myapp                            # what is stored, and when
 ```
 
@@ -23,9 +22,6 @@ drone @backup status @myapp                            # what is stored, and whe
 ## What It Does
 
 - **Snapshot** — a full mirror of a project as it stands right now.
-- **Versioned** — an incremental, timestamped store that keeps the current copy
-  and a baseline beside it, so a file can be recovered as it was.
-- **Restore** — finds a version by path or by name and writes it where you say.
 - **Registration** — a project registers once, gets its own `.backup/` store and
   its own `.backupignore`, and answers to `@name` afterwards.
 - **Ignore rules** — gitignore-style patterns, with a built-in floor that reaches
@@ -33,15 +29,15 @@ drone @backup status @myapp                            # what is stored, and whe
 - **A run ceiling** — every run measures what it is about to copy and refuses
   loudly rather than walking a build-artifact tree for hours.
 - **Drive sync** — optional, off by default, and the only lane that leaves the
-  machine. It uploads the snapshot store, never the versioned one, and holds
+  machine. It uploads the snapshot store and holds
   back secrets and key files whatever the ignore file says.
 
 The backups belong to the project, not to this branch: the store and the ignore
 file live in the target project's own root, so a project keeps its backups when
 this branch is not around. There is no compression and no encryption. The
-schedule is not this branch's either: @daemon fires `all --registered` at 05:00
-each night from this branch's `.daemon/schedule.json`, and any other backup
-happens when something asks for one.
+schedule is per project: `schedule` sets a registered project's daily time and
+turns it on or off, and @daemon fires that project's `all` from this branch's
+`.daemon/schedule.json`. Any other backup happens when something asks for one.
 
 ---
 
@@ -62,7 +58,7 @@ are safe to probe against a real project.
 ## How To Reach Me
 
 - Mail: `drone @ai_mail email @backup "Subject" "Body"` for a question, `drone @ai_mail dispatch @backup "Subject" "Body"` when the branch must act. A sleeping agent never reads plain mail.
-- A snapshot, versioned run, or restore that produces the wrong copy, an ignore rule that misses what it should catch, or a run ceiling that fires (or fails to fire) incorrectly is a defect worth reporting here.
+- A snapshot that produces the wrong copy, an ignore rule that misses what it should catch, or a run ceiling that fires (or fails to fire) incorrectly is a defect worth reporting here.
 - Owner rulings and architecture questions go to @devpulse, not here.
 
 ---
@@ -83,20 +79,18 @@ Three layers. `apps/backup.py` is the entry point: it discovers the modules,
 routes a verb to whichever one claims it, and resolves `@name` to a path.
 
 The modules are the verbs. `register` scaffolds a project's store; `snapshot`
-mirrors, `versioned` keeps history, and `all` runs both lanes over one shared
-scan before handing off to `drive_sync` when the project has it on (`all
---registered` does that for every registered project). `restore` reads history
-back out, `status` reports what is stored and which lanes are running, `stop`
+mirrors, and `all` runs it and then hands off to `drive_sync` when the project
+has it on (`all --registered` does that for every registered project). `status` reports what is stored and which lanes are running, `stop`
 ends a running lane by request (SIGTERM; the lane saves, says its counts and
 exits 130), `prune` lists (and with `--apply`
 deletes) stored copies the ignore rules now match, and `display` renders the panels the
 other lanes print. The Drive lane is `drive_sync`, `drive_check`, `drive_stats`,
 `drive_clear` and `share`. `settings` sets one key, a project's `drive_sync` on
-or off, and fails honestly for anything else. `door_trail` is not a verb: it is
-the door other branches import, publishing this branch's operation trail.
+or off, and fails honestly for anything else. Other branches import from the
+package door, `from aipass.backup import log_operation`, never from `apps/`.
 
 Underneath, the handlers do the work: walking and filtering a tree, applying
-ignore rules, copying, diffing, building store paths, reading and writing the
+ignore rules, copying, building store paths, reading and writing the
 project's config and registry, keeping the changelog and the running-lane
 progress files, talking to Drive, and writing this branch's own operation trail. They are shared by every module, and
 they refuse to be imported from outside this branch —
@@ -117,11 +111,11 @@ Depth lives in [docs/](docs/), one page per lane or handler group:
 | [ignores.md](docs/ignores.md) | Seed, built-in floor, runtime — the whole rule set |
 | [run_ceiling.md](docs/run_ceiling.md) | The guard that refuses a runaway run |
 | [store_cleanup.md](docs/store_cleanup.md) | Deletions that exist, and ones that do not |
-| [restore.md](docs/restore.md) | Finding a version and recovering it |
 | [drive_sync.md](docs/drive_sync.md) | The Drive lane, and what is verified |
 | [cli.md](docs/cli.md) | Router behaviour, flags by verb, legacy entry form |
+| [schedule.md](docs/schedule.md) | Each project's scheduled backup, and its JSON |
 | [module_fence.md](docs/module_fence.md) | The handlers access guard |
-| [path_resolution.md](docs/path_resolution.md) | Why nothing here resolves at import |
+| [path_resolution.md](docs/path_resolution.md) | What reads the cwd, and where backups land |
 | [tests.md](docs/tests.md) | Running the suite |
 
 ---

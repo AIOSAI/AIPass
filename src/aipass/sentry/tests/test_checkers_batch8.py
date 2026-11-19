@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch8.py
 # Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
-# Version: 1.1.0
+# Version: 1.2.3
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/handlers_check.py and six sibling checkers (batch 8)."""
@@ -13,12 +13,13 @@
 # sentry: no-test-needed(shared) — is_bypassed's own matching rules; tests/test_bypass.py
 # sentry: no-test-needed(stdlib) — ast.parse's parsing; the checkers only walk the tree it returns
 
+from pathlib import Path
 from typing import List
 
 import pytest
 
+from aipass.sentry.apps.handlers.aipass_standards import architecture_check, imports_check
 from aipass.sentry.apps.handlers.aipass_standards.handlers_check import (
-    _branch_before,
     check_auto_detection,
     check_handler_independence,
     check_no_orchestration,
@@ -51,6 +52,14 @@ from aipass.sentry.apps.handlers.aipass_standards.permission_flags_check import 
 def _lines(text: str) -> List[str]:
     """Split text into lines, widening LiteralString to str for pyright."""
     return text.split("\n")
+
+
+PERMISSION_SAMPLES = Path(__file__).parent / "fixtures" / "permission_flags"
+
+
+def _permission_sample(name: str) -> str:
+    """Read a permission_flags sample; the flag lives in data so this file never carries it."""
+    return (PERMISSION_SAMPLES / f"{name}.txt").read_text(encoding="utf-8")
 
 
 def test_handler_independence_clean(tmp_path):
@@ -249,7 +258,7 @@ def test_auto_detection_missing():
     assert result is not None
     assert result["passed"] is False
     assert "never reads the caller frame" in result["message"]
-    # Pinned as a refusal: inspect.stack() is the Windows dead-cwd defect, never a "clearer" instruction.
+    # Pinned as a refusal: inspect.stack() is the dead-cwd defect, never a "clearer" instruction.
     assert "use sys._getframe" in result["message"]
     assert "NOT inspect.stack()" in result["message"]
 
@@ -295,17 +304,18 @@ def test_no_orchestration_module_import():
     assert "orchestration" in result["message"]
 
 
-def test_branch_before_says_none_rather_than_guessing():
-    """A missing marker returns None, never the whole string."""
+def test_an_import_whose_branch_cannot_be_read_is_never_taken_for_the_own_branch(tmp_path):
+    """No branch before the marker is "cannot tell", never the last segment of the whole string."""
+    module = "apps.handlers.json"
+    content = f'"""Handler."""\nfrom {module} import x\n'
+    handler = tmp_path / "src" / "aipass" / "json" / "apps" / "handlers" / "h.py"
+    result = check_handler_independence(content, _lines(content), str(handler))
+    assert result["passed"] is False
+    assert f"from {module} import x" in result["message"]
 
-    assert _branch_before("aipass.spawn.apps.modules", ".apps.handlers") is None
-    assert _branch_before("aipass.spawn.apps.modules", ".apps.modules") == "spawn"
-    assert _branch_before("aipass.sentry.apps.handlers.json", ".apps.handlers") == "sentry"
-    assert _branch_before(".apps.handlers.x", ".apps.handlers") is None
 
-
-def test_no_orchestration_allows_another_branchs_modules_gateway(tmp_path):
-    """Consuming ANOTHER branch's modules/ is the sanctioned door, not orchestration."""
+def test_no_orchestration_leaves_another_branchs_long_path_to_front_door(tmp_path):
+    """A front_door violation (another branch's apps/modules by path), not orchestration: no double conviction."""
     content = '"""Handler."""\nfrom aipass.spawn.apps.modules import get_template_dir\n'
 
     result = check_no_orchestration(
@@ -334,6 +344,34 @@ def test_no_orchestration_unknown_path_stays_strict():
     result = check_no_orchestration(content, _lines(content))
     assert result is not None
     assert result["passed"] is False
+
+
+def test_handler_independence_cure_names_the_front_door():
+    content = "from aipass.flow.apps.handlers.plan import ops\n"
+    result = check_handler_independence(content, _lines(content), "src/aipass/sentry/apps/handlers/x/y.py")
+    assert "(import it through that branch's front door: from aipass.<branch> import <name>)" in result["message"]
+    assert "modules/" not in result["message"]
+
+
+@pytest.mark.parametrize(
+    "module, exempt",
+    [
+        ("aipass.prax.apps.modules.logger", True),
+        ("aipass.cli.apps.modules", True),
+        ("aipass.cli.apps.modules.display", True),
+        ("aipass.prax.apps.modules.dashboard", False),
+        ("aipass.prax.apps.modules", False),
+    ],
+)
+def test_handlers_architecture_and_imports_read_the_foundation_services_one_way(module, exempt):
+    """FPLAN-1024: prax's logger and cli's display, reached from inside their own branch, by one shared reading."""
+    content = f"from {module} import x\n"
+    path = f"src/aipass/{module.split('.')[1]}/apps/handlers/h/x.py"
+    orchestration = check_no_orchestration(content, _lines(content), path)
+    architecture = architecture_check.check_handler_independence(_lines(content), path)
+    imports = imports_check.check_handler_independence(_lines(content), path)
+    assert orchestration is not None and architecture is not None and imports is not None
+    assert (orchestration["passed"], architecture["passed"], imports["passed"]) == (exempt, exempt, exempt)
 
 
 def test_no_orchestration_in_docstring():
@@ -598,16 +636,20 @@ def test_observe_reads_100_when_system_logs_are_present(tmp_path):
     assert record["would_be_score"] == 100
 
 
-def test_observe_excludes_mail_lane_artifacts(tmp_path):
-    """dispatch_*.log is @ai_mail's delivery artifact, not the branch's log."""
+@pytest.mark.parametrize(
+    ("name", "counted"),
+    [("dispatch_wake.log", 0), ("dispatch_stdout.log", 0), ("dispatch_stderr.log", 0), ("dispatch_monitor.log", 1)],
+    ids=["wake", "stdout", "stderr", "own_module_log"],
+)
+def test_observe_excludes_exactly_the_named_mail_lane_transcripts(tmp_path, name, counted):
+    """@ai_mail's own dispatch_monitor.log is a branch log: the old dispatch_ prefix hid it."""
     branch = _branch_with_local_logs(tmp_path, local_logs=0)
-    (branch / "logs" / "dispatch_20260814.log").write_text("delivery", encoding="utf-8")
+    (branch / "logs" / name).write_text("delivery", encoding="utf-8")
 
     observe = getattr(log_structure_check, "check_branch_observe")
     record = observe(str(branch))[0]
 
-    assert record["local_logs"] == 0, "a mail-lane artifact is not a branch log"
-    assert record["would_be_score"] == 100
+    assert (record["local_logs"], record["would_be_score"]) == (counted, 50 if counted else 100)
 
 
 def test_observe_reports_unobservable_branch_without_a_number(tmp_path):
@@ -900,7 +942,7 @@ def test_function_naming_a_lookalike_of_a_protocol_name_still_fails(name):
     result = check_function_naming(f"def {name}(self):\n    pass\n")
 
     assert result is not None
-    assert result["message"] == f"Non-snake_case functions: {name}"
+    assert result["message"] == f"Non-snake_case functions: {name} (line 1)"
 
 
 def test_constant_naming_upper():
@@ -1034,11 +1076,7 @@ def test_no_dangerous_flags_clean(tmp_path):
 
 def test_no_dangerous_flags_violation(tmp_path):
     """File with prohibited permission bypass flag fails."""
-    lines: List[str] = [
-        '"""Module."""',
-        'cmd = "--dangerously-skip-permissions"',
-        "",
-    ]
+    lines = _lines(_permission_sample("module_with_flag"))
 
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is False
@@ -1047,13 +1085,7 @@ def test_no_dangerous_flags_violation(tmp_path):
 
 def test_no_dangerous_flags_in_docstring(tmp_path):
     """Prohibited flag inside docstring is ignored."""
-    lines: List[str] = [
-        '"""',
-        "Use --dangerously-skip-permissions for testing",
-        '"""',
-        "pass",
-        "",
-    ]
+    lines = _lines(_permission_sample("flag_in_docstring"))
 
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is True
@@ -1061,11 +1093,7 @@ def test_no_dangerous_flags_in_docstring(tmp_path):
 
 def test_no_dangerous_flags_skip_permissions(tmp_path):
     """File with --skip-permissions fails."""
-    lines: List[str] = [
-        '"""Module."""',
-        'cmd = "--skip-permissions"',
-        "",
-    ]
+    lines = _lines(_permission_sample("module_with_skip_permissions"))
 
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is False
@@ -1073,11 +1101,7 @@ def test_no_dangerous_flags_skip_permissions(tmp_path):
 
 def test_no_dangerous_flags_bypass_rule(tmp_path):
     """Prohibited flag bypassed by rule passes."""
-    lines: List[str] = [
-        '"""Module."""',
-        'cmd = "--dangerously-skip-permissions"',
-        "",
-    ]
+    lines = _lines(_permission_sample("module_with_flag"))
     bypass_rules = [{"standard": "permission_flags", "file": str(tmp_path / "fake/path.py")}]
 
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"), bypass_rules=bypass_rules)
@@ -1088,19 +1112,19 @@ def test_no_dangerous_flags_bypass_rule(tmp_path):
 
 
 def test_no_dangerous_flags_reads_code_after_a_docstring_quoting_the_other_delimiter(tmp_path):
-    lines = _lines('"""Quotes \'\'\' in prose."""\ncmd = "--dangerously-skip-permissions"\n')
+    lines = _lines(_permission_sample("flag_after_docstring_quoting_other_delimiter"))
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["message"].startswith("Dangerous permission bypass flags on lines [2]")
 
 
 def test_no_dangerous_flags_reads_a_triple_quoted_literal_in_code(tmp_path):
-    lines = _lines('cmd = """--dangerously-skip-permissions"""\n')
+    lines = _lines(_permission_sample("flag_in_triple_quoted_literal"))
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["message"].startswith("Dangerous permission bypass flags on lines [1]")
 
 
 def test_no_dangerous_flags_ignores_flag_words_in_a_docstring_holding_the_other_delimiter(tmp_path):
-    lines = _lines('"""\n\'\'\'\nUse --dangerously-skip-permissions never.\n"""\nx = 1\n')
+    lines = _lines(_permission_sample("flag_in_docstring_holding_other_delimiter"))
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is True
 
@@ -1138,7 +1162,7 @@ def test_error_not_user_input_reads_a_triple_quoted_literal_in_code(tmp_path):
 def test_constant_naming_reads_the_line_opening_a_triple_quoted_literal():
     result = check_constant_naming('bad_name = """\nbody\n"""\n')
     assert result is not None
-    assert result["message"] == "Non-UPPER_CASE constants: bad_name"
+    assert result["message"] == "Non-UPPER_CASE constants: bad_name (line 1)"
 
 
 def test_constant_naming_never_reads_a_literal_body_as_an_assignment():
@@ -1150,4 +1174,4 @@ def test_constant_naming_never_reads_a_literal_body_as_an_assignment():
 def test_constant_naming_reads_code_after_a_docstring_holding_the_other_delimiter():
     result = check_constant_naming("'''\n\"\"\"\n'''\nlower_x = 1\n")
     assert result is not None
-    assert result["message"] == "Non-UPPER_CASE constants: lower_x"
+    assert result["message"] == "Non-UPPER_CASE constants: lower_x (line 4)"

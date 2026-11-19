@@ -3,7 +3,7 @@
 # Description: Command jobs - a scheduled drone command run as a subprocess, no wake
 # Version: 1.1.0
 # Created: 2026-09-11
-# Modified: 2026-10-25
+# Modified: 2026-11-14
 # =============================================
 
 """Command jobs (DPLAN-0338): a schedule job that runs a drone command instead of waking an agent.
@@ -41,8 +41,6 @@ TAIL_MAX_CHARS = 400
 #: Between SIGTERM to the group and SIGKILL to whatever ignored it.
 _STOP_GRACE_SECONDS = 2.0
 _STOP_POLL_SECONDS = 0.05
-
-_POSIX = os.name == "posix"
 
 
 @dataclass
@@ -149,9 +147,7 @@ def signal_group(pid: int, sig) -> None:
 
 def _leader_exited(pid: int) -> bool:
     """True once the group leader has exited, WITHOUT reaping it. Raises ChildProcessError once reaped."""
-    if hasattr(os, "waitid"):
-        return os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
-    return False
+    return os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
 
 
 def _await_leader_unreaped(pid: int) -> None:
@@ -166,18 +162,15 @@ def _await_leader_unreaped(pid: int) -> None:
 
 def _stop_tree(proc: "subprocess.Popen[bytes]") -> None:
     """Stop an overrunning command and everything it started, then reap it."""
-    if _POSIX:
-        signal_group(proc.pid, signal.SIGTERM)
-        # The pgid is ours only while the leader is unreaped: a reaped pid can be reissued to a stranger.
-        try:
-            _await_leader_unreaped(proc.pid)
-        except ChildProcessError:
-            logger.warning("[command_job] pid %s was reaped before SIGKILL; its pgid is not ours to signal", proc.pid)
-        else:
-            # Unconditional: a grandchild may have ignored TERM, and the group outlives its leader.
-            signal_group(proc.pid, signal.SIGKILL)
+    signal_group(proc.pid, signal.SIGTERM)
+    # The pgid is ours only while the leader is unreaped: a reaped pid can be reissued to a stranger.
+    try:
+        _await_leader_unreaped(proc.pid)
+    except ChildProcessError:
+        logger.warning("[command_job] pid %s was reaped before SIGKILL; its pgid is not ours to signal", proc.pid)
     else:
-        proc.kill()
+        # Unconditional: a grandchild may have ignored TERM, and the group outlives its leader.
+        signal_group(proc.pid, signal.SIGKILL)
     try:
         proc.wait(timeout=_STOP_GRACE_SECONDS)
     except subprocess.TimeoutExpired:
@@ -196,7 +189,7 @@ def _execute(argv: List[str], cwd, timeout_seconds) -> CommandResult:
                 stdin=subprocess.DEVNULL,  # a scheduled command has no human to answer a prompt
                 stdout=out,
                 stderr=subprocess.STDOUT,  # one stream, so the tail reads in the order it was written
-                start_new_session=_POSIX,
+                start_new_session=True,
             )
         except OSError as e:
             logger.warning("[command_job] could not start %s in %s: %s", argv[:3], cwd, e)

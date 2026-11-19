@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unified_stream.py
 # Description: Unified Display Handler
-# Version: 0.5.0
+# Version: 0.5.1
 # Created: 2025-11-23
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Unified Stream Display Handler"""
@@ -14,17 +14,8 @@ from threading import Lock
 
 from rich.markup import escape
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.cli import console
 
-logger = get_direct_logger()
-
-try:
-    from aipass.cli.apps.modules import console
-except ImportError as e:
-    logger.info(f"[unified_stream] CLI console not available, falling back to rich.Console: {e}")
-    from rich.console import Console
-
-    console = Console()
 
 _print_lock = Lock()
 

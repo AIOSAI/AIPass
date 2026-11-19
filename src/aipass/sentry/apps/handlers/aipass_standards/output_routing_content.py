@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: output_routing_content.py
 # Description: Output Routing Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-09
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -68,13 +68,13 @@ def get_output_routing_standards() -> str:
         '  [dim]console.print("... Failed")[/dim]',
         "",
         "  [green]Good — use @cli helpers:[/green]",
-        "  [dim]from aipass.cli.apps.modules import error, success, warning[/dim]",
+        "  [dim]from aipass.cli import error, success, warning[/dim]",
         '  [dim]error(f"Error: {msg}")[/dim]',
         '  [dim]success("Done")[/dim]',
         '  [dim]warning("Check configuration")[/dim]',
         "",
         "[bold cyan]HOW TO FIX:[/bold cyan]",
-        "  1. Import the helpers: [dim]from aipass.cli.apps.modules import error, success, warning[/dim]",
+        "  1. Import the helpers: [dim]from aipass.cli import error, success, warning[/dim]",
         "  2. Replace raw print with [dim][red]...[/red][/dim] markup → [dim]error(msg)[/dim]",
         "  3. Replace status-emoji prints with [dim]success(msg)[/dim] or [dim]warning(msg)[/dim]",
         "  4. Keep [dim]console.print()[/dim] for tables, panels, and non-status output",

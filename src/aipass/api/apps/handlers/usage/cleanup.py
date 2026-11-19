@@ -3,7 +3,7 @@
 # Description: Usage data retention and cleanup
 # Version: 0.1.4
 # Created: 2025-11-16
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """Usage Data Cleanup Handler"""
@@ -39,8 +39,7 @@ def _read_json(file_path: Path) -> Optional[Dict]:
 def _write_json(file_path: Path, data: Dict) -> bool:
     """Write a JSON file, creating its parent; True once written.
 
-    Written to a sibling then replaced, so a failed write never leaves a cut store. On Windows the replace
-    raises PermissionError while another process holds the store open; the store stays whole.
+    Written to a sibling then replaced, so a failed write never leaves a cut store.
     """
     file_path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(data, indent=2, ensure_ascii=False)
@@ -57,7 +56,6 @@ def _write_json(file_path: Path, data: Dict) -> bool:
 @contextmanager
 def store_lock(file_path: Path) -> Iterator[None]:
     """Hold the store's exclusive lock (a sibling .lock file) across one read-modify-write; OSError past the wait."""
-    # O_CREAT|O_EXCL rather than fcntl, as host/tokens.py does: this has to work on Windows too.
     lock = file_path.with_name(file_path.name + ".lock")
     lock.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + LOCK_WAIT_SECONDS
@@ -65,9 +63,8 @@ def store_lock(file_path: Path) -> Iterator[None]:
         try:
             descriptor = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             break
-        except (FileExistsError, PermissionError) as e:
-            # Windows answers a delete-pending lock with PermissionError: still held, so poll it.
-            if isinstance(e, FileExistsError) and _lock_is_stale(lock):
+        except FileExistsError as e:
+            if _lock_is_stale(lock):
                 logger.warning(f"Breaking a stale usage store lock: {lock}")
                 lock.unlink(missing_ok=True)
                 continue

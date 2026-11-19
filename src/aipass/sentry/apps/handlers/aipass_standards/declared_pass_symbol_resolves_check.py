@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: declared_pass_symbol_resolves_check.py
 # Description: Declared Pass Symbol Resolves Standards Checker Handler
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-09-25
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Declared Pass Symbol Resolves Standards Checker Handler
@@ -62,8 +62,6 @@ ELSEWHERE = ("test_", "tests/")
 FILE_EXTENSIONS = frozenset({"md", "py", "json", "txt", "toml", "yaml", "yml", "cfg", "ini", "rst", "sh", "csv", "log"})
 
 #: Where this pack's checkers live: a category that names one is a reference to it.
-#: Never resolve()d at import: that reads the working directory, and an import
-#: must not need one (tests/test_import_dead_cwd.py).
 PACK_DIR = Path(__file__).parent
 
 CURE = "name the symbol the product has, or drop the line"
@@ -78,7 +76,7 @@ DYNAMIC_NAMES = "globals()"
 MODULE_HOOK = "__getattr__"
 
 BUILT_IN = "built-in"
-EXTENSIONS = {".so", ".pyd"}
+EXTENSIONS = {".so"}
 
 FROZEN = "frozen"
 

@@ -33,8 +33,7 @@ under the repo-root config, the same suite is all errors.
 ## What continuous integration actually runs
 
 No workflow names this branch. The fleet is tested in one process from the repo
-root: `ci.yml` across Python 3.10 to 3.13 on Linux, `macos-test.yml` on macOS
-without the e2e ignore.
+root: `ci.yml` across Python 3.10 to 3.13 on Linux.
 
 ```bash
 pytest -v --tb=short --rootdir=. --ignore=tests/e2e -n auto --dist loadscope --timeout 300 --timeout-method thread --max-worker-restart 0
@@ -47,10 +46,9 @@ missing import-time set would be masked rather than cured.
 
 ## Where tests live
 
-`tests/` holds the entry-point tests, one file per module (note, span, top,
-align, kv), the dead-cwd import pins, and the handler fence tests with their
-support file. Archived suites sit in `tests/.archive/`, untracked, with the
-date they were retired in the filename.
+`tests/` holds the entry-point tests, one file per module (span, top, align,
+kv), the dead-cwd fence pins, and the handler fence tests with their support
+file. Archived suites sit in `tests/.archive/`, untracked.
 
 The json handler shim has no test file here: every property of it is carried
 once, parametrised across every branch in the fleet, by the standards branch's

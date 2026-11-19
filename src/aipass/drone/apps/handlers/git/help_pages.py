@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.11.0
+# Version: 1.12.0
 # Created: 2026-10-04
-# Modified: 2026-11-08
+# Modified: 2026-11-10
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -20,6 +20,7 @@ from aipass.drone.apps.handlers.git import (
     alerts_handler,
     ci_cure_handler,
     commit_handler,
+    external_pr_handler,
     gh_chores,
     init_handler,
     label_handler,
@@ -59,6 +60,17 @@ def page(command: str | None = None) -> str:
         return (
             "git pr <description> — Push current branch and create PR to main [owner]\n"
             "  On main: creates temp branch from slug. Otherwise: pushes branch directly. No -u flag.\n"
+            "git pr <title> --repo <path> — Open an external repo's PR to its default branch [admin door]\n"
+            "  Pushes the checked-out branch to origin under its own name, never forced, then opens\n"
+            "  <branch> -> <default> on origin's GitHub repo, the default branch as GitHub reports\n"
+            "  it. An open PR for the branch is reused and its URL printed. The title is held to\n"
+            "  the commit subject cap before any push. Refused, exactly as printed:\n"
+            + _printed(
+                external_pr_handler.REFUSE_DETACHED.format(repo="<repo>"),
+                external_pr_handler.REFUSE_ON_DEFAULT.format(repo="<repo>", branch="<default>"),
+                external_pr_handler.REFUSE_DIRTY.format(count="<n>"),
+                external_pr_handler.REFUSE_NOT_AHEAD.format(head="<branch>", base="<default>"),
+            )
         )
     if command == "status":
         return (
@@ -337,6 +349,12 @@ def page(command: str | None = None) -> str:
             "  callers must pass --confirm or the merge is refused.\n"
             "  External project, its manager's seat: merges on origin's GitHub repo, then\n"
             "  checks out dev and fast-forwards it to origin/dev.\n"
+            "git merge <PR#> --repo <path> [--confirm] — Merge an external repo's PR [admin door]\n"
+            "  gh pr merge --merge on origin's GitHub repo: a merge commit, no --delete-branch,\n"
+            "  no --admin, no --auto. A protected branch or a red required check refuses, and\n"
+            "  gh's words come back as printed. The same y/N gate or --confirm. Nothing local\n"
+            "  moves, and sync --repo does not realign the working branch: the merge commit\n"
+            "  lands on the default branch only, and the next pr carries the branch on from there.\n"
         )
     if command == "smart-sync":
         return "git smart-sync — Fetch origin and rebase if behind [owner]\n"
@@ -414,12 +432,12 @@ def page(command: str | None = None) -> str:
         "  restore [--source <ref>] <path ...>  Tracked files back to HEAD or <ref>\n"
         "  uncommit [n]           Un-record the last n unpushed commits, changes staged\n"
         "  checkout <main|dev>    Switch branches\n"
-        "  pr <desc>              Push current branch and create PR to main\n"
+        "  pr <desc>              Push current branch and create PR to main (--repo: the door below)\n"
         "  dev-pr <desc>          Push dev and create PR to main\n"
         "  delete-branch <name>   Delete a remote branch\n"
         "  prune-temp             Delete merged citizen/* temp branches\n"
         "  close-pr <number>      Close a PR\n"
-        "  merge <PR#> [--confirm]  Merge a PR (gated: y/N prompt or --confirm)\n"
+        "  merge <PR#> [--confirm]  Merge a PR (gated: y/N prompt or --confirm; --repo: the door)\n"
         "  sync [--autostash]     Sync with origin/main (FF on dev)\n"
         "  merge-main             Merge origin/main into dev, no rewrite, no push\n"
         "  smart-sync             Fetch + rebase if behind\n"
@@ -467,6 +485,8 @@ def page(command: str | None = None) -> str:
         "  gh release list|view       drone @git release list [--repo O/N] [--since TAG]\n"
         "  gh release edit <tag>      drone @git release edit <tag>  (notes from CHANGELOG.md)\n"
         "  gh label list|create       drone @git label list | label create <name>\n"
+        "  gh pr create (another repo)  drone @git pr <title> --repo <path>\n"
+        "  gh pr merge <n> --merge      drone @git merge <n> --repo <path> --confirm\n"
         "  gh api .../code-scanning/alerts  drone @git alerts list | alerts dismiss <n>\n"
         "  Paths are read against your directory first, then the repo root.\n"
         "  No twin yet: git diff <range> -- <path> (use show <sha>). Ask @drone.\n"

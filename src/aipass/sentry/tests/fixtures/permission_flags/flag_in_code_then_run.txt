@@ -1,0 +1,2 @@
+CMD = "--dangerously-skip-permissions"
+run(CMD)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_config.py
 # Description: The registry-path configuration commands
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-05
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/config.py: the registry-path configuration commands."""
@@ -20,6 +20,7 @@ from aipass.drone.apps.modules.config import handle_command
 
 
 MODULE = "aipass.drone.apps.modules.config"
+HOME = "aipass.drone.apps.handlers.registry_handler"
 
 
 @pytest.fixture(autouse=True)
@@ -29,8 +30,8 @@ def _isolate_config():
         patch(f"{MODULE}.logger") as mock_logger,
         patch(f"{MODULE}.json_handler") as mock_jh,
         patch(f"{MODULE}.get_registry_path") as mock_get,
-        patch(f"{MODULE}.set_registry_path") as mock_set,
-        patch(f"{MODULE}.reset_registry_path") as mock_reset,
+        patch(f"{HOME}.set_registry_path") as mock_set,
+        patch(f"{HOME}.reset_registry_path") as mock_reset,
     ):
         mock_get.return_value = "/fake/registry.json"
         yield {

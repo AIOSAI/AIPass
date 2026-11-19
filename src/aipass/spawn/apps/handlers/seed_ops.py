@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: seed_ops.py
 # Description: Passport seeds — tracked identity, untracked live file (TDPLAN-0017)
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-08-28
-# Modified: 2026-11-09
+# Modified: 2026-11-18
 # =============================================
 
 """Passport seeds: the identity that ships with the repo (TDPLAN-0017).
@@ -20,17 +20,26 @@ import hashlib
 import json
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
+from aipass.spawn.apps.handlers.json_merge import backup_json
 from aipass.spawn.apps.handlers.class_registry import resolve_template_class
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.passport_migration import (
     BLOCK_ORDER,
     KEY_ORDER,
     SCHEMA_VERSION,
+    PassportTarget,
     discover_passports,
-    repo_root,
+)
+from aipass.spawn.apps.handlers.placeholders import resolve_residency
+from aipass.spawn.apps.handlers.registry import (
+    _validate_path_containment,
+    branches_as_list,
+    entry_path,
+    find_registry,
+    load_registry,
 )
 
 __all__ = [
@@ -73,8 +82,13 @@ OPTIONAL_KEYS = {
     "identity": ("class_extension",),
 }
 
-# Residents belong to their own project's repo, so only core citizens get seeds.
+# The AIPass tree's export seeds core citizens only: a resident belongs to its own project's repo,
+# and that project's own export (run at its registry) seeds it there.
 SEED_RESIDENCY = "core"
+TREE_REGISTRY_NAME = "AIPASS_REGISTRY.json"
+
+# A passport declaring one of these is its project's own shape: no core schema is forced on it.
+PROJECT_RESIDENCIES = ("resident", "external")
 
 # Deliberately small, not a second schema engine. Unlisted fields must be strings.
 _FIELD_TYPES = {
@@ -229,13 +243,40 @@ def _validate_document(document, *, kind: str) -> list[str]:
     return problems
 
 
+def _declares_project(document) -> bool:
+    """True when the document says it is a resident or external citizen; anything else is held to 2.0."""
+    citizenship = document.get("citizenship") if isinstance(document, dict) else None
+    return isinstance(citizenship, dict) and citizenship.get("residency") in PROJECT_RESIDENCIES
+
+
+def _validate_project_document(document, *, kind: str) -> list[str]:
+    """A project passport is kept as its user wrote it; only what restore keys on and privacy are checked."""
+    problems: list[str] = []
+    for section, key in (("branch_info", "branch_name"), ("identity", "citizen_class")):
+        block = document.get(section)
+        value = block.get(key) if isinstance(block, dict) else None
+        if not isinstance(value, str) or not value.strip():
+            problems.append(f"{section}.{key} is missing or empty (restore reads it)")
+    if kind == "seed":
+        leaked = set(MACHINE_LOCAL_CITIZENSHIP) & set(document.get("citizenship") or {})
+        problems += [
+            f"citizenship.{key} is machine-local and must never appear in a seed (it is minted fresh per install)"
+            for key in sorted(leaked)
+        ]
+    return problems
+
+
 def validate_seed(document) -> list[str]:
     """Problems with a seed document — machine-local fields are FORBIDDEN."""
+    if _declares_project(document):
+        return _validate_project_document(document, kind="seed")
     return _validate_document(document, kind="seed")
 
 
 def validate_passport(document) -> list[str]:
-    """Problems with a live passport document — machine-local fields REQUIRED."""
+    """Problems with a live passport document — a core one's machine-local fields REQUIRED."""
+    if _declares_project(document):
+        return _validate_project_document(document, kind="passport")
     return _validate_document(document, kind="passport")
 
 
@@ -385,10 +426,18 @@ def export_seed(target, *, confirm: bool = False) -> dict:
         logger.error("[export-seeds] %s: %s", target.path, exc)
         return record
 
-    problems = validate_passport(document)
+    # A core branch is held to 2.0 by where it lives, whatever residency its passport declares.
+    core = target.residency == SEED_RESIDENCY
+    problems = _validate_document(document, kind="passport") if core else validate_passport(document)
     if problems:
         # A bad seed shipped to every clone is worse than a missing one.
-        record["error"] = f"live passport is not a valid {SCHEMA_VERSION} passport: " + "; ".join(problems)
+        if core or not _declares_project(document):
+            cure = "run `drone @spawn migrate-passports --confirm`, then re-run export-seeds"
+            record["error"] = f"live passport is not a valid {SCHEMA_VERSION} passport: "
+        else:
+            cure = "fix the named field in the passport, then re-run export-seeds"
+            record["error"] = "live passport cannot be restored from a seed: "
+        record["error"] += "; ".join(problems) + f" - {cure}"
         logger.error("[export-seeds] %s skipped: %s", record["branch"], record["error"])
         return record
 
@@ -399,7 +448,7 @@ def export_seed(target, *, confirm: bool = False) -> dict:
         logger.error("[export-seeds] %s skipped: %s", record["branch"], exc)
         return record
 
-    seed_problems = validate_seed(seed)
+    seed_problems = _validate_document(seed, kind="seed") if core else validate_seed(seed)
     if seed_problems:
         record["error"] = "built seed did not validate: " + "; ".join(seed_problems)
         logger.error("[export-seeds] %s skipped: %s", record["branch"], record["error"])
@@ -427,6 +476,9 @@ def export_seed(target, *, confirm: bool = False) -> dict:
 
     try:
         seed_file.parent.mkdir(parents=True, exist_ok=True)
+        if current is not None:
+            # A refresh replaces a seed: the old one is kept where update keeps its backups.
+            backup_json(seed_file, backup_dir=target.branch_dir / ".spawn" / ".recovery")
         atomic_write_text(seed_file, wanted)
     except OSError as exc:
         record["error"] = f"write failed: {exc}"
@@ -440,16 +492,47 @@ def export_seed(target, *, confirm: bool = False) -> dict:
     return record
 
 
+def _project_targets(registry_path: Path) -> list[PassportTarget]:
+    """Every citizen one project's registry lists with a passport inside that project."""
+    targets: list[PassportTarget] = []
+    for row in branches_as_list(load_registry(registry_path).get("branches", [])):
+        name = row.get("name", "?")
+        if not _validate_path_containment(row.get("path", ""), registry_path):
+            logger.warning("[export-seeds] %s: path %r is outside %s, skipped", name, row.get("path"), registry_path)
+            continue
+        branch_dir = registry_path.parent / entry_path(row)
+        passport = branch_dir / ".trinity" / "passport.json"
+        if not passport.is_file():
+            logger.warning("[export-seeds] %s at %s has no passport, not exported", name, branch_dir)
+            continue
+        targets.append(PassportTarget(passport, branch_dir, registry_path.parent, resolve_residency(branch_dir)))
+    return targets
+
+
 def export_seeds(root=None, *, only: str | None = None, confirm: bool = False) -> dict:
-    """Export every core citizen's seed and return a measured receipt.
+    """Export the seeds of the project at ``root`` (default: the cwd) and return a measured receipt.
 
-    Shares discovery with the 2.0 migration so the fleet commands agree on the fleet.
+    The nearest registry decides the scope. The AIPass tree's own registry exports core citizens
+    only, through the 2.0 migration's discovery so the fleet commands agree on the fleet. Any other
+    registry is a project: every citizen it lists is exported, whatever its residency.
     """
-    base = Path(root) if root is not None else repo_root()
+    start = Path(root) if root is not None else Path.cwd()
+    registry_path = find_registry(start_path=start)
+    if registry_path is None:
+        logger.error("[export-seeds] no *_REGISTRY.json at or above %s", start)
+        raise FileNotFoundError(f"no *_REGISTRY.json at or above {start}: run export-seeds inside a project")
+    registry_path = Path(registry_path)
+    base = registry_path.parent
 
-    discovered = discover_passports(base)
-    core = [t for t in discovered if t.residency == SEED_RESIDENCY]
-    skipped_resident = len(discovered) - len(core)
+    if registry_path.name == TREE_REGISTRY_NAME:
+        scope = "core"
+        discovered = discover_passports(base)
+        core = [t for t in discovered if t.residency == SEED_RESIDENCY]
+        skipped_resident = len(discovered) - len(core)
+    else:
+        scope = "project"
+        core = _project_targets(registry_path)
+        skipped_resident = 0
 
     wanted = (only or "").lstrip("@").strip().lower()
     targets = [t for t in core if t.branch_dir.name.lower() == wanted] if wanted else core
@@ -459,6 +542,7 @@ def export_seeds(root=None, *, only: str | None = None, confirm: bool = False) -
 
     receipt = {
         "root": str(base),
+        "scope": scope,
         "confirm": confirm,
         "only": wanted or None,
         "scanned": len(records),

@@ -3,7 +3,7 @@
 # Description: Unit tests for log_events module
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for the log_events module (apps/modules/log_events.py)."""
@@ -14,7 +14,7 @@
 import pytest
 from unittest.mock import MagicMock, call, patch
 
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.trigger.apps.modules import log_events
 
 _MOCKS: dict = {}

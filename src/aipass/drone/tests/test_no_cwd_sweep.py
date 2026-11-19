@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_no_cwd_sweep.py
 # Description: Every location-inference site survives a deleted working directory
-# Version: 1.0.6
+# Version: 1.0.7
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/router_handler.py caller_cwd and every site that infers a location from the cwd."""
@@ -111,15 +111,15 @@ class TestTheDeleteLaneSurvives:
     def test_project_root_is_unknown_rather_than_a_crash(self, no_cwd, monkeypatch):
         """Mutant killed: find_project_root walking a cwd it does not have (a crash, not an answer)."""
         monkeypatch.delenv("AIPASS_HOME", raising=False)
-        temp_roots = {Path(tempfile.gettempdir()).resolve()}
-        if sys.platform != "win32":
-            temp_roots.add(Path(os.sep, "tmp").resolve())
+        temp_roots = {Path(tempfile.gettempdir()).resolve(), Path(os.sep, "tmp").resolve()}
         assert set(rm_handler.get_allowed_roots()) == temp_roots
 
     def test_the_current_branch_is_unknown(self, no_cwd, tmp_path):
         """Mutant killed: _current_branch_root walking a cwd it does not have; no branch is the caller's own."""
         (tmp_path / "somebranch" / ".trinity").mkdir(parents=True)
-        blocked, reason = rm_handler.check_carveouts((tmp_path / "somebranch" / "build").resolve(), tmp_path.resolve())
+        blocked, reason, _exemption = rm_handler.check_carveouts(
+            (tmp_path / "somebranch" / "build").resolve(), tmp_path.resolve()
+        )
         assert blocked is True
         assert "sibling branch somebranch/" in reason
 
@@ -141,7 +141,6 @@ class TestTheDeleteLaneSurvives:
         assert "current directory" in results[0][2].lower(), results
 
 
-@pytest.mark.deletable_cwd
 class TestTheDeleteLaneSurvivesForReal:
     """The end-to-end case, in a subprocess with a genuinely deleted directory: only that proves the lane."""
 
@@ -287,7 +286,7 @@ class TestTheSweepIsComplete:
 
     def test_the_detector_clears_prose_that_names_the_defect(self):
         """The red that changed the instrument, kept as the pin for it."""
-        tree = ast.parse('"""ntpath.realpath reads os.getcwd() unconditionally — hence the guard."""\n')
+        tree = ast.parse('"""os.getcwd() raises once the cwd is deleted — hence the guard."""\n')
         assert self._bare_cwd_reads(tree) == [], (
             "a docstring explaining the cure is not the defect; convicting it is how cures go unexplained"
         )
@@ -317,64 +316,3 @@ class TestTheSweepIsComplete:
         (root / "handlers" / "real.py").write_text("x = 1\n", encoding="utf-8")
 
         assert drone_conftest.python_sources(root) == [root / "handlers" / "real.py"]
-
-    def test_host_platform_answers_what_sys_platform_holds(self):
-        """The seam's body is the read it replaced; the collection-hook tests replace the seam."""
-        assert drone_conftest.host_platform() == sys.platform
-
-
-class TestTheWindowsSkipIsNarrow:
-    """A skip that fires everywhere reports its own defeat as a pass.
-
-    ``deletable_cwd`` tests delete their own cwd, which Windows forbids; conftest skips them on win32 only.
-    """
-
-    MARKED = (
-        "tests/test_deletion_log.py::TestRecordFailureIsContained::test_record_deletion_does_not_raise_when_cwd_is_gone"
-    )
-
-    def test_a_marked_test_runs_on_every_platform_but_windows(self):
-        branch_root = Path(drone_apps.__file__).resolve().parent.parent
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", self.MARKED, "-q", "-rs", "--timeout=120", "-p", "no:randomly"],
-            cwd=str(branch_root),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-        )
-
-        assert result.returncode == 0, result.stdout + result.stderr
-        if sys.platform == "win32":
-            assert "1 skipped" in result.stdout, result.stdout
-            assert "current directory" in result.stdout, "the skip did not say why"
-        else:
-            assert "1 passed" in result.stdout, result.stdout
-            assert "skipped" not in result.stdout, (
-                "a deletable-cwd test was skipped on a platform that can delete its own cwd: " + result.stdout
-            )
-
-    def test_the_hook_skips_marked_items_on_windows_and_only_there(self, monkeypatch):
-        """The Windows half of the ruling, checked from a machine that is not Windows.
-
-        The subprocess pin sees only this platform; calling the hook directly observes both answers anywhere.
-        """
-
-        def one_item():
-            recorded = []
-            return SimpleNamespace(
-                keywords={drone_conftest.DELETABLE_CWD_MARKER: True},
-                recorded=recorded,
-                add_marker=recorded.append,
-            )
-
-        monkeypatch.setattr(drone_conftest, "host_platform", lambda: "win32")
-        on_windows = one_item()
-        drone_conftest.pytest_collection_modifyitems(None, [on_windows])
-        assert on_windows.recorded, "a deletable-cwd test was left to run on Windows"
-        assert drone_conftest.WINDOWS_CWD_REASON in str(on_windows.recorded[0])
-
-        monkeypatch.setattr(drone_conftest, "host_platform", lambda: "linux")
-        elsewhere = one_item()
-        unmarked = SimpleNamespace(keywords={}, recorded=[], add_marker=lambda m: None)
-        drone_conftest.pytest_collection_modifyitems(None, [elsewhere, unmarked])
-        assert not elsewhere.recorded, "the skip reached a platform that can delete its own cwd"

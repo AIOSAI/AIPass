@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: read.py
 # Description: aipass read — render a branch README in the terminal
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-07
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -16,13 +16,13 @@ from __future__ import annotations
 
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.handlers.readme_map import get_readme_path, list_branches, read_readme_at
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 COMMAND = "read"
 _MODULE_NAME = "read"
-_VERSION = "1.1.0"
+_VERSION = "1.2.0"
 _DESCRIPTION = "Render a branch README in the terminal, live-read"
 
 
@@ -94,20 +94,20 @@ def handle_command(command: str, args: list[str]) -> bool:
 
     json_handler.ensure_module_jsons(_MODULE_NAME)
 
-    if not args:
-        print_introspection()
-        json_handler.log_operation("read_list", data={}, module_name=_MODULE_NAME)
-        return True
-
     if wants_help(args):
         print_help()
         return True
 
-    if args[0] == "--info":
-        print_introspection()
-        return True
-
-    branch = args[0].lstrip("@")
-    _render_readme(branch)
-    json_handler.log_operation("read_branch", data={"branch": branch}, module_name=_MODULE_NAME)
+    try:
+        if not args:
+            print_introspection()
+            json_handler.log_operation("read_list", data={}, module_name=_MODULE_NAME)
+        elif args[0] == "--info":
+            print_introspection()
+        else:
+            branch = args[0].lstrip("@")
+            _render_readme(branch)
+            json_handler.log_operation("read_branch", data={"branch": branch}, module_name=_MODULE_NAME)
+    except RuntimeError as exc:  # no AIPass home: the README map refuses rather than list no branches
+        error(str(exc))
     return True

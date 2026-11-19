@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: push_report.py
 # Description: Renders and persists the trinity push report — the artifact the dry-run exists to produce
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-27
-# Modified: 2026-10-17
+# Modified: 2026-11-18
 # =============================================
 
 """Trinity Push Report
@@ -15,13 +15,11 @@ Reference: docs/trinity_push.md
 from datetime import datetime
 from typing import List
 
-from aipass.prax import logger
+from aipass.prax import branch_state_root, logger
 from aipass.memory.apps.handlers.json import json_handler
-from aipass.memory.apps.handlers.repo_root import module_file
 from aipass.memory.apps.handlers.templates.trinity_push import DEFECT_ORDER
 
-_MEMORY_ROOT = module_file(__file__).parents[3]
-REPORTS_DIR = _MEMORY_ROOT / "artifacts" / "push_reports"
+REPORTS_DIR = branch_state_root("memory") / "artifacts" / "push_reports"
 
 # The remainder past the cap is COUNTED: a silent truncation reads as completeness.
 MAX_PRUNE_SAMPLES = 6

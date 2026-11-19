@@ -57,7 +57,7 @@ def process_items(items):
 ### Fix -- Use Structured Logging
 
 ```python
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 def process_items(items):
     logger.info(f"Processing {len(items)} items")
@@ -70,7 +70,7 @@ def process_items(items):
 ### Fix -- Use Rich Console Output
 
 ```python
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 
 def process_items(items):
     console.print(f"[cyan]Processing {len(items)} items[/cyan]")

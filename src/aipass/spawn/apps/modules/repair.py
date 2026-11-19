@@ -3,7 +3,7 @@
 # Description: Project structure repair — thin CLI layer for move, cleanup, scan
 # Version: 1.0.1
 # Created: 2026-05-15
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Repair orchestrator for project structure fixes."""
@@ -12,7 +12,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, header, error, warning
+from aipass.cli import console, header, error, warning
 
 from aipass.spawn.apps.handlers.repair_ops import (
     move_branch,
@@ -21,6 +21,7 @@ from aipass.spawn.apps.handlers.repair_ops import (
     repair_project,
 )
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.seat_gate import PREVIEW_NOTE, seat_refusal
 
 
 def print_introspection():
@@ -62,8 +63,19 @@ def handle_repair(args: list[str]) -> int:
         return 1
 
     apply = "--apply" in args
-    dry_run = not apply
+    refusal = apply and seat_refusal("repair --apply", " ".join(args))
+    if refusal:
+        error(refusal)
+        return 1
 
+    code = _route(args, not apply)
+    if not apply:
+        console.print(f"[dim]{PREVIEW_NOTE}[/dim]")
+    return code
+
+
+def _route(args, dry_run):
+    """Send repair to its lane: relocate, rename, clean-pollution, or the scan."""
     if "--relocate" in args:
         return _handle_relocate(args, dry_run)
 

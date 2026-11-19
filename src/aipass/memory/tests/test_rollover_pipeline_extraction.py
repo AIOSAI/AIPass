@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rollover_pipeline_extraction.py
 # Description: Rollover pipeline - the orchestrator's subprocess lanes and chroma path, and extraction
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # Category: memory/tests
 # =============================================
 
@@ -24,7 +24,7 @@ from aipass.memory.tests.support_rollover_pipeline import _import_extractor
 def _import_orchestrator(monkeypatch):
     """Import orchestrator with mocked infrastructure dependencies."""
     mock_detector = MagicMock()
-    mock_detector._read_registry = MagicMock(return_value=[])
+    mock_detector.write_scope = MagicMock(return_value=[])
     mock_detector.check_all_branches = MagicMock(return_value={"success": True, "triggers": []})
 
     mock_extractor = MagicMock()
@@ -244,7 +244,7 @@ class TestGetBranchLocalChromaPath:
         branch_dir = tmp_path / "my_branch"
         branch_dir.mkdir()
 
-        mocks["detector"]._read_registry.return_value = [
+        mocks["detector"].write_scope.return_value = [
             {"name": "MY_BRANCH", "path": str(branch_dir)},
         ]
 
@@ -260,7 +260,7 @@ class TestGetBranchLocalChromaPath:
 
     def test_returns_none_for_unknown_branch(self, monkeypatch):
         orch, mocks = _import_orchestrator(monkeypatch)
-        mocks["detector"]._read_registry.return_value = [
+        mocks["detector"].write_scope.return_value = [
             {"name": "OTHER", "path": "/nonexistent"},
         ]
         result = orch.get_branch_local_chroma_path("MISSING_BRANCH")
@@ -271,7 +271,7 @@ class TestGetBranchLocalChromaPath:
         branch_dir = tmp_path / "branch"
         branch_dir.mkdir()
 
-        mocks["detector"]._read_registry.return_value = [
+        mocks["detector"].write_scope.return_value = [
             {"name": "My_Branch", "path": str(branch_dir)},
         ]
 
@@ -285,7 +285,7 @@ class TestGetBranchLocalChromaPath:
         chroma_dir = branch_dir / ".chroma"
         chroma_dir.mkdir(parents=True)
 
-        mocks["detector"]._read_registry.return_value = [
+        mocks["detector"].write_scope.return_value = [
             {"name": "BRANCH", "path": str(branch_dir)},
         ]
 
@@ -299,7 +299,7 @@ class TestGetBranchLocalChromaPath:
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
         branch_dir = tmp_path / "other_root" / "src" / "x"
         branch_dir.mkdir(parents=True)
-        mocks["detector"]._read_registry.return_value = [{"name": "X", "path": str(branch_dir)}]
+        mocks["detector"].write_scope.return_value = [{"name": "X", "path": str(branch_dir)}]
 
         assert orch.get_branch_local_chroma_path("X") is None
         assert not (branch_dir / ".chroma").exists()
@@ -311,7 +311,7 @@ class TestGetBranchLocalChromaPath:
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
         branch_dir = tmp_path / "other_root" / "src" / "x"
         (branch_dir / ".chroma").mkdir(parents=True)
-        mocks["detector"]._read_registry.return_value = [{"name": "X", "path": str(branch_dir)}]
+        mocks["detector"].write_scope.return_value = [{"name": "X", "path": str(branch_dir)}]
 
         assert orch.get_branch_local_chroma_path("X") is None
 

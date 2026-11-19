@@ -3,19 +3,18 @@
 # Description: Persistent log watcher process for Medic error detection
 # Version: 1.5.0
 # Created: 2026-03-29
-# Modified: 2026-10-24
+# Modified: 2026-11-16
 # =============================================
 
 """
 Log Watcher Service — Persistent process for Medic"""
 
-import os
 import signal
 import sys
 import threading
 
 import aipass.trigger.apps.handlers.reload_sentinel as reload_sentinel
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.trigger.apps.modules.errors import purge_stale
 from aipass.trigger.apps.modules.core import trigger
 from aipass.trigger.apps.modules.medic import run_error_catchup
@@ -28,24 +27,11 @@ from aipass.trigger.apps.modules.log_events import (
     stop as stop_system_watcher,
 )
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 
 def _console():
-    """Return the shared CLI console, or a plain rich Console when cli is absent."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError.
-    except (ImportError, OSError):
-        logger.info("CLI console not available, using rich fallback")
-        from rich.console import Console
+    """Return the shared CLI console."""
+    from aipass.cli import console
 
-        console = Console()
     return console
 
 

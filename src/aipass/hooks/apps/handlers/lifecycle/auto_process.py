@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_process.py
-# Version: 1.3.1
+# Version: 1.4.0
 # Description: Kicks @memory's auto-process once per session and on pre-compact (TDPLAN-0005)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-06
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """Kicks @memory's auto_process in a detached child; the work leaves the prompt lane.
@@ -13,12 +13,12 @@
 Inline, vectorize + rollover outlasts the hook timeout and the injection is lost.
 """
 
-import importlib
 import os
 import tempfile
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 _GUARD_DIR = Path(tempfile.gettempdir())
 
@@ -41,16 +41,19 @@ def _mark_session_ran() -> None:
         try:
             guard.touch()
         except OSError as exc:
-            logger.info("[HOOKS] auto_process: guard write failed: %s", exc)
+            logger.warning("[HOOKS] auto_process: guard write failed: %s", exc)
 
 
 def handle(hook_data: dict) -> dict:
-    """Kick @memory's detached auto-process run and return. Never does the work inline.
+    """Kick @memory's detached auto-process; each call leaves one json trail entry."""
+    result = _handle()
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
 
-    The guard means "kicked once this session": a refusal counts, only a failed kick retries.
-    """
-    _ = hook_data
 
+def _handle() -> dict:
+    """Kick @memory's detached auto-process, never inline. A refusal marks the guard; a failed kick or raise retries."""
     if _already_ran_this_session():
         return {"stdout": "", "exit_code": 0}
 
@@ -59,23 +62,19 @@ def handle(hook_data: dict) -> dict:
         logger.info("[HOOKS] auto_process: probe run — spawn suppressed")
         return {"stdout": "", "exit_code": 0}
 
-    try:
-        module = importlib.import_module("aipass.memory.apps.modules.door_auto_process")
-        result = module.spawn_background()
+    from aipass.memory import spawn_background
 
-        if not result.get("success"):
-            logger.error("[HOOKS] auto_process: spawn failed: %s", result.get("error"))
-            return {"stdout": "", "exit_code": 1}
+    result = spawn_background()
 
-        _mark_session_ran()
-
-        if result.get("skipped"):
-            logger.info("[HOOKS] auto_process: not spawned: %s", result.get("reason"))
-            return {"stdout": "", "exit_code": 0}
-
-        logger.info("[HOOKS] auto_process: spawned pid %s", result.get("pid"))
-        return {"stdout": "", "exit_code": 0, "sound": "auto process"}
-
-    except Exception as exc:
-        logger.error("[HOOKS] auto_process: error: %s", exc)
+    if not result.get("success"):
+        logger.error("[HOOKS] auto_process: spawn failed: %s", result.get("error"))
         return {"stdout": "", "exit_code": 1}
+
+    _mark_session_ran()
+
+    if result.get("skipped"):
+        logger.info("[HOOKS] auto_process: not spawned: %s", result.get("reason"))
+        return {"stdout": "", "exit_code": 0}
+
+    logger.info("[HOOKS] auto_process: spawned pid %s", result.get("pid"))
+    return {"stdout": "", "exit_code": 0, "sound": "auto process"}

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 sentry checker handlers (batch 4)
-# Version: 1.5.0
+# Version: 1.8.1
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for 5 checkers: aipass_standards/stderr_routing_check.py, todo, trigger, dead_code, unused_function."""
@@ -14,7 +14,7 @@
 # sentry: no-test-needed(stdlib) — tokenize's own error classes; the fallback they trigger is pinned via check_branch
 
 import tokenize
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 import pytest
 from types import SimpleNamespace
@@ -33,7 +33,6 @@ from aipass.sentry.apps.handlers.aipass_standards.trigger_check import (
 )
 from aipass.sentry.apps.handlers.aipass_standards.dead_code_check import (
     check_branch as dead_code_check_branch,
-    reported_path as dead_code_reported_path,
 )
 from aipass.sentry.apps.handlers.aipass_standards.unused_function_check import (
     check_branch as unused_function_check_branch,
@@ -56,6 +55,16 @@ def _make_branch(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def _door_branch(tmp_path: Path, entries: str, constants: str = "") -> Path:
+    """A branch whose only handler, handlers/served.py, nothing imports; its top __init__.py holds a door table."""
+    branch = _make_branch(tmp_path)
+    _write_file(branch / "apps" / (branch.name + ".py"), "def main():\n    return 0\n")
+    _write_file(branch / "apps" / "handlers" / "served.py", "def render():\n    return 1\n")
+    door = f'_HANDLERS = "{branch.name}.apps.handlers"\n{constants}_HOMES = {{{entries}}}\n'
+    _write_file(branch / "__init__.py", door)
+    return branch
+
+
 @patch("aipass.sentry.apps.handlers.aipass_standards.stderr_routing_check.json_handler")
 class TestStderrRoutingCheck:
     """Tests for the stderr_routing_check checker."""
@@ -66,7 +75,7 @@ class TestStderrRoutingCheck:
         _write_file(
             py_file,
             (
-                "from aipass.cli.apps.modules import error, warning\n"
+                "from aipass.cli import error, warning\n"
                 "\n"
                 "def do_work():\n"
                 "    error('Something failed', suggestion='Try again')\n"
@@ -107,19 +116,25 @@ class TestStderrRoutingReadsCodeLinesOnly:
         return [c["message"] for c in stderr_check_module(str(py_file))["checks"] if not c["passed"]]
 
     def test_an_error_print_after_a_one_line_docstring_holding_the_other_delimiter_is_found(self, mock_json, tmp_path):
-        source = 'def f():\n    """Quotes \'\'\' here."""\n    console.print("[red]Error: the config failed to load now[/red]")\n'
+        source = (
+            'def f():\n    """Quotes \'\'\' here."""\n'
+            '    console.print("[red]Error: the config failed to load now[/red]")\n'
+        )
         assert self._failed(tmp_path, source) == [
             "subject.py: 1 error print(s) on lines [3] — use error() or fatal() instead"
         ]
 
     def test_an_error_print_inside_a_docstring_past_the_other_delimiter_is_prose(self, mock_json, tmp_path):
-        source = 'def f():\n    """Doc.\n    \'\'\'\n    console.print("[red]Error: the config failed to load now[/red]")\n    """\n'
+        source = (
+            "def f():\n    \"\"\"Doc.\n    '''\n"
+            '    console.print("[red]Error: the config failed to load now[/red]")\n    """\n'
+        )
         assert self._failed(tmp_path, source) == []
 
     def test_a_stderr_console_on_a_line_opening_a_triple_quoted_literal_is_found(self, mock_json, tmp_path):
         source = 'def f():\n    return Console(stderr=True), """\n    usage\n    """\n'
         assert self._failed(tmp_path, source) == [
-            "subject.py: Custom Console(stderr=True) on lines [2] — import err_console from aipass.cli.apps.modules"
+            "subject.py: Custom Console(stderr=True) on lines [2] — use from aipass.cli import err_console"
         ]
 
 
@@ -213,6 +228,109 @@ class TestTriggerCheck:
         assert result["passed"] is True
 
 
+_LIFECYCLE = "def create_backup(data):\n    pass\n\ndef delete_record(record_id):\n    pass\n\nPath('x').unlink()\n"
+_EVENT_HANDLER = 'from prax import logger\n\ndef event_handler(**kwargs):\n    print("fired")\n'
+_UNIMPORTED_FIRE = 'def do_work():\n    trigger.fire("x")\n'
+
+
+def _trigger_run(tmp_path: Path, rel: str, content: str, rows: list | None) -> dict:
+    """check_module on a real file, every row naming it."""
+    py_file = tmp_path / rel
+    _write_file(py_file, content)
+    rules = [{"file": rel, "standard": "trigger", **row} for row in rows] if rows is not None else None
+    return trigger_check_module(str(py_file), bypass_rules=rules)
+
+
+@patch("aipass.sentry.apps.handlers.aipass_standards.trigger_check.json_handler")
+class TestTriggerSites:
+    """Each finding is a site, at its line inside its function (<file> at module level), waived alone."""
+
+    def test_with_no_row_every_missing_event_is_reported_at_its_line(self, mock_json, tmp_path: Path) -> None:
+        result = _trigger_run(tmp_path, "modules/lifecycle.py", _LIFECYCLE, None)
+        assert result["passed"] is False
+        message = result["checks"][0]["message"]
+        assert "[1]" in message and "[4]" in message and "[7]" in message
+
+    @pytest.mark.parametrize(
+        "row",
+        [{"lines": [1]}, {"functions": ["create_backup"]}],
+        ids=["line_row", "function_row"],
+    )
+    def test_a_scoped_row_waives_its_site_and_the_other_sites_still_fail_the_file(
+        self, mock_json, tmp_path: Path, row: dict
+    ) -> None:
+        result = _trigger_run(tmp_path, "modules/lifecycle.py", _LIFECYCLE, [row])
+        message = result["checks"][0]["message"]
+        assert result["passed"] is False
+        assert "create_*" not in message and "delete_* function on lines [4]" in message and "[7]" in message
+
+    @pytest.mark.parametrize(
+        "row",
+        [{"lines": [1, 4, 7]}, {"functions": ["create_backup", "delete_record", "<file>"]}],
+        ids=["line_row", "function_row"],
+    )
+    def test_a_row_naming_every_site_passes_the_file(self, mock_json, tmp_path: Path, row: dict) -> None:
+        result = _trigger_run(tmp_path, "modules/lifecycle.py", _LIFECYCLE, [row])
+        assert (result["passed"], result["score"]) == (True, 100)
+
+    def test_a_module_level_deletion_is_waived_by_a_file_scope_row_alone(self, mock_json, tmp_path: Path) -> None:
+        result = _trigger_run(tmp_path, "modules/lifecycle.py", _LIFECYCLE, [{"functions": ["<file>"]}])
+        message = result["checks"][0]["message"]
+        assert result["passed"] is False
+        assert ".unlink()" not in message and "create_* function on lines [1]" in message
+
+    @pytest.mark.parametrize(
+        ("row", "open_checks"),
+        [
+            (None, ["No logger imports", "No print statements", "Handler naming"]),
+            ({"lines": [4]}, ["No logger imports", "Handler naming"]),
+            ({"functions": ["event_handler"]}, ["No logger imports"]),
+            ({"functions": ["<file>"]}, ["No print statements", "Handler naming"]),
+            ({"lines": [1, 3, 4]}, []),
+        ],
+        ids=["no_row", "print_line", "handler_function", "file_scope_import", "every_line"],
+    )
+    def test_an_event_handlers_logger_print_and_naming_are_sites(
+        self, mock_json, tmp_path: Path, row: dict | None, open_checks: list
+    ) -> None:
+        rel = "trigger/apps/handlers/events/on_x.py"
+        result = _trigger_run(tmp_path, rel, _EVENT_HANDLER, None if row is None else [row])
+        assert [c["name"] for c in result["checks"] if not c["passed"]] == open_checks
+        assert result["passed"] is (not open_checks)
+
+    @pytest.mark.parametrize(("row", "waived"), [({"lines": [1]}, True), ({"functions": ["<file>"]}, False)])
+    def test_an_unparseable_file_names_no_function_so_only_a_line_row_reaches_its_site(
+        self, mock_json, tmp_path: Path, row: dict, waived: bool
+    ) -> None:
+        result = _trigger_run(tmp_path, "modules/broken.py", "def create_backup(data):\n    pass\n\ndef (\n", [row])
+        assert result["passed"] is waived
+
+    def test_one_waived_print_leaves_the_other_print_failing_the_handler(self, mock_json, tmp_path: Path) -> None:
+        content = 'def handle_a(**kwargs):\n    print("a")\n\ndef handle_b(**kwargs):\n    print("b")\n'
+        rel = "trigger/apps/handlers/events/on_y.py"
+        result = _trigger_run(tmp_path, rel, content, [{"functions": ["handle_a"]}])
+        assert [c["message"] for c in result["checks"] if not c["passed"]] == [
+            "Handler uses print() (must be silent) on lines [5]"
+        ]
+
+    @pytest.mark.parametrize(
+        ("row", "waived"),
+        [
+            (None, False),
+            ({"functions": ["<file>"]}, True),
+            ({"functions": ["do_work"]}, False),
+            ({"lines": [2]}, False),
+        ],
+        ids=["no_row", "file_scope_row", "function_row", "line_row"],
+    )
+    def test_a_missing_import_is_a_whole_file_finding(
+        self, mock_json, tmp_path: Path, row: dict | None, waived: bool
+    ) -> None:
+        result = _trigger_run(tmp_path, "modules/worker.py", _UNIMPORTED_FIRE, None if row is None else [row])
+        assert result["passed"] is waived
+        assert ("Waived by a <file> bypass row" in result["checks"][0]["message"]) is waived
+
+
 @patch("aipass.sentry.apps.handlers.aipass_standards.dead_code_check.json_handler")
 class TestDeadCodeCheck:
     """Tests for the dead_code_check checker."""
@@ -270,6 +388,42 @@ class TestDeadCodeCheck:
         assert len(failed) > 0
         assert "unreferenced" in failed[0]["message"]
 
+    def test_a_module_served_by_its_own_door_table_is_referenced(self, mock_json, tmp_path: Path) -> None:
+        branch = _door_branch(tmp_path, '"render": f"{_HANDLERS}.served"')
+        result = dead_code_check_branch(str(branch))
+        assert (result["score"], result["checks"][0]["passed"]) == (100, True)
+
+    def test_a_plain_string_table_entry_also_serves(self, mock_json, tmp_path: Path) -> None:
+        branch = _door_branch(tmp_path, f'"render": "{tmp_path.name}.apps.handlers.served"')
+        assert dead_code_check_branch(str(branch))["score"] == 100
+
+    def test_a_table_entry_naming_a_door_constant_serves(self, mock_json, tmp_path: Path) -> None:
+        branch = _door_branch(tmp_path, '"render": _SERVED', constants='_SERVED = f"{_HANDLERS}.served"\n')
+        assert dead_code_check_branch(str(branch))["score"] == 100
+
+    @pytest.mark.parametrize(
+        "table",
+        [
+            '"render": f"{_HANDLERS}.other"',
+            '"render": f"{_HANDLERS}.deeper.served"',
+            "",
+            '"render": _UNSET',
+            '"render": _HANDLERS',
+        ],
+        ids=[
+            "served_by_nobody",
+            "entry_names_a_missing_module",
+            "no_table",
+            "name_never_assigned",
+            "constant_names_the_package",
+        ],
+    )
+    def test_a_file_the_table_does_not_resolve_to_is_still_dead(self, mock_json, tmp_path: Path, table) -> None:
+        branch = _door_branch(tmp_path, table)
+        result = dead_code_check_branch(str(branch))
+        assert result["score"] < 100
+        assert "handlers/served.py" in result["checks"][0]["message"]
+
     def test_dead_code_bypass_respected(self, mock_json, tmp_path: Path) -> None:
         """Bypass rules produce score=100."""
         branch = _make_branch(tmp_path)
@@ -294,6 +448,30 @@ class TestDeadCodeCheck:
         result = dead_code_check_branch(str(branch), bypass_rules=[{"file": spelled, "standard": "dead_code"}])
         message = result["checks"][0]["message"]
         assert "stray.py" in message and "orphan.py" not in message
+
+    @pytest.mark.parametrize(
+        ("rows", "dead"),
+        [
+            ([], ["orphan", "stray"]),
+            ([{"file": "apps/handlers/orphan.py", "functions": ["<file>"]}], ["stray"]),
+            ([{"file": name, "functions": ["<file>"]} for name in ("handlers/orphan.py", "stray.py")], []),
+            ([{"file": "apps/handlers/orphan.py", "functions": ["lonely"]}], ["orphan", "stray"]),
+            ([{"file": "apps/handlers/orphan.py", "lines": [1]}], ["orphan", "stray"]),
+        ],
+        ids=["no_row", "file_scope_row", "both_file_scope", "function_row", "line_row"],
+    )
+    def test_a_dead_file_is_a_whole_file_site_waived_by_a_file_scope_row(
+        self, mock_json, tmp_path: Path, rows: list, dead: list
+    ) -> None:
+        """A dead file has no line and no function: only <file> names it, and only for that file."""
+        branch = _make_branch(tmp_path)
+        _write_file(branch / "apps" / "handlers" / "orphan.py", "def lonely():\n    pass\n")
+        _write_file(branch / "apps" / "handlers" / "stray.py", "def alone():\n    pass\n")
+        _write_file(branch / "apps" / (branch.name + ".py"), "def handle_command(): pass\n")
+        result = dead_code_check_branch(str(branch), bypass_rules=[{"standard": "dead_code", **row} for row in rows])
+        message = result["checks"][0]["message"]
+        assert [name for name in ("orphan", "stray") if f"handlers/{name}.py" in message] == dead
+        assert result["passed"] is (not dead)
 
     def test_dead_code_ignores_tools_dir_by_default(self, mock_json, tmp_path: Path) -> None:
         """Orphan modules under apps/tools/ are skipped via the global .sentryignore default."""
@@ -358,21 +536,26 @@ class TestDeadCodeCheck:
         assert "repo_door.py" in result["checks"][0]["message"]
 
     @pytest.mark.parametrize(
-        ("tail", "dead"),
-        [("", False), ("\n\ndef log_more():\n    return log_operation\n", True)],
-        ids=["shaped_door_is_referenced", "door_that_defines_a_function_is_dead"],
+        ("name", "tail", "dead"),
+        [
+            ("door_trail.py", "", False),
+            ("door_trail.py", "\n\ndef log_more():\n    return log_operation\n", False),
+            ("trail_view.py", "", False),
+            ("trail_view.py", "\n\ndef log_more():\n    return log_operation\n", True),
+        ],
+        ids=["second_door_by_name", "second_door_by_name_with_logic", "second_door_by_shape", "unnamed_real_module"],
     )
-    def test_a_door_counts_as_referenced_by_its_shape(self, mock_json, tmp_path: Path, tail: str, dead: bool) -> None:
-        """A door is called from other branches, so its own corpus never names it (DPLAN-0404)."""
+    def test_a_second_door_is_left_to_front_door(self, mock_json, tmp_path, name, tail, dead) -> None:
+        """front_door convicts a second door (retired pattern); its unreferenced file is the same defect, one report."""
         branch = _make_branch(tmp_path)
         _write_file(branch / "apps" / "handlers" / "trail.py", "def log_operation():\n    return True\n")
         door = f'from aipass.{branch.name}.apps.handlers.trail import log_operation\n\n__all__ = ["log_operation"]\n'
-        _write_file(branch / "apps" / "modules" / "door_trail.py", door + tail)
+        _write_file(branch / "apps" / "modules" / name, door + tail)
         _write_file(branch / "apps" / (branch.name + ".py"), "def handle_command(): pass\n")
 
         result = dead_code_check_branch(str(branch))
 
-        assert ("door_trail.py" in result["checks"][0]["message"]) is dead
+        assert (name in result["checks"][0]["message"]) is dead
 
 
 @patch("aipass.sentry.apps.handlers.aipass_standards.unused_function_check.json_handler")
@@ -708,7 +891,10 @@ class TestDeadCodeReadsTheProjectConfig:
         assert _dead(self._project(tmp_path, config)) == ["handlers/security/gate.py"]
 
     def test_a_longer_module_name_does_not_reference_its_prefix(self, tmp_path):
-        config = '{"a": "aipass.mybranch.apps.handlers.lifecycle.boot_extra.handle", "b": "x.aipass.mybranch.apps.handlers.security.gate"}'
+        config = (
+            '{"a": "aipass.mybranch.apps.handlers.lifecycle.boot_extra.handle", '
+            '"b": "x.aipass.mybranch.apps.handlers.security.gate"}'
+        )
         assert _dead(self._project(tmp_path, config)) == ["handlers/lifecycle/boot.py", "handlers/security/gate.py"]
 
     def test_a_config_with_no_registry_root_above_the_branch_references_nothing(self, tmp_path):
@@ -740,11 +926,3 @@ class TestASkipNamedPackageIsSource:
         branch = self._commons_shape(tmp_path)
         _write_file(branch / "apps" / "handlers" / ".archive" / "old_ops.py", "def retired():\n    return 1\n")
         assert _dead(branch) == ["handlers/artifacts/trade_ops.py"]
-
-
-class TestDeadCodeReportsAForwardSlashPath:
-    """Windows CI printed 'handlers\\\\security\\\\gate.py' where the oracles read a slash (addendum d13d7c68 D)."""
-
-    def test_a_windows_shaped_path_is_reported_with_forward_slashes(self):
-        target = PureWindowsPath("C:/proj/apps/handlers/security/gate.py")
-        assert dead_code_reported_path(target, PureWindowsPath("C:/proj/apps")) == "handlers/security/gate.py"

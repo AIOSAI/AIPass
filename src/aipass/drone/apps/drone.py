@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -12,26 +12,18 @@ Drone - Command Router & Discovery for AIPass
 
 import functools
 import importlib
-import os
 import sys
 from pathlib import Path
 from typing import Callable, List
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 from rich.table import Table
 from rich.text import Text
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, err_console
-from aipass.drone.apps.modules import BranchNotFoundError, CommandExecutionError, RegistryError
+from aipass.cli import console, err_console
+from aipass.drone.apps.modules import BranchNotFoundError, CommandExecutionError, RegistryError, RepoRootError
 from aipass.drone.apps.modules.resolver import branch_exists, get_all_branches
-from aipass.drone.apps.modules.router import caller_cwd, registries_in, route_command
+from aipass.drone.apps.modules.router import caller_cwd, registry_named_entries, route_command
 from aipass.drone.apps.modules.module_registry import (
     is_module,
     list_modules,
@@ -132,7 +124,7 @@ def print_help() -> None:
     table.add_row("remove <name>", "Remove a custom command")
     table.add_row(
         "rm [--stale AGE] <path>...",
-        "Contained safe-delete; --stale sweeps old *_json temps (drone rm --help)",
+        "Moves in-tree targets to .archive; --stale sweeps old *_json temps (drone rm --help)",
     )
     table.add_row(
         "@target ... --drone-timeout <n>",
@@ -206,10 +198,10 @@ def _cwd_has_registry(max_depth: int = 10) -> bool:
         for i, parent in enumerate([cwd] + list(cwd.parents)):
             if i >= max_depth:
                 break
-            if registries_in(parent):
+            if registry_named_entries(parent):
                 return True
     home = resolve_aipass_home().path
-    return home is not None and home.is_dir() and bool(registries_in(home))
+    return home is not None and home.is_dir() and bool(registry_named_entries(home))
 
 
 def _handle_systems() -> int:
@@ -307,6 +299,9 @@ def _handle_module(name: str, args: List[str]) -> int:
     except (ImportError, AttributeError) as exc:
         logger.error("Module @%s not available: %s", name, exc)
         return _module_unavailable(name, str(exc))
+    except RepoRootError as exc:
+        err_console.print(f"drone: {exc}")
+        return 1
 
     if result.get("stdout"):
         sys.stdout.write(result["stdout"])
@@ -658,7 +653,7 @@ def main() -> int:
     if command.lstrip("@") == "aipass":
         err_console.print(
             "aipass isn't reachable through drone — it's your own front-door CLI,"
-            " the AIPass concierge (onboarding, doctor, help, OS/system questions)."
+            " the machine concierge (host and OS diagnosis, doctor, installer)."
             " drone routes the agent citizens (@git, @devpulse, @memory...);"
             " aipass is separate and serves you directly.\n"
             "\n"
@@ -676,7 +671,9 @@ def main() -> int:
         try:
             mod = importlib.import_module(f"aipass.drone.apps.modules.{command}")
         except Exception as exc:
-            logger.warning("Failed to discover module %s: %s", command, exc)
+            logger.error("Module %s failed to import: %s", command, exc)
+            err_console.print(f"drone: module '{command}' failed to import: {exc}")
+            return 1
     if mod is not None and hasattr(mod, "handle_command"):
         remaining = args[1:]
         cmd = remaining[0] if remaining else None
@@ -700,7 +697,6 @@ def main() -> int:
         return custom_result
 
     # The @ prefix is a hard contract: bare `drone prax` must error, or typos route to branches.
-    # PowerShell eats `@` (splatting); the setup.sh profile wrapper restores it, not this code.
     try:
         from aipass.drone.apps.modules.resolver import branch_exists
 

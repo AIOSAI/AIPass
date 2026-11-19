@@ -3,7 +3,7 @@
 # Description: Test suite for spawn module
 # Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/core.py (spawn_agent) and apps/handlers/registry.py."""
@@ -14,7 +14,6 @@
 
 import json
 import shutil
-import sys
 import pytest
 
 from aipass.spawn import spawn_agent
@@ -320,7 +319,6 @@ class TestPathContainment:
 class TestAtomicWriteAndLocking:
     """Tests for atomic writes and file locking in registry operations."""
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="fcntl-based locking not available on Windows")
     def test_add_to_registry_creates_lock_file(self, tmp_path):
         reg = tmp_path / "TEST_REGISTRY.json"
         branch = tmp_path / "agent_a"

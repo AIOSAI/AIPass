@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: diagnostics.py
-# Version: 1.0.0
+# Version: 1.2.1
 # Description: JSONL diagnostic logging for hook engine
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-05-19
-# Modified: 2026-05-19
+# Modified: 2026-11-17
 # =============================================
 
 """JSONL diagnostic logging — appends structured entries for hook activity."""
@@ -14,12 +14,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-from aipass.prax import append_jsonl
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.hooks.apps.handlers.module_root import module_file
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import append_jsonl, branch_state_root
+from aipass.prax import logger
 
-BRANCH_ROOT = module_file(__file__).parent.parent.parent.parent
-_PROD_LOG_FILE = BRANCH_ROOT / "logs" / "engine.jsonl"
+_PROD_LOG_FILE = branch_state_root("hooks") / "logs" / "engine.jsonl"
 
 
 def _is_pytest_session() -> bool:
@@ -40,11 +39,16 @@ LOG_FILE = _PROD_LOG_FILE
 
 
 def log_entry(entry: dict) -> None:
-    """Append a JSONL log entry for detailed diagnostics."""
+    """Append a JSONL log entry for detailed diagnostics; the json trail is trail_event's, once per event."""
     try:
         append_jsonl(_get_log_file(), entry)
     except OSError as exc:
         logger.error("[HOOKS] log write failed: %s", exc)
+
+
+def trail_event(event: str) -> None:
+    """One json trail entry per engine event, however many rows it logged: engine.jsonl holds the rows."""
+    json_handler.log_operation("trail_event", {"event": event, "log_file": str(_get_log_file())})
 
 
 def tail_log(count: int = 20) -> list[str]:

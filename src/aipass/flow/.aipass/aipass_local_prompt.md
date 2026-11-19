@@ -26,7 +26,7 @@ apps/
     template_manager.py  registry_monitor.py  aggregate_central.py
     post_close_runner.py    detached worker, picks up after a close
   handlers/
-    repo_root.py          module_file / find_repo_root / exists_exactly — the one location answer
+    repo_root.py          find_repo_root / exists_exactly — the one location answer
     plan/                 lifecycle: create_ops, close_ops, restore_ops, list_ops, display,
                           validator, command_parser, registry_routing, project_scope, …
     registry/             load, save, heal, monitor_ops, statistics
@@ -57,7 +57,7 @@ tests/  docs/  docs.local/  dropbox/  artifacts/  logs/  tools/  .archive/
  - Nothing here reads the process working directory to find itself. Route through `repo_root.py` or the branch dies on a checkout with no readable cwd.
  - Close is two halves: archival in the foreground where failure can still be reported, vectorisation in a detached runner. A restored-then-reclosed plan archives twice: `archive_plan` in `handlers/mbank/process.py` writes a timestamp-suffixed second copy when the archive name is taken.
  - `quick_status` on a dashboard is shared ground with other writers. Merge your keys, never replace the block, or you silently delete someone else's field.
- - The dashboard subject cap and char budget belong to @prax. Import them from `aipass.prax.apps.modules.dashboard`; a second copy of the number is what drifts.
+ - The dashboard subject cap and char budget belong to @prax. Import them from `aipass.prax`; a second copy of the number is what drifts.
  - The dashboard writer refuses to create a dashboard that does not exist. A directory without one is not a branch; `drone @prax dashboard refresh @<branch>` is what mints it.
  - An unknown command or argument refuses loudly through one gate. Never add a door that proceeds on a default.
 

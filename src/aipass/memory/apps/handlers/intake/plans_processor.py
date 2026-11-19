@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: plans_processor.py
 # Description: Plan Archival Vectorization Handler
-# Version: 1.3.0
+# Version: 1.3.2
 # Created: 2026-03-12
-# Modified: 2026-10-26
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -21,11 +21,10 @@ from datetime import datetime
 from typing import Dict, Any, List
 
 from aipass.memory.apps.handlers import repo_root
-from aipass.prax import logger
+from aipass.prax import branch_state_root, logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.monitor import registry_scope
-from aipass.memory.apps.handlers.repo_root import module_file
 from aipass.memory.apps.handlers.storage.lane import CHROMA_SUBPROCESS_SCRIPT, EMBED_SUBPROCESS_SCRIPT, run_json
 
 
@@ -37,8 +36,7 @@ def _find_repo_root() -> Path:
     return repo_root.find_repo_root(caller="plans_processor")
 
 
-_MEMORY_ROOT = module_file(__file__).parents[3]
-_PROCESSED_MANIFEST = _MEMORY_ROOT / "memory_json" / ".plans_processed.json"
+_PROCESSED_MANIFEST = branch_state_root("memory") / "memory_json" / ".plans_processed.json"
 
 MAX_CHUNK_CHARS = 1500  # ~375 tokens, fits well with all-MiniLM-L6-v2
 
@@ -168,20 +166,16 @@ def _is_stale(plan_file: Path, entry: Any, text: str) -> bool:
     """Does this file need processing, given what the manifest remembers?
 
     Keyed on CONTENT: a restored plan keeps its manifest row, so a name key misses its final close.
+    Raises ValueError (an unparsable stamp) or OSError (an unreadable mtime): the caller decides.
     """
     stamp, digest = _recorded(entry)
     if digest is not None:
         return digest != _content_hash(text)
 
     # Legacy row, no hash: mtime is the only evidence, and a restore writes the file.
-    if stamp:
-        try:
-            if datetime.fromtimestamp(plan_file.stat().st_mtime) > datetime.fromisoformat(stamp):
-                logger.info(f"[plans] {plan_file.name} is newer than its manifest row — re-processing")
-                return True
-        except (ValueError, OSError) as exc:
-            logger.warning(f"[plans] Cannot compare {plan_file.name} to its manifest row ({exc}) — re-processing")
-            return True
+    if stamp and datetime.fromtimestamp(plan_file.stat().st_mtime) > datetime.fromisoformat(stamp):
+        logger.info(f"[plans] {plan_file.name} is newer than its manifest row — re-processing")
+        return True
     return False
 
 
@@ -266,11 +260,12 @@ def process_plans() -> Dict[str, Any]:
             continue
         try:
             text = plan_file.read_text(encoding="utf-8")
-        except OSError as exc:
-            logger.warning(f"[plans] Cannot read {plan_file.name} to check freshness ({exc}) — re-processing")
+            stale = _is_stale(plan_file, manifest[key], text)
+        except (OSError, ValueError) as exc:
+            logger.warning(f"[plans] Cannot check {plan_file.name} against its manifest row ({exc}) — re-processing")
             unprocessed.append((project, plan_file, key))
             continue
-        if _is_stale(plan_file, manifest[key], text):
+        if stale:
             unprocessed.append((project, plan_file, key))
         elif _recorded(manifest[key])[1] is None:
             # Current content, legacy row: backfill the hash rather than re-embed.

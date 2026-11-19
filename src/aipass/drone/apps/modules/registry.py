@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Registry operations for branch management
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-09
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -13,10 +13,8 @@ Registry operations for branch management.
 from typing import List, Optional
 
 from aipass.prax import logger
-from aipass.drone.apps.handlers.exceptions import RegistryError, RegistryMismatchError
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.registry_handler import (
-    get_registry_path,
     load_registry,
     get_all_branches,
     get_branch_by_name,
@@ -24,26 +22,12 @@ from aipass.drone.apps.handlers.registry_handler import (
 from aipass.drone.apps.handlers.help_flags import wants_help
 from aipass.drone.apps.modules.resolver import normalize_branch_name
 
-# Public contract: path and error types live here too, so callers never reach into the handler.
-__all__ = [
-    "load_registry",
-    "get_all_branches",
-    "get_branch_by_name",
-    "get_registry_path",
-    "RegistryError",
-    "RegistryMismatchError",
-]
+__all__ = ["handle_command"]
 
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    except ImportError:
-        logger.warning("CLI console not available, using fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]registry Module[/bold cyan]")
@@ -102,7 +86,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
 
 def print_help() -> None:
     """Print help for the registry module."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("registry — Registry operations for branch management")
     console.print()

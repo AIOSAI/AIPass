@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.3.1
+# Version: 1.4.1
 # Created: 2026-08-27
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
@@ -20,18 +20,21 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 from aipass.memory.apps.handlers import write_fence
+from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.apps.handlers.json import entry_limits
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover import orchestrator
 from aipass.memory.apps.handlers.templates import push_report
+from aipass.prax import branch_state_root
 from aipass.memory.apps.handlers.tracking import tab_renderer
 from aipass.memory.apps.modules import push as push_module
-from aipass.sentry.apps.modules.door_trinity import check_branch, expected_meta_line
+from aipass.sentry import check_branch, expected_meta_line
 from aipass.memory.apps.handlers.rollover import todo_roll
 from aipass.memory.apps.handlers.templates import trinity_push as tp
 
@@ -348,6 +351,33 @@ class TestNothingIsPrunedWithoutProof:
         assert store.readback_calls, "nothing was read back — the success flag was taken on trust"
 
 
+class TestARefusedArchiveIsLogged:
+    """A refusal returned up the push is also said at WARNING where it happens."""
+
+    def _prune(self):
+        return {"file_key": "local", "container": "sessions", "number": 1, "entry": _entry(1), "reason": "drift"}
+
+    def test_a_store_refusal_logs_a_warning(self, monkeypatch):
+        said = MagicMock()
+        monkeypatch.setattr(tp, "logger", said)
+
+        result = tp.archive_prunes(FakeStore("store_refuses"), "guinea", [self._prune()], [("global", None)])
+
+        assert result["verified"] is False
+        said.warning.assert_called_once()
+        assert "embedding refused" in said.warning.call_args.args[0]
+
+    def test_a_failed_read_back_logs_a_warning(self, monkeypatch):
+        said = MagicMock()
+        monkeypatch.setattr(tp, "logger", said)
+
+        result = tp.archive_prunes(FakeStore("readback_fails"), "guinea", [self._prune()], [("global", None)])
+
+        assert result["verified"] is False
+        said.warning.assert_called_once()
+        assert "collection not found" in said.warning.call_args.args[0]
+
+
 class TestArchivedContentIsTheEntry:
     """Verbatim means verbatim: no transform, no summary, no re-shaping."""
 
@@ -581,8 +611,7 @@ class TestScope:
         """Split from the resident half on 2026-08-27, and the split is the point.
 
         The core citizens ship with any installation, so this runs on every
-        lane that has a registry at all — including the Windows e2e job, where
-        it is the only half that was ever a claim about the software.
+        lane that has a registry at all.
         """
         names = {item["name"] for item in tp.resolve_scope()["branches"]}
         assert {"memory", "canary", "hooks"} <= names
@@ -758,7 +787,7 @@ class TestThePushedFileIsCanonical:
     """The output is measured by the standard's own checker, not by opinion."""
 
     def test_a_pushed_branch_satisfies_the_trinity_checker(self, tmp_path, monkeypatch):
-        pytest.importorskip("aipass.sentry.apps.modules.door_trinity")
+        pytest.importorskip("aipass.sentry")
         local = {
             "document_metadata": {"created": "2026-01-01", "status": {"health": "healthy"}},
             "sessions": [_entry(2), _entry(1, findings=["drift"])],
@@ -828,7 +857,7 @@ class TestRefreshIsScopable:
         tmp = Path(tempfile.gettempdir())
         registry = [{"name": "alpha", "path": str(tmp / "alpha")}, {"name": "beta", "path": str(tmp / "beta")}]
         monkeypatch.setattr(tab_renderer, "_refresh_one_file", lambda *a, **k: (visited.append(a[1]), (0, 1, []))[1])
-        monkeypatch.setattr(detector, "_read_registry", lambda: registry, raising=False)
+        monkeypatch.setattr(detector, "write_scope", lambda: registry, raising=False)
 
         tab_renderer.refresh_all_tabs(branches=["alpha"])
 
@@ -840,7 +869,7 @@ class TestRefreshIsScopable:
         tmp = Path(tempfile.gettempdir())
         registry = [{"name": "alpha", "path": str(tmp / "alpha")}, {"name": "beta", "path": str(tmp / "beta")}]
         monkeypatch.setattr(tab_renderer, "_refresh_one_file", lambda *a, **k: (visited.append(a[1]), (0, 1, []))[1])
-        monkeypatch.setattr(detector, "_read_registry", lambda: registry, raising=False)
+        monkeypatch.setattr(detector, "write_scope", lambda: registry, raising=False)
 
         tab_renderer.refresh_all_tabs()
 
@@ -859,6 +888,10 @@ class TestRefreshIsScopable:
 
 class TestTheFleetGate:
     """A fleet write needs --confirm; a dry-run and a single branch do not."""
+
+    @pytest.fixture(autouse=True)
+    def _memory_seat(self, monkeypatch):
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: ("@memory", False))
 
     def test_a_bare_fleet_push_is_refused(self, monkeypatch):
         ran = []
@@ -909,6 +942,60 @@ class TestTheFleetGate:
         """`push` fired a fleet-wide per_branch reset from a bare word. It must not again."""
         source = (_MEMORY_ROOT / "apps" / "memory.py").read_text(encoding="utf-8")
         assert 'route_command("rollover", ["push"], modules)' not in source
+
+
+class TestTheCallerGate:
+    """A writing push names another branch, or the fleet, only from @memory's seat or the verified admin's."""
+
+    @pytest.fixture
+    def push(self, monkeypatch):
+        ran, logged = [], []
+        monkeypatch.setattr(push_module, "_run_push", lambda branch, dry: ran.append((branch, dry)))
+        monkeypatch.setattr(caller_gate.json_handler, "log_operation", lambda op, data, **k: logged.append(data))
+
+        def as_caller(caller, admin, *args):
+            monkeypatch.setattr(caller_gate, "verified_caller", lambda: (caller, admin))
+            push_module.handle_command("push", list(args))
+            return ran
+
+        return SimpleNamespace(as_caller=as_caller, logged=logged, ran=ran)
+
+    @pytest.mark.parametrize(
+        ("caller", "admin", "args"),
+        [
+            ("@canary", False, ("--branch", "@canary")),
+            ("@memory", False, ("--branch", "@canary")),
+            ("@devpulse", True, ("--branch", "@canary")),
+            ("@devpulse", True, ("--confirm",)),
+            ("@seed", False, ("--branch", "@canary", "--dry-run")),
+            ("", False, ("--dry-run",)),
+        ],
+    )
+    def test_its_own_seat_memory_the_admin_and_any_dry_run_pass(self, push, caller, admin, args):
+        assert push.as_caller(caller, admin, *args) != []
+
+    @pytest.mark.parametrize(
+        ("caller", "args", "sentence"),
+        [
+            ("@seed", ("--branch", "@canary"), "not @seed - run it from inside @canary's own directory"),
+            ("", ("--branch", "@canary"), "not an unverified caller - run it from inside @canary's own directory"),
+            ("@canary", ("--confirm",), "not @canary - mail @devpulse, the verified admin"),
+        ],
+    )
+    def test_another_seat_is_refused_non_zero_and_nothing_is_pushed(self, push, capsys, caller, args, sentence):
+        assert push.as_caller(caller, False, *args) == []
+        assert sentence in " ".join(capsys.readouterr().err.split())
+        assert push.logged[-1]["caller"] == (caller or "an unverified caller")
+        assert sentence in push.logged[-1]["refused"]
+
+    def test_a_dark_rail_refuses_rather_than_passes(self, push, monkeypatch, capsys):
+        def dark():
+            raise ImportError("no ai_mail")
+
+        monkeypatch.setattr(caller_gate, "verified_caller", dark)
+        push_module.handle_command("push", ["--branch", "@canary"])
+        assert "verified-caller rail is unavailable (ImportError: no ai_mail)" in capsys.readouterr().err
+        assert push.ran == []
 
 
 class TestTodosMoveToTheBacklog:
@@ -1373,6 +1460,13 @@ class TestThePushReportSaysWhyThereIsNoLocalStore:
         assert [entry["local_store"] for entry in result["branches"]] == [None]
         assert not [line for line in rendered if line.startswith("   local store")]
         assert sorted(store.shelves) == sorted([str(root / ".chroma"), str(None)])
+
+    def test_the_report_is_saved_under_memorys_state_root(self):
+        """A fixed climb from the module lands inside the installed package on a wheel.
+
+        Mutant: ``REPORTS_DIR`` back on ``Path(__file__).resolve().parents[3]`` — killed.
+        """
+        assert push_report.REPORTS_DIR == branch_state_root("memory") / "artifacts" / "push_reports"
 
 
 class TestEntryRulesReadTheConfig:

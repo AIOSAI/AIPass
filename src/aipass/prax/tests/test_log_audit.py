@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_log_audit.py
 # Description: Unit tests for PRAX log_audit module
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/log_audit.py."""
@@ -15,7 +15,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(through_the_command) — the sweep route _run_sweep(), covered by tests/test_sweep.py
-# sentry: no-test-needed(help_flag_safety) — -h skipping _run_enforce(), covered by tests/test_help_flag_safety.py
+# sentry: no-test-needed(help_flag_safety) — -h skipping _run_sweep(), covered by tests/test_help_flag_safety.py
 # sentry: no-test-needed(json_structure) — the log_audit_executed record written through json_handler.log_operation
 
 import sys
@@ -31,10 +31,8 @@ from aipass.prax.apps.modules import log_audit
 _WATCHDOG_NAMES = (
     "scan_log_files",
     "log_health_summary",
-    "enforce_log_limits",
     "scan_branch_log_files",
     "branch_log_health_summary",
-    "enforce_branch_log_limits",
 )
 
 
@@ -54,7 +52,7 @@ def audit_world(monkeypatch, tmp_path):
 
 
 def _ensure_watchdog_mock(monkeypatch):
-    """Replace the six log_watchdog functions log_audit imports at call time, on the real module."""
+    """Replace the four log_watchdog functions log_audit imports at call time, on the real module."""
     mock_watchdog = MagicMock()
     mock_watchdog.scan_log_files = MagicMock(
         return_value=[
@@ -72,11 +70,6 @@ def _ensure_watchdog_mock(monkeypatch):
             "oversized_count": 1,
             "critical_count": 0,
         }
-    )
-    mock_watchdog.enforce_log_limits = MagicMock(
-        return_value=[
-            {"name": "error.log", "truncated": True, "original_lines": 2500, "new_lines": 1000},
-        ]
     )
     mock_watchdog.scan_branch_log_files = MagicMock(
         return_value=[
@@ -103,18 +96,6 @@ def _ensure_watchdog_mock(monkeypatch):
             "healthy": False,
         }
     )
-    mock_watchdog.enforce_branch_log_limits = MagicMock(
-        return_value=[
-            {
-                "name": "engine.jsonl",
-                "branch": "hooks",
-                "original_lines": 200000,
-                "new_lines": 5001,
-                "size_mb": 63.0,
-                "truncated": True,
-            },
-        ]
-    )
     for name in _WATCHDOG_NAMES:
         monkeypatch.setattr(log_watchdog, name, getattr(mock_watchdog, name))
     _stood_where_log_audit_looks(log_watchdog)
@@ -126,7 +107,7 @@ def _stood_where_log_audit_looks(module, modules=sys.modules):
 
     log_audit imports the watchdog at call time, by name, through sys.modules. A raw
     pop of that entry in any earlier test would leave the stub on an orphan and send
-    enforce or sweep to the real functions over the live system_logs.
+    sweep to the real function over the live system_logs.
     """
     if modules.get(module.__name__) is not module:
         pytest.fail(f"{module.__name__} in sys.modules is not the module the stub stands on")
@@ -136,7 +117,7 @@ def test_the_guard_fails_when_sys_modules_holds_another_watchdog():
     """A different object under the watchdog's name stops the test before any route.
 
     Proven on the test side only, in a modules mapping of its own: no product
-    mutant is run here, because the far side truncates and deletes real logs.
+    mutant is run here, because the far side deletes real logs.
     """
     name = log_watchdog.__name__
     with pytest.raises(pytest.fail.Exception, match="not the module the stub stands on"):
@@ -180,11 +161,12 @@ def test_handle_command_wrong_command(audit_world, monkeypatch, capsys):
 
 
 def test_print_help_runs(audit_world, monkeypatch, capsys):
-    """print_help runs without error and includes audit/enforce subcommands."""
+    """print_help lists audit and sweep, and no truncating verb: writers rotate themselves."""
     log_audit.print_help()
     calls = capsys.readouterr().out.splitlines()
     assert any("audit" in c.lower() for c in calls)
-    assert any("enforce" in c.lower() for c in calls)
+    assert any("sweep" in c.lower() for c in calls)
+    assert not any("enforce" in c.lower() or "truncat" in c.lower() for c in calls)
 
 
 def test_print_introspection_runs(audit_world, monkeypatch, capsys):
@@ -217,8 +199,7 @@ _QUIET_BRANCH = {
 def _audit_through_command(monkeypatch, capsys, files=(), summary=None, branch_files=(), branch_summary=None):
     """Both displays through `log-audit audit`, the read-only route.
 
-    enforce sits stubbed by _ensure_watchdog_mock and must stay uncalled; sweep is
-    reachable only from its own subcommand. The side not under test is given a
+    Sweep is reachable only from its own subcommand. The side not under test is given a
     quiet, healthy world, so every line and every error() belongs to the other.
     """
     watchdog = _ensure_watchdog_mock(monkeypatch)
@@ -230,8 +211,6 @@ def _audit_through_command(monkeypatch, capsys, files=(), summary=None, branch_f
 
     assert log_audit.handle_command("log-audit", ["audit"]) is True
 
-    watchdog.enforce_log_limits.assert_not_called()
-    watchdog.enforce_branch_log_limits.assert_not_called()
     return capsys.readouterr().out.splitlines()
 
 
@@ -304,14 +283,21 @@ def test_handle_command_audit_subcommand(audit_world, monkeypatch, capsys):
     mock_watchdog.branch_log_health_summary.assert_called_once()
 
 
-def test_handle_command_enforce_calls_branch_enforce(audit_world, monkeypatch, capsys):
-    """'enforce' subcommand calls both system and branch enforcement."""
-    mock_watchdog = _ensure_watchdog_mock(monkeypatch)
+def test_enforce_is_retired_and_refused(audit_world, monkeypatch):
+    """Truncating a file other processes append to loses their lines: the verb and its path are gone."""
+    _ensure_watchdog_mock(monkeypatch)
+    # Holds a red run on the old code off the live logs; on the cured code nothing calls these.
+    held = {name: MagicMock() for name in ("_run_enforce", "_run_branch_enforce")}
+    for name, stub in held.items():
+        monkeypatch.setattr(log_audit, name, stub, raising=False)
 
-    result = log_audit.handle_command("log-audit", ["enforce"])
-    assert result is True
-    mock_watchdog.enforce_log_limits.assert_called_once()
-    mock_watchdog.enforce_branch_log_limits.assert_called_once()
+    with pytest.raises(UnknownArgument) as refusal:
+        log_audit.handle_command("log-audit", ["enforce"])
+
+    assert refusal.value.token == "enforce"
+    assert [stub.call_count for stub in held.values()] == [0, 0]
+    for retired in ("truncate_log_file", "enforce_log_limits", "enforce_branch_log_limits"):
+        assert not hasattr(log_watchdog, retired), retired
 
 
 def test_display_branch_audit_healthy(audit_world, monkeypatch, capsys):
@@ -374,12 +360,13 @@ def test_display_branch_audit_critical(audit_world, monkeypatch, capsys):
     assert len(rows) == 1
     assert rows[0].startswith("  CRITICAL hooks")
     assert rows[0].endswith("engine.jsonl: 63.0 MB, 200,000 lines, unrotated")
+    assert not any("enforce" in c for c in calls)
     audit_world.error.assert_called_once_with("Status: 1 unbounded, 1 critical")
 
 
-@pytest.mark.parametrize("verb", ["enforce", "sweep", "audit"])
+@pytest.mark.parametrize("verb", ["sweep", "audit"])
 def test_a_trailing_flag_is_refused_and_runs_nothing(audit_world, monkeypatch, verb):
-    """`enforce --dry-run` must not truncate for real: an extra token is refused by name."""
+    """`sweep --dry-run` must not delete for real: an extra token is refused by name."""
     watchdog = _ensure_watchdog_mock(monkeypatch)
     swept = MagicMock()
     monkeypatch.setattr(log_watchdog, "sweep_stale_logs", swept)
@@ -388,18 +375,19 @@ def test_a_trailing_flag_is_refused_and_runs_nothing(audit_world, monkeypatch, v
         log_audit.handle_command("log-audit", [verb, "--dry-run"])
 
     assert refusal.value.token == "--dry-run"
-    watchdog.enforce_log_limits.assert_not_called()
     watchdog.scan_log_files.assert_not_called()
     swept.assert_not_called()
 
 
-def test_enforce_help_still_shows_help(audit_world, monkeypatch, capsys):
+def test_sweep_help_still_shows_help(audit_world, monkeypatch, capsys):
     """Help after a verb is help, not a refusal."""
-    watchdog = _ensure_watchdog_mock(monkeypatch)
+    _ensure_watchdog_mock(monkeypatch)
+    swept = MagicMock()
+    monkeypatch.setattr(log_watchdog, "sweep_stale_logs", swept)
 
-    assert log_audit.handle_command("log-audit", ["enforce", "--help"]) is True
-    assert "log-audit enforce" in capsys.readouterr().out
-    watchdog.enforce_log_limits.assert_not_called()
+    assert log_audit.handle_command("log-audit", ["sweep", "--help"]) is True
+    assert "log-audit sweep" in capsys.readouterr().out
+    swept.assert_not_called()
 
 
 def test_audit_summarises_the_scan_it_already_made(audit_world, monkeypatch):

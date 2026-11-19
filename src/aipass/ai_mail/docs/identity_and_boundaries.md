@@ -169,7 +169,7 @@ A sender that cannot be placed in a project — no `AIPASS_CALLER_CWD` (drone om
 ## The Handlers Fence
 
 `apps/handlers/__init__.py` is an import-time fence: code outside this branch reaches
-the handlers through `apps/modules`, and a foreign importer gets an `ImportError` naming
+the handlers through the package door, `from aipass.ai_mail import <name>`, and a foreign importer gets an `ImportError` naming
 the caller, the file and the line. It reads the stack once, at the first import of the
 package, and sorts each frame into one of three kinds:
 
@@ -185,9 +185,7 @@ asked for the import on its behalf. `apps/__init__.py` imports nothing, so the i
 the fence sees is the real one.
 
 **No filesystem at import.** The walk uses `sys._getframe` (`co_filename` is already a
-string) and `linecache` for the import line, never `inspect.stack()`: on Windows
-`inspect` reaches `ntpath.realpath`, which calls `os.getcwd()` unconditionally, so a
-handler import would need a readable cwd. A pseudo filename (`<frozen ...>`, `<string>`)
+string) and `linecache` for the import line, never `inspect.stack()`. A pseudo filename (`<frozen ...>`, `<string>`)
 is never resolved — relative, it would resolve against the cwd and read as kin — and
 every `Path.resolve()` falls back to the raw spelling on `OSError`.
 `tests/test_handlers_fence.py` pins the fence.
@@ -198,8 +196,7 @@ rule (`drone @sentry audit`: handlers and encapsulation) is the wall.
 
 ## Registry Globs Are Re-Checked in Python
 
-`pathlib` delegates glob matching to the filesystem, so on Windows and default
-macOS `*_REGISTRY.json` **also matches** `*_registry.json`. This repo is full of
+A glob that folds case would let `*_REGISTRY.json` **also match** `*_registry.json`. This repo is full of
 bait: `drone_command_registry.json` sits directly beside drone's tree, every branch
 carries `.spawn/.template_registry.json` (pathlib `*` matches dotfiles, unlike the
 `glob` module), and @flow keeps `flow_json/*_registry.json` plan counters.
@@ -208,7 +205,7 @@ carries `.spawn/.template_registry.json` (pathlib `*` matches dotfiles, unlike t
 glob still does the walking — only the filesystem knows where files are — but it
 is not trusted with the *answer*: the name is compared again in Python with
 `str.endswith(REGISTRY_SUFFIX)`, where case means what it says. Refusals are
-logged, so on Windows there is a record that the filesystem returned something the
+logged, so there is a record that the filesystem returned something the
 pattern never asked for.
 
 **Suffix, never the stem.** External projects name registries after themselves —

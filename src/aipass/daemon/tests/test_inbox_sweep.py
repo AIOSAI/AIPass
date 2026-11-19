@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_inbox_sweep.py
 # Description: Fleet inbox sweep tests — stale unread mail detection, wake policy and waking
-# Version: 1.1.1
+# Version: 1.3.0
 # Created:2026-08-11
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/inbox_sweep.py and the handlers/monitoring/inbox_scanner.py it drives."""
@@ -13,6 +13,7 @@
 # sentry: no-test-needed(constant) — MAX_WAKES, WAKE_MODEL and the help and introspection text
 
 import json
+import re
 import shutil
 import tempfile
 from datetime import datetime, timedelta
@@ -36,7 +37,7 @@ NOW = datetime(2026, 8, 11, 12, 0, 0)
 
 SCANNER = "aipass.daemon.apps.handlers.monitoring.inbox_scanner"
 DISCOVERY = "aipass.daemon.apps.handlers.schedule.discovery"
-WAKE = "aipass.ai_mail.apps.modules.door_wake"
+WAKE = "aipass.ai_mail"
 
 
 # ── Fixtures ──────────────────────────────────────────
@@ -111,19 +112,17 @@ def oldest_age_beside(branch: Path, timestamp: str) -> float:
 
 class TestParseTimestamp:
     def test_ai_mail_format(self, branch_dir):
-        """Mutant killed: strptime's result .replace(second=0) in _parse_timestamp (49.4, not 49.3)."""
+        """Mutant killed: fromisoformat's result .replace(second=0) in _parse_timestamp (49.4, not 49.3)."""
         assert oldest_age_beside(branch_dir, "2026-08-09 10:39:30") == 49.3
 
-    def test_iso_format_fallback(self, branch_dir):
-        """Mutant killed: _parse_timestamp returns None instead of trying datetime.fromisoformat.
-
-        Mutant killed: fromisoformat's result .replace(second=0) in _parse_timestamp (49.4, not 49.3).
-        """
+    def test_iso_t_format(self, branch_dir):
         assert oldest_age_beside(branch_dir, "2026-08-09T10:39:30") == 49.3
 
-    def test_garbage_returns_none(self, branch_dir):
+    def test_garbage_is_skipped_with_a_warning(self, branch_dir, caplog):
         """Mutant killed: the fromisoformat except (ValueError, TypeError) removed from _parse_timestamp."""
-        assert oldest_age_beside(branch_dir, "not a date") == 30.0
+        with caplog.at_level("WARNING"):
+            assert oldest_age_beside(branch_dir, "not a date") == 30.0
+        assert "Unparseable timestamp 'not a date'" in caplog.text
 
     def test_empty_returns_none(self, branch_dir):
         assert oldest_age_beside(branch_dir, "") == 30.0
@@ -183,13 +182,17 @@ class TestScanBranchInbox:
     def test_missing_inbox_returns_none(self, branch_dir):
         assert scan_branch_inbox(branch_dir, "@test", now=NOW) is None
 
-    def test_malformed_json_returns_none(self, branch_dir):
+    def test_malformed_json_raises(self, branch_dir):
         (branch_dir / ".ai_mail.local" / "inbox.json").write_text("{not json", encoding="utf-8")
-        assert scan_branch_inbox(branch_dir, "@test", now=NOW) is None
+        with pytest.raises(ValueError):
+            scan_branch_inbox(branch_dir, "@test", now=NOW)
 
-    def test_missing_messages_key_returns_none(self, branch_dir):
-        (branch_dir / ".ai_mail.local" / "inbox.json").write_text('{"mailbox": "inbox"}', encoding="utf-8")
-        assert scan_branch_inbox(branch_dir, "@test", now=NOW) is None
+    def test_missing_messages_key_raises_naming_the_inbox(self, branch_dir):
+        inbox = branch_dir / ".ai_mail.local" / "inbox.json"
+        inbox.write_text('{"mailbox": "inbox"}', encoding="utf-8")
+        with pytest.raises(ValueError, match="no 'messages' list") as raised:
+            scan_branch_inbox(branch_dir, "@test", now=NOW)
+        assert str(inbox) in str(raised.value)
 
     def test_unparseable_timestamp_is_skipped_not_fatal(self, branch_dir):
         broken = message(48)
@@ -279,6 +282,20 @@ class TestFindStaleInboxes:
             entries = find_stale_inboxes(now=NOW)
         assert [(e["owner"], e["path"]) for e in entries] == [("@api", str(stale))]
 
+    def test_an_unreadable_inbox_is_skipped_with_a_warning_and_the_rest_still_scanned(self, branch_dir, caplog):
+        """Mutant killed: find_stale_inboxes' per-citizen except removed (one bad inbox stopped the sweep)."""
+        broken = branch_dir / "broken"
+        stale = branch_dir / "stale"
+        for path in (broken, stale):
+            (path / ".ai_mail.local").mkdir(parents=True)
+        (broken / ".ai_mail.local" / "inbox.json").write_text("{not json", encoding="utf-8")
+        write_inbox(stale, [message(48)])
+        citizens = [citizen(broken, "@broken"), citizen(stale, "@stale")]
+        with patch(f"{SCANNER}.active_citizens", return_value=citizens), caplog.at_level("WARNING"):
+            entries = find_stale_inboxes(now=NOW)
+        assert [e["owner"] for e in entries] == ["@stale"]
+        assert "@broken inbox unreadable, skipped" in caplog.text
+
 
 # ── fleet scope: a citizen is a citizen (FPLAN-0492 ruling 6, todo 188) ──
 
@@ -300,7 +317,7 @@ class TestSweepScopeIsTheWholeFleet:
     on unread mail for a week.
     """
 
-    FLEET = "aipass.daemon.apps.handlers.schedule.discovery.fleet"
+    FLEET = "aipass.daemon.apps.handlers.schedule.discovery"
 
     def test_a_projects_citizen_is_scanned(self, branch_dir):
         resident = branch_dir / "earmark"
@@ -310,7 +327,7 @@ class TestSweepScopeIsTheWholeFleet:
         fake = [{"name": "earmark", "path": resident, "registry": "EARMARK_REGISTRY.json", "email": "@earmark"}]
         with (
             patch(f"{self.FLEET}.fleet_branches", return_value=fake),
-            patch(f"{self.FLEET}.declared_residency", return_value="resident"),
+            patch("aipass.memory.declared_residency", return_value="resident"),
         ):
             entries = find_stale_inboxes(now=NOW)
 
@@ -462,7 +479,9 @@ class TestWakeOwner:
         ):
             results = inbox_sweep.run_sweep()
         assert (results["woken"], results["failed"]) == (0, 1)
-        assert "ERROR: @a — boom" in capsys.readouterr().out
+        out, err = capsys.readouterr()
+        assert "@a — boom" in err
+        assert "boom" not in out, "an error goes to stderr, where drone's piping expects it"
 
     def test_wake_message_names_the_backlog(self):
         """Mutant killed: _wake_owner passes an empty custom_message."""
@@ -479,6 +498,31 @@ class TestWakeOwner:
 
 
 # ── CLI routing ───────────────────────────────────────
+
+
+class TestSweepLinesThroughPrax:
+    def test_wake_skip_defer_and_summary_reach_the_prax_log(self, caplog, monkeypatch):
+        monkeypatch.setattr(inbox_sweep, "WAKE_STAGGER_SECONDS", 0)
+        status = MagicMock()
+        status.summary = "spawned"
+        entries = [entry("@a", age=50), entry("@b"), entry("@m", skip_reason="manager")]
+        with (
+            caplog.at_level("INFO"),
+            patch.object(inbox_sweep, "find_stale_inboxes", return_value=entries),
+            patch(f"{WAKE}.wake_branch", return_value=(status, True)),
+        ):
+            inbox_sweep.run_sweep(limit=1)
+        assert "[inbox_sweep] WAKE: @a — 1 unread, oldest 50h" in caplog.text
+        assert "[inbox_sweep] SKIP: @m — manager, mail lands live" in caplog.text
+        assert "[inbox_sweep] DEFERRED (limit 1): @b — will be picked up by the next sweep" in caplog.text
+        assert "[inbox_sweep] Sweep complete: 1 woken, 0 failed, 1 skipped, 1 deferred" in caplog.text
+
+    def test_no_console_line_carries_a_time_stamp(self, capsys):
+        with patch.object(inbox_sweep, "find_stale_inboxes", return_value=[]):
+            assert inbox_sweep.handle_command("inbox-sweep", []) is True
+        out = capsys.readouterr().out
+        assert "No branch is sitting on stale unread mail." in out
+        assert not re.search(r"^\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\]", out, re.MULTILINE)
 
 
 class TestCliRouting:
@@ -507,15 +551,17 @@ class TestCliRouting:
         kwargs = sweep.call_args.kwargs
         assert kwargs == {"dry_run": True, "stale_hours": 48, "limit": 2}
 
-    def test_bad_flag_value_falls_back_to_default(self):
+    def test_bad_flag_value_is_refused(self):
         with patch.object(inbox_sweep, "run_sweep", return_value={}) as sweep:
-            inbox_sweep.handle_command("inbox-sweep", ["--hours", "soon"])
-        assert sweep.call_args.kwargs["stale_hours"] == DEFAULT_STALE_HOURS
+            with pytest.raises(ValueError, match="--hours needs a whole number of 1 or more, got 'soon'"):
+                inbox_sweep.handle_command("inbox-sweep", ["--hours", "soon"])
+        sweep.assert_not_called()
 
-    def test_dangling_flag_falls_back_to_default(self):
+    def test_dangling_flag_is_refused(self):
         with patch.object(inbox_sweep, "run_sweep", return_value={}) as sweep:
-            inbox_sweep.handle_command("inbox-sweep", ["--limit"])
-        assert sweep.call_args.kwargs["limit"] == inbox_sweep.MAX_WAKES
+            with pytest.raises(ValueError, match="--limit needs a whole number"):
+                inbox_sweep.handle_command("inbox-sweep", ["--limit"])
+        sweep.assert_not_called()
 
 
 # ── Schedule entry ────────────────────────────────────
@@ -554,8 +600,9 @@ class TestScheduleEntry:
 
 
 @pytest.mark.parametrize("value", ["0", "-1"])
-def test_a_limit_below_one_falls_back_to_the_cap(value):
+def test_a_limit_below_one_is_refused(value):
     """A negative slice, wakeable[:-1], woke all but one branch past MAX_WAKES."""
     with patch.object(inbox_sweep, "run_sweep") as sweep:
-        assert inbox_sweep.handle_command("inbox-sweep", ["--dry-run", "--limit", value]) is True
-    assert sweep.call_args.kwargs["limit"] == inbox_sweep.MAX_WAKES
+        with pytest.raises(ValueError, match="--limit needs a whole number of 1 or more"):
+            inbox_sweep.handle_command("inbox-sweep", ["--dry-run", "--limit", value])
+    sweep.assert_not_called()

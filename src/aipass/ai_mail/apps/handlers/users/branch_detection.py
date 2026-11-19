@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detection.py
 # Description: Branch Auto-Detection Handler
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2025-11-18
-# Modified: 2026-10-17
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -13,21 +13,14 @@ Reference: docs/identity_and_boundaries.md
 """
 
 import os
-import sys
 import json
 from pathlib import Path
 from typing import Dict, Optional
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root, registries_in
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 BRANCH_REGISTRY_PATH = find_repo_root() / "AIPASS_REGISTRY.json"
 
@@ -111,7 +104,8 @@ def _get_branches_list(registry: dict) -> list:
 def _synthesize_external_branch(caller_branch: str) -> Optional[Dict]:
     """Build a synthetic branch info dict from env vars for an external project."""
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
-    if not caller_cwd:
+    # A name no registry knows, standing in no branch, is no citizen: synthesis would put its mailbox where it stands.
+    if not caller_cwd or not find_branch_root(Path(caller_cwd)):
         return None
     cwd_path = Path(caller_cwd)
     name_key = caller_branch.lstrip("@").lower()
@@ -336,7 +330,7 @@ def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict]:
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("\n" + "=" * 70)
     console.print("BRANCH AUTO-DETECTION HANDLER")

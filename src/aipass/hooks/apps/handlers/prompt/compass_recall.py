@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: compass_recall.py
-# Version: 1.2.0
+# Version: 1.2.2
 # Description: Ambient compass recall — surfaces rated decisions on relevant prompts
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-16
-# Modified: 2026-10-31
+# Modified: 2026-11-15
 # =============================================
 
 """Queries compass FTS against the user's prompt and injects matching decisions
@@ -17,7 +17,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.hooks.apps.handlers.config.loader import find_project_config
 from aipass.hooks.apps.handlers.json import json_handler
 
@@ -50,21 +50,14 @@ def _load_state(hook_data: dict | None = None) -> dict:
     path = _state_path(hook_data)
     if path is None or not path.exists():
         return _fresh_state()
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.info("[HOOKS] compass_recall: state read failed: %s", exc)
-        return _fresh_state()
+    # A corrupt state raises and is left as found: read as fresh, the save below would overwrite it.
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _fresh_state() -> dict:
-    try:
-        from aipass.memory.apps.modules.governance import new_state
+    from aipass.memory import new_state
 
-        return new_state()
-    except Exception as exc:
-        logger.info("[HOOKS] compass_recall: governance import failed: %s", exc)
-        return {"surfaces_count": 0, "messages_since_last": 0, "last_surface_time": 0.0, "surfaced_ids": []}
+    return new_state()
 
 
 def _save_state(state: dict, hook_data: dict | None = None) -> None:
@@ -74,7 +67,7 @@ def _save_state(state: dict, hook_data: dict | None = None) -> None:
     try:
         path.write_text(json.dumps(state), encoding="utf-8")
     except OSError as exc:
-        logger.info("[HOOKS] compass_recall: state write failed: %s", exc)
+        logger.warning("[HOOKS] compass_recall: state write failed: %s", exc)
 
 
 def _governance_config() -> dict:
@@ -124,7 +117,7 @@ def handle(hook_data: dict) -> dict:
 
         state = _open_window(_load_state(hook_data), hook_data)
 
-        from aipass.memory.apps.modules.governance import should_surface, record_message
+        from aipass.memory import should_surface, record_message
 
         state = record_message(state)
 
@@ -133,7 +126,7 @@ def handle(hook_data: dict) -> dict:
             _save_state(state, hook_data)
             return {"stdout": "", "exit_code": 0}
 
-        from aipass.devpulse.apps.modules.compass import recall_decisions, mark_surfaced
+        from aipass.devpulse import recall_decisions, mark_surfaced
 
         candidates = recall_decisions(prompt_text, limit=3)
         if not candidates:
@@ -169,5 +162,5 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": "\n".join(lines), "exit_code": 0, "sound": "compass recall"}
 
     except Exception as exc:
-        logger.info("[HOOKS] compass_recall_unreachable: %s", exc)
+        logger.error("[HOOKS] compass_recall_unreachable: %s", exc)
         return {"stdout": "", "exit_code": 0}

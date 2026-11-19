@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_hygiene_plugin.py
 # Description: pytest write-hygiene gate - stdlib only, injected into a copy
-# Version: 1.0.1
+# Version: 1.0.3
 # Created: 2026-08-29
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """The write gate. A pytest plugin injected into a COPY of somebody else's tree.
@@ -17,7 +17,6 @@ counted into `gate_coverage`: 100 means no violation seen by this gate.
 """
 
 import json
-import logging
 import os
 import sys
 import tempfile
@@ -25,9 +24,6 @@ import time
 from typing import Dict, List, Optional, TextIO, Tuple
 
 __version__ = "1.0.0"
-
-logger = logging.getLogger("audit_tests.hygiene_gate")
-
 
 #: In classifier order, copied verbatim into the artifact: a sandbox never widens unsaid.
 ALLOWANCES: Tuple[Tuple[str, str], ...] = (
@@ -130,13 +126,9 @@ class GateState:
 STATE = GateState()
 
 
-#: Windows accepts both "\\" and "/"; on POSIX "\\" is a legal filename character, so
-#: splitting on `os.sep` alone misclassifies forward-slash paths on Windows.
+#: On POSIX "\\" is a legal filename character, never a separator.
 def accepted_separators(sep: str = os.sep, altsep: Optional[str] = os.altsep) -> Tuple[str, ...]:
-    """The separators a platform honours, as a pure function of its two values.
-
-    A function so the Windows derivation is testable from Linux, where `altsep` is None.
-    """
+    """The separators a platform honours, as a pure function of its two values."""
     return tuple(dict.fromkeys(candidate for candidate in (sep, altsep) if candidate))
 
 
@@ -144,10 +136,7 @@ SEPARATORS: Tuple[str, ...] = accepted_separators()
 
 
 def _split_path(path: str, separators: Optional[Tuple[str, ...]] = None) -> List[str]:
-    """Split `path` on every separator this platform honours.
-
-    The default is read at call time, so a test can monkeypatch `SEPARATORS` from Linux.
-    """
+    """Split `path` on every separator this platform honours."""
     separators = SEPARATORS if separators is None else separators
     parts = [path]
     for sep in separators:
@@ -243,7 +232,6 @@ def escapes_via_symlink(path: str, state: GateState = STATE) -> bool:
     try:
         return not _under(os.path.realpath(path), os.path.realpath(state.env_root))
     except OSError as exc:
-        logger.debug("realpath failed for %s", path, exc_info=exc)
         _note_error(state, "realpath", exc)
         return False
 
@@ -330,7 +318,6 @@ def audit_hook(event: str, args: tuple) -> None:
                 dir_fd = args[fd_index] if fd_index is not None and fd_index < len(args) else None
                 _record_write(event, args[index], dir_fd)
     except Exception as exc:  # a hook must never break the suite it measures
-        logger.debug("audit hook failed on %s", event, exc_info=exc)
         _note_error(state, f"hook:{event}", exc)
 
 
@@ -344,7 +331,6 @@ def emit(record: dict) -> None:
         state.sink.write(json.dumps(record, sort_keys=True) + "\n")
         state.sink.flush()
     except Exception as exc:
-        logger.debug("could not write the gate log", exc_info=exc)
         _note_error(state, "sink", exc)
     finally:
         state.emitting = False
@@ -370,8 +356,11 @@ def pytest_configure(config) -> None:
             "to run without a sink rather than run blind."
         )
 
-    state.env_root = os.path.normpath(os.environ.get("AUDIT_TESTS_ENV_ROOT", "")) or ""
-    state.target_root = os.path.normpath(os.environ.get("AUDIT_TESTS_TARGET_ROOT", "")) or ""
+    # normpath("") is ".", so an unset root must stay "" for the guards that test it.
+    raw_env_root = os.environ.get("AUDIT_TESTS_ENV_ROOT", "")
+    state.env_root = os.path.normpath(raw_env_root) if raw_env_root else ""
+    raw_target_root = os.environ.get("AUDIT_TESTS_TARGET_ROOT", "")
+    state.target_root = os.path.normpath(raw_target_root) if raw_target_root else ""
     state.target_module = os.environ.get("AUDIT_TESTS_TARGET_MODULE", "")
     state.tmpdir_allowed = os.environ.get("AUDIT_TESTS_TMPDIR_ALLOWED", "1") != "0"
     state.tmp_root = os.path.normpath(tempfile.gettempdir())
@@ -449,7 +438,6 @@ def _resolve_target_module(state: GateState) -> Tuple[bool, str]:
         root = os.path.realpath(state.env_root) if state.env_root else ""
         return bool(where) and _under(where, root), where or "module has neither __file__ nor __path__"
     except Exception as exc:
-        logger.debug("import of %s failed", state.target_module, exc_info=exc)
         return False, f"{type(exc).__name__}: {exc}"
 
 
@@ -507,14 +495,12 @@ def fire_canary() -> dict:
             handle.write("audit-tests canary; removed immediately after the check\n")
     except OSError as exc:
         # An unwritable canary leaves the gate unproven; the reason travels to the artifact.
-        logger.warning("canary write failed: %s", exc)
         error = f"{type(exc).__name__}: {exc}"
     finally:
         try:
             # Only the sentinel this function created inside the scratch copy.
             os.unlink(state.canary_path)
         except OSError as exc:
-            logger.debug("canary cleanup failed", exc_info=exc)
             _note_error(state, "canary-cleanup", exc)
 
     return {"attempted": True, "caught": bool(state.canary_seen), "path": state.canary_path, "error": error}

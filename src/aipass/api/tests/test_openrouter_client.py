@@ -3,7 +3,7 @@
 # Description: Tests for OpenRouter client module
 # Version: 1.0.2
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/openrouter_client.py and create_client in apps/handlers/openrouter/client.py."""
@@ -593,6 +593,18 @@ def test_create_client_raises_with_the_sdk_reason(mock_openai_cls):
         create_client("FAKE-sk-or-key")
 
     assert str(caught.value) == "OpenRouter client could not be created: connection refused"
+
+
+def test_a_failed_request_raises_with_the_providers_reason():
+    """make_api_request raises the provider's message after its retries, never a bare None."""
+    sdk = MagicMock()
+    sdk.chat.completions.create.side_effect = RuntimeError("402 insufficient credits")
+
+    with pytest.raises(openrouter_client.client.OpenRouterUnavailable) as caught:
+        openrouter_client.client.make_api_request(sdk, [{"role": "user", "content": "hi"}], "test/model", retries=0)
+
+    assert "402 insufficient credits" in str(caught.value)
+    assert "test/model" in str(caught.value)
 
 
 @patch(f"{_MOD}.error")

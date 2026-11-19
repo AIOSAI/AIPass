@@ -45,13 +45,11 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 ## Durability
 
 - **Atomic writes:** All JSON state files use `config.atomic_write_json()` — writes to a temp file in the same directory, then an atomic rename. No partial writes on crash.
-  The rename goes through `config.replace_with_retry()`, not a bare `os.replace()`: on Windows an antivirus scanner or the search indexer can hold a transient handle on the destination and `os.replace` raises `PermissionError`. 40 attempts, 5ms apart, `PermissionError` only — any other `OSError` propagates on the first attempt, and exhaustion raises rather than reporting a write that did not happen. Fleet-canonical shape, matching `@commons`.
-- **File locking:** All read-modify-write cycles wrapped in `config.json_file_lock()` with `.lock` sidecar files — `fcntl.flock` on POSIX, `msvcrt.locking` on Windows. Prevents concurrent corruption from watcher + CLI. `flock` takes a fresh open file description per call, so it conflicts even inside one process. Both arms are pinned by tests: the win32 one by an injected fake `msvcrt`, the POSIX one by concurrent threads.
-  Windows has no blocking `flock`, so the win32 arm polls: `msvcrt.locking(..., LK_NBLCK, 1)` on one byte of the sidecar, 100 attempts 50ms apart, and the final attempt is deliberately unguarded so the caller gets the OS's own `OSError` instead of running unlocked. The sidecar opens `"a+"`, not `"w"` — truncating a file another process byte-locks is a sharing violation on Windows.
+- **File locking:** All read-modify-write cycles wrapped in `config.json_file_lock()` with `.lock` sidecar files — `fcntl.flock`. Prevents concurrent corruption from watcher + CLI. `flock` takes a fresh open file description per call, so it conflicts even inside one process. Pinned by a test of concurrent threads.
   Scope: these two helpers serialise trigger's **own** state files — the error registry, the circuit breaker, medic state, escalation state, `.aipass/alerts.json` and `trigger_data.json`. Trio documents under `trigger_json/` are written by the fleet json service, which carries its own durability machinery; trigger's `config.py` is not on that path.
 - **Atomic is not serialised.** `atomic_write_json` stops a *torn* file, not a *lost* one. Two unlocked read-modify-write cycles each produce a whole file and one update vanishes; only the lock prevents that.
-- **Unreadable is not corrupt.** Reads go through `config.read_text_with_retry`, the mirror of `replace_with_retry`, because a reader meets the same transient Windows sharing window a writer does. A read still refused after 40 attempts raises `PermissionError`, and any other `OSError` raises at once: an unreadable document is never treated as a corrupt one to be regenerated.
-- **Circuit breaker persistence:** Trip state, recent errors, per-fingerprint tracking all survive restarts via `trigger_cb_state.json`.
+- **Unreadable is not corrupt.** A read that fails raises its `OSError`: an unreadable document is never treated as a corrupt one to be regenerated.
+- **Circuit breaker persistence:** Trip state, recent mails, held lists, per-fingerprint tracking all survive restarts via `trigger_cb_state.json`.
 - **Off the trio path:** Hand-written live state uses filenames `json_handler`'s trio machinery does not own — see the trio doctrine above.
 
 

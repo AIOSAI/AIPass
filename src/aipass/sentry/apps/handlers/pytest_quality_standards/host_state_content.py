@@ -45,7 +45,7 @@ def get_host_state_standards() -> str:
         "",
         "  [yellow]Six species:[/yellow]",
         "  - [red]SERVICE_CONTROL[/red] — a subprocess call running",
-        "    [dim]systemctl[/dim], [dim]launchctl[/dim], [dim]crontab[/dim] and",
+        "    [dim]systemctl[/dim], [dim]service[/dim], [dim]crontab[/dim] and",
         "    the rest of the service-manager roster",
         "  - [red]PROCESS_SIGNAL[/red] — [dim]os.kill[/dim] / [dim]os.killpg[/dim]",
         "    / [dim]signal.raise_signal[/dim] at a process the unit never started",

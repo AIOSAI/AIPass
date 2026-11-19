@@ -354,13 +354,14 @@ from typing import Dict, List, Optional
 # Third-party imports (if any)
 
 # Internal imports (always use pip namespace)
-from aipass.module.apps.modules import something
+from aipass.<self>.apps.modules import something   # your own branch
+from aipass.<branch> import <name>                 # another branch: front door only
 ```
 
 **Import sections (in order):**
 1. Standard library imports
 2. Third-party imports
-3. Internal imports (always `from aipass.{module}...`)
+3. Internal imports (always `from aipass.{module}...`; another branch only through its front door, never its `apps/`)
 
 **WHY this order:**
 - **Standard library grouped:** Easy to see external dependencies
@@ -458,3 +459,11 @@ Both checks read the parse tree, never the spelling:
   function.
 - A file that does not parse falls back to a line scan and says so in the message, so a
   fallback never reads like a verdict from the real arm.
+
+## Bypass Rows
+
+A row with no `lines` or `functions` waives the whole file. A scoped row waives sites. Each
+public function missing a docstring is its own site, at its `def` line and under its name: a row
+with `"lines": [12]` or `"functions": ["load"]` waives that function, and every other undocumented
+function still convicts. A missing module docstring is the file's finding: only a row with
+`"functions": ["<file>"]` waives it, and a `lines` row never does.

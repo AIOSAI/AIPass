@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: subagent_gate.py
-# Version: 1.0.4
+# Version: 1.1.0
 # Description: Checks modified Python files against sentry standards on SubagentStop
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-22
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Checks modified Python files against sentry standards and blocks on violations.
@@ -21,7 +21,8 @@ import subprocess
 import time
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 _ALLOW = {"stdout": "", "exit_code": 0}
 # The engine kills this hook at 60s (hooks.json). Two git reads may take 10s each
@@ -65,12 +66,12 @@ def _get_cwd_branch(cwd: str, repo_root: Path) -> str | None:
         logger.info("[HOOKS] subagent_gate: CWD %s not inside src/<package>", cwd)
         return None
     src = repo_root / "src" / package
-    try:
-        rel = Path(cwd).resolve().relative_to(src)
-        return rel.parts[0] if rel.parts else None
-    except ValueError:
+    here = Path(cwd).resolve()
+    if not here.is_relative_to(src):
         logger.info("[HOOKS] subagent_gate: CWD %s not inside %s", cwd, src)
         return None
+    rel = here.relative_to(src)
+    return rel.parts[0] if rel.parts else None
 
 
 def _get_modified_py_files(cwd: str, repo_root: Path) -> list[str]:
@@ -106,8 +107,7 @@ def _get_modified_py_files(cwd: str, repo_root: Path) -> list[str]:
 
 def _run_sentry_checklist(file_path: str, repo_root: Path, timeout: float = _CHECKLIST_TIMEOUT_SECONDS) -> list[str]:
     """Run sentry checklist on a single file, return violation strings."""
-    # The caller hands str(repo_root / filepath), which is backslashed on Windows.
-    if "/.claude/" in file_path.replace("\\", "/"):
+    if "/.claude/" in file_path:
         return []
     result = subprocess.run(
         ["drone", "@sentry", "checklist", file_path],
@@ -208,7 +208,17 @@ def _check_within_budget(modified: list[str], repo_root: Path) -> tuple[dict[str
 
 
 def handle(hook_data: dict) -> dict:
-    """Check modified files against sentry standards on subagent stop."""
+    """Check modified files against sentry standards on subagent stop; each call leaves one json trail entry."""
+    result = _decide(hook_data)
+    payload = hook_data if isinstance(hook_data, dict) else {}
+    tool = payload.get("tool_name") or payload.get("hook_event_name", "")
+    verdict = "refuse" if result.get("exit_code") == 2 else "allow"
+    json_handler.log_operation("check", {"tool": tool, "verdict": verdict, "seat": payload.get("cwd", "")})
+    return result
+
+
+def _decide(hook_data: dict) -> dict:
+    """The verdict on one subagent stop."""
     try:
         agent_type = hook_data.get("agent_type", "")
         if not agent_type:

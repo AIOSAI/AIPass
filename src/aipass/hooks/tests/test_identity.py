@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_identity.py
-# Version: 1.3.3
+# Version: 1.4.0
 # Description: Tests for identity prompt handler (cadence-gated 1.1.0, char budget enforced 1.2.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/prompt/identity.py."""
@@ -71,20 +71,19 @@ class TestCadenceGate:
         assert "devpulse Identity" in result["stdout"]
         assert result["sound"] == "identity"
 
-    def test_is_withheld_when_cadence_check_raises(self, tmp_path, monkeypatch, caplog):
-        """The degraded fail mode (DPLAN-0347): identity waits, the kernel fires alone and says why."""
-
+    def test_a_raising_cadence_withholds_identity_on_one_engine_fault_line(self, engine_fault, tmp_path, monkeypatch):
         self._write_passport(tmp_path)
 
         def _boom(*_a, **_k):
             raise RuntimeError("cadence state unreadable")
 
         monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", _boom)
+        handler = f"{handle.__module__}.handle"
+        faults, (stdout, code) = engine_fault("UserPromptSubmit", "identity_injector", handler, {"cwd": str(tmp_path)})
 
-        result = handle({"cwd": str(tmp_path)})
-
-        assert result == {"stdout": "", "exit_code": 0}
-        assert "identity DEGRADED loader=identity" in caplog.text
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1
+        assert f"fault[UserPromptSubmit.identity_injector.{handler}.RuntimeError@" in faults[0]
 
 
 # Schema 1.0.0 shape — principles at the TOP LEVEL; still live, so it must keep rendering.
@@ -147,7 +146,6 @@ class TestIdentityHandler:
         (real / "work").mkdir()
         (tmp_path / "home").symlink_to(real, target_is_directory=True)
         monkeypatch.setenv("HOME", str(tmp_path / "home"))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
 
         result = handle({"cwd": str(real / "work")})
 
@@ -214,18 +212,18 @@ class TestIdentityHandler:
         assert result["stdout"] == ""
         assert "sound" not in result
 
-    def test_corrupt_passport_json(self, tmp_path):
-
+    def test_a_corrupt_passport_is_one_engine_fault_line_and_the_prompt_goes_on(self, engine_fault, tmp_path):
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
         passport.write_text("{broken json", encoding="utf-8")
 
-        result = handle({"cwd": str(tmp_path)})
+        handler = f"{handle.__module__}.handle"
+        faults, (stdout, code) = engine_fault("UserPromptSubmit", "identity_injector", handler, {"cwd": str(tmp_path)})
 
-        assert result["exit_code"] == 0
-        assert result["stdout"] == ""
-        assert "sound" not in result
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1
+        assert f"fault[UserPromptSubmit.identity_injector.{handler}.JSONDecodeError@" in faults[0]
 
 
 class TestPrinciplesLayoutFallback:

@@ -67,7 +67,21 @@ within one process; a second process waits up to 30 seconds, then the command
 fails with a `TimeoutError` message.
 
 **A failed registry save fails create.** The plan file is already on disk, so
-the error names it and points at `drone @flow registry scan` to register it.
+the error names it and asks @flow to run `drone @flow registry scan` to register it.
+
+**Who may act.** Every gate reads the caller from @ai_mail's verified-caller rail
+and records a refusal with it (`apps/handlers/plan/authority.py`):
+
+- `create` files a plan in any branch, for any citizen. A location inside
+  `.trinity`, `.aipass`, `.git`, `.codex`, `.agents` or any `.archive` (links
+  followed) is refused for everyone; a location outside every branch is the
+  verified admin seat's only. The row records `created_by`.
+- `close` and `restore` answer to the branch whose passport sits above the plan
+  (its `branch_name`, the name drone stamps), the row's `created_by`, or the
+  verified admin seat. A recovery with no row has no creator: the branch that
+  will hold it, or the admin.
+- `registry scan` and `registry move --apply` are @flow's own run or the
+  verified admin's; a `registry move` preview is open to anyone.
 
 ---
 

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_presence_gate.py
-# Version: 1.0.5
+# Version: 1.2.0
 # Description: Tests for the presence gate handler
 # Branch: hooks
 # Layer: tests
 # Created: 2026-06-29
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/security/presence_gate.py."""
@@ -50,9 +50,7 @@ def _make_mocks(our_pid: int | None = 1000, occupant=None, all_sessions=None):
     cc_mock = MagicMock()
     cc_mock.resolve_session_pid.return_value = our_pid
     cc_mock.find_occupant.return_value = occupant
-    # Real list, not a MagicMock: the gate iterates this to find its own
-    # session, and a non-iterable would be swallowed by the gate's own
-    # error handler as a silent allow.
+    # Real list, not a MagicMock: the gate iterates this to find its own session.
     cc_mock.read_all_sessions.return_value = list(all_sessions or [])
 
     return cc_mock, lambda: _served(cc_mock)
@@ -310,11 +308,17 @@ class TestRemedyIsSatisfiable:
         assert result["exit_code"] == 2
         assert "reclaim" in json.loads(result["stdout"])["reason"]
 
-    def test_gate_error_allows(self):
+    def test_a_gate_error_is_one_engine_fault_line_and_the_prompt_is_allowed(self, engine_fault):
+        cc_mock, serve = _make_mocks()
+        cc_mock.resolve_session_pid.side_effect = RuntimeError("proc unreadable")
+        handler = f"{presence_gate.__name__}.handle"
         with patch.dict(os.environ, {**_kept_redirect(), "AIPASS_SESSION_TYPE": "interactive"}, clear=True):
-            with _served(None):
-                result = presence_gate.handle({})
-        assert result["exit_code"] == 0
+            with serve():
+                faults, (stdout, code) = engine_fault("UserPromptSubmit", "presence_gate", handler, {})
+
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1 and f"fault[UserPromptSubmit.presence_gate.{handler}.RuntimeError@" in faults[0]
+        cc_mock.resolve_session_pid.assert_called_once_with()
 
 
 class TestHandleStop:
@@ -330,6 +334,18 @@ class TestHandleStop:
         mock.release.assert_not_called()
         mock.claim.assert_not_called()
         mock.find_occupant.assert_not_called()
+
+    def test_each_stop_leaves_one_trail_entry(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        presence_gate.handle_stop({"hook_event_name": "Stop", "cwd": str(tmp_path)})
+        trail = tmp_path / "hooks" / "hooks_json" / "presence_gate_log.json"
+        entries = [(e["operation"], e["data"]) for e in json.loads(trail.read_text(encoding="utf-8"))]
+        assert entries == [("handle_stop", {"tool": "Stop", "verdict": "allow", "seat": str(tmp_path)})]
+
+    def test_a_trail_that_cannot_be_written_changes_no_answer(self):
+        with patch.object(presence_gate.json_handler, "log_operation", return_value=False) as logged:
+            assert presence_gate.handle_stop({}) == {"stdout": "", "exit_code": 0}
+        logged.assert_called_once()
 
 
 @pytest.fixture

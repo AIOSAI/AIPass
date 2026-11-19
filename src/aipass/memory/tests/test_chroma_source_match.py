@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_chroma_source_match.py
 # Description: Tests for source_file matching in the ChromaDB subprocess handler
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-08-23
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/storage/chroma_subprocess.py."""
@@ -277,6 +277,26 @@ class _SearchCollection:
         }
 
 
+class _MissingCollectionClient:
+    def get_collection(self, name, embedding_function=None):
+        from chromadb.errors import NotFoundError
+
+        raise NotFoundError(f"Collection [{name}] does not exist (fake)")
+
+
+class TestCheckPlanWithNoCollection:
+    """No flow_plans collection: the plan is truly not vectorized, and the store's own words say why."""
+
+    def test_the_message_carries_the_exception_text(self, monkeypatch, run):
+        monkeypatch.setattr(chroma_subprocess, "_get_client", lambda db_path=None: _MissingCollectionClient())
+
+        result = run("check_plan", plan_label="FPLAN-0001")
+
+        assert result["success"] is True
+        assert result["found"] is False
+        assert "Collection [flow_plans] does not exist (fake)" in result["message"]
+
+
 class _SearchClient:
     """A store that records which collections a search actually opened."""
 
@@ -336,3 +356,35 @@ class TestSearchBranchScope:
         run("search_vectors", query_embedding=[0.1], branch="memory")
 
         assert store.queried == ["memory_pool_docs"]
+
+
+class _BrokenCollection(_SearchCollection):
+    def query(self, query_embeddings=None, n_results=5):
+        raise RuntimeError("segment unreadable")
+
+
+class TestAFailedCollectionIsNotASearchedOne:
+    """A collection that raised was not searched: it is named as failed, never counted."""
+
+    def _install(self, monkeypatch, broken):
+        client = _SearchClient(["flow_local", "flow_plans"])
+        client._collections = [_BrokenCollection(c.name) if c.name in broken else c for c in client._collections]
+        monkeypatch.setattr(chroma_subprocess, "_get_client", lambda db_path=None: client)
+
+    def test_one_broken_collection_is_named_not_counted(self, monkeypatch, run):
+        self._install(monkeypatch, {"flow_plans"})
+
+        result = run("search_vectors", query_embedding=[0.1], branch="flow")
+
+        assert result["success"] is True
+        assert result["collections_searched"] == 1
+        assert [f["collection"] for f in result["collections_failed"]] == ["flow_plans"]
+        assert "segment unreadable" in result["collections_failed"][0]["error"]
+
+    def test_every_collection_broken_is_a_failed_search(self, monkeypatch, run):
+        self._install(monkeypatch, {"flow_local", "flow_plans"})
+
+        result = run("search_vectors", query_embedding=[0.1], branch="flow")
+
+        assert result["success"] is False
+        assert "flow_local" in result["error"] and "flow_plans" in result["error"]

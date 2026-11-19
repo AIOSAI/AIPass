@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: rm.py
-# Description: Module orchestrator for contained safe-delete
-# Version: 1.1.1
+# Description: Module orchestrator for contained safe-delete: in-tree targets move to .archive
+# Version: 1.7.0
 # Created: 2026-06-02
-# Modified: 2026-09-11
+# Modified: 2026-11-18
 # =============================================
 
 """Module orchestrator for contained safe-delete.
 
-Thin orchestrator that delegates to rm_handler for path containment
-checks and deletion. Provider-agnostic alternative to shell ``rm``.
+Thin orchestrator that delegates to rm_handler for path containment checks and the move or
+delete. Provider-agnostic alternative to shell ``rm``.
 ``--stale AGE`` in any slot selects the stale-temp sweep instead (DPLAN-0338).
 """
 
@@ -18,7 +18,7 @@ from __future__ import annotations
 import tempfile
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, success
+from aipass.cli import console, err_console, error, mark_command_failed
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.rm_handler import (
     format_age,
@@ -36,8 +36,8 @@ from aipass.drone.apps.handlers.help_flags import wants_help
 
 DRONE_MODULE = {
     "name": "rm",
-    "version": "1.1.1",
-    "description": "Contained safe-delete (project + tmp)",
+    "version": "1.6.0",
+    "description": "Contained safe-delete: in-tree targets move to .archive, temp is deleted",
 }
 
 
@@ -69,13 +69,13 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         print_help()
         return True
 
-    json_handler.log_operation("rm_command", {"command": command, "args": args})
-
     paths: list[str] = []
     if command is not None:
         paths.append(command)
     if args:
         paths.extend(args)
+    # One key: the router's command/args split is routing, not meaning; every token is a target.
+    json_handler.log_operation("rm_command", {"targets": paths})
 
     if not paths:
         print_help()
@@ -87,12 +87,24 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     results = _safe_delete(paths)
     ok = True
     for _path_str, succeeded, message in results:
-        if succeeded:
-            success(message)
-        else:
-            error(message)
-            ok = False
+        _report(succeeded, message)
+        ok = ok and succeeded
     return ok
+
+
+def _report(succeeded: bool, message: str) -> None:
+    """The verdict line, then each further line whole and unwrapped: a path split at 80 columns cannot be copied.
+
+    Success to stdout, a failure to stderr and marked failed, as ``success()`` and ``error()`` do.
+    """
+    verdict, *lines = message.splitlines()
+    out = console if succeeded else err_console
+    if not succeeded:
+        mark_command_failed()
+    mark, style = ("✅", "green") if succeeded else ("❌", "red bold")
+    out.print(f"{mark} {verdict}", style=style, soft_wrap=True, markup=False, highlight=False)
+    for line in lines:
+        out.print(f"   {line}", soft_wrap=True, markup=False, highlight=False)
 
 
 def run_stale(tokens: list[str]) -> bool:
@@ -113,7 +125,7 @@ def run_stale(tokens: list[str]) -> bool:
         for path, age, size in report.candidates:
             _plain(f"  would delete  {format_age(age):>7}  {size:>9} B  {path}")
     for message in report.refusals:
-        error(message)
+        _report(False, message)
     _plain(format_stale_summary(request, report))
     return not report.refusals
 
@@ -128,7 +140,7 @@ def print_introspection() -> None:
     console.print()
     console.print("[bold cyan]rm — Contained Safe-Delete[/bold cyan]")
     console.print()
-    console.print("[dim]Deletes files and directories constrained to project root and system tmp.[/dim]")
+    console.print("[dim]Moves project files into the .archive beside them; deletes files in the system temp dir.[/dim]")
     console.print()
     console.print("Run [green]'drone rm --help'[/green] for usage information")
     console.print()
@@ -136,23 +148,42 @@ def print_introspection() -> None:
 
 def print_help() -> None:
     """Display help (--help flag)."""
-    console.print("Usage: drone rm <path> [<path>...]")
+    console.print("Usage: drone rm [--dot] <path> [<path>...]")
     console.print()
-    console.print("Contained safe-delete. Removes files and directories using pure Python")
-    console.print("(shutil.rmtree), constrained to the project root and system temp directory.")
+    console.print("Contained safe-delete, within the project root and the system temp dir.")
+    console.print("Inside the project nothing is deleted: the target MOVES to")
+    console.print("<its folder>/.archive/<its name> in one rename, a directory whole, the")
+    console.print(".archive made if absent. A name already archived keeps both: the new one")
+    console.print("gets a time stamp suffix. Nothing is overwritten.")
+    console.print("Truly deleted, and only these: files in the system temp dir, Python bytecode")
+    console.print("(__pycache__, *.pyc) and --stale temps. Everything else is moved.")
     console.print()
     console.print("[bold]Rules:[/bold]")
     console.print("  • Path must resolve under the project root or system temp dir")
     console.print("  • Cannot delete the project root or temp root itself")
     console.print("  • Symlinks are resolved; refuses if target escapes allowed roots")
     console.print("  • Nonexistent paths produce a clean error")
+    console.print("  • A target inside a .archive is refused: emptying one is the owner's")
+    console.print("  • A failed move fails loudly and moves nothing; a symlinked .archive refuses")
     console.print("  • Carve-outs: .git, .trinity, .aipass, .codex, .agents, other citizens' trees")
-    console.print("  • A project folder that CONTAINS another citizen is refused, naming the first one")
+    console.print("  • The verified admin seat alone may work inside other citizens' trees (never")
+    console.print("    a branch root, a carve-out or a .archive); unverifiable means refused")
+    console.print("  • A project folder that CONTAINS another citizen is refused, naming it")
+    console.print("  • Outside the allowed roots, the verified admin seat reaches any project under")
+    console.print("    the owner's home (the nearest folder holding a *_REGISTRY.json or .git): the")
+    console.print("    target moves into the .archive beside it and every rule here still holds,")
+    console.print("    judged against that project. Refused to every seat: the provider settings")
+    console.print("    folders ~/.claude and ~/.codex, a path in no project, anything outside home")
+    console.print("  • A dot name is a settings, identity or system file: a target whose OWN name")
+    console.print("    starts with a dot, file or folder, is refused. Citizens: always (mail")
+    console.print("    @devpulse the path and why). The verified admin seat moves it with --dot,")
+    console.print("    which says it is deliberate; --dot lifts no carve-out. What sits inside a")
+    console.print("    dot folder moves as normal, and so does a folder that merely holds dot files")
     console.print()
-    console.print("[bold]Every delete is recorded:[/bold]")
+    console.print("[bold]Every move and delete is recorded:[/bold]")
     console.print("  Successes AND refusals land in [cyan]<project>/.ai_central/deletions.jsonl[/cyan]")
-    console.print("  (timestamp, caller, cwd, resolved path, size/entries) and in the prax logs")
-    console.print("  at INFO. Nothing you delete through drone goes unwritten.")
+    console.print("  (timestamp, caller, cwd, resolved path, size/entries; a move adds moved_to)")
+    console.print("  and in the prax logs at INFO. Nothing removed through drone goes unwritten.")
     console.print()
     console.print("[bold]Stale mode — sweep old staging temps:[/bold]")
     console.print("  drone rm --stale AGE [--dry-run] DIR [DIR...]")

@@ -3,7 +3,7 @@
 # Description: Ignore pattern loader — pathspec/gitwildmatch matcher
 # Version: 2.1.0
 # Created: 2026-04-17
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """Ignore patterns handler."""
@@ -37,4 +37,4 @@ def load_spec(project_root: str) -> pathspec.PathSpec:
 
 def is_ignored(rel_path: str, spec: pathspec.PathSpec) -> bool:
     """Check whether a relative path is ignored by the spec."""
-    return spec.match_file(rel_path.replace("\\", "/"))
+    return spec.match_file(rel_path)

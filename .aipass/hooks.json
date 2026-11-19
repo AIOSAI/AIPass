@@ -150,6 +150,12 @@
       "matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash",
       "timeout": 10
     },
+    "test_template_pointer": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.security.testwrite_gate.template_pointer",
+      "matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash",
+      "timeout": 10
+    },
     "post_compact_regrounding": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding.handle",

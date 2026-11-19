@@ -1,30 +1,21 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Log File Monitor
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2025-11-23
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """PRAX Log Watcher - Event Queue Integration"""
 
 import ast
-import os
-import sys
 from pathlib import Path
 
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
 import re
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 from watchdog.observers import Observer as WatchdogObserver  # type: ignore
 from watchdog.events import FileSystemEventHandler  # type: ignore
 
@@ -247,8 +238,6 @@ class LogFileWatcher(FileSystemEventHandler):
                 "Starting" in log_line or "Running" in log_line or "Complete" in log_line
             ):
                 return {"command": "backup snapshot", "caller": None, "target": None}
-            elif "versioned" in log_line.lower() and ("Starting" in log_line or "Running" in log_line):
-                return {"command": "backup versioned", "caller": None, "target": None}
             elif "sync" in log_line.lower() and ("Starting" in log_line or "Running" in log_line):
                 return {"command": "backup sync", "caller": None, "target": None}
 
@@ -311,8 +300,7 @@ class LogFileWatcher(FileSystemEventHandler):
         target_match = re.search(r"@(\w+)", cmd)
         if target_match:
             return target_match.group(1).upper()
-        norm = cmd.replace("\\", "/")
-        path_match = re.search(r"/aipass/(\w+)", norm)
+        path_match = re.search(r"/aipass/(\w+)", cmd)
         if path_match:
             return path_match.group(1).upper()
         return None
@@ -465,7 +453,7 @@ if __name__ == "__main__":
     Press Ctrl+C to stop.
     """
     import time
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("[bold cyan]PRAX Log Watcher Test[/bold cyan]")
     console.print()

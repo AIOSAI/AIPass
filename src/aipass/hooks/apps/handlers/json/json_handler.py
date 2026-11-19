@@ -25,7 +25,7 @@ constants.
 
 from aipass.prax import json_handler
 
-_h = json_handler.for_module(__file__)
+_h = json_handler.for_branch("hooks")
 
 InvalidDocument = json_handler.InvalidDocument
 WriteFailed = json_handler.WriteFailed

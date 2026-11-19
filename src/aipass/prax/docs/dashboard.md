@@ -53,10 +53,22 @@ which is every external branch today, still gets its true count. Pinned in
 new, and `new_mail` 3. The `ai_mail` section feeds no count; the comment in
 `refresh.py` says so.
 
+**DEVPULSE gets two extra sections.** After the lock is released, a refresh of
+DEVPULSE runs `apps/plugins/devpulse_dashboard/`, which writes `sections.git` and
+`sections.dispatch` through `write_section()`. A failing builder is logged and
+does not block the other one. The dispatch section reads every citizen's
+`.ai_mail.local/.dispatch.lock`, the `{pid, timestamp, branch}` file ai_mail holds
+while a dispatched agent runs, and writes `managed_by` (`devpulse`),
+`agents_active` (branch directory names), `agents_active_count` and `details`
+(name to `{pid, timestamp}`). A lock whose PID is dead is skipped. A lock that
+cannot be parsed still counts as active, with `pid: null`, because ai_mail treats
+it as mid-write; a PID that cannot be checked counts as alive. A live dispatch
+must never vanish from the board.
+
 ## Programmatic Dashboard API
 
 ```python
-from aipass.prax.apps.modules.dashboard import write_section
+from aipass.prax import write_section
 
 write_section(branch_path, "ai_mail", {"new": 3, "total": 5})
 ```

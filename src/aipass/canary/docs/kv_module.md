@@ -63,7 +63,7 @@ first.
 
 **A carriage return is refused in a KEY and in a VALUE, and one on the end of a
 line is stripped when reading.** The contract names the tab and the newline
-only. Without the strip, every value in a store written on Windows comes back
+only. Without the strip, every value in a store written with CRLF endings comes back
 with a stray byte on the end; with the strip and no refusal, a value that
 genuinely ended in a carriage return would come back silently shortened.
 Refusing the character on the way in means the strip can only ever affect a

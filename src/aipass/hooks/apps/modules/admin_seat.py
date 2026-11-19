@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: admin_seat.py
-# Version: 1.1.3
+# Version: 1.3.0
 # Description: The verified admin-seat exemption and the caller's name, read once for every gate
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """Answers one question for every security gate: is this session the admin seat?
@@ -13,51 +13,54 @@
 A hook is not drone-invoked, so it stamps AIPASS_CALLER_CWD for @ai_mail's verified rail; fails closed.
 """
 
-import importlib
 import json
 import os
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 CONSOLE = err_console
 
 # For the log line only: who is admin is decided by the verified rail, never by this string.
 ADMIN_SEAT = "devpulse"
 
-_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
+_RAIL = "aipass.ai_mail"
 
 
 def is_admin_seat(cwd: str) -> bool:
-    """True only when the 5-leg admin grant verifies for this session."""
-    return _verified(cwd)
+    """True only when the 5-leg admin grant verifies for this session; each call leaves one json trail entry."""
+    admin = _verified(cwd)
+    json_handler.log_operation("is_admin_seat", {"seat": cwd, "admin": admin})
+    return admin
 
 
 def caller_name(cwd: str) -> str | None:
-    """The citizen a session belongs to, named by the passport above *cwd*, never by the path.
+    """The passport's name above *cwd*, for refusal text only (a name never decides); raises if unreadable."""
+    root = branch_root(cwd)
+    if root is None:
+        return None
+    data = json.loads((root / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+    name = data.get("branch_info", {}).get("branch_name") or data.get("identity", {}).get("name")
+    return name if isinstance(name, str) and name else None
 
-    For refusal text only: a name never decides who passes. Raises on an unreadable passport.
-    """
+
+def branch_root(cwd: str) -> Path | None:
+    """The resolved directory holding the nearest passport above *cwd*, the walk stopping at home; None when none."""
     if not cwd:
         return None
     search = Path(cwd).resolve()
     home = Path.home().resolve()  # both sides resolved, or a symlinked home never stops the walk
     while search != home and search.parent != search:
-        passport = search / ".trinity" / "passport.json"
-        if passport.exists():
-            data = json.loads(passport.read_text(encoding="utf-8"))
-            name = data.get("branch_info", {}).get("branch_name") or data.get("identity", {}).get("name")
-            return name if isinstance(name, str) and name else None
+        if (search / ".trinity" / "passport.json").exists():
+            return search
         search = search.parent
     return None
 
 
 def seat_of(cwd: str) -> tuple[str | None, bool]:
-    """(caller name, verified admin) for one session, for the gates that refuse by seat.
-
-    An unreadable passport costs the name, never the decision.
-    """
+    """(caller name, verified admin) for one session; an unreadable passport costs the name, never the decision."""
     try:
         name = caller_name(cwd)
     except (OSError, ValueError, AttributeError) as exc:
@@ -69,7 +72,7 @@ def seat_of(cwd: str) -> tuple[str | None, bool]:
 def _verified(cwd: str) -> bool:
     """Stamp the caller cwd, ask @ai_mail's rail, and never leave the stamp behind."""
     try:
-        vc = importlib.import_module(_RAIL)
+        from aipass.ai_mail import is_verified_admin_caller
     except Exception as exc:
         logger.warning("[HOOKS] admin_seat: admin lane dark — verified-caller rail unavailable: %s", exc)
         return False
@@ -78,7 +81,7 @@ def _verified(cwd: str) -> bool:
     if stamped:
         os.environ["AIPASS_CALLER_CWD"] = cwd
     try:
-        return bool(vc.is_verified_admin_caller())
+        return bool(is_verified_admin_caller())
     # Every caller is a gate: a raising verifier fails closed, and the warning tells it from a no.
     except Exception as exc:
         logger.warning("[HOOKS] admin_seat: admin verification raised (refusing): %s", exc)

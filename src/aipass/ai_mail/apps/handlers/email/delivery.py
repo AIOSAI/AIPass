@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.5.1
+# Version: 3.6.0
 # Created: 2025-12-02
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -14,23 +14,16 @@ Reference: docs/sending_and_delivery.md
 
 import json
 import os
-import sys
 import uuid
 from pathlib import Path
 from typing import Dict, Tuple, List, Optional, Callable
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import REGISTRY_SUFFIX, find_repo_root, find_project_root, registries_in
-from aipass.ai_mail.apps.handlers.registry.read import get_all_branches
+from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable, get_all_branches
 from aipass.ai_mail.apps.handlers.email.inbox_ops import count_new, migrate_inbox_format
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
+from aipass.ai_mail.apps.handlers.email.mail_kind import URGENT_KINDS, classify
 
 
 _REPO_ROOT = find_repo_root()
@@ -374,9 +367,20 @@ def deliver_email_to_branch(
     """
     json_handler.log_operation("deliver_email", {"to": to_branch, "subject": email_data.get("subject", "")})
 
+    try:
+        kind = classify(email_data.get("from", ""), email_data.get("subject", ""), email_data.get("kind"))
+    except ValueError as e:
+        return False, f"Refused: {e}"
+
     # drone's @ resolution may hand in a path instead of an address.
+    try:
+        all_branches = get_all_branches()
+    except RegistryUnreadable as e:
+        logger.warning("[delivery] AIPass registry unreadable for %s: %s", to_branch, e)
+        return False, f"AIPass registry unreadable, {to_branch} not resolved: {e}"
+
     if to_branch.startswith("/") or Path(to_branch).is_absolute():
-        branches_list = get_all_branches()
+        branches_list = all_branches
         path_to_email = {b["path"]: b["email"] for b in branches_list}
         if to_branch in path_to_email:
             to_branch = path_to_email[to_branch]
@@ -391,19 +395,9 @@ def deliver_email_to_branch(
             if not matched:
                 return False, f"Could not resolve path to email: {to_branch}"
 
-    all_branches = get_all_branches()
     branches = {b["email"]: b["path"] for b in all_branches}
 
     if to_branch not in branches:
-        # get_all_branches answers [] for an unreadable registry too: before the map widens,
-        # an AIPass name must not read as absent and be served to another root's namesake.
-        from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable, check_registry_readable
-
-        try:
-            check_registry_readable(_REPO_ROOT / "AIPASS_REGISTRY.json")
-        except RegistryUnreadable as e:
-            logger.warning("[delivery] AIPass registry unreadable for %s: %s", to_branch, e)
-            return False, f"AIPass registry unreadable, {to_branch} not resolved: {e}"
         caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
         if caller_cwd:
             try:
@@ -418,7 +412,7 @@ def deliver_email_to_branch(
         from aipass.ai_mail.apps.handlers.users import verified_caller
 
         if verified_caller.is_verified_admin_caller():
-            from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable, get_project_tree_branches
+            from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
 
             try:
                 branches.update(get_project_tree_branches(_REPO_ROOT))
@@ -494,6 +488,7 @@ def deliver_email_to_branch(
 
             if existing is not None:
                 _apply_upsert_update(existing, email_data)
+                existing["kind"] = kind
                 email_data["upsert_action"] = "updated"
                 updated_in_place = True
                 logger.info(
@@ -515,6 +510,7 @@ def deliver_email_to_branch(
                     "status": "new",
                     "auto_execute": email_data.get("auto_execute", False),
                     "priority": email_data.get("priority", "normal"),
+                    "kind": kind,
                 }
 
                 # sent_id links this copy to the sender's sent/ record; the id above is per-mailbox.
@@ -575,6 +571,7 @@ def deliver_email_to_branch(
             email_data["subject"],
             email_data.get("message", ""),
             address=_mail_address(delivered_id, to_branch, branch_path),
+            kind=kind,
         )
 
     if on_delivered:
@@ -594,6 +591,10 @@ def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str
     """
     if not inbox_file.exists():
         return False, f"inbox not found: {inbox_file}", ""
+    try:
+        kind = classify(email_data.get("from", ""), email_data.get("subject", ""), email_data.get("kind"))
+    except ValueError as e:
+        return False, f"Refused: {e}", ""
 
     try:
         with _get_inbox_lock()(inbox_file):
@@ -608,6 +609,7 @@ def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str
 
             reply_id = str(uuid.uuid4())[:8]
             email_data = dict(email_data)
+            email_data["kind"] = kind
             # sent_id is stamped in both lanes, so tracing never depends on which lane delivered.
             if email_data.get("id"):
                 email_data.setdefault("sent_id", email_data["id"])
@@ -642,6 +644,7 @@ def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str
         address=_mail_address(
             reply_id, email_data.get("to") or inbox_file.parent.parent.name, inbox_file.parent.parent
         ),
+        kind=kind,
     )
     return True, "", reply_id
 
@@ -680,9 +683,14 @@ _NOTIFICATION_WINDOW = 30.0  # seconds
 
 
 def _emit_notification_event(
-    sender: str, recipient: str, subject: str, message: str = "", address: Optional[Dict[str, str]] = None
+    sender: str,
+    recipient: str,
+    subject: str,
+    message: str = "",
+    address: Optional[Dict[str, str]] = None,
+    kind: str = "mail",
 ) -> None:
-    """Write a "mail" event to the notification feed for new email."""
+    """Write a "mail" event carrying mail_kind to the feed; the rate limit never drops an urgent kind."""
     import time
 
     now = time.time()
@@ -693,7 +701,8 @@ def _emit_notification_event(
     else:
         _NOTIFICATION_TIMESTAMPS[recipient] = []
 
-    if len(_NOTIFICATION_TIMESTAMPS[recipient]) >= _NOTIFICATION_MAX:
+    if kind not in URGENT_KINDS and len(_NOTIFICATION_TIMESTAMPS[recipient]) >= _NOTIFICATION_MAX:
+        logger.info("[delivery] feed line rate-limited for %s (%s): %s", recipient, kind, subject)
         return
 
     sender_name = sender.replace("@", "").upper()
@@ -708,7 +717,9 @@ def _emit_notification_event(
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
 
-        send_notification(title, body, source=sender.replace("@", ""), kind="mail", extra=address)
+        send_notification(
+            title, body, source=sender.replace("@", ""), kind="mail", extra={**(address or {}), "mail_kind": kind}
+        )
         _NOTIFICATION_TIMESTAMPS[recipient].append(now)
     except Exception as e:
         logger.warning("[delivery] _emit_notification_event() failed for %s: %s", recipient, e)

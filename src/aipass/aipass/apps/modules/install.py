@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: install.py
-# Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.5.3
+# Description: aipass install — one-command PyPI bootstrap (clone + setup + doctor + report)
+# Version: 1.9.0
 # Created: 2026-07-05
-# Modified: 2026-11-01
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -12,16 +12,19 @@ aipass install — one-command bootstrap of the whole framework
 
 from __future__ import annotations
 
+import importlib.metadata
+import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict
+from typing import Callable, Dict
 from urllib.parse import urlsplit, urlunsplit
 
-from aipass.cli.apps.modules import console, error, success, warning
+from aipass.cli import console, error, success, warning
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
@@ -39,8 +42,27 @@ DEFAULT_HOME = Path.home() / "AIPass"
 # Clone can be slow on a cold network; setup.sh compiles a venv + installs deps.
 _CLONE_TIMEOUT = 600
 _SETUP_TIMEOUT = 1800
+_DOCTOR_TIMEOUT = 600
 # Exported to setup.sh under --non-interactive, for it to read before its own [ -t 0 ].
 NON_INTERACTIVE_ENV = "AIPASS_NON_INTERACTIVE"
+# Exported under --yes: consent to setup.sh's machine changes, given up front.
+YES_ENV = "AIPASS_YES"
+_WAKE_PROMPT = (
+    "Read dropbox/install_report.json: a fresh AIPass install. "
+    "Greet me by name, then walk me through each attention item."
+)
+_PHONE_FAILED = {
+    "group": "Phone",
+    "label": "phone face",
+    "severity": "error",
+    "detail": "asked for (no --no-baud) and not installed; the Phone face step above says why",
+    "remediation": "aipass baud install",
+}
+_CLOSING_NOTE = (
+    "devpulse is the seat you talk to: the admin agent, with higher privileges to change files in any directory,",
+    "under your supervision. aipass is the machine concierge for host problems (Wi-Fi drops, a USB port not",
+    "working, CPU running hot, battery, screen flicker), so devpulse stays on your projects.",
+)
 
 
 def _prompt(msg: str, default: str = "") -> str:
@@ -96,13 +118,32 @@ def install_lock_path(home: Path) -> Path:
 
 
 def _fire_lock_removed(path: Path, reason: str) -> None:
-    """Fire the lock-removal trigger event, ignoring an absent trigger branch."""
-    try:
-        from aipass.trigger.apps.modules.core import trigger
+    """Fire file_deleted for a removed install lock on the home's own event bus.
 
-        trigger.fire("file_deleted", path=str(path), reason=reason)
-    except ImportError as exc:
-        logger.warning("[install] trigger unavailable for file_deleted event: %s", exc)
+    A bootstrap runs from a wheel outside any home, where the bus's handlers need a home
+    at import (RepoRootNotFound): it fires through the home's own drone instead.
+    """
+    home = path.parent / path.name.removeprefix(".").removesuffix(".install.lock")
+    if Path(__file__).resolve().is_relative_to(home.resolve()):
+        try:
+            from aipass.trigger import trigger
+
+            trigger.fire("file_deleted", path=str(path), reason=reason)
+        except ImportError as exc:
+            logger.warning("[install] trigger unavailable for file_deleted event: %s", exc)
+        return
+    drone = home / ".venv" / "bin" / "drone"
+    if not drone.is_file():
+        logger.warning("[install] no drone at %s yet: file_deleted for %s not fired", drone, path)
+        return
+    cmd = [str(drone), "@trigger", "fire", "file_deleted", f"path={path}", f"reason={reason}"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=str(home))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("[install] file_deleted for %s not fired through %s: %s", path, drone, exc)
+        return
+    if proc.returncode != 0:
+        logger.warning("[install] file_deleted for %s: drone exit %s: %s", path, proc.returncode, proc.stderr.strip())
 
 
 def _lock_holder_pid(lock: Path) -> str:
@@ -146,7 +187,7 @@ def acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
     except FileExistsError:
         logger.info("[install] install lock %s already held, inspecting holder", lock)
         holder_pid = _lock_holder_pid(lock)
-        # Only a holder PROVEN dead (False) is taken over; unknown (None) is left alone.
+        # Only a holder PROVEN dead (False) is taken over; no readable pid (None) is left alone.
         alive = _pid_alive(int(holder_pid)) if holder_pid else None
         if _retry and alive is False:
             if not _clear_stale_lock(lock, holder_pid):
@@ -154,8 +195,6 @@ def acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
             # One takeover only, so two racing installs cannot ping-pong clearing each other.
             return acquire_install_lock(home, _retry=False)
         holder = f", held by pid {holder_pid}" if holder_pid else ""
-        if holder_pid and alive is None:
-            holder += f" - could not tell whether pid {holder_pid} is alive"
         error(
             f"REFUSED: another install of {home} is already running "
             f"(lock: {lock}{holder}). "
@@ -172,31 +211,8 @@ def acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
     return lock
 
 
-def _pid_alive(
-    pid: int,
-    platform_name: str | None = None,
-    runner: Callable[..., Any] | None = None,
-) -> bool | None:
-    """True when `pid` names a live process, False when it is gone, on POSIX and on Windows.
-
-    ``platform_name`` and ``runner`` are test seams, defaulting at call time.
-    None when the Windows probe fails: the caller must not steal the lock on it.
-    Never os.kill(pid, 0) on Windows: it terminates the target whatever the signal.
-    """
-    run = subprocess.run if runner is None else runner
-    if (platform_name is None and sys.platform == "win32") or platform_name == "win32":
-        try:
-            out = run(
-                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            logger.warning("[install] tasklist probe for pid %s failed: %s", pid, exc)
-            return None  # unknown: the caller never steals on it
-        return str(pid) in out.stdout
-
+def _pid_alive(pid: int) -> bool:
+    """True when `pid` names a live process, False when it is gone."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -307,21 +323,29 @@ def _clone_repo(
 
 
 def _run_setup(
-    home: Path, dry_run: bool, no_symlink: bool = False, force_symlink: bool = False, non_interactive: bool = False
+    home: Path,
+    dry_run: bool,
+    no_symlink: bool = False,
+    force_symlink: bool = False,
+    non_interactive: bool = False,
+    yes: bool = False,
 ) -> bool:
     """Run the repo's setup.sh (venv + editable install + hook wiring + binaries).
 
     ``non_interactive`` closes stdin and exports AIPASS_NON_INTERACTIVE=1: install.sh
     hands this process the user's tty, so setup.sh's ``[ -t 0 ]`` alone would still prompt.
+    ``yes`` exports AIPASS_YES=1, consent to setup.sh's machine changes.
     """
     setup = home / "setup.sh"
-    # --no-chat: install owns the chat ending; setup.sh's own would launch a second one.
-    setup_args = ["bash", str(setup), "--no-chat"]
+    # --no-finish: install's own step 5 runs the doctor and the report, once, in this process.
+    setup_args = ["bash", str(setup), "--no-finish"]
     if no_symlink:
         setup_args.append("--no-symlink")
     if force_symlink:
         setup_args.append("--force-symlink")
-    closed = " (stdin closed, AIPASS_NON_INTERACTIVE=1)" if non_interactive else ""
+    exported = {**({NON_INTERACTIVE_ENV: "1"} if non_interactive else {}), **({YES_ENV: "1"} if yes else {})}
+    said = (["stdin closed"] if non_interactive else []) + [f"{k}=1" for k in exported]
+    closed = f" ({', '.join(said)})" if said else ""
     if dry_run:
         console.print(f"[yellow]\\[dry-run][/yellow] would run: {' '.join(setup_args)}{closed}")
         return True
@@ -329,9 +353,10 @@ def _run_setup(
         warning(f"setup.sh not found at {setup} — cannot build the environment.")
         return False
     console.print("[cyan]Building environment[/cyan] [dim](venv, dependencies, hook wiring)…[/dim]")
-    quiet = {"stdin": subprocess.DEVNULL, "env": {**os.environ, NON_INTERACTIVE_ENV: "1"}} if non_interactive else {}
+    stdin = subprocess.DEVNULL if non_interactive else None
+    env = {**os.environ, **exported} if exported else None
     try:
-        proc = subprocess.run(setup_args, cwd=str(home), timeout=_SETUP_TIMEOUT, **quiet)
+        proc = subprocess.run(setup_args, cwd=str(home), timeout=_SETUP_TIMEOUT, env=env, stdin=stdin)
         if proc.returncode == 0:
             return True
         warning("setup.sh reported errors — see output above.")
@@ -378,131 +403,161 @@ def _registry_user_name(home: Path) -> str:
     return str(data.get("metadata", {}).get("user", "") or "").strip()
 
 
-def _build_install_prompt(home: Path, bins: dict, doctor_action_items: list[str] | None = None) -> str:
-    """Compose the authored first prompt for the post-install @aipass chat.
-
-    The env vars come from setup.sh's ``--chat-only`` handoff; ``doctor_action_items``
-    lead the still-needs list because broken hook wiring is P1.
-    """
-    parts = [f"Fresh AIPass install completed at {home}."]
-    for name, path in bins.items():
-        if path:
-            parts.append(f"{name}: {path}.")
-
-    user_name = _registry_user_name(home)
-    if user_name:
-        parts.append(f"The user's name is {user_name} — greet them by name.")
-
-    if os.environ.get("AIPASS_IDENTITY_SKIPPED") == "1":
-        parts.append("Git identity was skipped during setup — commits will fail until it's configured.")
-
-    action_needed = list(doctor_action_items or [])
-    action_needed += [line for line in os.environ.get("AIPASS_ACTION_NEEDED", "").splitlines() if line.strip()]
-    if action_needed:
-        parts.append("The machine still needs: " + "; ".join(action_needed) + ".")
-
-    parts.append(
-        "This is my first time here — what can I do with AIPass? Show me a few things to try, with the exact commands."
-    )
-    return " ".join(parts)
-
-
-def _print_next_steps(home: Path) -> None:
-    """Print the installed banner + a few commands to try next."""
-    console.print()
-    success(f"AIPass is installed at {home}")
-    console.print()
-    console.print("  [cyan]drone systems[/cyan]     [dim]# list every agent[/dim]")
-    console.print("  [cyan]aipass doctor[/cyan]     [dim]# check system health[/dim]")
-    console.print("  [cyan]aipass init run[/cyan]   [dim]# scaffold your first project on AIPass[/dim]")
-    console.print()
-
-
-def _ask_permission_mode() -> str:
-    """Ask how the concierge session should run. Returns a launch flag_variant.
-
-    Any non-answer (Enter, Ctrl-C, EOF) keeps the repo's acceptEdits default.
-    """
-    console.print("How should the concierge session run?")
-    console.print("  [cyan]1.[/cyan] Accept edits [dim](default — asks before system-changing commands)[/dim]")
-    console.print("  [cyan]2.[/cyan] Bypass permissions [dim](full autonomy — no permission prompts)[/dim]")
+def _setup_attention(home: Path) -> list[dict]:
+    """setup.sh's action items, one per line of ``<home>/.aipass/setup_attention.txt``, as attention rows."""
+    path = home / ".aipass" / "setup_attention.txt"
     try:
-        choice = _prompt("Choice", "1")
-    except KeyboardInterrupt:
-        logger.info("[install] permission-mode selector cancelled — keeping accept-edits default")
-        console.print()
-        return "default"
-    return "skip-permissions" if choice.strip() == "2" else "default"
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        logger.info("[install] no %s: setup.sh predates it or never ran", path)
+        return []
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.error("[install] setup.sh's action items unreadable at %s: %s", path, exc)
+        detail = f"setup.sh's action items unreadable at {path}: {exc}"
+        return [{"group": "Setup", "label": "setup.sh", "severity": "error", "detail": detail, "remediation": ""}]
+    return [
+        {"group": "Setup", "label": "setup.sh", "severity": "warning", "detail": line.strip(), "remediation": ""}
+        for line in text.splitlines()
+        if line.strip()
+    ]
 
 
-def _run_doctor_preflight() -> list[str]:
-    """Run 'aipass doctor --fix' before the concierge says hello: heal, then report what's still broken.
+def _health_check(home: Path, dry_run: bool, non_interactive: bool, yes: bool = False) -> tuple[list[dict], dict]:
+    """Run the home's own 'aipass doctor --fix' in the home. Returns (attention rows, doctor counts).
 
-    Broken hook wiring is printed loud and returned so the prompt leads with it.
+    In-process, a bootstrap from a wheel would judge its own cwd, environment and code, not the home.
     """
-    from aipass.aipass.apps.modules.doctor import run_doctor_preflight
-
-    try:
-        _error_count, hook_action_items = run_doctor_preflight(fix=True)
-    except Exception as exc:
-        logger.warning("[install] doctor preflight crashed: %s", exc)
-        warning("Health check could not run — run 'aipass doctor --fix' manually.")
-        return ["doctor preflight crashed — run 'aipass doctor --fix' manually and check hook wiring"]
-
-    if hook_action_items:
-        error("ACTION NEEDED — hooks are not fully wired:")
-        for item in hook_action_items:
-            console.print(f"  • {item}")
-        console.print()
-
-    return hook_action_items
-
-
-def _end_in_chat(
-    home: Path, bins: dict, dry_run: bool, no_chat: bool, last_print: Callable[[], None] | None = None
-) -> None:
-    """End the install in a conversation with the @aipass concierge (TTY only).
-
-    ``launch_inline`` replaces this process and never returns; ``last_print`` (the
-    phone print) is the last output on every ending, so each calls it before a launch.
-    """
-    _print_next_steps(home)
-    finish = last_print if last_print is not None else (lambda: None)
-
-    # Every early return skips the preflight below, so each names the command that runs it.
-    if no_chat:
-        console.print("[dim]Skipped the welcome chat (--no-chat). Run 'claude' in this directory anytime.[/dim]")
-        warning("Health check skipped with the chat — run 'aipass doctor --fix' to check hook wiring.")
-        finish()
-        return
+    flags = [*(["--yes"] if yes else []), *(["--non-interactive"] if non_interactive else [])]
     if dry_run:
-        console.print("[yellow]\\[dry-run][/yellow] would launch the AIPass concierge welcome chat.")
-        console.print("[yellow]\\[dry-run][/yellow] would run the 'aipass doctor --fix' health check.")
-        finish()
-        return
-    if not sys.stdin.isatty():
-        console.print(f"[dim]Run 'claude' in {home} when you're ready to meet the AIPass concierge.[/dim]")
-        warning("Health check skipped (no TTY) — run 'aipass doctor --fix' to check hook wiring.")
-        finish()
-        return
+        console.print(f"[yellow]\\[dry-run][/yellow] would run: aipass doctor --fix {' '.join(flags)}".rstrip())
+        return [], {"pass": 0, "warn": 0, "error": 0}
+    aipass_bin = home / ".venv" / "bin" / "aipass"
+    rows_file = home / ".aipass" / "install_doctor_rows.json"
+    cmd = [str(aipass_bin), "doctor", "--fix", "--rows-json", str(rows_file), *flags]
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(home),
+            env={**os.environ, "AIPASS_HOME": str(home)},
+            stdin=subprocess.DEVNULL if non_interactive else None,
+            timeout=_DOCTOR_TIMEOUT,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(f"exit {proc.returncode}")
+        data = json.loads(rows_file.read_text(encoding="utf-8"))
+        return data["rows"], data["counts"]
+    except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError, KeyError, TypeError) as exc:
+        logger.error("[install] the home's doctor did not report (%s): %s", aipass_bin, exc)
+        error(f"Health check did not run: {aipass_bin} doctor: {exc}. Run 'aipass doctor --fix' in {home}.")
+        crash = {"group": "Doctor", "label": "doctor", "severity": "error", "detail": f"did not run: {exc}"}
+        return [{**crash, "remediation": f"cd {shlex.quote(str(home))} && aipass doctor --fix"}], {
+            "pass": 0,
+            "warn": 0,
+            "error": 1,
+        }
 
-    hook_action_items = _run_doctor_preflight()
 
-    console.print()
-    flag_variant = _ask_permission_mode()
-    prompt = _build_install_prompt(home, bins, doctor_action_items=hook_action_items)
-    aipass_branch = str(Path(__file__).resolve().parents[2])
-    finish()
-    console.print()
-    console.print("[dim]Launching the AIPass concierge — Ctrl-C to stay in the shell[/dim]")
-    console.print()
-    from aipass.aipass.apps.handlers.handoff_platform import launch_inline
+def install_report_path(home: Path) -> Path:
+    """devpulse's dropbox copy of the install outcome, overwritten each install."""
+    return home / "src" / "aipass" / "devpulse" / "dropbox" / "install_report.json"
 
-    launch_inline("claude", prompt, aipass_branch, flag_variant)
+
+def wake_command(home: Path) -> str:
+    """The one line that wakes devpulse on the report."""
+    devpulse = install_report_path(home).parent.parent
+    return f'cd {shlex.quote(str(devpulse))} && claude "{_WAKE_PROMPT}"'
+
+
+def _aipass_version() -> str:
+    try:
+        return importlib.metadata.version("aipass")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def _final_screen(
+    home: Path, attention: list[dict], counts: dict, dry_run: bool, failed: list[str] | None = None
+) -> int:
+    """Installed line, what needs attention, the report, the wake command. Returns the exit code.
+
+    *failed* names the requested steps that did not land; they and any doctor error make the exit 1,
+    once the report is written.
+    """
+    report_path = install_report_path(home)
+    if dry_run:
+        console.print(f"[yellow]\\[dry-run][/yellow] would write the install report: {report_path}")
+        return 0
+    console.print()
+    faults = [f"a requested step failed: {', '.join(failed)}"] if failed else []
+    if counts.get("error", 0):
+        faults.append(f"the health check found {counts['error']} error(s)")
+    if faults:
+        error(f"AIPass installed at {home}, but {'; '.join(faults)}")
+    else:
+        success(f"AIPass installed at {home}")
+    console.print()
+    if attention:
+        console.print("[bold]Needs attention:[/bold]")
+        for item in attention:
+            fix = f" -> {item['remediation']}" if item["remediation"] else ""
+            line = f"  {item['severity']}: {item['label']}: {item['detail']}{fix}"
+            console.print(line, markup=False, highlight=False)
+    else:
+        console.print("Nothing needs attention.")
+    console.print()
+    report = {
+        "kind": "aipass_install_report",
+        "version": 1,
+        "written_at": datetime.now(timezone.utc).isoformat(),
+        "home": str(home),
+        "aipass_version": _aipass_version(),
+        "user_name": _registry_user_name(home),
+        "outcome": "step_failed" if failed else "doctor_errors" if counts.get("error", 0) else "installed",
+        "failed_steps": failed or [],
+        "doctor": counts,
+        "attention": attention,
+    }
+    try:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        logger.error("[install] install report not written to %s: %s", report_path, exc)
+        error(f"Could not write the install report at {report_path}: {exc}")
+        return 1
+    json_handler.log_operation("install_report", {"path": str(report_path), "attention": len(attention)})
+    console.print(f"Report: {report_path}", markup=False, highlight=False)
+    console.print("Wake devpulse on it:")
+    console.print(wake_command(home), markup=False, highlight=False, soft_wrap=True)
+    console.print()
+    for line in _CLOSING_NOTE:
+        console.print(f"[dim]{line}[/dim]")
+    return 1 if faults else 0
+
+
+def _finish(
+    home: Path,
+    dry_run: bool,
+    non_interactive: bool,
+    last_print: Callable[[], None] | None = None,
+    yes: bool = False,
+    failed: list[dict] | None = None,
+) -> int:
+    """Step 5 and the final screen: the doctor with its fix, the phone print, then the report.
+
+    *failed* holds attention rows for requested steps that did not land; each fails the exit.
+    """
+    console.print()
+    console.print(render_step_header(5, TOTAL_STEPS, "Health check"))
+    attention, counts = _health_check(home, dry_run, non_interactive, yes)
+    if last_print is not None:
+        last_print()
+    failed = failed or []
+    rows = [*failed, *attention, *_setup_attention(home)]
+    return _final_screen(home, rows, counts, dry_run, failed=[row["label"] for row in failed])
 
 
 def _install_phone_face(dry_run: bool, no_baud: bool, baud_tag: str = LATEST) -> bool:
-    """The Phone face step: best-effort, so its outcome never fails the install."""
+    """The Phone face step. False when skipped or failed; run_install fails the exit on a requested miss."""
     if no_baud:
         console.print("[dim]Skipped the phone face and baud-cli (--no-baud). Install later: aipass baud install[/dim]")
         return False
@@ -525,7 +580,8 @@ def _phone_print(dry_run: bool, face_installed: bool, non_interactive: bool = Fa
 
 
 def _check_and_fix_owner(home: Path, drone_bin: str = "drone") -> None:
-    """Run sync-registry --check in `home`; if issues found, auto-heal with --fix."""
+    """Run sync-registry --check in `home`; if issues found, auto-heal with --fix. A check that cannot run is shown."""
+    fix_cmd = f"cd {home} && drone @spawn sync-registry --fix"
     try:
         check_proc = subprocess.run(
             [drone_bin, "@spawn", "sync-registry", "--check"],
@@ -547,37 +603,32 @@ def _check_and_fix_owner(home: Path, drone_bin: str = "drone") -> None:
                 success("Registry owner/identity reconciled.")
             else:
                 logger.warning("[install] sync-registry --fix exit %s", fix_proc.returncode)
+                warning(f"Owner/identity repair failed (exit {fix_proc.returncode}): run {fix_cmd}")
         else:
             success("Owner/identity OK.")
-    except FileNotFoundError:
-        logger.info("[install] drone not on PATH — skipping owner check")
-    except subprocess.TimeoutExpired:
-        logger.warning("[install] sync-registry timed out during install")
-    except Exception as exc:
-        logger.warning("[install] owner check skipped: %s", exc)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("[install] owner check could not run: %s", exc)
+        warning(f"Owner/identity NOT checked ({exc}): run {fix_cmd}")
 
 
-def run_chat_only(
+def run_finish(
     non_interactive: bool = False,
     path: str | None = None,
     here: bool = False,
     dry_run: bool = False,
-    no_chat: bool = False,
+    yes: bool = False,
 ) -> int:
-    """End-in-chat only — no clone/setup/verify. Used by setup.sh's own tail.
-
-    Reuses ``_end_in_chat`` so the welcome chat is composed in exactly one place.
-    """
+    """Step 5 and the final screen only, no clone/setup. setup.sh's tail calls it."""
     try:
         home = _resolve_home(path, here, non_interactive)
     except KeyboardInterrupt:
-        logger.info("[install] chat-only handoff cancelled by user")
+        logger.info("[install] --finish cancelled by user")
         console.print()
         warning("Cancelled.")
         return 1
-    bins = _verify_binaries(home) if not dry_run else {"drone": "dry-run", "aipass": "dry-run"}
-    _end_in_chat(home, bins, dry_run, no_chat)
-    return 0
+    if not dry_run:
+        _verify_binaries(home)
+    return _finish(home, dry_run, non_interactive, yes=yes)
 
 
 def run_install(
@@ -585,12 +636,12 @@ def run_install(
     path: str | None = None,
     here: bool = False,
     dry_run: bool = False,
-    no_chat: bool = False,
     no_symlink: bool = False,
     force_symlink: bool = False,
     no_baud: bool = False,
     baud_tag: str = LATEST,
     source: str | None = None,
+    yes: bool = False,
 ) -> int:
     """Run the 5-step one-command install. Returns 0 on success, 1 on failure.
 
@@ -636,8 +687,7 @@ def run_install(
             return 1
         logger.warning("[install] --force-global-home override: proceeding with throwaway home %s", home)
 
-    # Released before the chat: launch_inline replaces this process, so a later
-    # release never runs and wedges the home. A dry run writes nothing and takes no lock.
+    # Released before the phone step, which can wait on Enter. A dry run writes nothing and takes no lock.
     install_lock = None if dry_run else acquire_install_lock(home)
     if install_lock is None and not dry_run:
         return 1
@@ -654,7 +704,12 @@ def run_install(
         console.print()
         console.print(render_step_header(2, TOTAL_STEPS, "Building environment"))
         if not _run_setup(
-            home, dry_run, no_symlink=no_symlink, force_symlink=force_symlink, non_interactive=non_interactive
+            home,
+            dry_run,
+            no_symlink=no_symlink,
+            force_symlink=force_symlink,
+            non_interactive=non_interactive,
+            yes=yes,
         ):
             warning("Environment build failed — aborting install.")
             return 1
@@ -673,25 +728,21 @@ def run_install(
     console.print(render_step_header(4, TOTAL_STEPS, "Phone face + baud-cli"))
     face_installed = _install_phone_face(dry_run, no_baud, baud_tag)
     phone_print = _phone_print(dry_run, face_installed, non_interactive)
+    failed = [] if face_installed or no_baud else [_PHONE_FAILED]
 
-    console.print()
-    console.print(render_step_header(5, TOTAL_STEPS, "Welcome"))
-
-    # Log before _end_in_chat: its launch_inline replaces the process and never returns.
     json_handler.log_operation(
         "aipass_install",
         {
             "home": str(home),
             "non_interactive": non_interactive,
             "dry_run": dry_run,
-            "chat": not no_chat,
             "phone_face": face_installed,
+            "yes": yes,
             "baud_tag": baud_tag,
         },
     )
 
-    _end_in_chat(home, bins, dry_run, no_chat, last_print=phone_print)
-    return 0
+    return _finish(home, dry_run, non_interactive, last_print=phone_print, yes=yes, failed=failed)
 
 
 def print_help() -> None:
@@ -700,14 +751,17 @@ def print_help() -> None:
     console.print("[bold cyan]aipass install[/bold cyan] — one-command bootstrap of AIPass")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
-    console.print("  [green]aipass install[/green]                      [dim]# interactive, ends in a chat[/dim]")
+    console.print("  [green]aipass install[/green]                      [dim]# interactive, ends at the report[/dim]")
     console.print(
         "  [green]aipass install --non-interactive[/green]    "
-        "[dim]# CI/headless (~/AIPass), no chat, no pairing QR[/dim]"
+        "[dim]# CI/headless (~/AIPass), no questions, no pairing QR[/dim]"
+    )
+    console.print(
+        "  [green]aipass install --yes[/green]               [dim]# consent to the machine changes up front;"
+        " without it --non-interactive skips them, each a warning[/dim]"
     )
     console.print("  [green]aipass install --path DIR[/green]           [dim]# explicit home[/dim]")
     console.print("  [green]aipass install --here[/green]               [dim]# install into current dir[/dim]")
-    console.print("  [green]aipass install --no-chat[/green]            [dim]# install only, skip the chat[/dim]")
     console.print("  [green]aipass install --no-baud[/green]            [dim]# skip phone face + baud-cli[/dim]")
     console.print("  [green]aipass install --baud-tag TAG[/green]       [dim]# baud release, default latest[/dim]")
     console.print(
@@ -716,15 +770,18 @@ def print_help() -> None:
     )
     console.print("  [green]aipass install --no-symlink[/green]         [dim]# skip global CLI symlinks[/dim]")
     console.print("  [green]aipass install --force-symlink[/green]      [dim]# repoint from another install[/dim]")
-    console.print("  [green]aipass install --chat-only[/green]          [dim]# skip the build, just the chat[/dim]")
+    console.print("  [green]aipass install --finish[/green]             [dim]# just the doctor + report[/dim]")
     console.print("  [green]aipass install --force-global-home[/green]  [dim]# allow install into /tmp (unsafe)[/dim]")
     console.print("  [green]aipass install --dry-run[/green]            [dim]# walk steps, no side effects[/dim]")
     console.print()
     console.print(
-        "[yellow]STEPS:[/yellow] resolve home -> fetch -> setup.sh -> verify -> phone face + baud-cli -> welcome chat"
+        "[yellow]STEPS:[/yellow] resolve home -> fetch -> setup.sh -> verify -> phone face + baud-cli"
+        " -> doctor + report"
     )
     console.print()
-    console.print("[dim]Project creation isn't part of install — run 'aipass init run' for that, whenever ready.[/dim]")
+    console.print(
+        "[dim]Project creation isn't part of install — run 'aipass init <dir>' for that, whenever ready.[/dim]"
+    )
     console.print("[dim]With a phone face installed, the install starts the server when no boot unit runs it,[/dim]")
     console.print("[dim]then waits for Enter and shows the pairing QR. No QR (--non-interactive, or no server[/dim]")
     console.print("[dim]on a tailnet bind): drone @api host-api pair phone --scope operate[/dim]")
@@ -736,7 +793,7 @@ def print_introspection() -> None:
     """Show module info for install."""
     console.print()
     console.print("[bold cyan]install Module[/bold cyan]")
-    console.print("One-command bootstrap: clone + setup.sh + verify + handoff")
+    console.print("One-command bootstrap: clone + setup.sh + verify + doctor --fix + install report")
     console.print()
     console.print(f"[dim]Default home: {DEFAULT_HOME}[/dim]")
     console.print(f"[dim]Source: {REPO_URL}[/dim]")
@@ -772,10 +829,10 @@ def handle_command(command: str, args: list[str]) -> bool:
     run_args = args[1:] if args and args[0] == "run" else args
 
     non_interactive = "--non-interactive" in run_args
+    yes = "--yes" in run_args
     dry_run = "--dry-run" in run_args
     here = "--here" in run_args
-    no_chat = "--no-chat" in run_args
-    chat_only = "--chat-only" in run_args
+    finish = "--finish" in run_args
     no_symlink = "--no-symlink" in run_args
     force_symlink = "--force-symlink" in run_args
     no_baud = "--no-baud" in run_args
@@ -785,33 +842,28 @@ def handle_command(command: str, args: list[str]) -> bool:
     baud_tag = LATEST if baud_tag is None else baud_tag
     source = _flag_value(run_args, "--source")
 
-    if chat_only:
-        result = run_chat_only(
-            non_interactive=non_interactive,
-            path=path,
-            here=here,
-            dry_run=dry_run,
-            no_chat=no_chat,
-        )
+    if finish:
+        result = run_finish(non_interactive=non_interactive, path=path, here=here, dry_run=dry_run, yes=yes)
     else:
         result = run_install(
             non_interactive=non_interactive,
             path=path,
             here=here,
             dry_run=dry_run,
-            no_chat=no_chat,
             no_symlink=no_symlink,
             force_symlink=force_symlink,
             no_baud=no_baud,
             baud_tag=baud_tag,
             source=source,
+            yes=yes,
         )
     json_handler.log_operation(
         "install_run",
         {
             "non_interactive": non_interactive,
             "dry_run": dry_run,
-            "chat_only": chat_only,
+            "yes": yes,
+            "finish": finish,
             "source": _redact_url(source) if source else "default",
             "exit": result,
         },

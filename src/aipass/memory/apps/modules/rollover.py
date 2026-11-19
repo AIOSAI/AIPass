@@ -3,39 +3,32 @@
 # Description: Rollover Orchestration Module
 # Version: 0.10.1
 # Created: 2025-11-16
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
 Rollover Orchestration Module
 """
 
-import os
 import sys
+from pathlib import Path
 from typing import List
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 from rich.panel import Panel
 from rich import box
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.cli.json_flag import strip_json_flag, wants_json
+from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.apps.handlers.cli.branch_flag import read_branch_flag
 
 
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover.orchestrator import execute_rollover as _handler_execute_rollover
 from aipass.memory.apps.handlers.rollover import todo_report
-from aipass.memory.apps.handlers.repo_root import module_file
 
 # Re-exported unchanged: the CLI and the tests reach these as `rollover.<name>`. Neither module imports this one.
 from aipass.memory.apps.modules.rollover_config import (
@@ -479,6 +472,10 @@ def push_defaults(json_mode: bool = False) -> None:
     from aipass.memory.apps.handlers.json import config_loader
 
     ctx = _Json(_VERB_ROLLOVER_PUSH, json_mode)
+    refusal = caller_gate.other_branch_refusal(ctx.verb, None, "every branch's per_branch limits")
+    if refusal:
+        _refuse(ctx, refusal)
+        return
 
     if not ctx.on:
         console.print()
@@ -599,7 +596,7 @@ def _check_fleet_triggers() -> None:
 
 def _discover_handlers() -> dict[str, list[str]]:
     """Map each handlers/ subdirectory to its .py files, __init__.py excluded."""
-    handlers_dir = module_file(__file__).parent.parent / "handlers"
+    handlers_dir = Path(__file__).resolve().parent.parent / "handlers"
     result: dict[str, list[str]] = {}
     if not handlers_dir.exists():
         return result

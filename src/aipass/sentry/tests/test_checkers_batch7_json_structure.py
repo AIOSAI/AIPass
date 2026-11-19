@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_json_structure.py
 # Description: json_structure_check: declaration-only and bootstrap modules (split from test_checkers_batch7.py)
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/json_structure_check.py."""
@@ -14,6 +14,7 @@
 import pytest
 
 from aipass.sentry.apps.handlers.aipass_standards import json_structure_check
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE
 
 pytestmark = pytest.mark.usefixtures("_pin_bypass_log")
 
@@ -92,7 +93,7 @@ class TestJsonStructureExemptsPreLoggingBootstrapModules:
         return root
 
     def _check(self, path):
-        """check_module grants the bootstrap exemption. Mutant: exemption bypassed in json_structure_check.py — killed."""
+        """check_module grants the bootstrap exemption. Mutant: exemption bypassed — killed."""
         message = json_structure_check.check_module(str(path))["checks"][0]["message"]
         return message.startswith("Pre-logging bootstrap module")
 
@@ -126,6 +127,53 @@ class TestJsonStructureExemptsPreLoggingBootstrapModules:
             "def find_root():\n"
             "    from aipass.prax.apps.handlers.json import json_handler\n"
             "    return Path(__file__).parent\n",
+            encoding="utf-8",
+        )
+        assert self._check(boot) is False
+
+    def test_a_module_importing_only_the_trail_through_prax_s_door_keeps_the_exemption(self, tmp_path):
+        """Prax's trail is the logger built for modules beneath json_handler (prax ba4fd567)."""
+        root = self._universe(tmp_path)
+        boot = root / "prax" / "apps" / "handlers" / "boot.py"
+        boot.write_text(
+            "from pathlib import Path\n"
+            "from aipass.prax import trail\n\n"
+            "def find_root():\n    return Path(__file__).parent\n",
+            encoding="utf-8",
+        )
+        assert self._check(boot) is True
+
+    def test_the_trail_door_beside_another_door_name_is_not_exempt(self, tmp_path):
+        root = self._universe(tmp_path)
+        boot = root / "prax" / "apps" / "handlers" / "boot.py"
+        boot.write_text(
+            "from pathlib import Path\n"
+            "from aipass.prax import logger, trail\n\n"
+            "def find_root():\n    return Path(__file__).parent\n",
+            encoding="utf-8",
+        )
+        assert self._check(boot) is False
+
+    def test_a_prax_module_importing_only_its_own_long_trail_path_keeps_the_exemption(self, tmp_path):
+        """Inside prax the long path is its own; in another branch it is front_door's finding, not this row's."""
+        root = self._universe(tmp_path)
+        boot = root / "prax" / "apps" / "handlers" / "boot.py"
+        boot.write_text(
+            "from pathlib import Path\n"
+            "from aipass.prax.apps.handlers.logging.trail import PraxTrail\n\n"
+            "def find_root():\n    return Path(__file__).parent\n",
+            encoding="utf-8",
+        )
+        assert self._check(boot) is True
+
+    def test_the_long_trail_path_beside_any_other_aipass_import_is_not_exempt(self, tmp_path):
+        root = self._universe(tmp_path)
+        boot = root / "prax" / "apps" / "handlers" / "boot.py"
+        boot.write_text(
+            "from pathlib import Path\n"
+            "from aipass.prax.apps.handlers.logging.trail import PraxTrail\n"
+            "from aipass.prax.apps.handlers.json import json_handler\n\n"
+            "def find_root():\n    return Path(__file__).parent\n",
             encoding="utf-8",
         )
         assert self._check(boot) is False
@@ -183,6 +231,18 @@ class TestJsonStructureExemptsPreLoggingBootstrapModules:
         assert self._check(target) is False
 
 
+class TestTheMissingImportHint:
+    def test_the_hint_names_the_files_own_branch_shim(self, tmp_path):
+        target = tmp_path / "apps" / "handlers" / "work" / "unlogged.py"
+        target.parent.mkdir(parents=True)
+        target.write_text('"""Doc."""\n\n\ndef work():\n    return 1\n', encoding="utf-8")
+        messages = [c["message"] for c in json_structure_check.check_module(str(target), bypass_rules=[])["checks"]]
+        assert (
+            "Missing json_handler import — add this file's own branch's: "
+            "from aipass.<own branch>.apps.handlers.json import json_handler"
+        ) in messages
+
+
 class TestTheBootstrapChainSeesRelativeImports:
     """@canary's json_structure finding, and it was a hole in an exemption I
     ratified the night before."""
@@ -212,17 +272,25 @@ class TestTheBootstrapChainSeesRelativeImports:
     def test_an_absolute_import_is_untouched_by_the_resolver(self):
         assert self._resolve("aipass.prax", 0, "aipass.canary.apps") is None
 
-    def test_the_walk_reaches_a_relatively_imported_bootstrap_module(self, tmp_path):
-        """End to end on the real tree: @canary's helper is in the chain now."""
-        from pathlib import Path
 
-        # parents[2] is src/aipass, parents[3] is src: the branch is asserted, because a skip reads as a pass.
-        aipass_root = Path(__file__).resolve().parents[2]
-        assert aipass_root.name == "aipass", aipass_root
-        target = aipass_root / "canary" / "apps" / "handlers" / "paths.py"
-        if not target.exists():
-            import pytest
+class TestScopedBypassRows:
+    """json_structure's findings are file-level: a row waives them by the file scope name, never by a line."""
 
-            pytest.skip(f"canary's paths.py is not on this machine ({target})")
-        message = json_structure_check.check_module(str(target))["checks"][0]["message"]
-        assert message.startswith("Pre-logging bootstrap module"), message
+    def _score(self, tmp_path, **scope):
+        target = tmp_path / "apps" / "handlers" / "work" / "unlogged.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('"""Doc."""\n\n\ndef work():\n    return 1\n', encoding="utf-8")
+        rules = [{"file": "apps/handlers/work/unlogged.py", "standard": "json_structure", "reason": "t", **scope}]
+        return json_structure_check.check_module(str(target), bypass_rules=rules if scope else [])["score"]
+
+    def test_with_no_row_the_unlogged_handler_scores_zero(self, tmp_path):
+        assert self._score(tmp_path) == 0
+
+    def test_a_file_scope_function_row_waives_the_file_level_finding(self, tmp_path):
+        assert self._score(tmp_path, functions=[FILE_SCOPE]) == 100
+
+    def test_a_line_row_waives_nothing_because_the_finding_has_no_line(self, tmp_path):
+        assert self._score(tmp_path, lines=[4]) == 0
+
+    def test_a_whole_file_row_still_waives_the_whole_file(self, tmp_path):
+        assert self._score(tmp_path, lines=None) == 100

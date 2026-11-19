@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_send_helpers.py
 # Description: Tests for email send handler and send_args dispatch resolution
-# Version: 1.0.4
+# Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/email/send.py and apps/handlers/email/send_args.py."""
@@ -17,7 +17,6 @@
 import io
 
 import pytest
-from pathlib import PureWindowsPath
 from unittest.mock import patch, MagicMock
 
 from aipass.ai_mail.apps.handlers.email.send import (
@@ -418,17 +417,6 @@ def test_resolve_dispatch_target_tilde_path():
     assert result == "@flow"
 
 
-def test_resolve_dispatch_target_knows_a_windows_drive_path():
-    """A drive-letter path is a path, not an address (mutant: drop the PureWindowsPath test)."""
-    windows_path = str(PureWindowsPath("C:\\") / "work" / "src" / "ai_mail")
-    looked_up = []
-
-    result = resolve_dispatch_target(windows_path, True, get_branch_info_fn=looked_up.append)
-
-    assert result == "@ai_mail"
-    assert len(looked_up) == 1
-
-
 def test_parse_send_args_joins_split_message():
     """When message body is split into multiple args, all are joined."""
     result = parse_send_args(["@target", "Subject", "Line one", "Line two", "Line three"])
@@ -494,3 +482,49 @@ def test_broadcast_aggregates_central_once_not_per_recipient(tmp_path, recorded_
         f"broadcast aggregated {aggregations.call_count}x for 18 recipients; the scan is global and must run once"
     )
     assert recorded_bus.events() == ["email_broadcast_sent"], "one broadcast announces once, not per recipient"
+
+
+def test_parse_send_args_carries_a_declared_kind_and_keeps_it_out_of_the_text():
+    result = parse_send_args(["@target", "--kind", "medic", "Subject", "Body"])
+
+    assert (result["mode"], result["kind"], result["subject"], result["message"]) == (
+        "direct",
+        "medic",
+        "Subject",
+        "Body",
+    )
+
+
+@pytest.mark.parametrize("tail", [["--kind", "urgent"], ["--kind"]])
+def test_parse_send_args_refuses_an_unknown_or_missing_kind_naming_the_five(tail):
+    result = parse_send_args(["@target", "Subject", "Body"] + tail)
+
+    assert result["mode"] == "error"
+    assert result["error"].startswith("--kind needs one of medic, rounds, job_failed, notice, mail (got ")
+
+
+def test_send_to_single_and_broadcast_hand_the_declared_kind_to_delivery(tmp_path, recorded_bus):
+    kinds = []
+
+    def deliver(_to, data, on_delivered=None):
+        kinds.append(data.get("kind"))
+        return True, ""
+
+    load = MagicMock(side_effect=lambda _f: {"subject": "S", "message": "B"})
+    common = dict(
+        message="B",
+        user_info=_make_user_info(tmp_path),
+        auto_execute=False,
+        no_memory_save=False,
+        reply_to=None,
+        dispatched_to=None,
+        create_email_file_fn=MagicMock(return_value=str(tmp_path / "e.json")),
+        load_email_file_fn=load,
+        deliver_email_to_branch_fn=deliver,
+        log_operation_fn=MagicMock(),
+    )
+    send_to_single(to_branch="@flow", subject="S", on_delivered_callback=None, kind="job_failed", **common)
+    send_to_broadcast(subject="S", branches=[{"email": "@a"}], update_central_fn=None, kind="notice", **common)
+    send_to_single(to_branch="@flow", subject="S", on_delivered_callback=None, **common)
+
+    assert kinds == ["job_failed", "notice", None]

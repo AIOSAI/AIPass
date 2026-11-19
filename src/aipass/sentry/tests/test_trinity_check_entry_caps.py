@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_check_entry_caps.py
 # Description: trinity_check entry shapes, caps and numbering: drift classes D1-D16 (split from test_trinity_check.py)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/trinity_check.py and trinity_groups.py."""
@@ -32,16 +32,14 @@ from aipass.sentry.tests.support_trinity_check import (
 pytestmark = pytest.mark.usefixtures("_mock_infrastructure")
 
 # @memory's push reads the same entry_types.<type>.fields map; found by file, before the autouse mock swaps aipass.prax.
-# limits comes through memory/apps/modules (its published door); the module is held, not the symbol, so drift raises AttributeError.
-_PUSH_RELATIVE = ("src", "aipass", "memory", "apps", "modules", "door_trinity_push.py")
-_entry_rules = None
-_memory_limits = None
-_MEMORY_SHAPE_IMPORT_ERROR = "@memory door_trinity_push.py is not on disk"
+# The door is held, not its names, so each read is at call time and a name memory drops raises AttributeError.
+_DOOR_RELATIVE = ("src", "aipass", "memory", "__init__.py")
+_memory = None
+_MEMORY_SHAPE_IMPORT_ERROR = "@memory's door, memory/__init__.py, is not on disk"
 
 for _parent in Path(__file__).resolve().parents:
-    if _parent.joinpath(*_PUSH_RELATIVE).is_file():
-        from aipass.memory.apps.modules.door_trinity_push import entry_rules as _entry_rules
-        from aipass.memory.apps.modules import limits as _memory_limits
+    if _parent.joinpath(*_DOOR_RELATIVE).is_file():
+        from aipass import memory as _memory
 
         _MEMORY_SHAPE_IMPORT_ERROR = ""
         break
@@ -522,7 +520,7 @@ class TestTheEntryShapeComesFromTheConfig:
 
     def test_the_derived_shape_is_byte_identical_to_what_memorys_push_derives(self, trinity):
         """The cross-implementation guard, for the shape."""
-        assert _entry_rules is not None, (
+        assert _memory is not None, (
             f"@memory's trinity_push is the OTHER side of this guard and it is unreachable "
             f"({_MEMORY_SHAPE_IMPORT_ERROR}) - the shape agreement cannot be checked, which is a "
             f"finding about the fleet and not a reason to pass"
@@ -534,13 +532,13 @@ class TestTheEntryShapeComesFromTheConfig:
 
         assert mine, "the live config publishes no closed shape at all"
         for section in ("todos", "key_learnings", "sessions", "observations"):
-            assert mine.get(section) == _entry_rules(section), f"{section}: the two derivations disagree"
+            assert mine.get(section) == _memory.entry_rules(section), f"{section}: the two derivations disagree"
 
     @pytest.mark.parametrize("cap", [300, 200, 150, 77, 1])
     def test_the_draft_target_matches_memorys_own_answer_on_the_live_config(self, trinity, cap):
         """The tab's draft number agrees with @memory's, through @memory's door."""
-        assert _memory_limits is not None, (
-            f"@memory's limits gateway is the source of the draft number and it is unreachable "
+        assert _memory is not None, (
+            f"@memory's door is the source of the draft number and it is unreachable "
             f"({_MEMORY_SHAPE_IMPORT_ERROR}) - the draft target has nothing to be checked against"
         )
         live = trinity.load_memory_config()
@@ -550,4 +548,4 @@ class TestTheEntryShapeComesFromTheConfig:
 
         line = trinity.expected_meta_line("sessions", "memory", capped, _PROSE["sessions"])
 
-        assert line.endswith(f"≤{cap} chars · draft to {_memory_limits.draft_target(cap)} ⟧ {_PROSE['sessions']}")
+        assert line.endswith(f"≤{cap} chars · draft to {_memory.draft_target(cap)} ⟧ {_PROSE['sessions']}")

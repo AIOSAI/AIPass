@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic.py
 # Description: Medic toggle module for auto-healing error dispatch control
-# Version: 1.11.0
+# Version: 1.12.0
 # Created: 2026-02-12
-# Modified: 2026-11-10
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -12,14 +12,13 @@ Medic Toggle Module - Control auto-healing error dispatch
 Also the door to run_error_catchup(): log_watcher_service is an entry point, and entry points import modules.
 """
 
-import os
 import sys
 from pathlib import Path
 from typing import Callable
 
 from rich.markup import escape
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 from aipass.trigger.apps.handlers.events.startup import run_startup_catchup
 from aipass.trigger.apps.handlers.service_control import (
@@ -42,17 +41,11 @@ from aipass.trigger.apps.handlers.medic_state import (
     unmute_branch_volume,
     get_suppression_stats,
     get_rate_limit_stats,
+    get_failing_handlers,
     parse_duration,
     DEFAULT_MUTE_SECONDS,
     DEFAULT_OFF_SECONDS,
 )
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 
 def run_error_catchup(fire_event: Callable[..., object] | None = None) -> None:
@@ -65,14 +58,7 @@ def run_error_catchup(fire_event: Callable[..., object] | None = None) -> None:
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError.
-    except (ImportError, OSError):
-        logger.info("CLI console not available, using rich fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]medic Module[/bold cyan]")
@@ -106,7 +92,7 @@ def _extract_branch_name(raw: str) -> str:
 
 def print_help() -> None:
     """Print module help."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
     from rich.panel import Panel
 
     console.print(Panel("Medic - Auto-Healing Error Dispatch", style="bold"))
@@ -234,7 +220,7 @@ def _fmt_remaining(iso_expiry: str) -> str:
 
 def _handle_mute(console, args: list) -> None:
     """Handle 'medic mute @branch [--for <dur>] [--forever]'."""
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     try:
         duration_secs, is_forever, rest = _parse_duration_args(args)
@@ -262,7 +248,7 @@ def _handle_mute(console, args: list) -> None:
 
 def _handle_unmute(console, args: list) -> None:
     """Handle 'medic unmute @branch'."""
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     if not args:
         error("Missing branch name", suggestion="Usage: medic unmute @branch")
@@ -280,7 +266,7 @@ def _handle_unmute(console, args: list) -> None:
 
 def _handle_volume_mute(console, args: list) -> None:
     """Handle 'medic volume-mute @branch [--for <dur>] [--forever]'."""
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     try:
         duration_secs, is_forever, rest = _parse_duration_args(args)
@@ -310,7 +296,7 @@ def _handle_volume_mute(console, args: list) -> None:
 
 def _handle_volume_unmute(console, args: list) -> None:
     """Handle 'medic volume-unmute @branch'."""
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     usage = "Usage: medic volume-unmute @branch"
     if not args:
@@ -382,6 +368,13 @@ def _handle_status(console) -> None:
     console.print(f"  Last suppressed: {suppression['last_suppressed']}")
     console.print(f"  Rate limited:    {rate_limits['rate_limited_count']}")
     console.print(f"  Last rate limit: {rate_limits['last_rate_limited']}")
+    failing = get_failing_handlers()
+    console.print(f"  Failing handlers: {len(failing) if failing else 'none'}")
+    for row in failing:
+        console.print(
+            f"    {escape(row['handler'])} [dim]branch[/dim] {escape(str(row['branch']))} "
+            f"[dim]on {escape(row['event'])} since {row['since']} (pid {row['pid']}):[/dim] {escape(row['error'])}"
+        )
     console.print()
     if not enabled:
         console.print("  [dim]All error dispatch suppressed. Errors logged to medic_suppressed.jsonl[/dim]")
@@ -390,7 +383,7 @@ def _handle_status(console) -> None:
 def _handle_on(console) -> None:
     """Handle 'medic on' — enable dispatch and start watcher."""
     from rich.panel import Panel
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     if not set_enabled(True):
         error("Failed to enable Medic", suggestion="Check medic_state.json")
@@ -450,7 +443,7 @@ def _stop_watcher() -> str:
 def _handle_off(console, args: list | None = None) -> None:
     """Handle 'medic off [--forever]' — disable dispatch with 24h TTL or permanently."""
     from rich.panel import Panel
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     args = args or []
     is_forever = "--forever" in args
@@ -517,7 +510,7 @@ def handle_command(command: str, args: list) -> bool:
     """
     Handle medic commands - orchestrate toggle operations.
     """
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     if command == "medic":
         if not args:

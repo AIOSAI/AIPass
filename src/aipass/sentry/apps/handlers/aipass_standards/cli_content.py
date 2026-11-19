@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_content.py
 # Description: CLI Standards Content Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -28,7 +28,7 @@ def get_cli_standards() -> str:
         "[yellow]POLICY:[/yellow] Rich formatting is THE standard for ALL AIPass output",
         "",
         "[green]✓ Approved:[/green]",
-        "  [dim]from aipass.cli.apps.modules import console[/dim]",
+        "  [dim]from aipass.cli import console[/dim]",
         '  [dim]console.print("[cyan]This is the ONLY approved way[/cyan]")[/dim]',
         "",
         "[red]✗ Deprecated:[/red] Bare print() statements",
@@ -56,8 +56,9 @@ def get_cli_standards() -> str:
         "[yellow]RULE:[/yellow] Build BOTH or neither",
         "",
         "[bold cyan]CLI SERVICE PROVIDER:[/bold cyan]",
-        "  [dim]from aipass.cli.apps.modules import console, header, success, error[/dim]",
-        "  [dim]from aipass.cli.apps.modules import operation_start, operation_complete[/dim]",
+        "  [dim]from aipass.cli import console, header, success, error[/dim]",
+        "  [dim]from aipass.cli import operation_start, operation_complete[/dim]",
+        "  [dim]One door: a path under aipass.cli.apps is convicted by front_door.[/dim]",
         "",
         "  • Consistent formatting across all branches",
         "  • Update CLI once → affects entire system",
@@ -95,7 +96,7 @@ def get_cli_standards() -> str:
         "  own console import. Before that import has run the console does not",
         "  exist, so the rule is unsatisfiable and not merely inconvenient:",
         "     [green]sys.stderr.write('sys.path repair failed')[/green]   line 12 -- before",
-        "     [dim]from aipass.cli... import console[/dim]              line 20",
+        "     [dim]from aipass.cli import console[/dim]                 line 20",
         "     [red]sys.stderr.write('later failure')[/red]             line 40 -- after",
         "  [yellow]![/yellow]  STRICTLY prior. A write sharing the import's own statement",
         "     [dim]comes after it has run, so the console exists and Rich applies.[/dim]",

@@ -170,7 +170,9 @@ and logs the operation through the json service as `uncommit`. Pinned by `TestUn
 `commit --all` stages the whole repo, which is the correct default since dispatched agents work
 across several branch directories. Before it stages, it runs ruff `check` as a gate over whichever
 of `src/` and `tests/` exist at the repo root (an external project keeps its tests under
-`src/<pkg>/`), and a lint-dirty tree is refused with nothing changed. Only after the gate passes do
+`src/<pkg>/`), and a lint-dirty tree is refused with nothing changed. ruff is looked for beside the
+running Python first, then on PATH, then in `<repo>/.venv/bin`; when none has it the commit is refused
+by name (a repo with neither `src/` nor `tests/` has nothing to lint and passes). Only after the gate passes do
 `check --fix` and `format` run, and only on the Python files `git status` lists as changed; the
 result's stdout names every file they rewrote. Then pytest runs for every branch whose files changed, mapping a changed file to
 its branch by walking up for `.trinity/`. Templates ship complete branch skeletons, so the
@@ -233,7 +235,9 @@ honoured, and a job whose log the API refuses fails the command by name (`TestRu
 **`run watch <id>`.** A CI run takes about 30 minutes, so watch waits up to 45 before it gives up,
 and gh polls every 60 seconds unless the caller passes its own `-i/--interval`. Its output is not
 captured: gh's own run state reaches the terminal on every poll, so a human sees it is alive. Past
-the ceiling the command fails with `gh run timed out after 2700s`.
+the ceiling the command fails with `gh run timed out after 2700s`. Watch always passes gh's
+`--exit-status`, so a run that ends in failure exits non-zero and a background watch can be judged
+by its exit code alone.
 
 These three verbs take gh's **own** `--repo OWNER/NAME`, which is why they are not external-repo
 door verbs.

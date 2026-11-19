@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap_update.py
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
-# Version: 1.6.0
+# Version: 1.8.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: update_project and the plans it reads."""
@@ -14,6 +14,7 @@
 import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest  # pyright: ignore[reportMissingImports]
 
@@ -75,66 +76,6 @@ def test_update_project_return_dict_structure(tmp_path):
     assert isinstance(result["updated_files"], list)
     assert isinstance(result["already_current"], list)
     assert isinstance(result["skipped_files"], list)
-
-
-def _windows_newline_world(monkeypatch):
-    """Make this Linux process translate newlines the way Windows does.
-
-    ``write_text`` with ``newline=None`` writes ``os.linesep``: a no-op here, ``\r\n`` on
-    Windows. The fake translates only when ``newline`` is unset, so a writer pinning
-    ``newline="\n"`` passes straight through.
-    """
-    real_write_text = Path.write_text
-
-    def windows_write_text(self, data, encoding=None, errors=None, newline=None):
-        if newline is None:
-            # newline="" then stops the real writer translating a second time.
-            return real_write_text(self, data.replace("\n", "\r\n"), encoding=encoding, errors=errors, newline="")
-        return real_write_text(self, data, encoding=encoding, errors=errors, newline=newline)
-
-    monkeypatch.setattr(Path, "write_text", windows_write_text)
-
-
-def test_managed_files_land_lf_even_where_the_platform_translates(tmp_path, monkeypatch):
-    """Every file init writes holds LF bytes, on a platform that would give CRLF.
-
-    The manifest hashes bytes on disk, the plan hashes the template string: they
-    agree only if what lands on disk IS the string.
-    """
-    _windows_newline_world(monkeypatch)
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="crlf")
-
-    for rel in read_manifest(target)["files"]:
-        path = target / rel
-        if path.is_file():
-            assert b"\r\n" not in path.read_bytes(), f"{rel} landed with CRLF"
-
-    prep = target / ".agents" / "skills" / "prep" / "SKILL.md"
-    manifest = json.loads((target / ".aipass" / "scaffold_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["files"][".agents/skills/prep/SKILL.md"] == sc_sha256(sc.prep_skill_md())
-    assert prep.read_bytes() == sc.prep_skill_md().encode("utf-8")
-
-
-def test_update_after_init_is_clean_where_the_platform_translates(tmp_path, monkeypatch):
-    """Windows newlines, reproduced on Linux: a fresh project must be current, run after run."""
-    _windows_newline_world(monkeypatch)
-    monkeypatch.setattr(
-        "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda home: home != _expected_aipass_home(),
-    )
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="crlfupd")
-
-    first = update_project(target)
-    second = update_project(target)
-
-    assert first["updated_files"] == []
-    assert first["kept_files"] == []
-    assert second["updated_files"] == []
-    assert not (target / ".agents" / "skills" / "prep" / "SKILL.md.aipass-new").exists()
 
 
 def _age_the_stamp(target: Path) -> None:
@@ -381,6 +322,17 @@ def test_update_project_skipped_files_count(tmp_path):
     result = update_project(target)
 
     assert len(result["skipped_files"]) == 2
+
+
+def test_update_with_no_aipass_home_refuses_naming_it_and_writes_nothing(tmp_path):
+    """The wheel's answer (the Python lib folder) used to overwrite settings.local.json's AIPASS_HOME."""
+    _, target = _make_nested_project(tmp_path)
+    with (
+        patch("aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home", return_value=None),
+        pytest.raises(ValueError, match="AIPASS_HOME"),
+    ):
+        update_project(target)
+    assert sorted(p.name for p in target.iterdir()) == ["MYAPP_REGISTRY.json"]
 
 
 def _make_nested_project(tmp_path):
@@ -762,6 +714,74 @@ def test_update_refuses_when_the_ignore_file_is_there_but_unreadable(tmp_path):
         update_project(target)
 
     assert type(refused.value.__cause__) is type(platform_error)
+    assert _files_and_bytes(target) == before
+
+
+@pytest.mark.parametrize(
+    ("rel", "content"),
+    [
+        (".claude/settings.json", "not json{"),
+        (".claude/settings.json", "[]"),
+        (".claude/settings.local.json", "not json{"),
+        (".aipass/hooks.json", "not json{"),
+    ],
+)
+def test_update_refuses_a_corrupt_merge_file_and_writes_nothing(tmp_path, monkeypatch, rel, content):
+    """Mutant: a merge file's parse error read as {} again (a rebuild over the owner's file) -> red."""
+    host, target = _make_nested_project(tmp_path)
+    (host / ".aipass").mkdir()
+    (host / ".aipass" / "project_hooks.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda home: home != str(host))
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    (target / rel).parent.mkdir(parents=True, exist_ok=True)
+    (target / rel).write_text(content, encoding="utf-8")
+    before = _files_and_bytes(target)
+
+    with pytest.raises(ValueError, match=rf"{Path(rel).name} is unusable .*re-run 'aipass init update'"):
+        update_project(target)
+
+    assert _files_and_bytes(target) == before
+
+
+def test_update_refuses_a_non_utf8_settings_json_instead_of_recreating_it(tmp_path):
+    """Mutant: _read_text reads an undecodable file as absent again (the plan says create, apply overwrites) -> red."""
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="bytes")
+    (target / ".claude" / "settings.json").write_bytes(b"\xff\xfe{")
+    before = _files_and_bytes(target)
+
+    with pytest.raises(ValueError, match=r"settings\.json is unusable"):
+        update_project(target)
+
+    assert _files_and_bytes(target) == before
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
+def test_an_unreadable_managed_file_stops_the_plan_instead_of_planning_its_create(tmp_path):
+    """Mutant: hash_file reads an unreadable file as absent again (the plan says 'create' over it) -> red."""
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="locked")
+    agents = target / "AGENTS.md"
+    agents.chmod(0o000)
+    try:
+        with pytest.raises(PermissionError, match="AGENTS.md"):
+            update_project(target, apply=False)
+    finally:
+        agents.chmod(0o644)
+
+
+def test_update_refuses_a_corrupt_registry_instead_of_a_roster_of_no_citizens(tmp_path, monkeypatch):
+    """Mutant: navmap_stub reads the corrupt registry as no branches again -> red."""
+    host, target = _make_nested_project(tmp_path)
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    (target / "MYAPP_REGISTRY.json").write_text("{broken", encoding="utf-8")
+    before = _files_and_bytes(target)
+
+    with pytest.raises(RuntimeError, match=r"MYAPP_REGISTRY\.json is unreadable"):
+        update_project(target)
+
     assert _files_and_bytes(target) == before
 
 

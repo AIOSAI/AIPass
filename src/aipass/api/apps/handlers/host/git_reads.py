@@ -440,9 +440,8 @@ def _changed_files(document: Dict[str, Any], root: Optional[Path]) -> Any:
             {
                 "path": _branch_local(path, prefix),
                 "status": code,
-                # Fallback for an older drone: by porcelain's definition the columns are the code.
-                "index": str(entry.get(INDEX_KEY, code[:1])),
-                "worktree": str(entry.get(WORKTREE_KEY, code[1:2])),
+                "index": str(entry[INDEX_KEY]),
+                "worktree": str(entry[WORKTREE_KEY]),
             }
         )
 

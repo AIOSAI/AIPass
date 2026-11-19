@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 5.6.0
+# Version: 5.7.0
 # Description: Tests for git_gate: raw git, gh and the secrets store refused for every seat; protected writes
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-03
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.hooks.apps.modules import protected_paths
 from aipass.hooks.apps.handlers.security.git_gate import handle
 
 # Derived, never spelled: the fixtures are only meaningful as paths INSIDE this checkout.
@@ -49,7 +50,7 @@ def admin_grant():
 
     Patched at @ai_mail's rail, so no test reads this machine's real grant.
     """
-    with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
+    with patch("aipass.ai_mail.is_verified_admin_caller", return_value=True):
         yield
 
 
@@ -498,6 +499,13 @@ class TestGitGateEditProtection:
         for path in (r"D:\work\.claude\settings.json.bak", r"D:\a\repo\.claude\agents\helper.md"):
             _assert_allowed(handle({"tool_name": "Write", "tool_input": {"file_path": path}, "cwd": CWD}))
 
+    def test_a_second_name_the_anchor_scan_cannot_list_is_refused_never_allowed(self, tmp_path):
+        target = tmp_path / "plain.txt"
+        target.write_text("x", encoding="utf-8")
+        os.link(target, tmp_path / "second_name.txt")
+        with patch.object(protected_paths, "_files", side_effect=OSError("unlistable")):
+            _assert_blocked(_edit(str(target), CWD, grant=False))
+
 
 class TestGitGateMisc:
     """Miscellaneous edge cases."""
@@ -595,7 +603,7 @@ class TestMailBodyIsAnArgumentNotACommand:
 class TestOneProgramSpelledManyWays:
     """A rename is not a bypass — the owner's go, 2026-09-19 (devpulse DPLAN-0352).
 
-    Windows runs every spelling below as git.
+    WSL interop runs git.exe as git; every spelling below is read alike.
     """
 
     #: Assembled, like WRITE_LINE above and for the same reason.
@@ -636,7 +644,7 @@ class TestOneProgramSpelledManyWays:
             _assert_blocked(_bash(f"git {self.WRITE}"))
 
 
-_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller"
+_RAIL = "aipass.ai_mail.is_verified_admin_caller"
 
 
 def _seat(root: Path, name: str) -> str:
@@ -767,7 +775,6 @@ def trust_home(tmp_path, monkeypatch):
     (home / ".aipass").mkdir(parents=True)
     (home / ".aipass" / "trusted_projects.json").write_text("{}", encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
     return home / ".aipass" / "trusted_projects.json"
 
 
@@ -798,6 +805,20 @@ class TestAProtectedFileIsProtectedUnderEveryName:
             f"python3 -c \"import os; os.link('{_word(trust_home)}', 'mine.json')\"",
         ):
             _assert_blocked(_canary_bash(command, seat))
+
+    def test_a_target_whose_stat_fails_for_any_cause_but_absence_is_refused(self, tmp_path, trust_home):
+        seat = Path(_seat(tmp_path, "canary"))
+        (seat / "plain.txt").write_text("x", encoding="utf-8")
+        _assert_allowed(_edit(str(seat / "new.json"), str(seat), grant=False, tool="Write"))
+        _assert_blocked(_edit(str(seat / "plain.txt" / "child.json"), str(seat), grant=False, tool="Write"))
+
+    def test_an_anchor_gone_is_skipped_and_one_whose_stat_fails_otherwise_refuses(self, tmp_path, trust_home):
+        seat = Path(_seat(tmp_path, "canary"))
+        (seat / "a.json").write_text("{}", encoding="utf-8")
+        os.link(seat / "a.json", seat / "b.json")
+        for anchor, verdict in ((seat / "gone.json", _assert_allowed), (seat / "a.json" / "x", _assert_blocked)):
+            with patch.object(protected_paths, "anchors", return_value=[anchor]):
+                verdict(_edit(str(seat / "b.json"), str(seat), grant=False, tool="Write"))
 
     def test_the_admin_seat_still_links_it(self, tmp_path, trust_home):
         with patch(_RAIL, return_value=True):
@@ -1054,7 +1075,6 @@ def store_home(tmp_path, monkeypatch):
     (home / ".secrets" / "aipass").mkdir(parents=True)
     (home / ".secrets" / "aipass" / ".env").write_text("K=v\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
     return home / ".secrets"
 
 
@@ -1093,7 +1113,7 @@ class TestReadingTheSecretsStoreIsRefusedForEverySeat:
     @pytest.mark.parametrize(
         "command",
         (
-            "drone @api get-secret telegram prax_monitor",
+            "drone @api get-secret openai prax_monitor",
             "drone @api --help",
             "drone @api list ~/.secrets/aipass",
             'grep -rn ".secrets" src/aipass/backup',

@@ -7,11 +7,12 @@
 ## What It Is
 
 A test that asserts a **whole path**, spelled inside an f-string, against output a console
-**rendered**. It is green on Linux and red on Windows and macOS. Tests only.
+**rendered**. It is green on the seat that wrote it and red where the tmp path is longer or
+spelled differently. Tests only.
 
 The specimen is @aipass's `tests/test_aipass_main.py`,
 `TestMain.test_a_crash_whose_log_cannot_be_written_still_ends_on_the_crash_not_a_traceback`
-(PR #787, red on the Windows and macOS legs):
+(PR #787, red in CI):
 
 ```python
 log_home = tmp_path / "system_logs"
@@ -25,13 +26,12 @@ assert f"(this crash could not be written to the log: [Errno 13] Permission deni
 
 ## Why it matters: two fragilities
 
-**WRAP.** Rich wraps a line at the console width (the fleet conftest pins 200). A Windows tmp
-path (`C:\Users\runneradmin\AppData\Local\Temp\pytest-of-runneradmin\pytest-0\popen-gw1\...`)
-or macOS's `/private/var/folders/...` pushes the line past it, and the wrapped output no longer
-holds the substring.
+**WRAP.** Rich wraps a line at the console width (the fleet conftest pins 200). A longer tmp
+path (another user's `pytest-of-<user>`, a different `TMPDIR`, an xdist `popen-gw<N>` worker)
+pushes the line past it, and the wrapped output no longer holds the substring.
 
-**REPR.** `str(OSError)` renders the filename with `%r`, so on Windows the backslashes are
-doubled, and `'{log_home}'` (single backslashes) never matches, wrap or not. A fixed console
+**REPR.** `str(OSError)` renders the filename with `%r`, so a path holding a quote or an
+undecodable byte is escaped, and `'{log_home}'` never matches, wrap or not. A fixed console
 width does not cure this one.
 
 ---
@@ -56,7 +56,7 @@ Inside one `def test_*`, one finding per offending `assert`:
 
 | Part | Shapes |
 |---|---|
-| Needle | An f-string with a FormattedValue that is a path: the `tmp_path` parameter itself; a name bound in the test to `tmp_path`, `tmp_path_factory.mktemp(...)`, or an expression rooted at one (`/`, `.joinpath`, `.resolve()`, `.absolute()`, `.with_name/suffix/stem`, `.expanduser()`); a `Path(...)` / `PurePath(...)` (and Posix/Windows siblings) call or a name bound to one; `str(<path>)`; `<path>.parent` |
+| Needle | An f-string with a FormattedValue that is a path: the `tmp_path` parameter itself; a name bound in the test to `tmp_path`, `tmp_path_factory.mktemp(...)`, or an expression rooted at one (`/`, `.joinpath`, `.resolve()`, `.absolute()`, `.with_name/suffix/stem`, `.expanduser()`); a `Path(...)` / `PurePath(...)` (and Posix siblings) call or a name bound to one; `str(<path>)`; `<path>.parent` |
 | Haystack | `out, err = capsys.readouterr()` (or `capfd`); `captured.out` / `.err` with `captured = capsys.readouterr()`; `capsys.readouterr().out` inline or bound to a name; `result.output` / `.stdout` / `.stderr` with `result` bound to a `CliRunner` `invoke` or a `subprocess.run`; a plain alias of any of these |
 | Compare | `in`, `not in`, `==`, `!=` (needle on either side), anywhere inside the `assert` |
 
@@ -92,7 +92,7 @@ number moves. Advisory, then ratchet: gate it once the nine are cured.
 ## Bypass position
 
 Standard bypass via `.sentry/bypass.json` (`"standard": "rendered_path_oracle"`). A test that
-genuinely must compare a full rendered path (a Linux-only test under a platform guard) is the
+genuinely must compare a full rendered path (a path the test itself pins short) is the
 case for it; say why in the rule's reason.
 
 ---

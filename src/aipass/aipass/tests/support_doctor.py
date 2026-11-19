@@ -16,5 +16,5 @@ from unittest.mock import patch
 
 
 def _home_at(home):
-    """Point Path.home() at a scratch dir through its edge, the environment (USERPROFILE on Windows)."""
-    return patch.dict(os.environ, {"HOME": str(home), "USERPROFILE": str(home)})
+    """Point Path.home() at a scratch dir through its edge, the environment."""
+    return patch.dict(os.environ, {"HOME": str(home)})

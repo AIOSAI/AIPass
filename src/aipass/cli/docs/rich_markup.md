@@ -49,7 +49,7 @@ data and the styling share one literal, escape the bracket by hand.**
 ## What this branch provides
 
 ```python
-from aipass.cli import escape            # or aipass.cli.apps.modules
+from aipass.cli import escape
 success(f"Updated {escape(path)}")
 ```
 

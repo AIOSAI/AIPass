@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_aipass_standards.py
 # Description: Unit tests for handlers/aipass_standards/
-# Version: 1.6.0
+# Version: 1.8.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/naming_check.py and its json, host and calendar siblings."""
@@ -528,42 +528,11 @@ def test_disk_triplets_multiple_gaps_counted(tmp_path):
     assert result["message"].startswith("2/3 modules missing triplet files")
 
 
-def _canonical_shim_bytes_or_skip():
-    """The canonical shim as the pinned spec defines it, or skip saying why.
-
-    A constant taught by a branch copy would bless that branch's drift. docs.local/ is gitignored, so the spec
-    is absent on a fresh checkout: this skips naming the path rather than degrade silently.
-    """
-    import re
-    from pathlib import Path
-
-    # From the installed package, so the read is identical whichever rootdir pytest picks.
-    spec = Path(aipass.__file__).resolve().parent / "devpulse" / "docs.local" / "DPLAN-0325_spec.md"
-    if not spec.is_file():
-        pytest.skip(f"pinned spec not present ({spec}) — docs.local/ is gitignored, so this pin is local-only")
-    text = spec.read_text(encoding="utf-8")
-    section = text.index("## 3. The shim")
-    block = re.search(r"```python\n(.*?)\n```", text[section:], re.S)
-    assert block is not None, "DPLAN-0325 section 3 no longer carries a python block"
-    return block.group(1) + "\n"
-
-
-def test_the_pinned_hash_is_the_hash_of_the_spec_block():
-    """The constant and the spec cannot drift apart without this turning red."""
-    import hashlib
-
-    measured = hashlib.sha256(_canonical_shim_bytes_or_skip().encode("utf-8")).hexdigest()
-    assert measured == json_handler_check.CANONICAL_SHIM_SHA256, (
-        "the pinned canonical-shim hash no longer matches DPLAN-0325 section 3 — "
-        "amend the constant in the same change as the spec"
-    )
-
-
 def _canonical_shim_bytes_on_disk():
     """The canonical shim from the citizen template, verified against the pin.
 
-    The spec is gitignored and absent on CI; the template ships in the repo, so pins needing real bytes still
-    run. The bytes are checked against ``CANONICAL_SHIM_SHA256``, so template drift is never blessed.
+    The template ships in the repo, and its bytes are checked against ``CANONICAL_SHIM_SHA256``,
+    so template drift is never blessed.
     """
     import hashlib
     from pathlib import Path as _Path
@@ -608,16 +577,16 @@ def _capability(root, content, branch_name):
 
 
 def test_the_canonical_shim_passes_capability_by_hash(tmp_path):
-    """The spec's own bytes are accepted, and accepted on the identity path."""
+    """The canonical bytes are accepted, and accepted on the identity path."""
 
-    passed, message = _capability(tmp_path, _canonical_shim_bytes_or_skip(), "anybranch")
+    passed, message = _capability(tmp_path, _canonical_shim_bytes_on_disk(), "anybranch")
     assert passed is True
     assert "sha256" in message
 
 
 def test_one_changed_character_is_no_longer_the_canonical_shim(tmp_path):
     """Identity, not resemblance: a shim that drifts stops being the shim."""
-    mutated = _canonical_shim_bytes_or_skip().replace("_h = json_handler.for_module", "_h  = json_handler.for_module")
+    mutated = _canonical_shim_bytes_on_disk().replace("_h = json_handler.for_module", "_h  = json_handler.for_module")
     passed, message = _capability(tmp_path, mutated, "anybranch")
     assert passed is False
     assert "sha256" in message
@@ -638,6 +607,14 @@ def test_the_refusal_message_names_the_branch_and_the_line_to_write(tmp_path):
     assert passed is False
     assert "canary" in message
     assert json_handler_check.SERVICE_IMPORT_MARKER in message
+
+
+def test_an_unreadable_handler_raises_rather_than_reading_as_missing(tmp_path):
+    handler = tmp_path / "canary" / "apps" / "handlers" / "json" / "json_handler.py"
+    handler.parent.mkdir(parents=True)
+    handler.write_bytes(b"\xff\xfe not utf-8")
+    with pytest.raises(UnicodeDecodeError):
+        json_handler_check.check_branch(str(tmp_path / "canary"))
 
 
 def test_a_branch_without_a_citizen_template_grows_no_template_check(tmp_path):
@@ -667,6 +644,35 @@ def test_the_citizen_template_is_judged_by_the_same_rule(tmp_path):
     result = _named_check(branch, "Template handler capability")
     assert result is not None
     assert result["passed"] is True
+
+
+def _by_name_shim(name):
+    """The canonical shim with only its binding line naming *name*: built from the canonical text, never retyped."""
+    canonical = _canonical_shim_bytes_on_disk()
+    assert canonical.count(json_handler_check.BY_FILE_LINE) == 1
+    return canonical.replace(json_handler_check.BY_FILE_LINE, json_handler_check.by_name_line(name))
+
+
+def test_a_claimed_branch_passes_with_the_shim_binding_its_own_name(tmp_path):
+    passed, message = _capability(tmp_path, _by_name_shim("hooks"), "hooks")
+    assert passed is True
+    assert "by-name" in message
+
+
+@pytest.mark.parametrize(
+    ("content_for", "branch", "reason"),
+    [
+        (lambda: _canonical_shim_bytes_on_disk(), "hooks", "holds a by-name claim but binds by file"),
+        (lambda: _by_name_shim("canary"), "canary", "claimed only by hooks"),
+        (lambda: _by_name_shim("canary"), "hooks", "binds the branch named 'canary', not itself"),
+        (lambda: _by_name_shim("hooks").replace("adds nothing", "adds  nothing"), "hooks", "Not the canonical"),
+    ],
+    ids=["claimed_binds_by_file", "unclaimed_binds_by_name", "names_another_branch", "one_more_byte"],
+)
+def test_the_by_name_form_fails_off_its_claim_and_says_why(tmp_path, content_for, branch, reason):
+    passed, message = _capability(tmp_path, content_for(), branch)
+    assert passed is False
+    assert reason in message
 
 
 def test_a_bound_alias_is_not_a_lowercase_constant():
@@ -724,7 +730,22 @@ def test_a_handler_that_neither_binds_nor_resolves_still_fails(tmp_path):
 
 def test_the_two_standards_share_the_shim_test_not_a_copy_of_a_string():
     """Both standards must agree on what a shim IS, by running the same function."""
-    assert json_structure_check._is_canonical_shim is json_handler_check._is_canonical_shim
+    assert json_structure_check.is_shim_for is json_handler_check.is_shim_for
+
+
+@pytest.mark.parametrize(("branch", "delegates"), [("hooks", True), ("canary", False)])
+def test_the_by_name_shim_delegates_resolution_only_in_its_claimed_branch(tmp_path, branch, delegates):
+    package = tmp_path / "src" / "aipass"
+    # json_structure places a file in the fleet by finding prax beside its branch.
+    (package / "prax").mkdir(parents=True)
+    handler = package / branch / "apps" / "handlers" / "json" / "json_handler.py"
+    handler.parent.mkdir(parents=True)
+    handler.write_text(_by_name_shim(branch), encoding="utf-8")
+
+    checks = json_structure_check.check_module(str(handler), bypass_rules=None)["checks"]
+    resolution = next(c for c in checks if c["name"] == "Relative path resolution")
+    assert resolution["passed"] is delegates
+    assert ("Delegates path resolution" in resolution["message"]) is delegates
 
 
 def _seam_branch(tmp_path, seam_body: str | None = None):
@@ -1052,26 +1073,14 @@ def test_shared_parse_treats_a_valueerror_as_unparseable(monkeypatch):
     assert logged.log_operation.call_count == 2
 
 
-# host_coupled_oracle_check: reductions of the two PR #807 hooks reds. proc.py is cc_sessions' shape: a
-# module-level platform alias and a local subprocess alias in the one function that forks.
+# host_coupled_oracle_check: a reduction of the PR #807 hooks red. proc.py is cc_sessions' shape.
 
 _PROC_PRODUCTION = """import os
-import sys
 from pathlib import Path
-
-_PLATFORM = sys.platform
 
 
 def process_args(pid):
-    import subprocess as _sp
-
-    if _PLATFORM.startswith("linux"):
-        return Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\\0")
-    return _sp.run(["ps", "-o", "args=", "-p", str(pid)], capture_output=True, text=True).stdout.split()
-
-
-def resolve_session_pid():
-    return process_args(os.getppid()) and None
+    return Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\\0")
 
 
 def is_pid_alive(pid):
@@ -1080,26 +1089,11 @@ def is_pid_alive(pid):
     except OSError:
         return False
     return True
-
-
-def is_supported():
-    return sys.platform.startswith("linux")
-
-
-def enable():
-    import subprocess
-
-    if not is_supported():
-        return None
-    return subprocess.run(["systemctl", "--user", "enable", "--now", "demo"])
 """
 
 _PROC_UNITS = """import os
 import subprocess
 import sys
-from unittest.mock import patch
-
-import pytest
 
 from pkg.demo.apps import proc
 
@@ -1110,31 +1104,6 @@ def test_own_title():
 
 def test_own_liveness():
     assert proc.is_pid_alive(os.getpid())
-
-
-def test_forked_count():
-    with patch("subprocess.run", side_effect=OSError("no ps")) as ps:
-        proc.resolve_session_pid()
-    assert ps.call_count == 1
-
-
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the /proc path")
-def test_forked_count_on_linux_only():
-    with patch("subprocess.run", side_effect=OSError("no ps")) as ps:
-        proc.resolve_session_pid()
-    assert ps.call_count == 1
-
-
-def test_gate_pinned_by_a_fixture():
-    with patch("subprocess.run") as run, patch.object(proc, "is_supported", return_value=True):
-        proc.enable()
-    assert run.call_count == 1
-
-
-def test_a_non_runner_count():
-    with patch.object(proc, "is_pid_alive", return_value=True) as alive:
-        proc.resolve_session_pid()
-    assert alive.call_count == 1
 
 
 def _child_pid():
@@ -1157,15 +1126,13 @@ def _proc_package(tmp_path):
     return branch, test_file
 
 
-def test_host_coupled_oracle_convicts_the_title_read_and_the_forked_count_only(tmp_path):
-    """Own pid into process_args and an exact ps count convicted; liveness, a skip mark, a pinned gate and a
-    non-runner mock and a child's pid acquitted."""
+def test_host_coupled_oracle_convicts_the_title_read_only(tmp_path):
+    """Own pid into process_args convicted; liveness and a child's pid acquitted."""
     branch, test_file = _proc_package(tmp_path)
 
     rows = host_coupled_oracle_check.scan_file(str(test_file), str(branch.parent))
 
-    assert _lines(rows) == [_line_of(_PROC_UNITS, "process_args(os.getpid())"), _line_of(_PROC_UNITS, "ps.call_count")]
-    assert "demo/apps/proc.py:8 process_args" in rows[1][1]
+    assert _lines(rows) == [_line_of(_PROC_UNITS, "process_args(os.getpid())")]
 
 
 def test_host_coupled_oracle_scores_by_clean_test_file_share(tmp_path):
@@ -1177,3 +1144,56 @@ def test_host_coupled_oracle_scores_by_clean_test_file_share(tmp_path):
 
     assert (result["standard"], result["score"], result["passed"]) == ("HOST_COUPLED_ORACLE", 50, False)
     assert {row["file"] for row in result["checks"][0]["violations"]} == {"tests/test_proc.py"}
+
+
+_TWO_BAD_FUNCTIONS = '"""Doc."""\n\ndef badOne():\n    return 1\n\n\ndef badTwo():\n    return 2\n'
+
+
+def _naming(tmp_path, source: str, name: str = "thing.py", **scope) -> dict:
+    """naming_check.check_module on apps/modules/<name> under one naming row of the given scope (none: no row)."""
+    target = tmp_path / "apps" / "modules" / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(source, encoding="utf-8")
+    rules = [{"file": f"apps/modules/{name}", "standard": "naming", "reason": "t", **scope}] if scope else []
+    result = naming_check.check_module(str(target), bypass_rules=rules)
+    return {"score": result["score"], **{check["name"]: check for check in result["checks"]}}
+
+
+def test_naming_names_every_bad_function_with_its_line(tmp_path):
+    """Mutant: the message names only the first site in naming_check.py — killed."""
+    verdict = _naming(tmp_path, _TWO_BAD_FUNCTIONS)
+    assert verdict["Function naming"]["passed"] is False
+    assert verdict["Function naming"]["message"] == "Non-snake_case functions: badOne (line 3), badTwo (line 7)"
+
+
+def test_naming_a_line_row_waives_its_function_and_the_other_still_convicts(tmp_path):
+    """Mutant: the per-site ask drops line= in naming_check.py — killed."""
+    verdict = _naming(tmp_path, _TWO_BAD_FUNCTIONS, lines=[3])
+    assert verdict["Function naming"]["message"] == "Non-snake_case functions: badTwo (line 7)"
+
+
+def test_naming_a_function_row_waives_the_names_it_lists_only(tmp_path):
+    """Mutant: the per-site ask drops name= in naming_check.py — killed."""
+    one = _naming(tmp_path, _TWO_BAD_FUNCTIONS, functions=["badOne"])
+    both = _naming(tmp_path, _TWO_BAD_FUNCTIONS, functions=["badOne", "badTwo"])
+    assert one["Function naming"]["message"] == "Non-snake_case functions: badTwo (line 7)"
+    assert (both["Function naming"]["passed"], both["score"]) == (True, 100)
+
+
+def test_naming_a_whole_file_row_still_waives_the_whole_file(tmp_path):
+    assert _naming(tmp_path, _TWO_BAD_FUNCTIONS, lines=None)["score"] == 100
+
+
+def test_naming_constants_and_classes_are_sites_too(tmp_path):
+    """Mutant: one waived site waives every site in naming_check.py — killed."""
+    source = '"""Doc."""\nbad_one = 5\nbad_two = 6\n\n\nclass bad_cls:\n    pass\n'
+    verdict = _naming(tmp_path, source, lines=[2, 6])
+    assert verdict["Constant naming"]["message"] == "Non-UPPER_CASE constants: bad_two (line 3)"
+    assert verdict["Class naming"]["passed"] is True
+
+
+def test_naming_a_bad_file_name_is_waived_by_the_file_scope_name_not_a_line(tmp_path):
+    """Mutant: the file-level waiver drops name=FILE_SCOPE in naming_check.py — killed."""
+    by_scope = _naming(tmp_path, '"""Doc."""\n', "BadName.py", functions=[_bypass_utils.FILE_SCOPE])
+    by_line = _naming(tmp_path, '"""Doc."""\n', "BadName.py", lines=[1])
+    assert (by_scope["score"], by_line["score"]) == (100, 0)

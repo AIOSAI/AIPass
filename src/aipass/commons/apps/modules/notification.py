@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: notification.py
 # Description: Notification Preferences Module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -14,16 +14,8 @@ Handles: watch, mute, track, preferences commands.
 
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
-
-try:
-    from aipass.cli.apps.modules import console, error
-except (ImportError, OSError):
-    logger.warning("[notification] CLI console unavailable, using fallback")
-    from rich.console import Console
-
-    console = Console()
-    error = console.print  # type: ignore[assignment]
+from aipass.prax import logger  # noqa: F401 - the imports standard requires the prax logger in every module
+from aipass.cli import console, error
 
 from aipass.commons.apps.handlers.notifications.notification_ops import (
     set_watch,

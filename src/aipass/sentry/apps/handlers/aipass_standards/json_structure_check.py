@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_check.py
 # Description: JSON Structure Standards Checker Handler
-# Version: 3.4.2
+# Version: 3.8.1
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -20,9 +20,10 @@ from pathlib import Path
 from typing import Dict, List
 
 from aipass.prax import logger
+from aipass.sentry.apps.handlers.aipass_standards import stdlib_only_check
 from aipass.sentry.apps.handlers.aipass_standards.check_support import parse
-from aipass.sentry.apps.handlers.aipass_standards.json_handler_check import _is_canonical_shim
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.aipass_standards.json_handler_check import is_shim_for
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
 from aipass.sentry.apps.handlers.json import json_handler
 
 # APPLIES_TO: a test does not log_operation and should not.
@@ -89,7 +90,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     path_str = str(path)
 
     if "json_handler" in path.name and path.parent.name == "json":
-        checks = _check_json_handler_config(path, content, bypass_rules)
+        checks = [_waive_file_level(c, path_str, bypass_rules) for c in _check_json_handler_config(path, content)]
         passed_count = sum(1 for c in checks if c["passed"])
         total = len(checks)
         score = int((passed_count / total * 100)) if total > 0 else 0
@@ -134,6 +135,25 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "JSON STRUCTURE",
         }
 
+    # --- A proven stdlib_only claim: other branches import it before any aipass service, so it cannot log ---
+    if (in_modules or in_handlers) and stdlib_only_check.proven_claim(path):
+        return {
+            "passed": True,
+            "checks": [
+                {
+                    "name": "JSON structure check",
+                    "passed": True,
+                    "message": (
+                        "Listed under the stdlib_only standard and proven there (standard library only, no disk, "
+                        "environment or process access), so the json_handler wiring does not apply"
+                    ),
+                    "declined": True,
+                }
+            ],
+            "score": 100,
+            "standard": "JSON STRUCTURE",
+        }
+
     # --- Pre-logging bootstrap module: importing json_handler here is a cycle ---
     if (in_modules or in_handlers) and _is_prelogging_bootstrap(path, content):
         return {
@@ -144,7 +164,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "passed": True,
                     "message": (
                         "Pre-logging bootstrap module — reached from the logging chain's own "
-                        "imports and holds no aipass import of any kind, so json_handler cannot "
+                        "imports and holds no aipass import but prax's trail door, so json_handler cannot "
                         "be imported here without a cycle (not applicable)"
                     ),
                     "declined": True,
@@ -155,7 +175,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         }
 
     if in_modules or in_handlers:
-        checks = _check_code_wiring(path, content)
+        checks = [_waive_file_level(c, path_str, bypass_rules) for c in _check_code_wiring(path, content)]
         passed_count = sum(1 for c in checks if c["passed"])
         total = len(checks)
         score = int((passed_count / total * 100)) if total > 0 else 0
@@ -178,11 +198,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
 
 def _declares_no_callable_code(content: str) -> bool:
-    """True when a module defines no function or method ANYWHERE.
+    """True when a module defines no function or method ANYWHERE: pure declarations perform no operations to log.
 
-    "Every module must log operations" is about modules that PERFORM operations; pure declarations perform
-    none, and both cures (a module-level log_operation, which writes at pytest COLLECTION, or a function added
-    only to call it) are worse. ONE method anywhere puts the module back in scope; an unparseable file is not exempt.
+    ONE method anywhere puts the module back in scope; an unparseable file is not exempt.
     """
     try:
         tree = ast.parse(content)
@@ -192,9 +210,13 @@ def _declares_no_callable_code(content: str) -> bool:
     return not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in ast.walk(tree))
 
 
-#: How many modules the bootstrap walk will visit before it gives up. The whole
-#: fleet's logging chain measures ~100; this is a runaway guard, not a budget.
+#: A runaway guard on the bootstrap walk, not a budget: the fleet's logging chain measures ~150.
 _BOOTSTRAP_WALK_CAP = 2000
+
+#: Prax's trail, the logger made for modules beneath json_handler: importing it is no cycle. The door form
+#: is the ruled one; the module path is prax's own spelling, and front_door's finding anywhere else.
+_TRAIL_DOOR = "aipass.prax.trail"
+_TRAIL_MODULE = "aipass.prax.apps.handlers.logging.trail"
 
 
 def resolve_relative(module_name: str | None, level: int, package: str | None) -> str | None:
@@ -214,11 +236,9 @@ def resolve_relative(module_name: str | None, level: int, package: str | None) -
 
 
 def _aipass_imports(content: str, package: str | None = None) -> list[str]:
-    """Every ``aipass.*`` module name this source imports, at any nesting depth.
+    """Every ``aipass.*`` module name this source imports, function-level included: the dependency is taken.
 
-    Function-level imports count: a module reaching aipass only from inside a function has still taken the
-    dependency. Relative imports count when ``package`` is supplied; None keeps the absolute-only behaviour
-    the "holds no aipass import" clause wants for a file it cannot place.
+    Relative imports count only when ``package`` is supplied; clause 1 passes None for a file it cannot place.
     """
     try:
         tree = ast.parse(content)
@@ -279,10 +299,8 @@ def _module_name(path: Path, source_root: Path) -> str | None:
 def _bootstrap_chain(source_root_str: str) -> frozenset:
     """Every module the logging substrate imports, transitively.
 
-    Seeded from the system logger and every branch's json_handler, the two things this standard tells a
-    module to import: anything they reach cannot import them back without a cycle. Ancestor packages are
-    deliberately absent (walking them exempted helpers that have a working logger). Statically walked, so a
-    dynamic importlib hop leaves the set SHORT, the safe direction: an over-long set would hand out exemptions.
+    Seeded from the system logger and every branch's json_handler: anything they reach cannot import them back
+    without a cycle. Static, so a dynamic importlib hop leaves the set SHORT, the safe direction.
     """
     source_root = Path(source_root_str)
     branches = [d.name for d in source_root.iterdir() if (d / "apps").is_dir()]
@@ -316,17 +334,16 @@ def _bootstrap_chain(source_root_str: str) -> frozenset:
 def _is_prelogging_bootstrap(path: Path, content: str) -> bool:
     """True for a module that sits BENEATH the logging system it would have to call.
 
-    Two clauses, both measured: (1) the module holds no aipass import of any kind, and (2) the logging
+    Two clauses, both measured: (1) the module holds no aipass import but prax's trail door, and (2) the logging
     substrate's own imports reach it. Either alone exempts too much; the pair names modules where wiring
     log_operation() would put a file write on every branch's import path, firing during pytest COLLECTION.
     """
-    try:
-        ast.parse(content)
-    except (SyntaxError, ValueError) as exc:
-        # An unreadable file is not a bootstrap module: [] from _aipass_imports() would buy the exemption.
-        logger.info("json_structure: unparseable, so not eligible for the bootstrap exemption: %s", exc)
+    # An unparseable file is not a bootstrap module: [] from _aipass_imports() would buy the exemption.
+    if parse(content, tag="json_structure") is None:
         return False
-    if _aipass_imports(content):
+    imports = _aipass_imports(content)
+    allowed = {_TRAIL_DOOR, _TRAIL_MODULE} | ({"aipass.prax"} if _TRAIL_DOOR in imports else set())
+    if any(name not in allowed and not name.startswith(_TRAIL_MODULE + ".") for name in imports):
         return False
     source_root = _aipass_source_root(path)
     if source_root is None:
@@ -340,10 +357,8 @@ def _branch_root(path: Path) -> Path | None:
     source_root = _aipass_source_root(path)
     if source_root is None:
         return None
-    try:
-        relative = path.resolve().relative_to(source_root)
-    except ValueError:
-        return None
+    # The source root is one of the resolved path's own parents, so the path is always below it.
+    relative = path.resolve().relative_to(source_root)
     return source_root / relative.parts[0] if relative.parts else None
 
 
@@ -451,7 +466,8 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
         import_message = "Imports json_handler"
     else:
         import_message = (
-            "Missing json_handler import — add: from aipass.<branch>.apps.handlers.json import json_handler"
+            "Missing json_handler import — add this file's own branch's: "
+            "from aipass.<own branch>.apps.handlers.json import json_handler"
         )
     checks.append(
         {
@@ -481,7 +497,7 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
     return checks
 
 
-def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules: list | None = None) -> List[Dict]:
+def _check_json_handler_config(handler_path: Path, content: str) -> List[Dict]:
     """Check json_handler.py: no Path.home(), relative resolution, no json_templates, no load_template()."""
     checks: List[Dict] = []
 
@@ -519,8 +535,10 @@ def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules:
         )
 
     # A shim that binds the fleet json service resolves nothing itself: the service derives the branch root
-    # from the shim's own __file__ (deliberately WITHOUT resolve()), so the canonical shim passes by hash.
-    binds_the_json_service = _is_canonical_shim(content)
+    # from the shim's own __file__ (deliberately WITHOUT resolve()) or a claimed branch's name, so the shim passes
+    # by hash.
+    branch = _branch_root(handler_path)
+    binds_the_json_service = is_shim_for(content, branch.name if branch else "")
     resolves_here = bool(
         re.search(r"Path\(__file__\)", content)
         or re.search(r"\.resolve\(\)", content)
@@ -658,3 +676,10 @@ def check_branch_info(branch_path: str) -> list[str]:
         f"{Path(branch_path).name}_json/{CUSTOM_CONFIG_DIR}/: {len(files)} operator {noun} "
         f"({', '.join(files)}) — content not audited. {CUSTOM_CONFIG_GUIDE}"
     ]
+
+
+def _waive_file_level(check: Dict, path_str: str, bypass_rules: list | None) -> Dict:
+    """A failing check passed by a row naming FILE_SCOPE under functions: every finding here is file-level."""
+    if check["passed"] or not is_bypassed(path_str, "json_structure", bypass_rules=bypass_rules, name=FILE_SCOPE):
+        return check
+    return {**check, "passed": True, "message": f"Waived by a {FILE_SCOPE} bypass row: {check['message']}"}

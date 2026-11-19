@@ -34,7 +34,6 @@
     "purpose": "Project-owned, local-first backups with .backup_system/ and .backupignore per project",
     "what_i_do": [
       "Snapshot backups (full mirror)",
-      "Versioned backups (incremental, timestamped)",
       "Project registration and @name resolution",
       "Ignore pattern management (gitignore-style)",
       "Backup status and changelog tracking"

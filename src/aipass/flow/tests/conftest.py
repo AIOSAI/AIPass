@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Description: Shared fixtures for flow tests - log redirect, console pin, command-state reset
-# Version: 1.4.0
+# Description: Shared fixtures for flow tests - log redirect, console pin, command-state reset, caller rail
+# Version: 1.7.0
 # Created: 2026-03-05
-# Modified: 2026-10-26
+# Modified: 2026-11-17
 # =============================================
 
 """Shared pytest fixtures for flow tests"""
@@ -22,12 +22,12 @@ from typing import Generator
 import sys
 from unittest.mock import MagicMock, patch
 
+import aipass.prax as prax
+
 # patch() needs these sub-module attributes for dotted-path traversal.
-import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.flow.apps.handlers.json.json_handler  # noqa: F401
 from aipass.flow.apps.handlers.json import json_handler as json_handler_module
-import aipass.cli.apps.modules  # noqa: F401
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 # Import-time find_repo_root() fallback logs would leak into mock_json_handler counts; pinned complete.
 import aipass.flow.apps.handlers.dashboard.push_central  # noqa: F401
@@ -36,12 +36,16 @@ import aipass.flow.apps.handlers.plan.close_helpers  # noqa: F401
 import aipass.flow.apps.handlers.plan.restore_ops  # noqa: F401
 import aipass.flow.apps.modules.aggregate_central  # noqa: F401
 import aipass.flow.apps.modules.registry_monitor  # noqa: F401
+from aipass.flow.apps.handlers.plan import authority
+
+# The door's logger is an object with no __module__; its class lives in the door name's home.
+_PRAX_LOGGER_HOME = sys.modules[type(prax.logger).__module__]
 
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
-    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    """Rich sizes an unpinned console on every print: 80 under pytest's capture,
+    the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 
@@ -76,8 +80,8 @@ def mock_logger(request, monkeypatch):
         for attribute in ("logger", "system_logger"):
             if getattr(module, attribute, None) is not None:
                 monkeypatch.setattr(module, attribute, mock, raising=False)
-    # The source too, so a module imported LATER in the test binds the mock.
-    monkeypatch.setattr("aipass.prax.apps.modules.logger.system_logger", mock)
+    # The home too: prax's door never caches, so a module imported LATER binds the mock through it.
+    monkeypatch.setattr(_PRAX_LOGGER_HOME, "system_logger", mock)
     yield mock
 
 
@@ -89,6 +93,28 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     sandbox = json_handler_module.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox
+
+
+@pytest.fixture(autouse=True)
+def verified_caller(monkeypatch):
+    """The ai_mail rail is another branch: every test is @devpulse, the admin seat, unless it patches the caller."""
+    monkeypatch.setattr(authority, "resolve_verified_caller", lambda: "@devpulse")
+    monkeypatch.setattr(
+        authority, "is_verified_admin_caller", lambda: authority.resolve_verified_caller() == "@devpulse"
+    )
+
+
+@pytest.fixture
+def make_seat():
+    """Make ``directory`` a citizen seat: a passport naming ``branch_name`` (default: the directory's name)."""
+
+    def build(directory: Path, branch_name: str | None = None) -> Path:
+        (directory / ".trinity").mkdir(parents=True, exist_ok=True)
+        passport = {"branch_info": {"branch_name": branch_name or directory.name}}
+        (directory / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+        return directory
+
+    return build
 
 
 @pytest.fixture

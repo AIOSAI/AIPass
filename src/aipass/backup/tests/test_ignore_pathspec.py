@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_ignore_pathspec.py
 # Description: Tests for ignore/patterns.py: matching, seed template, *.tmp floor, cleanup
-# Version: 1.3.7
+# Version: 1.4.0
 # Created: 2026-06-12
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/ignore/patterns.py: matching, seed template, *.tmp floor, cleanup."""
@@ -24,10 +24,7 @@ from aipass.backup.apps.handlers.ignore.patterns import (
     is_ignored,
     load_spec,
 )
-from aipass.backup.apps.handlers.path.builder import (
-    build_snapshot_path,
-    build_versioned_store,
-)
+from aipass.backup.apps.handlers.path.builder import build_snapshot_path
 from aipass.backup.apps.handlers.project import setup
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
 from aipass.backup.apps.handlers.report.result import BackupResult
@@ -36,7 +33,6 @@ from aipass.backup.apps.handlers.scan.walk import walk_project
 from aipass.backup.apps.modules import display
 from aipass.backup.apps.modules.all import handle_command
 from aipass.backup.apps.modules.snapshot import run_snapshot
-from aipass.backup.apps.modules.versioned import run_versioned
 
 
 # --- gitignore parity, read through the product's own matcher ---
@@ -386,8 +382,8 @@ def _json_folder_with_temps(root):
 class TestBuiltinTmpFloor:
     """*.tmp is ignored by every project, whatever its .backupignore says.
 
-    Measured 2026-09-11: the AIPass store held 498 temp copies in snapshots/
-    and 996 in versioned/, all from *_json folders, because no .backupignore
+    Measured 2026-09-11: the AIPass store held 498 temp copies in snapshots/,
+    all from *_json folders, because no .backupignore
     seeded before the rule named them. The floor lives in load_spec, which
     every copy lane and the Drive re-filter read.
     """
@@ -425,21 +421,8 @@ class TestBuiltinTmpFloor:
         # Not vacuous: both temps were in the tree the run walked, and still are.
         assert sorted(p.name for p in (root / "data_json").glob("*.tmp")) == [".4242_7.tmp", "tmpab12cd34.tmp"]
 
-    def test_versioned_lane_skips_temps_and_keeps_the_json(self, tmp_path):
-        """run_versioned: no temp reaches the store, as a file-folder or a copy."""
-        root = tmp_path / "proj"
-        real = _json_folder_with_temps(root)
-        result = run_versioned(str(root), show_panels=False)
-
-        assert result.success is True
-        store = build_versioned_store(str(root))
-        assert (store / "data_json" / "state.json" / "state.json").read_bytes() == real
-        # A pre-rule run stored each temp as <name>.tmp/<name>.tmp plus a
-        # baseline; rglob('*.tmp') catches the folder and both copies.
-        assert list(store.rglob("*.tmp")) == []
-
-    def test_all_lane_skips_temps_in_both_stores(self, tmp_path, monkeypatch):
-        """'all' shares one scan between both stores; neither gets a temp."""
+    def test_all_lane_skips_temps_in_the_snapshot_store(self, tmp_path, monkeypatch):
+        """'all' hands snapshot its shared scan; no temp reaches the store."""
         root = tmp_path / "proj"
         real = _json_folder_with_temps(root)
         # header() fires @cli's event bus; replaced where display binds it, so nothing fires.
@@ -449,16 +432,13 @@ class TestBuiltinTmpFloor:
         with patch("aipass.backup.apps.modules.drive_sync.run_drive_sync", return_value={}):
             assert handle_command("all", [str(root), "--quiet"]) is True
 
-        # What is true today: --quiet does not reach the two modes (all.py passes them no show_panels),
-        # so both headers print. The day it does, this goes red and is rewritten to [].
-        assert titles == ["Backup — Snapshot", "Backup — Versioned"]
+        # What is true today: --quiet does not reach snapshot (all.py passes it no show_panels),
+        # so its header prints. The day it does, this goes red and is rewritten to [].
+        assert titles == ["Backup — Snapshot"]
 
         dest = build_snapshot_path(str(root))
-        store = build_versioned_store(str(root))
         assert (dest / "data_json" / "state.json").read_bytes() == real
-        assert (store / "data_json" / "state.json" / "state.json").read_bytes() == real
         assert list(dest.rglob("*.tmp")) == []
-        assert list(store.rglob("*.tmp")) == []
 
 
 # --- mirror cleanup uses source-existence, no exceptions ---
@@ -470,9 +450,9 @@ class TestWalkSkipsIgnoredDirectories:
     @staticmethod
     def _walked(root: Path, whitelist: list[str]) -> list[str]:
         """The relative paths the walk yields under the project's own spec."""
-        return sorted(rel.replace("\\", "/") for _abs, rel in walk_project(str(root), load_spec(str(root)), whitelist))
+        return sorted(rel for _abs, rel in walk_project(str(root), load_spec(str(root)), whitelist))
 
-    @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs a POSIX directory a user cannot list")
+    @pytest.mark.skipif(os.geteuid() == 0, reason="needs a directory a user cannot list")
     def test_an_ignored_directory_is_never_opened(self, tmp_path: Path) -> None:
         """Mutant: the walk enters node_modules/, and the walk refuses a directory it cannot list."""
         (tmp_path / ".backupignore").write_text("node_modules/\n", encoding="utf-8")

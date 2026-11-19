@@ -13,21 +13,13 @@ A CLI flag is a claim, not a credential. Reference: docs/identity_and_boundaries
 """
 
 import os
-import sys
 from pathlib import Path
 from typing import Optional, Tuple
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 
 from .branch_detection import find_branch_root, _CREDENTIAL_SOURCES
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 
 # Senders that unlock a wake lane. test_verified_caller.py checks every `sender == "@x"` gate in wake.py is listed here.
@@ -100,7 +92,7 @@ def verify_admin_caller(
 ) -> Tuple[bool, str]:
     """Run the full 5-leg admin-grant check."""
     try:
-        from aipass.devpulse.apps.modules.door_admin_grant import verify_admin_grant
+        from aipass.devpulse import verify_admin_grant
     except ImportError as exc:
         logger.warning("[identity] admin lane dark — reference implementation unavailable: %s", exc)
         return False, f"admin lane dark: devpulse admin_grant reference unavailable ({exc})"
@@ -132,7 +124,7 @@ def is_verified_admin_caller() -> bool:
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]VERIFIED-CALLER RAIL[/bold cyan]")

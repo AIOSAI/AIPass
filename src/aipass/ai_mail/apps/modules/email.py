@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email.py
 # Description: Email Orchestration Module
-# Version: 3.5.0
+# Version: 3.6.0
 # Created: 2025-12-02
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -12,7 +12,6 @@ Email Orchestration Module
 Handles send, inbox, view, close, reply, sent, contacts; business logic lives in handlers.
 """
 
-import os
 import sys
 from pathlib import Path
 from typing import List
@@ -20,7 +19,7 @@ from typing import List
 from rich.markup import escape
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
 from aipass.ai_mail.apps.handlers.email.create import load_email_file
 from aipass.ai_mail.apps.handlers.email.format import format_email_list_item, format_email_header
@@ -38,12 +37,6 @@ from aipass.ai_mail.apps.handlers.email.close_ops import batch_close, batch_clos
 from aipass.ai_mail.apps.handlers.email.inbox_resolve import resolve_inbox_target
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 _AI_MAIL_DIR = Path(__file__).resolve().parents[2]
 _REPO_ROOT = find_repo_root()
@@ -121,6 +114,9 @@ FLAGS:
                     carrying KEY (from you) instead of stacking a new one.
                     Bumps its update counter, keeps its id and read status,
                     never wakes anything. Closing it re-arms the signature.
+  --kind KIND       Declare the mail's kind: medic, rounds, job_failed, notice
+                    or mail. Undeclared, delivery guesses it from sender and
+                    subject. An unknown kind is refused.
 
 NOTE: To send + wake in one step, use: drone @ai_mail dispatch @target "Subject" "Body"
 """

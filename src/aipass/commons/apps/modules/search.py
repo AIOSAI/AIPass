@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: search.py
 # Description: Search & Log Orchestration Module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -14,16 +14,8 @@ Handles: search, log commands.
 
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
-
-try:
-    from aipass.cli.apps.modules import console, error
-except (ImportError, OSError):
-    logger.warning("[search] CLI console unavailable, using fallback")
-    from rich.console import Console
-
-    console = Console()
-    error = console.print  # type: ignore[assignment]
+from aipass.prax import logger  # noqa: F401 - the imports standard requires the prax logger in every module
+from aipass.cli import console, error
 
 from aipass.commons.apps.handlers.search.search_ops import run_search, run_log_export
 from aipass.commons.apps.handlers.json import json_handler

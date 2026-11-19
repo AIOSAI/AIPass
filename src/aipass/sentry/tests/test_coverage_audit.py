@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_coverage_audit.py
 # Description: Unit tests for branch_audit.py: checker discovery, the corpus, the file lane, diagnostics
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/audit/branch_audit.py."""
@@ -61,14 +61,14 @@ class TestDiscoverCheckers:
         result = branch_audit.discover_checkers(standards_dir)
         assert "bad" not in result
 
-    def test_skip_failing_load(self, tmp_path):
-        """Skips modules that raise during exec_module."""
+    def test_a_checker_that_fails_to_load_refuses_discovery(self, tmp_path):
+        """A dropped checker would score the audit green, so the load failure is raised by name."""
         standards_dir = tmp_path / "standards"
         standards_dir.mkdir()
         checker_file = standards_dir / "broken_check.py"
         checker_file.write_text("raise RuntimeError('broken')\n", encoding="utf-8")
-        result = branch_audit.discover_checkers(standards_dir)
-        assert "broken" not in result
+        with pytest.raises(ImportError, match=r"broken_check\.py failed to load: RuntimeError: broken"):
+            branch_audit.discover_checkers(standards_dir)
 
     def test_empty_directory(self, tmp_path):
         """Empty standards dir returns empty dict."""
@@ -77,8 +77,8 @@ class TestDiscoverCheckers:
         result = branch_audit.discover_checkers(standards_dir)
         assert result == {}
 
-    def test_spec_none_skipped(self, tmp_path):
-        """Files where spec_from_file_location returns None skipped."""
+    def test_spec_none_refuses_discovery(self, tmp_path):
+        """A checker file with no import spec is refused, never silently dropped."""
         standards_dir = tmp_path / "standards"
         standards_dir.mkdir()
         checker_file = standards_dir / "valid_check.py"
@@ -93,8 +93,8 @@ class TestDiscoverCheckers:
             "importlib.util.spec_from_file_location",
             return_value=None,
         ):
-            result = branch_audit.discover_checkers(standards_dir)
-        assert "valid" not in result
+            with pytest.raises(ImportError, match=r"valid_check\.py has no import spec"):
+                branch_audit.discover_checkers(standards_dir)
 
     def test_check_branch_function_discovered(self, tmp_path):
         """Modules with check_branch are discovered."""

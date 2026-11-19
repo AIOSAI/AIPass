@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_machine_vitals.py
 # Description: The machine_vitals() contract
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-09-12
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # Category: skills/tests
 # =============================================
 
@@ -29,14 +29,12 @@ _CpuTimes = namedtuple(
     "scputimes",
     ["user", "nice", "system", "idle", "iowait", "irq", "softirq", "steal", "guest", "guest_nice"],
 )
-# Windows' cpu_times fields: no guest, no iowait.
-_WinCpuTimes = namedtuple("scputimes", ["user", "system", "idle", "interrupt", "dpc"])
 _Freq = namedtuple("scpufreq", ["current", "min", "max"])
 _NetIO = namedtuple(
     "snetio",
     ["bytes_sent", "bytes_recv", "packets_sent", "packets_recv", "errin", "errout", "dropin", "dropout"],
 )
-_Virtual = namedtuple("svmem", ["total", "available", "percent", "used", "free"])
+_Virtual = namedtuple("svmem", ["total", "available", "percent", "used", "free", "buffers", "cached"])
 _Swap = namedtuple("sswap", ["total", "used", "free", "percent", "sin", "sout"])
 _Temp = namedtuple("shwtemp", ["label", "current", "high", "critical"])
 _Fan = namedtuple("sfan", ["label", "current"])
@@ -70,6 +68,7 @@ REASON_CODES = {
     "warming",
     "no_range",
     "switched_off",
+    "switch_unreadable",
     "psutil_missing",
 }
 
@@ -166,7 +165,7 @@ class _Clock:
 
 
 class _Machine:
-    """psutil as a Mac has it: every portable call, and of sensors_* only the battery.
+    """psutil with every common call, and of sensors_* only the battery.
 
     Four logical CPUs, each busy until its CORE_BUSY_UNTIL second and idle after,
     so a window over [0, 2] reads 75, 100, 0 and 25 per core and 50% in total, and
@@ -255,7 +254,9 @@ class _Machine:
         return (0.52, 1.0, 2.37)
 
     def virtual_memory(self):
-        return _Virtual(total=8 * GIB, available=2 * GIB, percent=75.0, used=5 * GIB, free=1 * GIB)
+        return _Virtual(
+            total=8 * GIB, available=2 * GIB, percent=75.0, used=5 * GIB, free=1 * GIB, buffers=1 * GIB, cached=3 * GIB
+        )
 
     def swap_memory(self):
         return _Swap(total=4 * GIB, used=1 * GIB, free=3 * GIB, percent=25.0, sin=0, sout=0)
@@ -350,7 +351,6 @@ def sysfs(tmp_path, monkeypatch):
     root = _build_hwmon(tmp_path / "hwmon")
     monkeypatch.setattr(status, "HWMON_ROOT", root)
     _no_battery_files(monkeypatch, tmp_path)
-    monkeypatch.setattr(status, "_host_platform", lambda: "linux")
     return root
 
 
@@ -410,9 +410,8 @@ def guarded_sysfs(sysfs, audit_guard):
     return opened
 
 
-def _manufacture(monkeypatch, clock, tmp_path, platform):
-    """A host with no sensor functions at all, naming itself as platform."""
-    monkeypatch.setattr(status, "_host_platform", lambda: platform)
+def _manufacture(monkeypatch, clock, tmp_path):
+    """A host with no sensor functions at all."""
     monkeypatch.setattr(status, "HWMON_ROOT", tmp_path / "no_sysfs_here")
     _no_battery_files(monkeypatch, tmp_path)
     stand_in = _Machine(clock)
@@ -536,10 +535,14 @@ class TestTheWholeFunctionRefusal:
 
         result = status.machine_vitals()
 
-        assert list(result) == ["ok", "reason", "detail"]
-        assert result["ok"] is False
-        assert result["reason"] == "switched_off"
-        assert "drone @skills on system_status" in result["detail"]
+        assert result == {
+            "ok": False,
+            "reason": "switched_off",
+            "detail": (
+                "Skill 'system_status' is switched OFF and takes no readings. "
+                "Turn it back on with: drone @skills on system_status"
+            ),
+        }
         assert untouchable.touched == []
 
     def test_switching_it_back_on_is_what_lifts_the_refusal(self, machine):
@@ -564,13 +567,15 @@ class TestTheWholeFunctionRefusal:
 
         result = status.machine_vitals()
 
-        assert list(result) == ["ok", "reason", "detail"]
-        assert result["ok"] is False
-        assert result["reason"] == "switched_off"
-        assert result["detail"] == (
-            f"The switch state {switch_handler.STATE_FILENAME} could not be read (SwitchStateUnreadable), "
-            f"so this skill counts as switched OFF; the error is in the host log."
-        )
+        assert result == {
+            "ok": False,
+            "reason": "switch_unreadable",
+            "detail": (
+                f"The switch state {switch_handler.STATE_FILENAME} could not be read (SwitchStateUnreadable), "
+                f"so this skill counts as switched OFF; the error is in the host log."
+            ),
+        }
+        assert status.machine_processes() == result
         assert untouchable.touched == []
         assert state_path.read_text(encoding="utf-8") == document
 
@@ -724,45 +729,24 @@ class TestTheFanRangeReadIsReadOnly:
         monkeypatch.setattr(status, "HWMON_ROOT", root)
         assert status.machine_vitals()["fan"]["fans"] == [RIGHT_SIDE_AT_ITS_FLOOR]
 
-    def test_off_linux_the_range_is_never_read(self, machine, guarded_sysfs, monkeypatch):
-        monkeypatch.setattr(status, "_host_platform", lambda: "freebsd14")
-        fan = status.machine_vitals()["fan"]
-        assert fan["reason"] == "no_range"
-        assert fan["current"] == 1290
-        assert fan["range"] is None
-        assert "not Linux" in fan["detail"]
-        assert guarded_sysfs == []
 
-
-class TestManufacturedMacOSAndWindows:
+class TestAPsutilWithoutSensorFunctions:
     """Pin 7: a missing sensor function reads as platform, never AttributeError."""
 
-    @pytest.mark.parametrize("platform", ["darwin", "win32"])
-    def test_the_world_has_no_sensor_functions(self, monkeypatch, clock, tmp_path, platform):
-        """Control: the stand-in really lacks them, the way psutil does there."""
-        stand_in = _manufacture(monkeypatch, clock, tmp_path, platform)
+    def test_the_world_has_no_sensor_functions(self, monkeypatch, clock, tmp_path):
+        """Control: the stand-in really lacks them."""
+        stand_in = _manufacture(monkeypatch, clock, tmp_path)
         assert hasattr(stand_in, "sensors_temperatures") is False
         assert hasattr(stand_in, "sensors_fans") is False
 
-    @pytest.mark.parametrize("platform", ["darwin", "win32"])
-    def test_temp_and_fan_answer_platform_while_the_rest_answer(self, monkeypatch, clock, tmp_path, platform):
-        _manufacture(monkeypatch, clock, tmp_path, platform)
+    def test_temp_and_fan_answer_platform_while_the_rest_answer(self, monkeypatch, clock, tmp_path):
+        _manufacture(monkeypatch, clock, tmp_path)
         result = status.machine_vitals()
         assert result["ok"] is True
         assert result["temp"] == _expected("temp", "platform")
         assert result["fan"] == _expected("fan", "platform")
         assert result["memory"]["total_bytes"] == 8 * GIB
         assert result["processes"]["count"] == 3
-
-    def test_windows_load_is_named_as_platform_not_drawn_as_its_emulated_zero(self, monkeypatch, clock, tmp_path):
-        stand_in = _manufacture(monkeypatch, clock, tmp_path, "win32")
-        monkeypatch.setattr(stand_in, "getloadavg", lambda: (0.0, 0.0, 0.0))
-        assert status.machine_vitals()["load"] == _expected("load", "platform")
-
-    def test_macos_load_is_read(self, monkeypatch, clock, tmp_path):
-        """Control: the same stand-in answers load when the host is not Windows."""
-        _manufacture(monkeypatch, clock, tmp_path, "darwin")
-        assert status.machine_vitals()["load"] == _expected("load", one=0.52, five=1.0, fifteen=2.37)
 
 
 class TestNoRange:
@@ -911,22 +895,6 @@ class TestTheCores:
         assert hasattr(machine, "cpu_freq") is False
         assert status.machine_vitals()["cpu"] == _expected("cpu", "warming", logical=4, physical=None)
 
-    def test_windows_cpu_times_carry_no_guest_or_iowait_and_still_read(self, monkeypatch, clock, tmp_path):
-        stand_in = _manufacture(monkeypatch, clock, tmp_path, "win32")
-
-        def _windows_times(percpu=False):
-            now = clock()
-            cpus = [
-                _WinCpuTimes(user=min(now, 1.0), system=0.0, idle=max(now - 1.0, 0.0), interrupt=0.0, dpc=0.0),
-                _WinCpuTimes(user=0.0, system=now / 8, idle=now * 3 / 4, interrupt=now / 8, dpc=0.0),
-            ]
-            return cpus if percpu else _WinCpuTimes(*(sum(field) for field in zip(*cpus)))
-
-        monkeypatch.setattr(stand_in, "cpu_times", _windows_times)
-        result = _two_reads(clock)
-        assert result["cpu"] == _expected("cpu", percent=37.5, window_s=2.0, cores=[50.0, 25.0], **CPU_FACTS)
-        assert result["load"] == _expected("load", "platform")
-
 
 class TestTheBattery:
     """Pin 10: charge, mains, state and time left as psutil gives them; absence named; lines only when published."""
@@ -947,7 +915,7 @@ class TestTheBattery:
         assert status.machine_vitals()["battery"] == _expected("battery", "no_sensor", detail=NO_BATTERY)
 
     def test_a_psutil_with_no_battery_function_is_platform(self, monkeypatch, clock, tmp_path):
-        _manufacture(monkeypatch, clock, tmp_path, "openbsd7")
+        _manufacture(monkeypatch, clock, tmp_path)
         monkeypatch.setattr(status, "psutil", _OpenBSDMachine(clock))
         assert status.machine_vitals()["battery"] == _expected("battery", "platform")
 
@@ -997,12 +965,6 @@ class TestTheBattery:
         assert battery["state"] == "unknown"
         assert "'Not charging'" in battery["detail"]
 
-    def test_off_linux_the_kernel_word_is_never_read(self, monkeypatch, clock, tmp_path):
-        stand_in = _manufacture(monkeypatch, clock, tmp_path, "darwin")
-        stand_in.battery = _Battery(percent=80.0, secsleft=POWER_TIME_UNLIMITED, power_plugged=True)
-        _lay_battery_status(tmp_path, "Discharging")
-        assert status.machine_vitals()["battery"]["state"] == "charging"
-
     def test_the_published_upower_lines_are_read(self, machine, tmp_path):
         _lay_upower(tmp_path, "[UPower]\n# the owner's lines\nPercentageLow=15\nPercentageCritical=3.5\n")
         battery = status.machine_vitals()["battery"]
@@ -1029,12 +991,6 @@ class TestTheBattery:
         assert (battery["low"], battery["critical"]) == (None, None)
         assert "could not be parsed (ValueError)" in battery["detail"]
         assert "twenty" not in battery["detail"]
-
-    def test_off_linux_upower_is_never_read(self, monkeypatch, clock, tmp_path):
-        _manufacture(monkeypatch, clock, tmp_path, "darwin")
-        _lay_upower(tmp_path, "[UPower]\nPercentageLow=15\n")
-        battery = status.machine_vitals()["battery"]
-        assert (battery["low"], battery["critical"]) == (None, None)
 
 
 class TestTheBatteryAction:

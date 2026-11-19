@@ -19,9 +19,9 @@ the depth behind it.
 | [init_and_install.md](init_and_install.md) | Every entry form of `install` and `init`, including the ones no help page names |
 | [scaffold_update.md](scaffold_update.md) | The update ritual, the manifest hash rule, seeds, `.updateignore` |
 | [doctor.md](doctor.md) | The seven groups, the flags, the provider wiring door, what it refuses |
-| [help_chat.md](help_chat.md) | The keyword model behind `aipass help`, and `aipass read` |
 | [trust_and_projects.md](trust_and_projects.md) | The enrolled hash, and `new` / `adopt` |
 | [baud_phone_face.md](baud_phone_face.md) | Fetch, verify, unpack, swap, point — and every refusal |
 | [admin_setup.md](admin_setup.md) | The admin lane: the five legs, the threat model, lighting it |
 | [shared_contract.md](shared_contract.md) | `shared/`, the part of this branch @spawn imports |
 | [probe_hygiene.md](probe_hygiene.md) | How this branch probes the system without mutating it |
+| [two_clis.md](two_clis.md) | One citizen on Claude Code, Codex and OpenCode: what each reads, the ritual spellings, the compact flow |

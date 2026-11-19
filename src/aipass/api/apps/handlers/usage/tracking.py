@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tracking.py
 # Description: Usage Tracking Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2025-11-16
-# Modified: 2026-10-28
+# Modified: 2026-11-17
 # =============================================
 
 """Usage Tracking Handler"""
@@ -18,16 +18,14 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from aipass.prax import logger
-
-from aipass.api.apps.handlers.module_root import module_file
+from aipass.prax import branch_state_root, logger
 
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.usage.cleanup import _write_json, store_lock
 
 MODULE_NAME = "tracking"
 DATA_FILE = "usage_tracker_data.json"  # Standard 3-file pattern
-API_JSON_DIR = module_file(__file__).parent.parent.parent.parent / "api_json"
+API_JSON_DIR = branch_state_root("api") / "api_json"
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 GENERATION_ENDPOINT = f"{OPENROUTER_BASE_URL}/generation"

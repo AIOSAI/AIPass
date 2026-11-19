@@ -4,7 +4,7 @@
 # Description: main()'s help/introspection/exit-code routing, route_command, and the json shim's contracts
 # Version: 1.3.0
 # Created: 2026-03-28
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -42,7 +42,7 @@ from aipass.commons.apps.commons import (
     route_command,
     ensure_database,
 )
-from aipass.cli.apps.modules.display import error as cli_error, command_failed
+from aipass.cli import error as cli_error, command_failed
 import aipass.commons.apps.handlers.json.json_handler as jh
 from aipass.commons.apps.modules import catchup as catchup_module
 from aipass.commons.apps.modules import commons_identity as identity_module
@@ -316,8 +316,8 @@ def test_missing_file_load_json_auto_creates(tmp_path, monkeypatch):
     assert result is not None and result["module_name"] == "ghost"
 
 
-def test_empty_file_recovery(tmp_path, monkeypatch):
-    """An empty_file should be detected as corrupt and recreated with defaults."""
+def test_empty_file_raises_and_is_left_untouched(tmp_path, monkeypatch):
+    """An empty_file is corrupt: the service raises InvalidDocument and never overwrites it."""
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "empty_file_test"))
 
     # The path is asked of the handler, not spelled here: a literal would drift with the service's layout.
@@ -325,13 +325,11 @@ def test_empty_file_recovery(tmp_path, monkeypatch):
     empty_path.parent.mkdir(parents=True, exist_ok=True)
     empty_path.write_text("", encoding="utf-8")
 
-    result = jh.ensure_json_exists("emptymod", "config")
-    assert result is True
-
-    loaded = jh.load_json("emptymod", "config")
-    assert loaded is not None
-    assert isinstance(loaded, dict)
-    assert loaded["module_name"] == "emptymod"
+    with pytest.raises(jh.InvalidDocument, match="not overwritten"):
+        jh.ensure_json_exists("emptymod", "config")
+    with pytest.raises(jh.InvalidDocument):
+        jh.load_json("emptymod", "config")
+    assert empty_path.read_text(encoding="utf-8") == ""
 
 
 def test_reimport_after_mock_preserves_function():
@@ -357,9 +355,6 @@ def test_discover_modules_returns_every_public_router_in_modules_dir():
     assert all(callable(m.handle_command) for m in found)
 
 
-_NO_SIGPIPE = "this platform has no SIGPIPE, and commons.py sets nothing where it is missing"
-
-
 def _child(code: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
     """Run code in a fresh interpreter: this process imported commons.py at collection."""
     return subprocess.run(
@@ -373,7 +368,6 @@ def _child(code: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.mark.skipif(not hasattr(signal, "SIGPIPE"), reason=_NO_SIGPIPE)
 def test_importing_the_entry_leaves_sigpipe_as_the_interpreter_set_it(tmp_path):
     """An import must not set SIG_DFL: in an xdist worker the first EPIPE would kill it silently."""
     code = (
@@ -390,7 +384,6 @@ def test_importing_the_entry_leaves_sigpipe_as_the_interpreter_set_it(tmp_path):
     assert after == before
 
 
-@pytest.mark.skipif(not hasattr(signal, "SIGPIPE"), reason=_NO_SIGPIPE)
 def test_the_started_program_restores_the_kernel_default(tmp_path):
     """Run as a program, commons still ends quietly on a pipe to head; the database init is stubbed."""
     code = (

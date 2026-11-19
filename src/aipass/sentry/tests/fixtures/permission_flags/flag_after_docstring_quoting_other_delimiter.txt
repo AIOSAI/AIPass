@@ -1,0 +1,2 @@
+"""Quotes ''' in prose."""
+cmd = "--dangerously-skip-permissions"

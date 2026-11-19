@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_check.py
 # Description: Host Portability Standards Checker Handler
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-09-12
-# Modified: 2026-11-06
+# Modified: 2026-11-14
 # =============================================
 
 """Host Portability Standards Checker Handler.
@@ -25,57 +25,27 @@ from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.aipass_standards.check_support import (
     collect_child_linenos,
     find_enclosing_function,
-    is_platform_guard,
     lines_in_guarded_blocks,
-    references_platform,
     tail_name,
 )
 
-# APPLIES_TO: its own corpus already reads tests/; a /proc read in a test is real.
+# APPLIES_TO: its own corpus already reads tests/; a missing binary in a test is real.
 APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "branch_level"
 
 STANDARD_NAME = "HOST_PORTABILITY"
 _BYPASS_KEY = "host_portability"
 
-#: Split so this file's own source cannot be read as an occurrence of the
-#: literal it hunts. Same device windows_compat_check uses for /tmp.
-_PROC_ROOT = "/" + "proc"
-_SYS_ROOT = "/" + "sys/"
-
 #: Directories this checker never walks, plus the two trees that are not source.
 _SKIP_DIRS = SOURCE_SKIP_DIRS
 
-#: The roots a branch's own code lives in: every macOS failure this standard exists to prevent was a test,
+#: The roots a branch's own code lives in: most failures this standard exists to prevent were tests,
 #: and skills keeps its built-in skills in lib/. Widened HERE only; the per-file audit corpus stays apps/.
 _CORPUS_ROOTS = ("apps", "tests", "lib")
 
-#: Calls that hand a string to the filesystem. A `/proc` literal anywhere else (a dict key, an argv element,
-#: a skipif reason) opens nothing.
-_FS_CONSTRUCTORS = frozenset({"open", "Path", "PosixPath", "PurePath"})
-_FS_METHODS = frozenset(
-    {
-        "readlink",
-        "listdir",
-        "stat",
-        "lstat",
-        "scandir",
-        "exists",
-        "isfile",
-        "isdir",
-        "read_text",
-        "read_bytes",
-        "open",
-        "iterdir",
-    }
-)
-
-#: Constructors whose result is a path object, not a filesystem touch.
-_PATH_CONSTRUCTORS = frozenset({"Path", "PosixPath", "PurePath"})
-
-#: Except types that make a missing /proc (or a missing binary) a handled fact
-#: rather than a crash. `lines_in_guarded_blocks` already covers OSError and
-#: the import family; FileNotFoundError and the broad catches are added here.
+#: Except types that make a missing binary a handled fact rather than a crash.
+#: `lines_in_guarded_blocks` already covers OSError and the import family;
+#: FileNotFoundError and the broad catches are added here.
 _FS_EXCEPT_TYPES = frozenset(
     {
         "FileNotFoundError",
@@ -91,11 +61,8 @@ _FS_EXCEPT_TYPES = frozenset(
 #: The pytest context that expects an exception; around a missing-file error it is a guard.
 RAISES = "raises"
 
-#: Calls that answer "is it there" - the other honest guard for a /proc read.
-_EXISTENCE_CALLS = frozenset({"exists", "is_file", "is_dir", "isfile", "isdir", "is_mount"})
-
 #: The ONLY argv[0] names read. Measured, not imagined: each one is absent on
-#: at least one host in the support matrix and present on the author's.
+#: at least one Linux host (a container, a CI runner, a desktop without that terminal).
 _NON_PORTABLE_BINARIES = frozenset(
     {
         "tmux",
@@ -106,8 +73,6 @@ _NON_PORTABLE_BINARIES = frozenset(
         "xfce4-terminal",
         "konsole",
         "xterm",
-        "wt",
-        "tasklist",
     }
 )
 
@@ -123,7 +88,7 @@ _SUBPROCESS_RUNNERS = frozenset({"run", "Popen", "check_output", "call", "check_
 PASS_THRESHOLD = 75
 
 #: Arm D: the generic classes whose __new__ picks a flavour. A concrete flavour
-#: (PosixPath, PureWindowsPath, ...) carries its own _flavour on every Python.
+#: (PosixPath, PurePosixPath, ...) carries its own _flavour on every Python.
 _FLAVOURLESS_BASES = frozenset({"Path", "PurePath"})
 _FLAVOUR_FIX = "below Python 3.12 Path.__new__ needs _flavour on the subclass (AttributeError on 3.10 and 3.11)"
 
@@ -141,7 +106,7 @@ _SCOPE_EDGES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
 #: one); AS_GIVEN is the host's own answer, which keeps a symlinked prefix.
 RESOLVED = "resolved"
 AS_GIVEN = "as given"
-#: Calls whose answer keeps the spelling the host hands out (macOS: /var, not /private/var).
+#: Calls whose answer keeps the spelling the host hands out (a home or temp dir reached through a symlink).
 _HOST_SPELLINGS = (
     "Path.home",
     "Path.cwd",
@@ -157,87 +122,8 @@ _CARRYING_METHODS = frozenset({"as_posix", "joinpath", "absolute", "with_name", 
 _PATH_COMPARISONS = frozenset({"relative_to", "is_relative_to", "startswith"})
 _SPELLING_FIX = (
     "one side passes through resolve(), the other is Path.home()/Path.cwd()/os.getcwd()/tempfile as given; "
-    "a symlinked prefix (macOS /var -> /private/var) makes them differ - resolve both"
+    "a symlinked prefix (a home or temp dir reached through a symlink) makes them differ - resolve both"
 )
-
-
-def _reads_platform(node: ast.expr) -> bool:
-    """True when the expression consults the host platform.
-
-    ``references_platform`` (check_support) knows ``sys.platform`` and ``os.name``; this adds the
-    ``platform`` module.
-    """
-    if references_platform(node):
-        return True
-    for child in ast.walk(node):
-        if isinstance(child, ast.Attribute) and isinstance(child.value, ast.Name):
-            if child.value.id == "platform" and child.attr in ("system", "machine", "mac_ver", "uname"):
-                return True
-    return False
-
-
-def _platform_predicate_names(tree: ast.Module) -> frozenset:
-    """Module-level functions that RETURN a platform answer.
-
-    ``_openat2_available()`` returns ``sys.platform == "linux" and ...``, so
-    ``if _openat2_available():`` is a platform guard wearing a name. Without
-    this, drone's guarded openat2 path reads as unguarded.
-    """
-    names: Set[str] = set()
-    for node in ast.iter_child_nodes(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        for child in ast.walk(node):
-            if isinstance(child, ast.Return) and child.value is not None and _reads_platform(child.value):
-                names.add(node.name)
-                break
-    return frozenset(names)
-
-
-def _is_platform_test(test: ast.expr, predicates: frozenset) -> bool:
-    """True for a platform comparison, a hasattr probe, or a named predicate."""
-    if is_platform_guard(test) or _reads_platform(test):
-        return True
-    for child in ast.walk(test):
-        if isinstance(child, ast.Call) and isinstance(child.func, ast.Name) and child.func.id in predicates:
-            return True
-    return False
-
-
-def _platform_branch_lines(tree: ast.Module, predicates: frozenset) -> Set[int]:
-    """Every line inside an ``if`` whose test reads the platform."""
-    lines: Set[int] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.If) and _is_platform_test(node.test, predicates):
-            lines.update(collect_child_linenos(node))
-    return lines
-
-
-def _platform_true_operands(tree: ast.Module, predicates: frozenset) -> Set[int]:
-    """``id()`` of every node in the ``X`` of an inline ``X if <platform test> else Y``.
-
-    Nodes, not lines: both operands usually share one line, and ``Y`` runs where the platform is not the one
-    tested, so it stays judged. A module-level constant has no function to read, so this is its only acquittal.
-    """
-    ids: Set[int] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.IfExp) and _is_platform_test(node.test, predicates):
-            ids.update(id(child) for child in ast.walk(node.body))
-    return ids
-
-
-def _function_tests_platform(func: ast.AST) -> bool:
-    """True when anything in this function branches on the platform.
-
-    Whole-function, not lines-before: guarded reads are written both ways (a platform return above the read,
-    an exists() return below it), and a before-only rule convicts half of one idiom.
-    """
-    for node in ast.walk(func):
-        test = getattr(node, "test", None)
-        if isinstance(node, (ast.If, ast.IfExp, ast.While, ast.Assert)) and test is not None:
-            if _reads_platform(test):
-                return True
-    return False
 
 
 def _handler_catches(handler: ast.ExceptHandler, wanted: frozenset) -> bool:
@@ -269,275 +155,13 @@ def _fs_except_lines(tree: ast.Module) -> Set[int]:
 def _expects_missing(context: ast.expr) -> bool:
     """``pytest.raises(X)`` where X is a missing-file error: the test passes on every host.
 
-    A /proc read or missing binary inside it raises where the host lacks them, which is what the test claims.
+    A missing binary inside it raises where the host lacks it, which is what the test claims.
     """
     if not (isinstance(context, ast.Call) and tail_name(context.func) == RAISES and context.args):
         return False
     expected = context.args[0]
     names = expected.elts if isinstance(expected, ast.Tuple) else [expected]
     return any(tail_name(name) in _FS_EXCEPT_TYPES | {"OSError"} for name in names)
-
-
-def _calls_existence(node: ast.AST) -> bool:
-    """True when the expression asks the filesystem whether something is there."""
-    for child in ast.walk(node):
-        if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
-            if child.func.attr in _EXISTENCE_CALLS:
-                return True
-    return False
-
-
-def _has_existence_exit(func: ast.AST) -> bool:
-    """True when the function bails out on an existence test."""
-    for node in ast.walk(func):
-        if not isinstance(node, ast.If) or not _calls_existence(node.test):
-            continue
-        for stmt in node.body:
-            for child in ast.walk(stmt):
-                if isinstance(child, (ast.Return, ast.Raise, ast.Continue)):
-                    return True
-    return False
-
-
-#: Hosts whose name in a skipif predicate means "the host that HAS the recipe".
-_RECIPE_HOSTS = frozenset({"linux", "darwin"})
-
-#: (owner, attribute) pairs whose patch forces the platform lane.
-_PLATFORM_ATTRS = frozenset({("sys", "platform"), ("os", "name"), ("platform", "system")})
-
-#: Filesystem primitives whose patch means the unit supplies the answer itself.
-_FS_PRIMITIVES = frozenset(
-    {"open", "listdir", "readlink", "scandir", "stat", "lstat", "iterdir", "read_text", "read_bytes", "exists", "Path"}
-)
-
-_PATCH_CALLS = frozenset({"setattr", "patch", "object"})
-
-
-def _mark_kind(mark: ast.expr) -> str:
-    """ "skip" or "skipif" for a pytest skip mark, called or bare, else ""."""
-    target = mark.func if isinstance(mark, ast.Call) else mark
-    if isinstance(target, ast.Attribute) and target.attr in ("skip", "skipif"):
-        return target.attr
-    return ""
-
-
-def _module_skip_marks(tree: ast.Module) -> Tuple[Dict[str, ast.expr], List[ast.expr]]:
-    """Module-level names bound to a skip mark, and the module's own ``pytestmark``.
-
-    ``_posix_only = pytest.mark.skipif(...)`` then ``@_posix_only`` is how many fleet guards are spelled.
-    """
-    aliases: Dict[str, ast.expr] = {}
-    module_marks: List[ast.expr] = []
-    for node in ast.iter_child_nodes(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        values = node.value.elts if isinstance(node.value, (ast.List, ast.Tuple)) else [node.value]
-        marks = [value for value in values if _mark_kind(value)]
-        names = [target.id for target in node.targets if isinstance(target, ast.Name)]
-        if not marks:
-            continue
-        for name in names:
-            if name == "pytestmark":
-                module_marks.extend(marks)
-            else:
-                aliases[name] = marks[0]
-    return aliases, module_marks
-
-
-def _skip_marks(decorators: Iterable[ast.expr], aliases: Dict[str, ast.expr]) -> List[ast.expr]:
-    """The skip marks among these decorators, aliases resolved."""
-    resolved = [aliases.get(dec.id, dec) if isinstance(dec, ast.Name) else dec for dec in decorators]
-    return [mark for mark in resolved if _mark_kind(mark)]
-
-
-def _names_recipe_host(predicate: ast.expr) -> bool:
-    """True when a skipif predicate names the host that HAS the recipe, or probes the recipe.
-
-    ``sys.platform == "win32"`` does not: it names one host that lacks the recipe, and macOS, which lacks it
-    too, runs the unit.
-    """
-    for child in ast.walk(predicate):
-        if isinstance(child, ast.Constant) and isinstance(child.value, str):
-            if child.value.lower() in _RECIPE_HOSTS or child.value.startswith((_PROC_ROOT, _SYS_ROOT)):
-                return True
-        if isinstance(child, ast.Call) and tail_name(child.func) == "which":
-            return True
-    return False
-
-
-def _is_guard_mark(mark: ast.expr) -> bool:
-    """An unconditional skip, or a skipif whose predicate names the recipe host."""
-    if _mark_kind(mark) == "skip":
-        return True
-    return isinstance(mark, ast.Call) and any(_names_recipe_host(arg) for arg in mark.args)
-
-
-def _guarded_unit_lines(tree: ast.Module, aliases: Dict[str, ast.expr], module_marks: List[ast.expr]) -> Set[int]:
-    """Every line of every unit (or class) whose skip names the recipe host."""
-    if any(_is_guard_mark(mark) for mark in module_marks):
-        return collect_child_linenos(tree)
-    lines: Set[int] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
-        if any(_is_guard_mark(mark) for mark in _skip_marks(node.decorator_list, aliases)):
-            lines.update(collect_child_linenos(node))
-    return lines
-
-
-def _patched_pair(call: ast.Call) -> Tuple[str, str]:
-    """(owner, attribute) a monkeypatch.setattr / patch / patch.object call replaces."""
-    if tail_name(call.func) not in _PATCH_CALLS or not call.args:
-        return "", ""
-    first = call.args[0]
-    if isinstance(first, ast.Constant) and isinstance(first.value, str):
-        parts = first.value.split(".")
-        return (parts[-2] if len(parts) > 1 else ""), parts[-1]
-    second = call.args[1] if len(call.args) > 1 else None
-    if isinstance(second, ast.Constant) and isinstance(second.value, str):
-        return tail_name(first), second.value
-    return "", ""
-
-
-def _manufactures_its_lane(unit: ast.AST) -> bool:
-    """True when the unit patches the platform, or the filesystem primitive a read reaches.
-
-    ai_mail test_wake.py replaces ``builtins.open``; aipass test_doctor.py
-    replaces the module's ``Path`` and forces ``os.name``. Neither asks the
-    host anything, so neither one's gate is what makes it portable.
-    """
-    for node in ast.walk(unit):
-        if not isinstance(node, ast.Call):
-            continue
-        owner, attr = _patched_pair(node)
-        if (owner, attr) in _PLATFORM_ATTRS or attr in _FS_PRIMITIVES:
-            return True
-    return False
-
-
-def _caller_guarded_functions(tree: ast.Module, platform_lines: Set[int]) -> frozenset:
-    """Functions whose EVERY call site in this module sits under a platform test.
-
-    One hop, not a full call graph. That is enough for the shape it exists for
-    - a Linux-only helper reached only from ``if <platform>:`` - and it cannot
-    launder the fallback twin, whose call site is the ``else`` leg.
-    """
-    call_lines: dict = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            call_lines.setdefault(node.func.id, []).append(node.lineno)
-    return frozenset(name for name, lines in call_lines.items() if lines and all(ln in platform_lines for ln in lines))
-
-
-def _is_proc_path(text: str) -> bool:
-    """``/proc`` itself or a path under it; ``/processed/...`` is an ordinary directory."""
-    return text == _PROC_ROOT or text.startswith(_PROC_ROOT + "/")
-
-
-def _proc_literal(node: ast.expr) -> str:
-    """The ``/proc...`` text of this node, or "" when it is not one."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str) and _is_proc_path(node.value):
-        return node.value
-    if isinstance(node, ast.JoinedStr) and node.values:
-        head = node.values[0]
-        if isinstance(head, ast.Constant) and isinstance(head.value, str) and _is_proc_path(head.value):
-            return head.value + "{...}"
-    return ""
-
-
-def _is_fs_call(node: ast.Call) -> bool:
-    """True when this call hands its arguments to the filesystem."""
-    func = node.func
-    if isinstance(func, ast.Name):
-        return func.id in _FS_CONSTRUCTORS
-    if isinstance(func, ast.Attribute):
-        return func.attr in _FS_METHODS or func.attr in _FS_CONSTRUCTORS
-    return False
-
-
-def _unwrap_path(node: ast.expr) -> ast.expr:
-    """The argument of ``Path(x)`` and its kin, or the node itself."""
-    if isinstance(node, ast.Call) and tail_name(node.func) in _PATH_CONSTRUCTORS and node.args:
-        return node.args[0]
-    return node
-
-
-def _proc_bindings(tree: ast.Module) -> Tuple[Dict[str, str], Set[int]]:
-    """Names bound ONLY to /proc literals, and the ids of those bound value nodes.
-
-    A name bound only to a /proc literal (``meminfo_path = "/proc/meminfo"`` then ``open(meminfo_path)``)
-    is read; a name bound to anything else anywhere in the file is dropped.
-    """
-    texts: Dict[str, str] = {}
-    values: Dict[str, List[int]] = {}
-    other: Set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-            continue
-        name = node.targets[0].id
-        text = _proc_literal(_unwrap_path(node.value))
-        if not text:
-            other.add(name)
-            continue
-        texts.setdefault(name, text)
-        values.setdefault(name, []).append(id(node.value))
-    bound = {name: text for name, text in texts.items() if name not in other}
-    return bound, {value for name in bound for value in values[name]}
-
-
-def _fs_operands(node: ast.Call) -> List[ast.expr]:
-    """The arguments a filesystem call reads, plus the receiver of a method call."""
-    operands: List[ast.expr] = list(node.args) + [kw.value for kw in node.keywords]
-    if isinstance(node.func, ast.Attribute):
-        operands.append(node.func.value)
-    return operands
-
-
-def _proc_nominations(tree: ast.Module, guarded: Set[int]) -> List[Tuple[int, str]]:
-    """Every ``/proc`` literal that reaches a filesystem call, directly or through a name.
-
-    A ``Path(...)`` bound to a name is judged where the name is USED, not where it is built: building a
-    Path touches nothing. A call whose ``id()`` is in ``guarded`` (:func:`_platform_true_operands`) is not nominated.
-    """
-    bound, bound_values = _proc_bindings(tree)
-    found: List[Tuple[int, str]] = []
-    seen: Set[Tuple[int, str]] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or id(node) in bound_values or id(node) in guarded or not _is_fs_call(node):
-            continue
-        for arg in _fs_operands(node):
-            text = _proc_literal(arg) or (bound.get(arg.id, "") if isinstance(arg, ast.Name) else "")
-            key = (arg.lineno, text)
-            if not text or key in seen:
-                continue
-            seen.add(key)
-            found.append(key)
-    return found
-
-
-def _proc_violations(tree: ast.Module, skipped: Set[int], predicates: frozenset) -> List[Tuple[int, str]]:
-    """Arm A: unguarded reads of the Linux-only /proc filesystem."""
-    nominations = _proc_nominations(tree, _platform_true_operands(tree, predicates))
-    if not nominations:
-        return []
-
-    platform_lines = _platform_branch_lines(tree, predicates)
-    handled = lines_in_guarded_blocks(tree) | _fs_except_lines(tree) | platform_lines
-    caller_guarded = _caller_guarded_functions(tree, platform_lines)
-
-    violations: List[Tuple[int, str]] = []
-    for lineno, text in nominations:
-        if lineno in handled or lineno in skipped:
-            continue
-        enclosing = find_enclosing_function(tree, lineno)
-        if enclosing is not None:
-            if _function_tests_platform(enclosing) or _has_existence_exit(enclosing):
-                continue
-            if enclosing.name in caller_guarded:
-                continue
-        preview = text if len(text) <= 44 else text[:41] + "..."
-        violations.append((lineno, f"reads {preview!r} - {_PROC_ROOT} is Linux-only (absent on macOS and Windows)"))
-    return violations
 
 
 def _subprocess_aliases(tree: ast.Module) -> frozenset:
@@ -590,7 +214,7 @@ def _which_guarded_names(func: ast.AST) -> Set[str]:
     return probed
 
 
-def _binary_violations(tree: ast.Module, predicates: frozenset) -> Tuple[List[Tuple[int, str]], int]:
+def _binary_violations(tree: ast.Module) -> Tuple[List[Tuple[int, str]], int]:
     """Arm B: a non-portable binary run with nothing standing behind it.
 
     Returns the violations and the count of sites that acquitted, so the
@@ -607,8 +231,7 @@ def _binary_violations(tree: ast.Module, predicates: frozenset) -> Tuple[List[Tu
     if not nominations:
         return [], 0
 
-    platform_lines = _platform_branch_lines(tree, predicates)
-    handled = lines_in_guarded_blocks(tree) | _fs_except_lines(tree) | platform_lines
+    handled = lines_in_guarded_blocks(tree) | _fs_except_lines(tree)
 
     violations: List[Tuple[int, str]] = []
     acquitted = 0
@@ -617,101 +240,18 @@ def _binary_violations(tree: ast.Module, predicates: frozenset) -> Tuple[List[Tu
             acquitted += 1
             continue
         enclosing = find_enclosing_function(tree, lineno)
-        if enclosing is not None:
-            if name in _which_guarded_names(enclosing) or _function_tests_platform(enclosing):
-                acquitted += 1
-                continue
+        if enclosing is not None and name in _which_guarded_names(enclosing):
+            acquitted += 1
+            continue
         violations.append(
             (
                 lineno,
-                f"runs {name!r} with no shutil.which({name!r}) probe, platform test or "
+                f"runs {name!r} with no shutil.which({name!r}) probe or "
                 "FileNotFoundError handler - a missing binary raises out of exec, "
                 "so check=False does not help",
             )
         )
     return violations, acquitted
-
-
-#: A unit NAMED for Linux. The other half (non_linux, off_linux, not_linux) is
-#: the portable case and is excluded by name.
-_LINUX_NAME = re.compile(r"(?:^|_)linux(?:_|$)")
-_OTHER_HALF_NAME = re.compile(r"(?:non|off|not)_linux")
-
-#: A reason saying the recipe is Linux's: "Linux-only", or Linux beside a
-#: Linux-only recipe word. "Linux + macOS only by contract" (hooks, ps-based)
-#: names Linux and no such recipe, and its Windows-only gate is correct.
-_LINUX_ONLY_PROSE = re.compile(r"linux[- ]only|only on linux", re.IGNORECASE)
-_LINUX_WORD = re.compile(r"linux", re.IGNORECASE)
-_RECIPE_PROSE = re.compile(
-    "|".join(re.escape(word) for word in (_PROC_ROOT, _SYS_ROOT, "systemd", "systemctl")), re.IGNORECASE
-)
-
-
-def _reason_text(mark: ast.expr) -> str:
-    """Every string in a mark's ``reason=``, joined."""
-    if not isinstance(mark, ast.Call):
-        return ""
-    reasons = [kw.value for kw in mark.keywords if kw.arg == "reason"]
-    return " ".join(
-        child.value
-        for reason in reasons
-        for child in ast.walk(reason)
-        if isinstance(child, ast.Constant) and isinstance(child.value, str)
-    )
-
-
-def _declares_linux_recipe(name: str, gates: List[ast.expr]) -> bool:
-    """True when the unit's name, or its gate's reason, says the recipe is Linux's."""
-    if _LINUX_NAME.search(name) and not _OTHER_HALF_NAME.search(name):
-        return True
-    for gate in gates:
-        reason = _reason_text(gate)
-        if _LINUX_ONLY_PROSE.search(reason) or (_LINUX_WORD.search(reason) and _RECIPE_PROSE.search(reason)):
-            return True
-    return False
-
-
-def _test_units(tree: ast.Module) -> List[Tuple[ast.AST, List[ast.expr]]]:
-    """Each test function with the decorators it inherits from its class."""
-    units: List[Tuple[ast.AST, List[ast.expr]]] = []
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef):
-            units.extend(
-                (member, list(getattr(member, "decorator_list", [])) + node.decorator_list) for member in node.body
-            )
-        else:
-            units.append((node, list(getattr(node, "decorator_list", []))))
-    return [
-        (unit, decorators)
-        for unit, decorators in units
-        if isinstance(unit, (ast.FunctionDef, ast.AsyncFunctionDef)) and unit.name.startswith("test")
-    ]
-
-
-def _gate_violations(
-    tree: ast.Module, aliases: Dict[str, ast.expr], module_marks: List[ast.expr]
-) -> List[Tuple[int, str]]:
-    """Arm C: a platform skip naming only Windows, on a unit that declares a Linux recipe."""
-    violations: List[Tuple[int, str]] = []
-    for unit, decorators in _test_units(tree):
-        marks = _skip_marks(decorators, aliases) + module_marks
-        if any(_is_guard_mark(mark) for mark in marks):
-            continue
-        gates: List[ast.expr] = [
-            mark for mark in marks if isinstance(mark, ast.Call) and any(_reads_platform(a) for a in mark.args)
-        ]
-        name = getattr(unit, "name", "")
-        if not gates or not _declares_linux_recipe(name, gates) or _manufactures_its_lane(unit):
-            continue
-        violations.append(
-            (
-                gates[0].lineno,
-                f"{name} is skipped where the predicate names Windows, but declares a Linux recipe - "
-                "macOS runs it and lacks the recipe too; skip where the recipe is absent "
-                "(sys.platform != 'linux') and name the recipe in the reason",
-            )
-        )
-    return violations
 
 
 def _flavourless_subclasses(tree: ast.Module) -> List[Tuple[int, str]]:
@@ -1027,38 +567,6 @@ def _empty_git_markers(tree: ast.Module) -> List[Tuple[int, str]]:
     return violations
 
 
-#: Arm I: a unit whose own source says case or fold is testing the folding on purpose.
-_CASE_WORDS = re.compile(r"case|fold")
-_CASE_TWIN_FIX = "a case-folding host (macOS, Windows) makes them one directory - give them distinct names"
-
-
-def _case_twin_rows(func: ast.AST) -> List[Tuple[int, str]]:
-    """``x / "aipass"`` and ``x / "AIPass"`` in one function body: the same parent, names equal under casefold."""
-    rows: List[Tuple[int, str]] = []
-    first: Dict[Tuple[str, str], str] = {}
-    for node in _own_nodes(func):
-        if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
-            continue
-        if not (isinstance(node.right, ast.Constant) and isinstance(node.right.value, str)):
-            continue
-        name = node.right.value
-        seen = first.setdefault((ast.unparse(node.left), name.casefold()), name)
-        if seen != name:
-            rows.append((node.lineno, f"`{ast.unparse(node)}` beside {seen!r} - {_CASE_TWIN_FIX}"))
-    return rows
-
-
-def _case_twins(tree: ast.Module) -> List[Tuple[int, str]]:
-    """Arm I: two sibling path literals that differ only by case, in a unit that never says it means it."""
-    violations: List[Tuple[int, str]] = []
-    for func in ast.walk(tree):
-        if isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            rows = _case_twin_rows(func)
-            if rows and not _CASE_WORDS.search(ast.unparse(func).lower()):
-                violations.extend(rows)
-    return violations
-
-
 def _declared_floor(branch_root: Path) -> Tuple[int, int] | None:
     """The nearest pyproject.toml's ``requires-python >=3.N``; None when none declares one.
 
@@ -1100,7 +608,7 @@ def _relative(path: Path, branch_root: Path) -> str:
 
 
 def scan_file(file_path: str, floor: Tuple[int, int] | None = None) -> Tuple[List[Tuple[int, str]], int]:
-    """Every arm (A to I) over one file. Returns (violations, acquitted binary sites).
+    """Every arm (B, D to H) over one file. Returns (violations, acquitted binary sites).
 
     Arm G runs only with the branch's declared ``floor``; arm H only outside a test tree, whose fixtures plant .git.
 
@@ -1118,17 +626,11 @@ def scan_file(file_path: str, floor: Tuple[int, int] | None = None) -> Tuple[Lis
         logger.info("[host_portability] skipped %s: %s", path, exc)
         return [], 0
 
-    predicates = _platform_predicate_names(tree)
-    aliases, module_marks = _module_skip_marks(tree)
-    violations = _proc_violations(tree, _guarded_unit_lines(tree, aliases, module_marks), predicates)
-    binary_violations, acquitted = _binary_violations(tree, predicates)
-    violations.extend(binary_violations)
-    violations.extend(_gate_violations(tree, aliases, module_marks))
+    violations, acquitted = _binary_violations(tree)
     violations.extend(_flavourless_subclasses(tree))
     violations.extend(_mixed_spelling_comparisons(tree))
     violations.extend(_unanswered_git_identity(tree))
     violations.extend(_version_bound_imports(tree, floor))
-    violations.extend(_case_twins(tree))
     if not is_test_path(str(path)):
         violations.extend(_empty_git_markers(tree))
     violations.sort(key=lambda row: row[0])
@@ -1155,7 +657,7 @@ def _violation_items(rows: Iterable[Tuple[str, int, str]]) -> List[Dict]:
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a branch for host assumptions: Linux-only OS calls, a 3.12-only Path subclass, an empty .git as a repo."""
+    """Check a branch for host assumptions: a missing binary, a 3.12-only Path subclass, an empty .git as a repo."""
     branch_root = Path(branch_path)
 
     if is_bypassed(branch_path, _BYPASS_KEY, bypass_rules=bypass_rules):
@@ -1209,7 +711,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
             {
                 "name": "Host portability",
                 "passed": True,
-                "message": f"No unguarded {_PROC_ROOT} reads or non-portable binaries in {len(files)} files",
+                "message": f"No host assumptions in {len(files)} files",
             }
         )
 
@@ -1220,7 +722,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
                 "passed": True,
                 "message": (
                     f"{acquitted_total} call(s) to a non-portable binary already carry a "
-                    "shutil.which() probe, a platform test or a FileNotFoundError handler "
+                    "shutil.which() probe or a FileNotFoundError handler "
                     "- context, not scored"
                 ),
             }

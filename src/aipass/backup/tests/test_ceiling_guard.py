@@ -1,15 +1,15 @@
 # =================== META ====================
 # Name: test_ceiling_guard.py
 # Description: Tests for the per-run size/file-count ceiling (runaway guard)
-# Version: 1.0.6
+# Version: 1.1.0
 # Created: 2026-08-20
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/scan/ceiling.py and the per-run size/file-count ceiling."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(ruff) — that scan/ceiling and modules/snapshot, versioned, all parse and import
+# sentry: no-test-needed(ruff) — that scan/ceiling and modules/snapshot, all parse and import
 # sentry: no-test-needed(documentation) — that check_ceiling and breach methods carry docstrings
 # sentry: no-test-needed(constant) — DEFAULT_MAX_TOTAL_GB and DEFAULT_MAX_FILES values (the latter tested as the limit)
 # sentry: no-test-needed(stdlib) — the byte count os.path.getsize() returns; its OSError skip is tested here
@@ -20,14 +20,13 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.backup.apps.handlers.path.builder import build_snapshot_path, build_versioned_store
+from aipass.backup.apps.handlers.path.builder import build_snapshot_path
 from aipass.backup.apps.handlers.scan import ceiling
 from aipass.backup.apps.handlers.scan.ceiling import DEFAULT_MAX_FILES, check_ceiling
 from aipass.backup.apps.modules import all as all_mod
 from aipass.backup.apps.modules import display
 from aipass.backup.apps.modules.all import handle_command
 from aipass.backup.apps.modules.snapshot import run_snapshot
-from aipass.backup.apps.modules.versioned import run_versioned
 
 
 def _files(tmp_path: Path, rel_paths: list[str], size: int = 8) -> list[tuple[str, str]]:
@@ -231,52 +230,24 @@ class TestRunRefusal:
         assert dest.exists() is True
         assert list(dest.rglob("*")) == []
 
-    def test_versioned_refuses_and_writes_no_store(self, tmp_path: Path) -> None:
-        """run_versioned refuses over-ceiling and creates no versioned content."""
-
-        root = self._project(tmp_path)
-        result = run_versioned(str(root), show_panels=False)
-
-        assert result.success is False
-        assert result.files_copied == 0
-
-        # Versioned refuses BEFORE it scaffolds, so unlike snapshot the store is never created.
-        store = build_versioned_store(str(root))
-        assert store.exists() is False
-
-    def test_versioned_refuses_a_pre_scanned_set(self, tmp_path: Path) -> None:
-        """The 'all' path hands versioned a pre-scanned list — still measured."""
-
-        root = self._project(tmp_path)
-        pre = [(str(p), str(p.relative_to(root))) for p in root.rglob("*") if p.is_file() and ".backup" not in p.parts]
-        result = run_versioned(str(root), show_panels=False, pre_scanned=pre)
-
-        assert result.success is False
-
-        store = build_versioned_store(str(root))
-        assert store.exists() is False
-
-    def test_all_refuses_before_either_store_is_written(self, tmp_path: Path) -> None:
-        """'all' writes nothing on breach — belt and braces with the sub-guards."""
+    def test_all_refuses_before_the_store_is_written(self, tmp_path: Path) -> None:
+        """'all' writes nothing on breach — belt and braces with snapshot's own guard."""
 
         root = self._project(tmp_path)
         assert handle_command("all", [str(root), "--quiet"]) is True
 
-        # 'all' refuses on its shared scan: versioned never scaffolded, snapshot dir present and empty.
-        store = build_versioned_store(str(root))
+        # 'all' refuses on its shared scan: snapshot dir present and empty.
         dest = build_snapshot_path(str(root))
-        assert store.exists() is False
         assert dest.exists() is True
         assert list(dest.rglob("*")) == []
 
     def test_all_refuses_without_re_walking_the_tree(self, tmp_path: Path) -> None:
-        """'all' refuses on its own shared scan and never calls run_snapshot or run_versioned."""
+        """'all' refuses on its own shared scan and never calls run_snapshot."""
         root = self._project(tmp_path)
-        with patch.object(all_mod, "run_snapshot") as snap, patch.object(all_mod, "run_versioned") as ver:
+        with patch.object(all_mod, "run_snapshot") as snap:
             assert all_mod.handle_command("all", [str(root), "--quiet"]) is True
 
         snap.assert_not_called()
-        ver.assert_not_called()
 
     def test_under_ceiling_still_backs_up(self, tmp_path: Path) -> None:
         """The guard refuses runaways, not ordinary projects."""
@@ -294,7 +265,7 @@ class TestSharedScanSeeding:
     def test_first_run_seeds_ignore_before_the_shared_scan(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A project's FIRST 'all' run keeps seed-excluded artifacts out of the versioned store."""
+        """A project's FIRST 'all' run keeps seed-excluded artifacts out of the snapshot store."""
 
         root = tmp_path / "rustproj"
         (root / "app" / "src-tauri" / "target" / "debug" / "deps").mkdir(parents=True)
@@ -310,12 +281,12 @@ class TestSharedScanSeeding:
         with patch("aipass.backup.apps.modules.drive_sync.run_drive_sync", return_value={}):
             assert handle_command("all", [str(root), "--quiet"]) is True
 
-        # What is true today: --quiet does not reach the two modes (all.py passes them no show_panels),
-        # so both headers print. The day it does, this goes red and is rewritten to [].
-        assert titles == ["Backup — Snapshot", "Backup — Versioned"]
-        store = build_versioned_store(str(root))
+        # What is true today: --quiet does not reach snapshot (all.py passes it no show_panels),
+        # so its header prints. The day it does, this goes red and is rewritten to [].
+        assert titles == ["Backup — Snapshot"]
+        store = build_snapshot_path(str(root))
         leaked = list(store.rglob("*rcgu*")) if store.exists() else []
-        assert leaked == [], f"seed-excluded artifacts reached the versioned store: {leaked}"
+        assert leaked == [], f"seed-excluded artifacts reached the snapshot store: {leaked}"
 
 
 # =============================================

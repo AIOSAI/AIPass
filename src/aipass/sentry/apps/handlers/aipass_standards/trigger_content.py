@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trigger_content.py
 # Description: Trigger Standards Content Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -36,14 +36,19 @@ def get_trigger_standards() -> str:
         "[bold cyan]IMPORT PATTERNS:[/bold cyan]",
         "",
         "  [yellow]Standard:[/yellow]",
-        "  [dim]from aipass.trigger.apps.modules.core import trigger[/dim]",
+        "  [dim]from aipass.trigger import trigger[/dim]",
         "  [dim]trigger.fire('event_name', key=value)[/dim]",
+        "  [dim]A path under aipass.trigger.apps is convicted by front_door.[/dim]",
         "",
         "  [yellow]Lazy-load (for circular import safety):[/yellow]",
         "  [dim]try:[/dim]",
-        "  [dim]    from aipass.trigger.apps.modules.core import trigger[/dim]",
+        "  [dim]    from aipass.trigger import trigger[/dim]",
         "  [dim]except ImportError:[/dim]",
         "  [dim]    trigger = None[/dim]",
+        "",
+        "  [yellow]Silence the bus in another branch's test (the one way):[/yellow]",
+        "  [dim]from aipass.trigger import Trigger[/dim]",
+        "  [dim]with patch.object(Trigger, 'fire'): ...[/dim]",
         "",
         "[bold cyan]EVENT NAMING:[/bold cyan]",
         "",

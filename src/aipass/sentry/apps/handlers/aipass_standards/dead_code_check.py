@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dead_code_check.py
 # Description: Dead Code Standards Checker Handler
-# Version: 1.5.0
+# Version: 1.8.2
 # Created: 2026-03-22
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Dead Code Standards Checker Handler
@@ -11,15 +11,17 @@
 Reference: dead_code.md
 """
 
+import ast
 import re
 from pathlib import Path, PurePath
 
 from aipass.prax import logger
+from aipass.sentry.apps.handlers.aipass_standards.check_support import parse, read_text
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
 from aipass.sentry.apps.handlers.bypass.ignore_handler import is_sentry_ignored, load_ignore_entries
 from aipass.sentry.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir, is_disabled_file
-from aipass.sentry.apps.handlers.aipass_standards.modules_check import check_door
+from aipass.sentry.apps.handlers.aipass_standards.modules_check import is_second_door
 
 # APPLIES_TO: pytest calls test functions by discovery, so every one would read unreferenced.
 APPLIES_TO = "production"
@@ -37,17 +39,15 @@ _INSTALL_CONFIG = Path(".aipass") / "hooks.json"
 _INSTALL_SOURCE = Path("src") / "aipass"
 
 
-def _is_shaped_door(py_file: Path) -> bool:
-    """Whether this is an ``apps/modules/door_*.py`` that passes Door shape (DPLAN-0404).
+def _is_second_door(py_file: Path) -> bool:
+    """Whether front_door already convicts this file as a second door (a retired pattern).
 
-    A door is called from other branches, never its own, so its branch's corpus
-    never names it; its shape is its reference, the way the entry point's name is.
-    A ``door_`` file that fails Door shape is read like any other module.
+    A second door exists to hand names to other branches, so its own branch never names it: that is
+    the same defect front_door reports, and one defect gets one report.
     """
-    if not (py_file.name.startswith("door_") and py_file.parent.name == "modules"):
+    if py_file.parent.name != "modules":
         return False
-    content = py_file.read_text(encoding="utf-8", errors="ignore")
-    return check_door(content, py_file.as_posix())["passed"]
+    return is_second_door(py_file.as_posix(), py_file.read_text(encoding="utf-8", errors="ignore"))
 
 
 def _should_skip(path: Path, branch_root: Path, ignore_entries: list) -> bool:
@@ -116,6 +116,50 @@ def _named_in_config(import_path: str, config_text: str) -> bool:
     return re.search(rf"(?<![\w.]){re.escape(import_path)}(?!\w)", config_text) is not None
 
 
+def _string_value(node: ast.AST, constants: dict[str, str]) -> str | None:
+    """A string literal, one of the module's own string constants, or an f-string over them, else None."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return constants.get(node.id)
+    if not isinstance(node, ast.JoinedStr):
+        return None
+    pieces = []
+    for part in node.values:
+        if isinstance(part, ast.FormattedValue) and isinstance(part.value, ast.Name) and part.format_spec is None:
+            pieces.append(constants.get(part.value.id))
+        else:
+            pieces.append(_string_value(part, constants))
+    return None if None in pieces else "".join(pieces)
+
+
+def door_served(branch_root: Path) -> frozenset[str]:
+    """Dotted module paths the branch's door table serves: string values of a dict in its top ``__init__.py``.
+
+    Other branches and shell scripts reach a handler through this table alone, so no import names it.
+    """
+    door = branch_root / "__init__.py"
+    source = read_text(door, tag="dead_code") if door.is_file() else None
+    tree = parse(source, tag="dead_code") if source is not None else None
+    constants: dict[str, str] = {}
+    served: set[str] = set()
+    for node in tree.body if tree is not None else []:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            target, value = node.target, node.value
+        else:
+            continue
+        if not isinstance(target, ast.Name):
+            continue
+        text = _string_value(value, constants)
+        if text is not None:
+            constants[target.id] = text
+        elif isinstance(value, ast.Dict):
+            served.update(v for v in (_string_value(item, constants) for item in value.values) if v)
+    return frozenset(served)
+
+
 def _build_import_path(py_file: Path, branch_path: Path, branch_name: str) -> str:
     """Build the dotted import path for a file."""
     try:
@@ -155,8 +199,9 @@ def _check_file_used(
     source_text: str,
     entry_point_name: str,
     config_text: str = "",
+    served: frozenset[str] = frozenset(),
 ) -> bool:
-    """Determine if a .py file is referenced anywhere in the branch source."""
+    """Determine if a .py file is referenced anywhere in the branch source, or served by the branch's door table."""
     stem = py_file.stem
 
     if py_file.name == "__init__.py":
@@ -165,7 +210,7 @@ def _check_file_used(
     if py_file.name == f"{entry_point_name}.py" and py_file.parent.name == "apps":
         return True
 
-    if _is_shaped_door(py_file):
+    if _is_second_door(py_file):
         return True
 
     for suffix_pattern in ("_check", "_content"):
@@ -175,7 +220,7 @@ def _check_file_used(
             return True
 
     import_path = _build_import_path(py_file, branch_path, branch_name)
-    if import_path in source_text:
+    if import_path in source_text or import_path in served:
         return True
 
     try:
@@ -234,7 +279,7 @@ def _branch_relative(target: Path, branch_root: Path) -> str:
 
 
 def reported_path(path: PurePath, root: PurePath) -> str:
-    """The path from root as the finding prints it: ``handlers/x.py``, forward slashes on every host.
+    """The path from root as the finding prints it: ``handlers/x.py``.
 
     Raises:
         ValueError: path is not below root.
@@ -311,21 +356,23 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
 
     source_text = _collect_source_text(apps_dir, bp, ignore_entries)
     config_text = _project_config_text(bp)
+    served = door_served(bp)
 
     total_files = len(targets)
     dead_files: list[str] = []
 
     for target in targets:
-        used = _check_file_used(target, bp, branch_name, source_text, entry_point_name, config_text)
+        used = _check_file_used(target, bp, branch_name, source_text, entry_point_name, config_text, served)
         if not used:
             try:
                 rel = reported_path(target, apps_dir)
             except ValueError:
                 logger.info("File %s not relative to apps dir, using full path", target)
                 rel = target.as_posix()
-            # The rule is matched against the BRANCH-relative path (apps/...), the spelling
-            # every other checker is handed and dead_rules reads.
-            if not is_bypassed(_branch_relative(target, bp), "dead_code", bypass_rules=bypass_rules):
+            # The rule is matched against the BRANCH-relative path (apps/...), the spelling every other checker
+            # is handed and dead_rules reads. A dead file has no line or function: its site is FILE_SCOPE.
+            site = _branch_relative(target, bp)
+            if not is_bypassed(site, "dead_code", bypass_rules=bypass_rules, name=FILE_SCOPE):
                 dead_files.append(rel)
 
     referenced_files = total_files - len(dead_files)

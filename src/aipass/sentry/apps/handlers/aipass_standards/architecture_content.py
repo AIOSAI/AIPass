@@ -48,7 +48,7 @@ def get_architecture_standards() -> str:
         "",
         "  1. [bold]Handlers CANNOT import modules[/bold] (breaks transportability)",
         "     [green]✓[/green] Modules import handlers",
-        "     [green]✓[/green] Handlers import handlers (same domain package)",
+        "     [green]✓[/green] Handlers import handlers (any package in the same branch)",
         "     [red]✗[/red] Handlers import modules (circular dependency)",
         "",
         "  2. [bold red]CRITICAL:[/bold red] [bold]Foundation services CANNOT import each other[/bold]",
