@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_screen_lock.py
 # Description: Tests for the screen_lock skill — lock paths, the lock-state read, honest failure, doctrine
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-08-14
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for lib/screen_lock/handler.py: lock_screen, lock_state, the off switch and the run envelope."""
@@ -737,13 +737,27 @@ class TestSelfContained:
     def test_importing_the_skill_pulls_in_no_third_party_module(self):
         """Imported for real in a clean interpreter: a source grep would pass on a lazy import."""
         src_root = Path(__file__).resolve().parents[5]
+        # stdlib_module_names misses platform-named stdlib (_sysconfigdata_*): a module's home decides,
+        # the stdlib directories minus site-packages, which a venv nests inside platstdlib.
         code = (
             "import sys\n"
             "before = set(sys.modules)\n"
             "from aipass.skills.lib.screen_lock import handler\n"
             "handler.get_actions()\n"
             "tops = {m.split('.')[0] for m in set(sys.modules) - before}\n"
-            "print(','.join(sorted(t for t in tops if t not in sys.stdlib_module_names and t != 'aipass')))\n"
+            "import os, sysconfig\n"
+            "paths = sysconfig.get_paths()\n"
+            "stdlib = tuple(os.path.realpath(paths[k]) + os.sep for k in ('stdlib', 'platstdlib'))\n"
+            "site = tuple(os.path.realpath(paths[k]) + os.sep for k in ('purelib', 'platlib'))\n"
+            "def is_stdlib(name):\n"
+            "    if name in sys.stdlib_module_names:\n"
+            "        return True\n"
+            "    origin = getattr(sys.modules[name], '__file__', None)\n"
+            "    if not origin:\n"
+            "        return False\n"
+            "    origin = os.path.realpath(origin)\n"
+            "    return origin.startswith(stdlib) and not origin.startswith(site)\n"
+            "print(','.join(sorted(t for t in tops if t != 'aipass' and not is_stdlib(t))))\n"
         )
         env = {**os.environ, "PYTHONPATH": str(src_root)}
 
