@@ -18,6 +18,8 @@ PyPI version — not the changelog header.
 
 ### Changed
 
+- **hooks: the engine's per-handler budget is removed** (2026-11-19). The engine kept its own fire count for a hook that declared `max_per_session`. Compass recall was its only user, and the handler's own cap was always reached first, so the engine's count never decided anything; when it did cut in, it froze the handler's message spacing. `max_per_session` stays in `hooks.json` as the handler's cap.
+
 - **devpulse: one shared word no longer surfaces a Compass decision** (2026-11-19). Recall scored a decision as relevant when the prompt shared a single uncommon word with it ("console", "remaining"), which cleared the surfacing threshold. Relevance is now m / (4 + m): one shared word scores 0.2 and stays silent, two score 0.33 and may surface, so the unchanged threshold of 0.3 means "at least two uncommon words in common". Spacing, cooldown and the cap are as they were.
 
 - **ci: the Docker image is published by hand, not by every release** (2026-11-19). A version tag fired the image build beside PyPI, and a slow package mirror or an installer fault then marked the release red. A running AIPass updates itself from the remote, so a release needs no new image; the workflow runs from the Actions tab when one is wanted.
