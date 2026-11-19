@@ -799,7 +799,10 @@ def _check_community() -> List[CheckResult]:
     return results
 
 
-_NO_PASSPORT = ("no readable passport", "Run 'aipass doctor --fix'")
+_UNSEATED = {
+    "no_passport": ("no readable passport", "Run 'aipass doctor --fix'"),
+    "no_seed": ("no passport seed", "Run 'aipass doctor --fix'"),
+}
 
 
 def _check_structure() -> List[CheckResult]:
@@ -855,8 +858,8 @@ def _check_structure() -> List[CheckResult]:
         reg_issues = check_registry_consistency(reg_path, agents, project_root=project_root)
         if reg_issues:
             for issue in reg_issues:
-                if issue.problem == "no_passport":
-                    results.append(CheckResult(f"registry: {issue.branch_name}", GLYPH_FAIL, *_NO_PASSPORT))
+                if issue.problem in _UNSEATED:
+                    results.append(CheckResult(f"registry: {issue.branch_name}", GLYPH_FAIL, *_UNSEATED[issue.problem]))
                     continue
                 glyph = GLYPH_FAIL if issue.problem == "missing" else GLYPH_WARN
                 results.append(
@@ -1248,10 +1251,15 @@ def _compute_doctor_groups(
         services = groups.get("Services", [])
         groups["Services"] = [r for r in services if r.label != "wire verify"] + wire_recheck
 
-        from aipass.aipass.apps.modules._doctor_fix import repair_passports
+        from aipass.aipass.apps.modules._doctor_fix import export_missing_seeds, repair_passports
 
-        # Passports before seating: the seating check must see the restored seat (spawn's --fix cannot restore one).
-        if passport_fix := [CheckResult(*row) for row in repair_passports(find_project_root(Path.cwd()))]:
+        # Seeds while passports still exist, then passports, then seating: the seating check must see the restored
+        # seat (spawn's --fix cannot restore one).
+        root = find_project_root(Path.cwd())
+        if seed_fix := [CheckResult(*row) for row in export_missing_seeds(root)]:
+            seeded = {r.label for r in seed_fix}
+            groups["Structure"] = [r for r in groups.get("Structure", []) if r.label not in seeded] + seed_fix
+        if passport_fix := [CheckResult(*row) for row in repair_passports(root)]:
             repaired = {r.label for r in passport_fix}
             structure = [r for r in groups.get("Structure", []) if r.label not in repaired]
             groups["Structure"] = structure + passport_fix

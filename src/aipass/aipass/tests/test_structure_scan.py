@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_structure_scan.py
 # Description: Tests for doctor structure scanner (DPLAN-0177)
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-05-14
 # Modified: 2026-11-18
 # =============================================
@@ -67,8 +67,10 @@ def _structure_via_doctor() -> list:
     return printed["Structure"]
 
 
-def _make_agent(tmp_path: Path, name: str, registry_id: str = "uuid-1", subdir: str = "") -> Path:
-    """Create a minimal agent directory with passport."""
+def _make_agent(
+    tmp_path: Path, name: str, registry_id: str = "uuid-1", subdir: str = "", seed: bool = True, residency: str = ""
+) -> Path:
+    """Create a minimal agent directory with passport and, unless told not to, its seed."""
     if subdir:
         agent_dir = tmp_path / "src" / subdir / name
     else:
@@ -77,9 +79,12 @@ def _make_agent(tmp_path: Path, name: str, registry_id: str = "uuid-1", subdir: 
     trinity.mkdir(parents=True, exist_ok=True)
     passport = {
         "branch_info": {"branch_name": name},
-        "citizenship": {"registry_id": registry_id},
+        "citizenship": {"registry_id": registry_id, "residency": residency},
     }
     (trinity / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+    if seed:
+        (agent_dir / ".aipass").mkdir(exist_ok=True)
+        (agent_dir / ".aipass" / "passport.seed.json").write_text("{}", encoding="utf-8")
     return agent_dir
 
 
@@ -479,6 +484,22 @@ class TestRegistryConsistency:
         issues = check_registry_consistency(reg, scan_agents(tmp_path))
         assert [(i.branch_name, i.problem) for i in issues] == [("torn", "no_passport")]
 
+    def test_a_project_citizen_with_a_passport_and_no_seed_is_no_seed(self, tmp_path: Path) -> None:
+        agent_dir = _make_agent(tmp_path, "finch", seed=False, residency="resident")
+        reg = _make_registry(tmp_path, [{"name": "finch", "path": str(agent_dir)}])
+        issues = check_registry_consistency(reg, scan_agents(tmp_path))
+        assert [(i.branch_name, i.problem) for i in issues] == [("finch", "no_seed")]
+
+    def test_the_tree_registry_expects_a_seed_from_its_core_citizens_only(self, tmp_path: Path) -> None:
+        """spawn's export seeds only core citizens from the tree: a resident there is no defect doctor can cure."""
+        core = _make_agent(tmp_path, "flow", seed=False, residency="core")
+        resident = _make_agent(tmp_path, "guest", seed=False, residency="resident")
+        reg = tmp_path / "AIPASS_REGISTRY.json"
+        rows = [{"name": "flow", "path": str(core)}, {"name": "guest", "path": str(resident)}]
+        reg.write_text(json.dumps({"branches": rows}), encoding="utf-8")
+        issues = check_registry_consistency(reg, scan_agents(tmp_path))
+        assert [(i.branch_name, i.problem) for i in issues] == [("flow", "no_seed")]
+
     def test_corrupt_registry(self, tmp_path: Path) -> None:
         """Corrupt registry JSON returns unreadable issue."""
         reg = tmp_path / "BAD_REGISTRY.json"
@@ -689,6 +710,18 @@ class TestCheckStructureIntegration:
             results = _structure_via_doctor()
         rows = [(r.glyph, r.detail, r.remediation) for r in results if r.label == "registry: bare"]
         assert rows == [(GLYPH_FAIL, "no readable passport", "Run 'aipass doctor --fix'")]
+
+    def test_a_citizen_with_a_passport_and_no_seed_is_one_fail_row_naming_doctor_fix(self, tmp_path: Path) -> None:
+        """Once its passport is lost a seedless citizen cannot be restored, so the gap is red while it can be cured."""
+        _make_agent(tmp_path, "finch", seed=False)
+        _make_registry(tmp_path, [{"name": "finch", "path": str(tmp_path / "src" / "finch")}])
+        with (
+            patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
+            patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=str(tmp_path / "home")),
+        ):
+            results = _structure_via_doctor()
+        rows = [(r.glyph, r.detail, r.remediation) for r in results if r.label == "registry: finch"]
+        assert rows == [(GLYPH_FAIL, "no passport seed", "Run 'aipass doctor --fix'")]
 
     @staticmethod
     def _unknown_rows(tmp_path: Path) -> tuple:

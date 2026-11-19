@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills, shadow and smoke rows
-# Version: 1.10.0
+# Version: 1.11.0
 # Created: 2026-10-08
 # Modified: 2026-11-18
 # =============================================
@@ -422,6 +422,75 @@ class TestFixRestoresALostPassport:
 
         detail = "passport restored: passport.json(seed); still not readable"
         assert rows == [(GLYPH_FAIL, detail, self.REINSTALL)]
+
+    def test_a_project_citizen_with_no_seed_is_sent_to_a_backup_not_the_installer(self) -> None:
+        """The installer rebuilds the AIPass tree's own citizens only: for a project it cannot help."""
+        project = self.registry.with_name("FINCH_REGISTRY.json")
+        project.write_bytes(self.registry.read_bytes())
+        self.registry.unlink()
+
+        rows = self._restored_rows(FileNotFoundError("devpulse carries no seed"))
+
+        backup = "No seed was written while the passport existed: restore .trinity/passport.json from a backup"
+        assert rows == [(GLYPH_FAIL, "passport not restored: devpulse carries no seed", backup)]
+
+    def _a_seedless_citizen(self) -> Path:
+        """A core citizen 'flow' with a readable passport and no seed, listed beside devpulse."""
+        flow = self.registry.parent / "src" / "flow"
+        (flow / ".trinity").mkdir(parents=True)
+        (flow / ".trinity" / "passport.json").write_text('{"citizenship": {"residency": "core"}}', encoding="utf-8")
+        rows = json.loads(self.registry.read_text(encoding="utf-8"))
+        rows["branches"].append({"name": "flow", "path": "src/flow"})
+        self.registry.write_text(json.dumps(rows), encoding="utf-8")
+        return flow / ".aipass" / "passport.seed.json"
+
+    def _stub_export(self, monkeypatch, seed: Path, refusal: str = "") -> None:
+        """spawn's export-seeds command: writes the seed, or prints its refusal the way its receipt does."""
+        real = subprocess.run
+        self.exports: list = []
+
+        def export(cmd, **kwargs):
+            if cmd[:3] != ["drone", "@spawn", "export-seeds"]:
+                return real(cmd, **kwargs)
+            self.exports.append(cmd)
+            self.events.append("seed")
+            if refusal:
+                printed = f"1 seed(s) could not be exported:\n    flow: {refusal}\n"
+                return subprocess.CompletedProcess(cmd, 1, "", printed)
+            seed.parent.mkdir(parents=True, exist_ok=True)
+            seed.write_text("{}", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, "Written: 1\n", "")
+
+        monkeypatch.setattr("subprocess.run", export)
+
+    def test_fix_writes_a_missing_seed_before_passports_are_restored_and_the_owner_is_seated(self, monkeypatch) -> None:
+        seed = self._a_seedless_citizen()
+        self.events: list = []
+        self._stub_export(monkeypatch, seed)
+        seated = [CheckResult("owner", GLYPH_PASS, "ok", "")]
+        monkeypatch.setattr(
+            "aipass.aipass.apps.modules.doctor._check_owner_seating", lambda: self.events.append("seat") or seated
+        )
+
+        self._restored_rows(lambda *a: self.events.append("restore") or self._write_passport())
+
+        flow = [(r.glyph, r.detail, r.remediation) for r in self.printed["Structure"] if r.label == "registry: flow"]
+        assert flow == [(GLYPH_PASS, f"seed written: {seed}", "")]
+        root = str(self.registry.parent)
+        assert self.exports == [["drone", "@spawn", "export-seeds", "--confirm", "--root", root, "--only", "flow"]]
+        assert self.events == ["seed", "restore", "seat"]
+
+    def test_a_seed_spawn_refuses_fails_carrying_spawn_reason_verbatim(self, monkeypatch) -> None:
+        seed = self._a_seedless_citizen()
+        self.events = []
+        reason = "live passport is not a valid 2.0.0 passport: branch_info: missing key 'branch_name'"
+        self._stub_export(monkeypatch, seed, refusal=reason)
+
+        self._restored_rows(self._write_passport)
+
+        flow = [(r.glyph, r.detail, r.remediation) for r in self.printed["Structure"] if r.label == "registry: flow"]
+        assert flow == [(GLYPH_FAIL, f"seed not written: {reason}", "")]
+        assert not seed.exists()
 
 
 class TestRunDoctorPreflight:

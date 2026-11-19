@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_doctor_fix.py
 # Description: Tests for doctor --fix remediation report (DPLAN-0177 Phase 2)
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-05-15
 # Modified: 2026-11-18
 # =============================================
@@ -35,8 +35,8 @@ from aipass.aipass.apps.modules._doctor_fix import (
 # =============================================================================
 
 
-def _make_agent(tmp_path: Path, name: str, registry_id: str = "uuid-1", subdir: str = "") -> Path:
-    """Create a minimal agent directory with passport."""
+def _make_agent(tmp_path: Path, name: str, registry_id: str = "uuid-1", subdir: str = "", seed: bool = True) -> Path:
+    """Create a minimal agent directory with passport and, unless told not to, its seed."""
     if subdir:
         agent_dir = tmp_path / "src" / subdir / name
     else:
@@ -48,6 +48,9 @@ def _make_agent(tmp_path: Path, name: str, registry_id: str = "uuid-1", subdir: 
         "citizenship": {"registry_id": registry_id},
     }
     (trinity / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+    if seed:
+        (agent_dir / ".aipass").mkdir(exist_ok=True)
+        (agent_dir / ".aipass" / "passport.seed.json").write_text("{}", encoding="utf-8")
     return agent_dir
 
 
@@ -175,6 +178,14 @@ class TestGenerateRemediation:
         items = generate_remediation(tmp_path)
         registry = [(i.severity, i.fix_command) for i in items if i.category == "registry"]
         assert registry == [("critical", "aipass doctor --fix")]
+
+    def test_a_citizen_without_a_seed_is_critical_and_names_doctor_fix(self, tmp_path: Path) -> None:
+        _make_agent(tmp_path, "bare", seed=False)
+        _make_registry(tmp_path, [{"name": "bare", "path": str(tmp_path / "src" / "bare")}])
+        (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
+        items = generate_remediation(tmp_path)
+        registry = [(i.severity, i.description.split(":")[0], i.fix_command) for i in items if i.category == "registry"]
+        assert registry == [("critical", "No passport seed", "aipass doctor --fix")]
 
     def test_root_artifact_warn(self, tmp_path: Path) -> None:
         """Root artifact with warn severity produces warning remediation."""
