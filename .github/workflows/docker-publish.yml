@@ -1,13 +1,11 @@
 name: Publish Docker image
 
 # Builds the AIPass image from the release wheel and pushes it to GitHub's
-# container registry. It fires on a version tag, beside publish.yml, and is no
-# part of CI: no pull request runs it and no merge waits for it. A failed run
-# is re-run from the Actions tab (workflow_dispatch) without a new tag.
+# container registry. It runs by hand only, from the Actions tab: a release
+# does not build an image, because a running AIPass updates itself from the
+# remote. Run it from a version tag to publish that version and move latest;
+# from a branch it publishes edge.
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 # Least-privilege token (Scorecard Token-Permissions); the job adds packages.

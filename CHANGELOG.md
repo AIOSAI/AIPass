@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+### Changed
+
+- **ci: the Docker image is published by hand, not by every release** (2026-11-19). A version tag fired the image build beside PyPI, and a slow package mirror or an installer fault then marked the release red. A running AIPass updates itself from the remote, so a release needs no new image; the workflow runs from the Actions tab when one is wanted.
+
 ## [2026-11-19] — v2.8.39: the Docker image builds, the README says what install does
 
 ### Fixed
