@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_templates_lane.py
 # Description: Pins for the live templates lane — spawn propagation, receipt status, the bump site, and two refusals
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-27
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/templates.py and the template_bump lane it drives."""
@@ -62,11 +62,13 @@ class TestRetiredVerbsAnswer:
         assert "retired" in printed.lower()
         assert "--dry-run" in printed
 
-    def test_the_refusal_says_where_the_handlers_went(self, capsys):
-        """A reader who wants the old code must be able to find it."""
+    def test_the_refusal_says_why_and_points_at_no_archive(self, capsys):
+        """The reason is the measurement; the retired code sits in .archive, which the owner empties at any time."""
         templates.handle_command("templates", ["push-templates"])
+        printed = _out(capsys)
 
-        assert "dead_template_lane_20260827" in _out(capsys)
+        assert "pre-.trinity layout" in printed, printed
+        assert ".archive" not in printed and "parked" not in printed, printed
 
     def test_a_retired_verb_writes_nothing(self, capsys):
         """The whole point: it used to no-op silently, now it no-ops loudly."""
@@ -77,7 +79,7 @@ class TestRetiredVerbsAnswer:
         # The refusal must reach the caller even with --dry-run on the line.
         printed = _out(capsys)
         assert "retired" in printed.lower(), printed
-        assert "dead_template_lane_20260827" in printed, printed
+        assert "drone @memory push" in printed, printed
 
 
 class TestHelpNeverPerforms:
