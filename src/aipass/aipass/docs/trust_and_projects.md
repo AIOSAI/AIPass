@@ -55,8 +55,19 @@ only**: it never rewrites a file that is already there. `--mode` picks the shape
 
 | Mode | Writes | Tracked files | `.gitignore` |
 |------|--------|---------------|--------------|
-| `framework` (default) | registry, `.aipass/` and `.claude/` scaffold, switch files, a fresh resident agent | adds missing scaffold files | the AIPass local-state block is added first |
+| `framework` (default) | registry, `.aipass/` and `.claude/` scaffold, switch files, a fresh resident agent | in a repo of its own, none: every path it writes is excluded; else adds missing scaffold files | in a repo of its own, untouched; else the AIPass local-state block, unless `.updateignore` claims `.gitignore` |
 | `contractor` | registry, `.aipass/hooks.json`, `tier0_kernel.md`, `tier1_navmap.md`, `.claude/settings.local.json` | none | untouched; every path it writes is listed in `.git/info/exclude` |
+
+Framework mode in a target with its own `.git` treats it as a product: the
+tracked `.gitignore` is never written, and before the seat is minted adopt
+appends one root-anchored line per path it creates to `.git/info/exclude`. A
+top folder it made whole is listed as that folder (`/.aipass/`, `/.claude/`),
+inside a folder the product already had only the file it wrote. The list adds
+the registry lock, the seat as `/src/<pkg>/<pkg>/` and `*.aipass-new`. The
+`.gitignore` template's lines are never copied: `tools/`, `logs/` and their kind
+would hide the product's own code. Without a repo, the `.gitignore` lane runs
+after the mint, so it reads the `.updateignore` the seat is stamped with, the
+same way `init update` does.
 
 Contractor mode needs the target's own git repo, and a project whose stack is
 not AIPass's. A tracked AIPass file (anything under `.aipass/`, a registry,

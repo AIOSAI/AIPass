@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: adopt.py
 # Description: aipass adopt — bring an existing directory anywhere on disk into AIPass
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-07-20
 # Modified: 2026-11-20
 # =============================================
@@ -9,9 +9,11 @@
 """
 Adopt Handler — PRIVATE implementation
 
-Two modes. framework: the AIPass layout, additive only, with .gitignore patched so AIPass local
-state never leaks into a commit. contractor: the project keeps its own stack, and AIPass writes
-no tracked file and never .gitignore; every local path it writes goes to .git/info/exclude.
+Two modes. framework: the AIPass layout, additive only. In a repo of its own the project's
+.gitignore is never written and every AIPass path goes to .git/info/exclude; without one the
+.gitignore lane runs after the seat is stamped and honours .updateignore. contractor: the project
+keeps its own stack, and AIPass writes no tracked file and never .gitignore; every local path it
+writes goes to .git/info/exclude.
 Every path either mode considers comes back as a row: create, append, skip or clash, with a reason.
 """
 
@@ -62,6 +64,13 @@ CREATE, APPEND, SKIP, CLASH = "create", "append", "skip", "clash"
 _CITIZEN_RE = re.compile(r"^@[A-Za-z0-9_-]+$")
 _TRACKED = "tracked by the project: contractor mode never writes a tracked file"
 _run_drone = subprocess.run  # the seam tests replace: @spawn's door is another branch
+_REPO_GITIGNORE = "the project's own repo: its .gitignore is never written; AIPass paths go to .git/info/exclude"
+_GITIGNORE_ROWS = {
+    "created": (CREATE, "absent"),
+    "appended": (APPEND, "adds the AIPass local-state block"),
+    "already-safe": (SKIP, "already holds the AIPass local-state block"),
+    "updateignore": (SKIP, "claimed by .updateignore: the owner's, never written"),
+}
 
 
 def _row(path: str, action: str, reason: str) -> dict:
@@ -69,7 +78,11 @@ def _row(path: str, action: str, reason: str) -> dict:
 
 
 def _gitignore_safety(target: Path, *, dry_run: bool) -> str:
-    """Ensure AIPass-managed paths are gitignored. Returns 'created', 'appended', or 'already-safe'."""
+    """Ensure AIPass-managed paths are gitignored: 'created', 'appended', 'already-safe' or 'updateignore'.
+
+    Read after the seat is stamped, like init update: a .gitignore the .updateignore claims is never written."""
+    if sm.is_ignored(".gitignore", sm.read_ignore(target)):
+        return "updateignore"
     gitignore_path = target / ".gitignore"
     if gitignore_path.exists():
         existing = gitignore_path.read_text(encoding="utf-8")
@@ -82,6 +95,36 @@ def _gitignore_safety(target: Path, *, dry_run: bool) -> str:
     if not dry_run:
         sm.write_text_lf(gitignore_path, sc.gitignore())
     return "created"
+
+
+def _exclude_lines(rels: list[str], existed: set[str]) -> list[str]:
+    """One root-anchored line per path adopt wrote: a top folder it made whole, else that path itself.
+
+    Never a template line: the .gitignore block's tools/ and logs/ would hide a product's own code."""
+    lines: list[str] = []
+    for rel in rels:
+        top, _, rest = rel.partition("/")
+        line = f"/{rel}" if top in existed else (f"/{top}/" if rest else f"/{top}")
+        if line not in lines:
+            lines.append(line)
+    return lines
+
+
+def _plan_exclude(target: Path, lines: list[str]) -> tuple[Path, str, list[str], dict]:
+    """The exclude file, its text, the lines it lacks, and their row."""
+    exclude = target / ".git" / "info" / "exclude"
+    current = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
+    new_lines = [line for line in lines if line not in current.splitlines()]
+    if new_lines:
+        return exclude, current, new_lines, _row(".git/info/exclude", APPEND, "lists " + ", ".join(new_lines))
+    return exclude, current, new_lines, _row(".git/info/exclude", SKIP, "nothing new to list")
+
+
+def _write_exclude(exclude: Path, current: str, new_lines: list[str]) -> None:
+    if new_lines:
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        head = current if current.endswith("\n") or not current else current + "\n"
+        sm.write_text_lf(exclude, head + "".join(f"{line}\n" for line in new_lines))
 
 
 def _write_if_missing(target: Path, rel: str, content: str, *, dry_run: bool, planned: list, rows: list) -> None:
@@ -182,15 +225,14 @@ def _adopt_framework(target: Path, *, no_agent: bool, dry_run: bool, citizen: st
     files: list[str] = []
     rows: list[dict] = []
     notes: list[str] = []
-
-    # First: the target may be a public repo, so nothing AIPass-managed lands before it is ignored.
-    gitignore_action = _gitignore_safety(target, dry_run=dry_run)
-    gitignore_rows = {
-        "created": (CREATE, "absent"),
-        "appended": (APPEND, "adds the AIPass local-state block"),
-        "already-safe": (SKIP, "already holds the AIPass local-state block"),
-    }
-    rows.append(_row(".gitignore", *gitignore_rows[gitignore_action]))
+    # A repo of its own is a product: its tracked .gitignore is never written, every AIPass path is excluded.
+    # A .git dir with content: a sandbox mounts an empty one; a worktree's .git file has no info/ to exclude in.
+    git_dir = target / ".git"
+    repo = git_dir.is_dir() and any(git_dir.iterdir())
+    existed = {p.name for p in target.iterdir()}
+    gitignore_action = "untouched"
+    if repo:
+        rows.append(_row(".gitignore", SKIP, _REPO_GITIGNORE))
 
     # Minted before spawn: registry-first.
     registry_id = None
@@ -254,6 +296,17 @@ def _adopt_framework(target: Path, *, no_agent: bool, dry_run: bool, citizen: st
         files.append(str(manifest_file))
         rows.append(_row(manifest_file.relative_to(target).as_posix(), CREATE, "stamps the files adopt wrote"))
 
+        if repo:
+            # Before the seat exists, so no AIPass path is ever untracked trace.
+            created = [row["path"] for row in rows if row["action"] == CREATE and row["path"] != "trust registry"]
+            lines = _exclude_lines(created, existed)
+            lines += [] if citizen else [f"/.{reg}_REGISTRY.lock"]
+            lines += [f"/{agent_home.relative_to(target).as_posix()}/"] if mint else []
+            exclude, current, new_lines, exclude_row = _plan_exclude(target, lines + ["*.aipass-new"])
+            rows.append(exclude_row)
+            if not dry_run:
+                _write_exclude(exclude, current, new_lines)
+
         spawn_result = None
         agent_created = False
         if citizen and not dry_run:
@@ -267,6 +320,10 @@ def _adopt_framework(target: Path, *, no_agent: bool, dry_run: bool, citizen: st
             files.append(f"{agent_home} (resident agent — planned)")
         if mint:
             rows.append(_row(agent_home.relative_to(target).as_posix(), CREATE, "fresh resident agent (spawn_agent)"))
+        if not repo:
+            # After the mint, which stamps the seat's .updateignore: the lane reads it, as init update does.
+            gitignore_action = _gitignore_safety(target, dry_run=dry_run)
+            rows.append(_row(".gitignore", *_GITIGNORE_ROWS[gitignore_action]))
     except BaseException:
         if not dry_run and registry_id is not None:
             (target / registry_filename).unlink(missing_ok=True)
@@ -390,13 +447,8 @@ def _adopt_contractor(target: Path, *, no_agent: bool, dry_run: bool, citizen: s
         state = "tracked, the project's own" if rel in tracked else "contractor mode does not write it"
         rows.append(_row(rel, SKIP, state))
 
-    exclude = target / ".git" / "info" / "exclude"
-    current = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
-    new_lines = [line for line in excludes if line not in current.splitlines()]
-    if new_lines:
-        rows.append(_row(".git/info/exclude", APPEND, "lists " + ", ".join(new_lines)))
-    else:
-        rows.append(_row(".git/info/exclude", SKIP, "nothing new to list"))
+    exclude, current, new_lines, exclude_row = _plan_exclude(target, excludes)
+    rows.append(exclude_row)
 
     citizen_result = _spawn_adopt_citizen(citizen, target, apply=False) if citizen else None
     clashes = [row["path"] for row in rows if row["action"] == CLASH]
@@ -414,10 +466,7 @@ def _adopt_contractor(target: Path, *, no_agent: bool, dry_run: bool, citizen: s
         for path, content in writes:
             path.parent.mkdir(parents=True, exist_ok=True)
             sm.write_text_lf(path, content)
-        if new_lines:
-            exclude.parent.mkdir(parents=True, exist_ok=True)
-            head = current if current.endswith("\n") or not current else current + "\n"
-            sm.write_text_lf(exclude, head + "".join(f"{line}\n" for line in new_lines))
+        _write_exclude(exclude, current, new_lines)
         if hooks_created and _enroll_project(target) is not True:
             notes.append(not_enrolled_note(target))
         if citizen:
