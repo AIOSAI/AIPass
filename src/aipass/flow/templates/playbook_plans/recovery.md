@@ -13,6 +13,28 @@
 
 An agent with no memory of AIPass, started by the owner because the agents inside it cannot work. Also the admin seat (@devpulse) in safe mode. Read the whole page before you run anything.
 
+## Owner: your whole job
+
+Open a terminal and start a fresh Claude from your home directory — not inside the project:
+
+```
+cd ~
+claude
+```
+
+Paste this prompt, with the path corrected if your AIPass checkout is somewhere else:
+
+```
+AIPass is broken: every agent inside it refuses tools with a message that
+starts HOOKS BROKEN. My checkout is at ~/AIPass. Read
+~/AIPass/src/aipass/flow/templates/playbook_plans/recovery.md
+and follow it exactly: run diagnose first, then only the cure the guide
+picks from the traceback. Delete nothing, commit nothing, push nothing,
+edit no code. If neither cure applies, stop and tell me what you saw.
+```
+
+Then answer what the agent asks and read what it reports. The rest of this page is for that agent.
+
 ## What the break is
 
 AIPass runs a hook engine before every tool call of every agent. The engine loads code from the working tree on each call (`src/aipass/prax`, `src/aipass/hooks`, `src/aipass/cli` and what they import). An edit left half done in that code makes the engine fail, and it then refuses every tool of every agent with a message that starts `HOOKS BROKEN`. No agent inside can read, edit or run, so none can fix it.

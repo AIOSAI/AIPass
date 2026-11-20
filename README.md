@@ -254,6 +254,12 @@ Ubuntu is the platform, native or WSL2: the daily driver, the one CI proves.
 
 </details>
 
+## If it breaks: safe mode
+
+A half-done edit to live-loaded code can take the hook engine down; every agent then refuses every tool with a message that starts `HOOKS BROKEN`, and the system is in safe mode: one recovery command allowed, everything else held. The refusal itself names the command.
+
+If no agent can act, open [the recovery guide](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/flow/templates/playbook_plans/recovery.md) — `src/aipass/flow/templates/playbook_plans/recovery.md` in your checkout. It holds the full instructions, including a ready prompt to paste into a fresh Claude session started from your home directory. Nothing is deleted and nothing is pushed on that path.
+
 ## Documentation
 
 Each agent keeps its own docs under `src/aipass/<agent>/docs/`. Start with these:
