@@ -1,0 +1,8 @@
+{
+  "_comment": "Test-write policy for this project, read by @hooks' test-write gate (schema: aipass.hooks apps/modules/testgate_policy.py; read it live with drone @hooks testwrite). Stamped by @spawn at the project's first seat; the owner's file from then on.",
+  "version": "1.0.0",
+  "agent_test_writing": "off",
+  "allow": [],
+  "block_test_edits": false,
+  "note": "The owner flips this per project. \"off\" refuses agents creating NEW test files under any tests/ folder, the same refusal a missing file gave, now ruled and named here; editing existing tests stays allowed. \"on\" lets agents create tests in this project. While off, allow[] lists seat names let through."
+}

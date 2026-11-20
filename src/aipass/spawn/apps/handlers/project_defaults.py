@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: project_defaults.py
-# Description: A project's first-seat defaults: the root .updateignore and the First wake checklist
-# Version: 1.0.0
+# Description: A project's first-seat defaults: .updateignore, test-write policy, First wake checklist
+# Version: 1.1.0
 # Created: 2026-11-20
 # Modified: 2026-11-20
 # =============================================
@@ -19,6 +19,8 @@ from aipass.spawn.apps.handlers.update_ignore import IGNORE_NAME, UpdateIgnoreUn
 ARRIVALS = ("fresh", "adopted")
 PROJECT_TEMPLATE_DIR = Path(__file__).parents[2] / "templates" / "project"
 LOCAL_PROMPT_REL = Path(".aipass") / "aipass_local_prompt.md"
+# Where @hooks' test-write gate looks, walking up from the session: the project root's .aipass/.
+TEST_POLICY_REL = Path(".aipass") / "test_write_policy.json"
 
 
 def arrival_refusal(arrival) -> str | None:
@@ -56,3 +58,15 @@ def stamp_updateignore(project_root: Path, arrival: str) -> str:
     atomic_write_text(path, f"{existing.rstrip()}\n\n{default}" if existing.strip() else default)
     json_handler.log_operation("updateignore_stamped", data={"path": str(path), "arrival": arrival})
     return f"stamped ({arrival})"
+
+
+def stamp_test_policy(project_root: Path) -> str:
+    """Stamp the project's test-write policy (off, named) unless a policy file is already there."""
+    path = Path(project_root) / TEST_POLICY_REL
+    if path.exists():
+        logger.info("[spawn] %s already exists, the owner's: policy not stamped", path)
+        return "kept: the owner's file"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(path, (PROJECT_TEMPLATE_DIR / TEST_POLICY_REL.name).read_text(encoding="utf-8"))
+    json_handler.log_operation("test_policy_stamped", data={"path": str(path)})
+    return "stamped (off)"

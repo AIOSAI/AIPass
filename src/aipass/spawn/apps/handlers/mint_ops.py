@@ -43,8 +43,13 @@ from aipass.spawn.apps.handlers.class_registry import (
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.passport_migration import PassportTarget
-from aipass.spawn.apps.handlers.project_defaults import arrival_refusal, stamp_onboarding, stamp_updateignore
-from aipass.spawn.apps.handlers.seed_ops import export_seed, find_seed
+from aipass.spawn.apps.handlers.project_defaults import (
+    arrival_refusal,
+    stamp_onboarding,
+    stamp_test_policy,
+    stamp_updateignore,
+)
+from aipass.spawn.apps.handlers.seed_ops import copy_seed_home, export_seed, find_seed
 
 # Left in a tree the mint refused, so a retry refuses instead of adopting the partial tree.
 INCOMPLETE_MARKER = "INCOMPLETE_MINT.txt"
@@ -303,11 +308,18 @@ def mint_citizen(
     ensure_project_has_owner(reg_path)
 
     if arrival:
-        try:
-            arrival_record["updateignore"] = stamp_updateignore(reg_path.parent, arrival)
-        except OSError as e:
-            logger.warning("[spawn] .updateignore not stamped at %s: %s", reg_path.parent, e)
-            arrival_record["updateignore"] = f"not stamped: {e}"
+        project_stamps = {
+            "updateignore": lambda: stamp_updateignore(reg_path.parent, arrival),
+            "test_policy": lambda: stamp_test_policy(reg_path.parent),
+            # The seat's own seed may sit in a folder the product's git excludes; this copy survives a reclone.
+            "home_seed": lambda: copy_seed_home(reg_path.parent, target),
+        }
+        for name, stamp in project_stamps.items():
+            try:
+                arrival_record[name] = stamp()
+            except (OSError, RuntimeError) as e:
+                logger.warning("[spawn] %s not stamped for %s: %s", name, branch_upper, e)
+                arrival_record[name] = f"not stamped: {e}"
 
     placeholder_issues = [f"Unreplaced {sorted(names)} in {path}" for path, names in validate_no_placeholders(target)]
     arrival_issues = [f"{name} {state}" for name, state in arrival_record.items() if state.startswith("not stamped")]

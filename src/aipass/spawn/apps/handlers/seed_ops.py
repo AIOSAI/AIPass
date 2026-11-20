@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: seed_ops.py
 # Description: Passport seeds — tracked identity, untracked live file (TDPLAN-0017)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-28
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """Passport seeds: the identity that ships with the repo (TDPLAN-0017).
@@ -36,6 +36,7 @@ from aipass.spawn.apps.handlers.passport_migration import (
 from aipass.spawn.apps.handlers.placeholders import resolve_residency
 from aipass.spawn.apps.handlers.registry import (
     _validate_path_containment,
+    aipass_home,
     branches_as_list,
     entry_path,
     find_registry,
@@ -51,6 +52,8 @@ __all__ = [
     "STAMP_KEY",
     "SeedError",
     "build_seed",
+    "copy_seed_home",
+    "home_seed_path",
     "canonical_text",
     "export_seed",
     "export_seeds",
@@ -69,6 +72,7 @@ __all__ = [
 SEED_DIR_NAME = ".aipass"
 SEED_FILE_NAME = "passport.seed.json"
 SEED_RELATIVE_PATH = f"{SEED_DIR_NAME}/{SEED_FILE_NAME}"
+HOME_SEED_DIR = Path(".aipass") / "seeds"
 
 # Additive optional field: schema_version stays 2.0.0. A template mint gets no stamp.
 STAMP_KEY = "seed"
@@ -134,6 +138,23 @@ def seed_path_for(branch_dir) -> Path:
     Inside the branch, never looked up by name, so no citizen can get another's identity.
     """
     return Path(branch_dir) / SEED_DIR_NAME / SEED_FILE_NAME
+
+
+def home_seed_path(project_root, branch_dir) -> Path:
+    """A project seat's durable seed copy: under the AIPass home (in @backup's scope), never in the product's git.
+
+    Raises RuntimeError when no AIPass home is found."""
+    seat = Path(branch_dir).name.lower()
+    return aipass_home() / HOME_SEED_DIR / Path(project_root).name / f"{seat}.{SEED_FILE_NAME}"
+
+
+def copy_seed_home(project_root, branch_dir) -> str:
+    """Copy the seat's seed to its home copy; OSError or RuntimeError (no home) when it cannot."""
+    dest = home_seed_path(project_root, branch_dir)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(dest, seed_path_for(branch_dir).read_text(encoding="utf-8"))
+    logger.info("[spawn] seed of %s copied to %s", branch_dir, dest)
+    return f"copied to {dest}"
 
 
 def find_seed(branch_dir) -> Path | None:
@@ -489,7 +510,21 @@ def export_seed(target, *, confirm: bool = False) -> dict:
 
     record["written"] = True
     logger.info("[export-seeds] %s seed %s (%s)", record["branch"], record["action"], seed_file)
+    if target.residency != SEED_RESIDENCY:
+        _refresh_home_copy(target, record)
     return record
+
+
+def _refresh_home_copy(target, record: dict) -> None:
+    """Rewrite a project seat's home copy when it has one, so a restore never reads a stale identity."""
+    try:
+        home_copy = home_seed_path(target.project_root, target.branch_dir)
+        if home_copy.is_file():
+            copy_seed_home(target.project_root, target.branch_dir)
+            record["home_copy"] = str(home_copy)
+    except (OSError, RuntimeError) as exc:
+        record["error"] = f"seed written, home copy not refreshed: {exc}"
+        logger.error("[export-seeds] %s: %s", record["branch"], record["error"])
 
 
 def _project_targets(registry_path: Path) -> list[PassportTarget]:

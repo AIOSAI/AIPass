@@ -164,8 +164,14 @@ values stripped (registered, registry_id, citizen_id).
  - **As fresh as its last write.** Nothing watches the passport. A role or trait changed after
    the last export is not in the seed until `export-seeds` runs again; `update --apply` does
    not refresh seeds.
+ - **A home copy for a project seat.** A seat minted with an `arrival` also gets
+   `<AIPass home>/.aipass/seeds/<project folder>/<seat>.passport.seed.json`. That copy is
+   outside the product's git, so it leaves no trace there, and inside @backup's nightly
+   scope, so it survives a reclone and a lost machine. Whenever `export-seeds` rewrites a
+   seat's seed, it rewrites an existing home copy too.
  - **Read back by restore.** A citizen whose passport is lost is restored from its seed with
-   the same name, class, role and traits. A citizen with no seed is refused, and the refusal
+   the same name, class, role and traits. When the project's own seed is gone too, restore
+   first puts the home copy back as the seat's seed. A citizen with no seed is refused, and the refusal
    names the cure: run `export-seeds` in its project while a passport still exists.
 
 A mint at a target that already holds a seed but no passport births from the seed.
@@ -194,6 +200,13 @@ other value, before anything is written. `result["arrival"]` says what was done.
    The rows are `AGENTS.md`, `.aipass/tier1_navmap.md`, `aipass_local_prompt.md` and
    `*/docs.local/`. `adopted` adds `.gitignore`, plus commented product examples for the seat
    to fill in.
+ - **Test-write policy.** `test_write_policy.json` is written to the project root's
+   `.aipass/` when no file is there; an existing file is never touched. It is off with an
+   empty `allow`: the same refusal of new test files that a missing file gave, now a named
+   ruling the owner flips per project. The schema is @hooks' test-write gate; read it live
+   with `drone @hooks testwrite`.
+ - **Durable seed copy.** The seat's seed is copied under the AIPass home (see Passport
+   seeds), because a seat folder the product's git excludes never reaches a clone.
  - **Matching limits.** A slashless row matches at any depth, so `.gitignore` also holds
    every seat's `.gitignore`. A trailing-`/` row is anchored at the project root, which is
    why seats need `*/docs.local/`. A leading-`/` row matches nothing.
