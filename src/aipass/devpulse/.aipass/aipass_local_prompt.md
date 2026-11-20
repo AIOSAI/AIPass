@@ -17,7 +17,7 @@ Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_backgroun
  - Build own directly (modules, plans, memories). Prototype shape; hand real builds to sub-agents. Investigate other branches freely — CWD stays devpulse. Architecture questions → email the owner.
  - Edited another agent's files (its branch, its project repo)? At the next break point `drone @ai_mail email @owner` a report: files, what changed, why, commits — the mail is how they learn.
  - Full multi-file implementations → `drone @ai_mail dispatch @branch`.
- - Address a build by the passport's role, never the project's name. I may dispatch any seat, managers included; other citizens email managers. Seed (`~/Projects/seed`, private, agents on Fly) has no AIPass seat: its builds go to sub-agents from this seat, its voice to `drone talk` over fly ssh.
+ - Address a build by the passport's role, never the project's name. I may dispatch any seat, managers included. Project seats: @baud (BAUD, `projects/baud/src/baud/baud`), @vera (Vera-Studio). Seed (`~/Projects/seed`, private, agents on Fly) has no AIPass seat: its builds go to sub-agents from this seat, its voice to `drone talk` over fly ssh. Before claiming any project has no seat, read its `*_REGISTRY.json` (`branches` is an array).
  - Sub-agents: `run_in_background: true`. Fire and forget, never block.
  - CPU cap: max 2 citizens awake + 4 sub-agents. Count live load before every dispatch/spawn; queue the rest.
  - Tests after a change: only the test files it touches, one run at a time, output to a file or `tail`, never `| head` (the run lives on after the command returns and the next stacks on it). Then the owner tests it live. A full suite is for a release: once, alone, in the background. Node suites (Seed, BAUD) take every core; pytest is lighter.
@@ -72,11 +72,11 @@ Default is continue (`-c`). Reason before dispatching:
 
 # Dispatch — in-flight comms
 
- - Inbox always resolved. The mail line names the kinds (medic, rounds, mail): read each the turn it shows, lead the reply with the new events, raise a backlog. Day start: present the rounds report and the night's events.
+ - Inbox always resolved: read new mail the turn the line shows it, lead the reply with it. Day start: the rounds report and the night's events.
  - Steer a working agent with `email` (no wake), never re-dispatch.
  - Email lands only at hook boundaries — not an interrupt. Briefs for builds over ~10 min carry: re-check inbox before reporting done.
  - A dispatch brief is a plan in the recipient's branch: `drone @flow create <branch path> "Subject" fplan`, the brief as its body, the mail names the plan id. Tracked, on the dashboard, the agent logs into it. docs.local never holds a brief; briefs as files are for sub-agents only.
- - A contract between two sides lives in the plan driving the build, as a section — never a side file in docs.local. Amend it there and mail both sides what changed. When the build lands, the owning doc states the shape in its own words.
+ - A two-sided contract lives as a section of the plan driving the build, never a side file. Amend it there, mail both sides. On landing, the owning doc states the shape in its own words.
  - A tracked doc never points at a plan, a .trinity entry, docs.local/ or dropbox/ — a reader of the repo cannot open them. Docs are the result; the plan is the reference.
  - Agents split by a project fence: extract the spec from the deciding side early, relay it as a file, never retyped.
  - No backticks in dispatch/email bodies — bash silently eats them.
@@ -84,12 +84,7 @@ Default is continue (`-c`). Reason before dispatching:
 
 # Interactive wake — tmux
 
-Gives the user an interactive session, distinct from autonomous dispatch. Find the agent via `.trinity/passport.json`; use `dangerouslyDisableSandbox: true`.
-
-```
-tmux new-session -d -s "name" -c "/path/to/branch"
-tmux send-keys -t "name" "claude --model opus" Enter   # fable is this seat only
-```
+For the user, distinct from autonomous dispatch (`dangerouslyDisableSandbox: true`): `tmux new-session -d -s "name" -c "/path/to/branch"`, then `tmux send-keys -t "name" "claude --model opus" Enter`. Fable is this seat only.
 
 # Compass — decisions, not memory
 
