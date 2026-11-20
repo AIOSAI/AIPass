@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mint_ops.py
 # Description: The mint of a new citizen from the template, step by step
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-09-28
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """The mint body: a validated target becomes a registered citizen."""
@@ -43,6 +43,7 @@ from aipass.spawn.apps.handlers.class_registry import (
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.passport_migration import PassportTarget
+from aipass.spawn.apps.handlers.project_defaults import arrival_refusal, stamp_onboarding, stamp_updateignore
 from aipass.spawn.apps.handlers.seed_ops import export_seed, find_seed
 
 # Left in a tree the mint refused, so a retry refuses instead of adopting the partial tree.
@@ -59,17 +60,22 @@ def spawn_at(
     template_dir=None,
     registry_path=None,
     citizen_class=None,
+    arrival=None,
 ) -> dict:
     """Decide the lane for a target and run it: refuse, adopt, birth from seed, or mint.
 
     citizen_class None means decide at mint from the citizen number; retired names are refused.
-    traits: a bare string becomes a one-element list (identity.traits is a list)."""
+    traits: a bare string becomes a one-element list (identity.traits is a list).
+    arrival: "fresh" or "adopted" stamps a project seat's defaults at mint; None stamps nothing."""
     # Forbidden and retired values refuse before any filesystem work, through every door.
     for candidate in (citizen_class, Path(template_dir).name if template_dir else ""):
         refusal = refuse_retired_or_forbidden(candidate)
         if refusal:
             json_handler.log_operation("mint_refused", data={"class": candidate, "reason": refusal})
             return error_result(refusal)
+    refusal = arrival_refusal(arrival)
+    if refusal:
+        return error_result(refusal)
 
     # Role and purpose are substituted raw into the JSON passport template.
     for label, value in (("role", role), ("purpose", purpose)):
@@ -126,6 +132,7 @@ def spawn_at(
         profile=profile,
         registry_path=registry_path,
         citizen_class=citizen_class,
+        arrival=arrival,
     )
 
 
@@ -139,6 +146,7 @@ def mint_citizen(
     profile=None,
     registry_path=None,
     citizen_class=None,
+    arrival=None,
 ) -> dict:
     """Mint a citizen at a target that does not exist yet, from template."""
     folder_name = get_branch_name(target)
@@ -185,6 +193,8 @@ def mint_citizen(
         citizen_id=citizen_id,
         registry_path=reg_path,
     )
+    if arrival and replacements["RESIDENCY"] == "core":
+        return error_result(f"--arrival stamps a project seat's defaults; {target} is a core citizen. Nothing written.")
 
     ensure_directory(target)
     copied, skipped = copy_template(template, target, replacements)
@@ -204,6 +214,15 @@ def mint_citizen(
             traits_issues.append(f"Traits not written to passport: no readable passport at {passport_path}")
         for issue in traits_issues:
             logger.warning("[spawn] %s", issue)
+
+    # Before the template registry and branch meta are generated, so both record the stamped prompt.
+    arrival_record: dict = {}
+    if arrival:
+        try:
+            arrival_record["first_wake"] = stamp_onboarding(target, arrival)
+        except OSError as e:
+            logger.warning("[spawn] First wake not stamped for %s: %s", branch_upper, e)
+            arrival_record["first_wake"] = f"not stamped: {e}"
 
     regenerate_template_registry(target)
 
@@ -283,8 +302,16 @@ def mint_citizen(
 
     ensure_project_has_owner(reg_path)
 
+    if arrival:
+        try:
+            arrival_record["updateignore"] = stamp_updateignore(reg_path.parent, arrival)
+        except OSError as e:
+            logger.warning("[spawn] .updateignore not stamped at %s: %s", reg_path.parent, e)
+            arrival_record["updateignore"] = f"not stamped: {e}"
+
     placeholder_issues = [f"Unreplaced {sorted(names)} in {path}" for path, names in validate_no_placeholders(target)]
-    issues = placeholder_issues + receipt_issues + traits_issues + seed_issues
+    arrival_issues = [f"{name} {state}" for name, state in arrival_record.items() if state.startswith("not stamped")]
+    issues = placeholder_issues + receipt_issues + traits_issues + seed_issues + arrival_issues
 
     logger.info(
         "[spawn] BORN %s at %s (class %s, citizen %s, receipt %s)",
@@ -315,4 +342,5 @@ def mint_citizen(
         "citizen_number": citizen_number,
         "citizen_class": resolved_class,
         "validation_issues": issues,
+        "arrival": arrival_record,
     }

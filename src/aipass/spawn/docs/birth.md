@@ -173,6 +173,36 @@ A mint at a target that already holds a seed but no passport births from the see
 
 ---
 
+## Project seat defaults (`arrival`)
+
+`spawn_agent(..., arrival="fresh" | "adopted")` stamps a project seat's defaults from
+`templates/project/`. The caller names the arrival; spawn never guesses it from the tree.
+Without an arrival nothing is stamped. A core citizen given one is refused, and so is any
+other value, before anything is written. `result["arrival"]` says what was done.
+
+ - **First wake.** `onboarding_<arrival>.md` goes under the title of the seat's
+   `.aipass/aipass_local_prompt.md`: a checklist with an example on each line, which the
+   seat ticks off and then edits out of the prompt. Both arrivals cover the test gate, the
+   passport seed, the release dry-run, hooks trust and foreground sub-agents. `fresh` is a
+   project born with the seat. `adopted` is a seat joining a codebase that was alive before
+   it. It adds reading the tree, checking which startup file loaded, `.git/info/exclude`,
+   the tracked `.gitignore`, the test-write policy, the `.aipass-new` sidecars, and naming
+   the product's own files.
+ - **Root `.updateignore`.** `updateignore_<arrival>` is written at the registry's folder
+   when that file has no rows. An absent file gets the default; a header-only file keeps its
+   text, with the default below it. A file with any row is the owner's and is never touched.
+   The rows are `AGENTS.md`, `.aipass/tier1_navmap.md`, `aipass_local_prompt.md` and
+   `*/docs.local/`. `adopted` adds `.gitignore`, plus commented product examples for the seat
+   to fill in.
+ - **Matching limits.** A slashless row matches at any depth, so `.gitignore` also holds
+   every seat's `.gitignore`. A trailing-`/` row is anchored at the project root, which is
+   why seats need `*/docs.local/`. A leading-`/` row matches nothing.
+
+`tests/test_spawn.py` (`TestArrivalDefaults`) pins the stamping, and reads the stamped file
+back through the update lane's own matcher.
+
+---
+
 ## Python API
 
 ```python
@@ -186,7 +216,7 @@ result = spawn_agent(
 )
 # Returns on success: { success, branch_name, path, files_copied, dirs_created,
 #                       files_skipped, renamed, registry_updated, registry_path,
-#                       citizen_number, validation_issues }
+#                       citizen_number, validation_issues, arrival }
 # Returns on failure: { success: False, error, ...the same counters, zeroed }
 ```
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Main orchestrator for agent spawning
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-05
-# Modified: 2026-11-15
+# Modified: 2026-11-20
 # =============================================
 
 """
@@ -141,6 +141,7 @@ def spawn_agent(
     template_dir=None,
     registry_path=None,
     citizen_class=None,
+    arrival=None,
 ):
     """Create a new AIPass agent from template — the public door (aipass.spawn exports it).
 
@@ -156,4 +157,5 @@ def spawn_agent(
         template_dir=template_dir,
         registry_path=registry_path,
         citizen_class=citizen_class,
+        arrival=arrival,
     )
