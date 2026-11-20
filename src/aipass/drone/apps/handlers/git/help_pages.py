@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.12.0
+# Version: 1.13.0
 # Created: 2026-10-04
-# Modified: 2026-11-10
+# Modified: 2026-11-20
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -311,7 +311,10 @@ def page(command: str | None = None) -> str:
         )
     if command == "delete-branch":
         return (
-            "git delete-branch <name> — Delete a remote branch [owner]\n  Protected: main and dev cannot be deleted.\n"
+            "git delete-branch <name> — Delete a remote branch on origin [owner]\n"
+            "  Refused, with the reason: main, dev, the branch checked out in the repo, a branch\n"
+            "  with an open PR, and any branch when gh cannot answer whether one is open.\n"
+            "  Works in AIPass and in an external project's own repo from its manager's seat.\n"
         )
     if command == "close-pr":
         return "git close-pr <number> — Close a GitHub pull request by number [owner]\n"
@@ -459,8 +462,8 @@ def page(command: str | None = None) -> str:
         "                         (paths under src/aipass/<owner>/ or CHANGELOG.md; ci-cure --help)\n"
         "  An external project's manager, from its own seat, runs: commit, untrack,\n"
         "  restore, uncommit, checkout, sync, push, merge-main, unlock, merge, dev-pr,\n"
-        "  prune-temp, tag, issue <write>, run <write>, workflow <write>, release <write>,\n"
-        "  label <write>, alerts <write>, remote <write>. The rest refuse there.\n"
+        "  delete-branch, prune-temp, tag, issue <write>, run <write>, workflow <write>,\n"
+        "  release <write>, label <write>, alerts <write>, remote <write>. The rest refuse there.\n"
         "  Every write is fenced by the session: one started in another project is\n"
         "  refused here even from this project's seat, unless the seat is admin.\n"
         "\n"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access — the tiers, the owner gate and its log severity
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-05-12
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py: the git tiers and how owner tier is earned per repo."""
@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
@@ -27,7 +28,7 @@ from aipass.drone.apps.plugins.devpulse_ops.auth import (
 )
 from aipass.drone.apps.plugins.devpulse_ops import auth
 from aipass.ai_mail import transcript_dir
-from aipass.drone.apps.handlers.git import help_pages, repo_door, session_home
+from aipass.drone.apps.handlers.git import delete_branch_handler, help_pages, repo_door, session_home
 from aipass.drone.apps.modules.git_module import handle_command
 
 from .conftest import OWNER_REGISTRY_ID, make_owner_project
@@ -645,7 +646,7 @@ class TestTheFenceIsTheSession:
         _vera_seat(tmp_path, monkeypatch)
         start_session(tmp_path / "wren" / "src" / "wren")
 
-        for verb in ("commit", "push", "tag"):
+        for verb in ("commit", "push", "tag", "delete-branch"):
             with pytest.raises(PermissionError) as exc_info:
                 verify_git_access(verb)
             assert "not in project 'Vera-Studio'" in str(exc_info.value)
@@ -829,3 +830,75 @@ class TestIssuesFromAnySeat:
         assert result["exit_code"] == 1
         assert "give the text with --body" in result["stderr"]
         run.assert_not_called()
+
+
+_DEPENDABOT = "dependabot/npm_and_yarn/app/dev/npm-minor-patch-6cfceca777"
+
+
+def _git_and_gh(calls: list[tuple[list[str], str | None]], *, current: str = "work", gh: tuple[int, str] = (0, "")):
+    """Stand in for git and gh as delete-branch calls them; every other subprocess runs for real."""
+    real = subprocess.run
+
+    def run(argv, *args, **kwargs):
+        if argv[0] not in ("git", "gh") or argv[1:2] == ["config"]:
+            return real(argv, *args, **kwargs)
+        calls.append((list(argv), kwargs.get("cwd")))
+        if argv[0] == "gh":
+            return subprocess.CompletedProcess(argv, gh[0], gh[1], "gh: unreachable" if gh[0] else "")
+        answers = {"rev-parse": current, "remote": "https://github.com/vera/studio.git"}
+        return subprocess.CompletedProcess(argv, 0, answers.get(argv[1], ""), "")
+
+    return patch(f"{delete_branch_handler.__name__}.subprocess.run", side_effect=run)
+
+
+def _deletes(calls: list[tuple[list[str], str | None]]) -> list[tuple[list[str], str | None]]:
+    return [(argv, cwd) for argv, cwd in calls if argv[:3] == ["git", "push", "--delete"]]
+
+
+class TestManagerDeletesABranchInItsOwnRepo:
+    """A project's manager deletes a remote branch in its own repo; the rails refuse with the reason."""
+
+    def test_the_own_seat_deletes_a_stale_remote_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: delete-branch back on the untranslated list — VERA meets 'not translated'."""
+        seat = _vera_seat(tmp_path, monkeypatch)
+        calls: list[tuple[list[str], str | None]] = []
+
+        with _git_and_gh(calls):
+            result = handle_command("delete-branch", [_DEPENDABOT])
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert _deletes(calls) == [(["git", "push", "--delete", "origin", _DEPENDABOT], str(seat.parent.parent))]
+
+    @pytest.mark.parametrize("name", ["main", "dev", "work"])
+    def test_main_dev_and_the_checked_out_branch_are_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        """Mutant: the checked-out branch not compared — work is deleted from under its own checkout."""
+        _vera_seat(tmp_path, monkeypatch)
+        calls: list[tuple[list[str], str | None]] = []
+
+        with _git_and_gh(calls, current="work"):
+            result = handle_command("delete-branch", [name])
+
+        assert result["exit_code"] == 1
+        assert f"'{name}'" in result["stderr"]
+        assert _deletes(calls) == []
+
+    @pytest.mark.parametrize(
+        ("gh", "refusal"), [((0, "17\n"), "open pull request #17"), ((1, ""), "could not check for an open PR")]
+    )
+    def test_a_branch_with_an_open_pr_or_an_unanswered_check_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gh: tuple[int, str], refusal: str
+    ) -> None:
+        """Mutant: the PR check's answer ignored — a branch under review is deleted."""
+        _vera_seat(tmp_path, monkeypatch)
+        calls: list[tuple[list[str], str | None]] = []
+
+        with _git_and_gh(calls, gh=gh):
+            result = handle_command("delete-branch", [_DEPENDABOT])
+
+        assert result["exit_code"] == 1
+        assert refusal in result["stderr"]
+        assert _deletes(calls) == []
+        (pr_check,) = [argv for argv, _ in calls if argv[0] == "gh"]
+        assert pr_check[:3] == ["gh", "pr", "list"] and "vera/studio" in pr_check and _DEPENDABOT in pr_check
