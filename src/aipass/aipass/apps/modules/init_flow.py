@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: init_flow.py
 # Description: aipass init — project scaffold, scaffold update, first agent
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-04-16
-# Modified: 2026-11-15
+# Modified: 2026-11-20
 # =============================================
 
 """
@@ -67,7 +67,10 @@ def print_help() -> None:
     console.print(
         "  [green]aipass init update --dry-run[/green]         [dim]# print the plan, write nothing (exit 2)[/dim]"
     )
-    console.print("  [green]aipass init update --json[/green]            [dim]# the same plan, machine-readable[/dim]")
+    console.print(
+        "  [green]aipass init update --dry-run --json[/green]  "
+        "[dim]# the same plan as JSON, write nothing (--json alone is refused)[/dim]"
+    )
     console.print()
 
 
@@ -253,8 +256,10 @@ def _handle_init_update(args: list[str]) -> int:
     as_json = "--json" in args
     positional = [a for a in args if not a.startswith("--")]
     target = Path(positional[0]) if positional else Path.cwd()
-
     try:
+        if as_json and not dry_run:
+            # A seat reads --json as a preview; alone it applied the update, so it is refused before anything runs.
+            raise ValueError(f"--json only previews: run aipass init update --dry-run --json {target}")
         result = update_project(target, apply=not dry_run)
     except Exception as exc:
         logger.warning("[init_flow] update failed: %s", exc)

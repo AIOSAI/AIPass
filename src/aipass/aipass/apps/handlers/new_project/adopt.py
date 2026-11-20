@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adopt.py
 # Description: aipass adopt — bring an existing directory anywhere on disk into AIPass
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-07-20
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """
@@ -261,7 +261,7 @@ def _adopt_framework(target: Path, *, no_agent: bool, dry_run: bool, citizen: st
             if not citizen_result["ok"]:
                 raise RuntimeError(f"@spawn adopt-citizen {citizen} --apply refused: {citizen_result['reason']}")
         elif mint and not dry_run:
-            spawn_result = _spawn_project_agent(target, name)
+            spawn_result = _spawn_project_agent(target, name, arrival="adopted")
             agent_created = True
         elif mint:
             files.append(f"{agent_home} (resident agent — planned)")

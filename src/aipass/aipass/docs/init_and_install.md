@@ -104,7 +104,7 @@ Bare `init` prints usage.
 | `init agent <name>` | Create an agent via `drone @spawn` |
 | `init update [target]` | The scaffold-update plan, then apply it + owner-tier repo auth |
 | `init update --dry-run` | Print the plan and write nothing — exit 0 current, exit 2 pending |
-| `init update --json` | The same plan as a JSON document, for machines |
+| `init update --dry-run --json` | The same plan as one JSON document on stdout, for machines; writes nothing, same exit codes. `--json` without `--dry-run` is refused, exit 1, nothing written |
 | `init run` | Refused, exit 1: there is no guided setup; the error names `aipass init [target] [name]` |
 
 The update forms are the update ritual, and it has rules of its own — read

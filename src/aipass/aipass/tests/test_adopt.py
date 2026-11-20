@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_adopt.py
 # Description: Tests for aipass adopt — project adoption handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-07-20
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/handlers/new_project/adopt.py and apps/modules/adopt.py."""
@@ -374,6 +374,8 @@ def test_adopt_with_agent_spawns(host_env):
     ):
         result = adopt_project(target, no_agent=False)
     mock_spawn.assert_called_once()
+    # spawn stamps the adopted seat's defaults (wider .updateignore, codebase onboarding) on this value only.
+    assert mock_spawn.call_args.kwargs["arrival"] == "adopted"
     assert result["agent_created"] is True
     assert result["agent_home"] == str(target / "src" / "existing_site" / "existing_site")
 

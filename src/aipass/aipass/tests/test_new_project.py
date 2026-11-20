@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-07-17
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -501,9 +501,11 @@ def test_agent_home_hyphenated(host_env, monkeypatch):
 
 
 def test_spawn_project_agent_calls_spawn(host_env, monkeypatch):
-    """Calls spawn_agent with the agent_home path, role and purpose — and no class.
+    """Calls spawn_agent with the agent_home path, role, purpose and arrival 'fresh' — and no class.
 
+    spawn stamps a project seat's defaults (.updateignore, first-wake onboarding) only on a named arrival.
     Mutant: `role="project_manager",` -> `role="project_agent",` -> red.
+    Mutant: arrival dropped or "adopted" -> red.
     """
     result, mock_spawn = _built_with_agent(host_env, monkeypatch, "demo", _SPAWN_SUCCESS)
     expected_home = str(host_env / "projects" / "demo" / "src" / "demo" / "demo")
@@ -511,6 +513,7 @@ def test_spawn_project_agent_calls_spawn(host_env, monkeypatch):
         target_path=expected_home,
         role="project_manager",
         purpose="Resident agent of the demo project.",
+        arrival="fresh",
     )
     assert result["spawn_result"]["success"] is True
     assert result["spawn_result"]["branch_name"] == "DEMO"

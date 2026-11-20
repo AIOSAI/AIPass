@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: New project handler — create projects inside AIPass
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-07-17
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """
@@ -293,18 +293,21 @@ def _localize_imports(home: Path, pkg: str) -> None:
     )
 
 
-def _spawn_project_agent(project_root: Path, name: str) -> dict:
+def _spawn_project_agent(project_root: Path, name: str, *, arrival: str) -> dict:
     """Create the project agent via spawn_agent().
 
     No citizen_class: agent #1 of a fresh registry is minted ``manager`` by spawn's
     first-agent rule, and the retired "project_agent" class is refused. ``role`` is
-    rendered into the agent's identity, so it never names a retired class.
+    rendered into the agent's identity, so it never names a retired class. ``arrival``
+    ("fresh" for new, "adopted" for adopt) is required: spawn stamps the seat's defaults
+    only on a named arrival and never guesses one.
     """
     home = _agent_home(project_root, name)
     result = spawn_agent(
         target_path=str(home),
         role="project_manager",
         purpose=f"Resident agent of the {name} project.",
+        arrival=arrival,
     )
     if not result.get("success"):
         raise RuntimeError(f"spawn_agent failed: {result.get('error', 'unknown')}")
@@ -363,7 +366,7 @@ def create_project(
 
         spawn_result = None
         if not no_agent:
-            spawn_result = _spawn_project_agent(target, name)
+            spawn_result = _spawn_project_agent(target, name, arrival="fresh")
 
         _git_init(target, name, template)
         logger.info("[aipass new] git repo initialized with birth commit")
