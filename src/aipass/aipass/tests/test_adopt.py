@@ -710,6 +710,9 @@ class TestFrameworkProductRepo:
         assert {"/src/seed/seed/", "/SEED_REGISTRY.json", "/.SEED_REGISTRY.lock", "/.venv", "*.aipass-new"} <= set(
             lines
         )
+        # The mint's import localizer writes src/<pkg>/__init__.py when the product has none; it is
+        # adopt's file, excluded - found as live untracked trace by the container truth run.
+        assert "/src/seed/__init__.py" in lines
         assert {"/.aipass/", "/.claude/", "/.agents/", "/.updateignore"} <= set(lines)
         assert not {"/src/", "/AGENTS.md", "tools/", "logs/", ".trinity/"} & set(lines)
 

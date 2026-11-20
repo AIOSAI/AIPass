@@ -301,7 +301,13 @@ def _adopt_framework(target: Path, *, no_agent: bool, dry_run: bool, citizen: st
             created = [row["path"] for row in rows if row["action"] == CREATE and row["path"] != "trust registry"]
             lines = _exclude_lines(created, existed)
             lines += [] if citizen else [f"/.{reg}_REGISTRY.lock"]
-            lines += [f"/{agent_home.relative_to(target).as_posix()}/"] if mint else []
+            if mint:
+                lines.append(f"/{agent_home.relative_to(target).as_posix()}/")
+                # The mint's import localizer writes src/<pkg>/__init__.py when the product has none:
+                # absent here means that file will be adopt's, never the product's own.
+                pkg_init = agent_home.parent / "__init__.py"
+                if not pkg_init.exists():
+                    lines.append(f"/{pkg_init.relative_to(target).as_posix()}")
             exclude, current, new_lines, exclude_row = _plan_exclude(target, lines + ["*.aipass-new"])
             rows.append(exclude_row)
             if not dry_run:
