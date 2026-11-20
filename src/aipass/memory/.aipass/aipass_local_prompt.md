@@ -67,7 +67,7 @@ memory/
 
  - `entry_limits.entry_types.<type>` — the container, the canonical text field and its cap.
  - `entry_limits.entry_types.<type>.fields` — the closed shape: every field an entry may carry, its type, whether it is required, its `max_chars` / `max_items`. Anything not listed is `unknown_field`.
- - `entry_limits.file_budgets` — local.json 25,000, observations.json 15,000, passport.json 6,000 file and 600 per string. Read by the keep-count ceiling and by sentry's startup-budget pack.
+ - `entry_limits.file_budgets` — local.json 32,000, observations.json 17,000, passport.json 6,000 file and 600 per string. Read by the keep-count ceiling and by sentry's startup-budget pack.
  - `rollover.defaults` / `rollover.per_branch` — keep counts, resolved per file key, never deep-merged.
 
 Caps are read, never copied. A second copy of a number is a second source of truth.

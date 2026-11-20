@@ -3,7 +3,7 @@
 # Description: Unified config loader for memory.config.json
 # Version: 1.8.1
 # Created: 2026-06-13
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """
@@ -133,8 +133,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Read, never copied: sentry's startup_budget and the keep-count check read these.
         # passport.json is SIZE only: @spawn owns its schema.
         "file_budgets": {
-            "local.json": {"max_chars": 25000},
-            "observations.json": {"max_chars": 15000},
+            "local.json": {"max_chars": 32000},
+            "observations.json": {"max_chars": 17000},
             "passport.json": {"max_chars": 6000, "max_string_chars": 600},
         },
         "per_branch": {},

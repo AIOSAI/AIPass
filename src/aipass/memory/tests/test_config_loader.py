@@ -3,7 +3,7 @@
 # Description: Tests for config_loader handler (FPLAN-0271 Phase 1)
 # Version: 1.3.1
 # Created: 2026-06-13
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/handlers/json/config_loader.py and the budget arithmetic it seeds."""
@@ -975,7 +975,7 @@ class TestClampOnLoad:
         mod = _get_module()
         mod.resolve_limits(self._over_budget(mod), "guinea", _entry_limits(mod))
         said = " ".join(str(call) for call in mod.logger.warning.call_args_list)
-        assert "40" in said and "local.json" in said and "25,000" in said and "todos" in said
+        assert "40" in said and "local.json" in said and "32,000" in said and "todos" in said
 
     def test_without_ceiling_data_there_is_no_clamp(self) -> None:
         """The resolver promises no I/O, so a caller that has not loaded the
@@ -1044,15 +1044,15 @@ class TestFileBudgetAccessor:
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", _write_config(tmp_path, copy.deepcopy(mod.DEFAULT_CONFIG)))
         budgets = mod.get_file_budgets()
-        assert budgets["local.json"]["max_chars"] == 25000
-        assert budgets["observations.json"]["max_chars"] == 15000
+        assert budgets["local.json"]["max_chars"] == 32000
+        assert budgets["observations.json"]["max_chars"] == 17000
         assert budgets["passport.json"]["max_string_chars"] == 600
 
     def test_a_caller_cannot_edit_the_fleet_budgets_by_mutating_what_it_got(self, tmp_path: Path, monkeypatch) -> None:
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", _write_config(tmp_path, copy.deepcopy(mod.DEFAULT_CONFIG)))
         mod.get_file_budgets()["local.json"]["max_chars"] = 1
-        assert mod.get_file_budgets()["local.json"]["max_chars"] == 25000
+        assert mod.get_file_budgets()["local.json"]["max_chars"] == 32000
 
     def test_ceilings_read_the_configured_budget_not_a_literal(self, tmp_path: Path, monkeypatch) -> None:
         """Halve local.json's budget and every local.json ceiling must move."""

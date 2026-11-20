@@ -79,12 +79,12 @@ The arithmetic lives in `handlers/json/budget.py`. It is per file, because that 
 budget names, and it needs co-tenants, because a `.trinity` file is shared:
 
 ```
-local.json        sessions + key_learnings + todos   →  25,000 chars
-observations.json observations                       →  15,000 chars
+local.json        sessions + key_learnings + todos   →  32,000 chars
+observations.json observations                       →  17,000 chars
 ```
 
 "The sessions ceiling" is therefore **not a property of sessions**. It is what is LEFT of
-`local.json`'s 25,000 once key_learnings and todos have taken their configured share and the
+`local.json`'s 32,000 once key_learnings and todos have taken their configured share and the
 document's own structure has taken its allowance. Raise key_learnings and the sessions ceiling drops
 — which is why `count_ceiling()` takes the whole count map and not just the type being asked about.
 
@@ -124,12 +124,12 @@ A caller holding only the rollover section gets unclamped counts, which is why t
 
 | Type | Ceiling | File | Budget | Co-tenants it was measured against |
 |---|---|---|---|---|
-| `sessions` | 16 | `local.json` | 25,000 | key_learnings 15, todos 10 |
-| `key_learnings` | 17 | `local.json` | 25,000 | sessions 15, todos 10 |
-| `todos` | 14 | `local.json` | 25,000 | key_learnings 15, sessions 15 |
-| `observations` | 19 | `observations.json` | 15,000 | none — its file's only tenant |
+| `sessions` | 26 | `local.json` | 32,000 | key_learnings 15, todos 10 |
+| `key_learnings` | 36 | `local.json` | 32,000 | sessions 15, todos 10 |
+| `todos` | 48 | `local.json` | 32,000 | key_learnings 15, sessions 15 |
+| `observations` | 22 | `observations.json` | 17,000 | none — its file's only tenant |
 
-No shipped default is clamped: every default sits under its own ceiling, with little room above it.
+No shipped default is clamped: every default sits under its own ceiling.
 The table is not a constant — `config_loader.get_count_ceilings(branch)` computes it in one config
 read, and the BOUNDS block of `config --help` prints the live numbers rather than a copy.
 
