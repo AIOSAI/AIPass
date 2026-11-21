@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: managers.py
 # Description: Manager discovery — passports on this machine that own a project
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-09
-# Modified: 2026-11-09
+# Modified: 2026-11-21
 # =============================================
 
 """Manager discovery for release-notify (DPLAN-0335 leg 1).
@@ -187,6 +187,10 @@ def discover_managers() -> dict:
                 )
                 continue
             address = passport_address(passport, passport_path)
+            # An unrendered template passport ({{name}} placeholders) is scaffold material, not a citizen.
+            if "{{" in address or "{{" in passport_name(passport, passport_path):
+                skipped.append({"path": str(passport_path), "reason": "template passport — placeholders unrendered"})
+                continue
             if address in seen:
                 skipped.append({"path": str(passport_path), "reason": f"{address} already found under another root"})
                 continue
