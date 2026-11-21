@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delete_ops.py
 # Description: Delete handler — branch deletion by name or path, and whole-project retirement
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-03-07
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Delete handler implementation for branch lifecycle management."""
@@ -33,6 +33,10 @@ from aipass.spawn.apps.handlers.registry import (
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.repair_ops import ARCHIVE_EXCLUDE
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers import MY_BRANCH
+
+# One wording for the refusal and the advice, so the advice never promises what the refusal denies.
+ADMIN_SEAT = "a real delete or retire runs from the verified admin seat"
 
 
 def _resolve_branch_dir(branch_name, registry_path, registry):
@@ -155,7 +159,10 @@ def delete_branch(
     if protected:
         msg = f"Cannot delete '{branch_name}' — protected ({reason})"
         if not is_protected(branch_name, registry_path=registry_path, count_passport=False)[0]:
-            msg += "; retire it with: drone @spawn delete @" + branch_name + " --retire"
+            msg += (
+                f"; retire it with: drone @spawn delete @{branch_name} --retire - {ADMIN_SEAT} (@{ADMIN_BRANCH}) "
+                f"only; any other seat mails @{MY_BRANCH} or @{ADMIN_BRANCH} to ask"
+            )
         logger.warning(f"[delete] {msg}")
         return _error_result(branch_name, msg)
     project_root = registry_path.parent
@@ -182,10 +189,7 @@ def delete_branch(
     caller = resolve_verified_caller() or "unknown"
     admin = _admin_seat()
     if not dry_run and not admin:
-        msg = (
-            f"Cannot delete '{branch_name}' - a real delete or retire runs from the verified admin seat only; "
-            f"mail @{ADMIN_BRANCH} the branch and why"
-        )
+        msg = f"Cannot delete '{branch_name}' - {ADMIN_SEAT} only; mail @{ADMIN_BRANCH} the branch and why"
         logger.warning("[delete] %s (caller %s, requested %s)", msg, caller, requested or branch_name)
         json_handler.log_operation(
             "delete_refused",

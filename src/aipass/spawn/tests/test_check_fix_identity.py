@@ -1,12 +1,12 @@
 # =================== META ====================
 # Name: test_check_fix_identity.py
 # Description: Tests for owner/identity check and fix (DPLAN-0239 P4)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-11
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
-"""Tests for apps/handlers/sync_registry_ops.py and apps/modules/sync_registry.py."""
+"""Tests for apps/handlers/sync_registry_ops.py, apps/modules/sync_registry.py and repair's damaged-agent report."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(documentation) — docstrings on check_owner_identity, fix_owner_identity and pick_owner_branch
@@ -15,9 +15,12 @@
 import json
 from unittest.mock import patch
 
+import pytest
+
 from aipass.spawn.apps.handlers.registry import ensure_project_has_owner, pick_owner_branch
 from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity, fix_owner_identity, sync_registry
 from aipass.spawn.apps.handlers.adoption_ops import adopt_existing
+from aipass.spawn.apps.modules.repair import handle_repair
 from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 
 
@@ -951,3 +954,46 @@ class TestLostOwnerPassport:
         assert "aipass doctor --fix" in result["error"]
         assert reg.read_bytes() == before
         log.error.assert_called_once()
+
+
+RESTORE = "aipass doctor --fix"
+RETIRE = "drone @spawn delete @probe --retire"
+
+
+def _damaged_probe(tmp_path, monkeypatch, vault):
+    """PROBE's row and folder survive (a mailbox was recreated) but its passport is gone; vault or not."""
+    monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+    monkeypatch.chdir(tmp_path)
+    _make_branch(tmp_path, "devpulse", "src/devpulse", passport_rid="proj-id")
+    probe = tmp_path / "src" / "probe"
+    (probe / "ai_mail.local").mkdir(parents=True)
+    if vault:
+        (probe / ".aipass").mkdir()
+        (probe / ".aipass" / "passport.vault.json").write_text("{}", encoding="utf-8")
+    _write_registry(
+        tmp_path,
+        metadata={"version": "1.0.0", "id": "proj-id"},
+        branches=[_entry("DEVPULSE", "src/devpulse", owner=True), _entry("PROBE", "src/probe", created="2026-02-01")],
+    )
+    return probe
+
+
+class TestADamagedAgentReadsTheSameInBothTools:
+    """sync-registry and repair name a passportless registered folder alike, with one next step."""
+
+    @pytest.mark.parametrize(("vault", "cure", "not_cure"), [(True, RESTORE, RETIRE), (False, RETIRE, RESTORE)])
+    @pytest.mark.parametrize("tool", ["sync", "repair-agent", "repair-project"])
+    def test_the_state_and_the_next_step(self, tmp_path, monkeypatch, capsys, tool, vault, cure, not_cure):
+        """Mutant: damaged_cure always answers the restore -> the vaultless agent is told to restore -> red."""
+        probe = _damaged_probe(tmp_path, monkeypatch, vault)
+
+        if tool == "sync":
+            code = handle_sync_registry([str(tmp_path)])
+        else:
+            code = handle_repair([str(probe if tool == "repair-agent" else tmp_path)])
+
+        said = " ".join("".join(capsys.readouterr()).split())
+        assert "folder on disk, passport missing" in said
+        assert cure in said and not_cure not in said
+        assert "No structural issues" not in said
+        assert code != 0 or tool == "repair-project"

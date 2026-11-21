@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_admin_fence.py
 # Description: Admin grant ceremony + permanent admin-class refusal (FPLAN-0401 P2)
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-12
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/grant_admin.py, apps/handlers/registry.py, apps/handlers/class_registry.py and apps/handlers/seat_gate.py: the seat fences and the owner seat."""
@@ -29,6 +29,7 @@ from aipass.spawn.apps.handlers.class_registry import (
     validate_class,
 )
 from aipass.spawn.apps.handlers import seat_gate
+from aipass.spawn.apps.handlers.delete_ops import delete_branch
 from aipass.spawn.apps.handlers.registry import ADMIN_BRANCH, ensure_admin, ensure_ci_cure, move_owner
 from aipass.spawn.apps.handlers.sync_registry_ops import resolve_sync_template_class
 from aipass.spawn.apps.modules.core import spawn_agent
@@ -646,3 +647,18 @@ class TestLanesThatRewriteAnotherCitizenRunFromSpawnOrTheAdmin:
         assert _NOTE in out
         assert _tree(project) == before
         assert _refusals(_isolate_spawn_json) == []
+
+
+def test_the_retire_advice_on_a_live_citizen_names_the_admin_seat_and_who_to_ask(tmp_path):
+    """Mutant: the advice drops the admin-seat clause -> a non-admin seat is told to run a refused command -> red."""
+    branch = tmp_path / "src" / "aipass" / "worker"
+    (branch / ".trinity").mkdir(parents=True)
+    (branch / ".trinity" / "passport.json").write_text('{"citizenship": {"registered": true}}', encoding="utf-8")
+    reg = _write_registry(tmp_path, [_entry("WORKER")])
+
+    result = delete_branch("worker", dry_run=True, registry_path=reg)
+
+    assert result["success"] is False
+    assert "drone @spawn delete @worker --retire" in result["error"]
+    assert "runs from the verified admin seat (@devpulse) only" in result["error"]
+    assert "any other seat mails @spawn or @devpulse" in result["error"]

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repair_ops.py
 # Description: Repair handler — move branches, update registry paths, clean pollution
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-05-15
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Repair handler implementation for project structure fixes.
@@ -25,9 +25,12 @@ from aipass.spawn.apps.handlers.registry import (
     registry_lock,
     save_registry,
     branches_as_list,
+    row_at,
 )
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.metadata import normalize_branch_name
+from aipass.spawn.apps.handlers.sync_registry_ops import DAMAGED_STATE, damaged_cure
 
 # Rebuildable noise only: .git history and .chroma vectors go into the archive, since the original is removed.
 ARCHIVE_EXCLUDE = {".venv", "__pycache__", "node_modules", ".pytest_cache"}
@@ -536,6 +539,19 @@ def cleanup_pollution(project_root, dry_run=False):
     }
 
 
+def not_a_project(path, reason: str) -> str:
+    """One line for a scan target that is no project root: a registered folder names its state, anything else why."""
+    path = Path(path).resolve()
+    reg_path = find_registry(path.parent) if path.is_dir() else None
+    row = row_at(reg_path, path) if reg_path else None
+    if reg_path is None or row is None:
+        return f"{path} is not a project or agent: {reason}"
+    name = normalize_branch_name(row.get("name", path.name), "lower")
+    if not (path / ".trinity" / "passport.json").exists():
+        return f"@{name} at {path}: Damaged: {DAMAGED_STATE}; {damaged_cure(path, name)}"
+    return f"{path} is agent @{name}, not a project root; repair scans a project: drone @spawn repair {reg_path.parent}"
+
+
 def repair_project(project_path, dry_run=False):
     """Scan a project for structural issues and report findings.
 
@@ -572,6 +588,15 @@ def repair_project(project_path, dry_run=False):
                     "branch": entry.get("name", "?"),
                     "registered_path": rel_path,
                     "issue": "Directory missing — registered path does not exist",
+                }
+            )
+        elif not (abs_path / ".trinity" / "passport.json").exists():
+            name = normalize_branch_name(entry.get("name", "?"), "lower")
+            results["registry_mismatches"].append(
+                {
+                    "branch": entry.get("name", "?"),
+                    "registered_path": rel_path,
+                    "issue": f"Damaged: {DAMAGED_STATE}; {damaged_cure(abs_path, name)}",
                 }
             )
 

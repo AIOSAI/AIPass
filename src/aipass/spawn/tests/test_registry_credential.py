@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_credential.py
 # Description: metadata.id — the project credential a new registry is born with
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-08-24
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/registry.py's project-credential mint (metadata.id)."""
@@ -27,6 +27,8 @@ from aipass.spawn.apps.handlers.registry import (
     save_registry,
 )
 from aipass.spawn.apps.modules.core import spawn_agent
+from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
+from aipass.spawn.tests.conftest import MACHINE_REGISTRY_ID, make_passport, write_registry
 
 # The mint is deliberately asymmetric: an ABSENT registry is a new project and earns a
 # credential; an UNREADABLE one already has one, and minting would orphan every passport.
@@ -434,3 +436,102 @@ class TestAnUnreadableRegistryIsNeverOverwritten:
         assert registry_is_writable_document(corrupt) is False
         assert registry_is_writable_document(not_an_object) is False
         assert registry_is_writable_document(good) is True
+
+
+CORRUPT_SHAPES = {
+    "empty": b"",
+    "list": b"[]",
+    "truncated": b'{"metadata": {"id": "pid"}, "bran',
+    "garbage": b'{"metadata": {"id": "pid"}, "branches": []}\n<<<<<<< HEAD',
+}
+
+
+def _passported_project(tmp_path, credentials=None):
+    """(registry, {name: citizen_id}): a project whose registry bytes the caller sets; each seat carries a passport."""
+    project = tmp_path / "proj"
+    seats = {"alpha": "src/alpha", "devpulse": "devpulse", "trigger": "src/aipass/trigger"}
+    for name, rel in seats.items():
+        passport = make_passport(name)
+        passport["citizenship"]["citizen_id"] = f"cid-{name}"
+        passport["citizenship"]["registry_id"] = (credentials or {}).get(name, MACHINE_REGISTRY_ID)
+        (project / rel / ".trinity").mkdir(parents=True)
+        (project / rel / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+    return project / "PROJ_REGISTRY.json", {name: f"cid-{name}" for name in seats}
+
+
+def _tree(project):
+    """Every file under the project with its bytes; the empty flock file is no write."""
+    return {p: p.read_bytes() for p in project.rglob("*") if p.is_file() and p.suffix != ".lock"}
+
+
+class TestRebuildRegistry:
+    """rebuild_registry: a corrupt registry is rebuilt from the passports on disk, its bytes kept aside."""
+
+    @pytest.mark.parametrize("shape", sorted(CORRUPT_SHAPES))
+    def test_a_preview_writes_nothing_and_names_every_citizen(self, tmp_path, shape):
+        reg, citizens = _passported_project(tmp_path)
+        reg.write_bytes(CORRUPT_SHAPES[shape])
+        before = _tree(reg.parent)
+
+        receipt = sync_registry_ops.rebuild_registry(reg)
+
+        assert _tree(reg.parent) == before
+        assert receipt["refused"] is None and receipt["written"] is False
+        assert sorted(r["name"] for r in receipt["rows"]) == sorted(n.upper() for n in citizens)
+
+    @pytest.mark.parametrize("shape", sorted(CORRUPT_SHAPES))
+    def test_confirm_keeps_the_corrupt_bytes_aside_and_writes_every_passported_seat(self, tmp_path, shape):
+        reg, citizens = _passported_project(tmp_path)
+        reg.write_bytes(CORRUPT_SHAPES[shape])
+
+        receipt = sync_registry_ops.rebuild_registry(reg, confirm=True)
+
+        aside = list(reg.parent.glob("PROJ_REGISTRY.json.corrupt-*"))
+        assert [p.read_bytes() for p in aside] == [CORRUPT_SHAPES[shape]]
+        doc = json.loads(reg.read_text(encoding="utf-8"))
+        assert doc["metadata"]["id"] == MACHINE_REGISTRY_ID
+        rows = {r["name"]: r for r in doc["branches"]}
+        assert {name: row["registry_id"] for name, row in rows.items()} == {
+            n.upper(): cid for n, cid in citizens.items()
+        }
+        assert rows["ALPHA"]["path"] == "src/alpha" and rows["ALPHA"]["email"] == "@alpha"
+        assert not any("admin" in r or "ci_cure" in r for r in doc["branches"])
+        assert receipt["written"] is True and receipt["aside"] == str(aside[0])
+        assert {"drone @spawn grant-admin", "drone @spawn grant-ci-cure"} == {
+            c.split(" --registry")[0] for c in receipt["ceremonies"]
+        }
+
+    def test_a_good_registry_is_refused_byte_identical(self, tmp_path):
+        reg, _ = _passported_project(tmp_path)
+        write_registry(reg, {"alpha": "src/alpha"})
+        before = _tree(reg.parent)
+
+        receipt = sync_registry_ops.rebuild_registry(reg, confirm=True)
+
+        assert _tree(reg.parent) == before
+        assert "not corrupt" in receipt["refused"] and "sync-registry --fix" in receipt["refused"]
+
+    def test_disagreeing_credentials_refuse_with_nothing_written(self, tmp_path):
+        reg, _ = _passported_project(tmp_path, credentials={"trigger": "other-project"})
+        reg.write_bytes(b"")
+        before = _tree(reg.parent)
+
+        receipt = sync_registry_ops.rebuild_registry(reg, confirm=True)
+
+        assert _tree(reg.parent) == before
+        assert "trigger" in receipt["refused"] and "other-project" in receipt["refused"]
+
+    def test_the_command_rebuilds_with_confirm_and_a_refusal_exits_1(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        reg, citizens = _passported_project(tmp_path)
+        reg.write_bytes(b"[]")
+
+        assert handle_sync_registry([str(reg.parent), "--rebuild", "--confirm"]) == 0
+        assert len(json.loads(reg.read_text(encoding="utf-8"))["branches"]) == len(citizens)
+        assert handle_sync_registry([str(reg.parent), "--rebuild", "--confirm"]) == 1
+
+    def test_the_sync_refusal_names_the_rebuild(self, tmp_path):
+        reg, _ = _passported_project(tmp_path)
+        reg.write_bytes(b"[]")
+
+        assert "drone @spawn sync-registry --rebuild" in sync_registry_ops.sync_registry(registry_path=reg)["error"]

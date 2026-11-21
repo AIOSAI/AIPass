@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_repair.py
 # Description: Tests for repair and adopt-citizen — move, rename, pollution, cross-project adoption
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-05-15
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/repair_ops.py and adopt_citizen_ops.py — move, rename, pollution, adopt-citizen."""
@@ -315,6 +315,22 @@ def _renamed_citizen(tmp_path, citizen_id="cid-old"):
     passport_path.write_text(json.dumps(passport), encoding="utf-8")
     shutil.move(str(project / "src" / "aipass" / "old"), str(project / "src" / "aipass" / "new"))
     return project, reg, project / "src" / "aipass" / "new" / ".trinity" / "passport.json"
+
+
+class TestRepairCrashExit:
+    """A crash inside relocate or rename exits 2, which no answer of theirs returns: a caller tells failure apart."""
+
+    @pytest.mark.parametrize(
+        ("args", "seam"),
+        [
+            (["--relocate", "@nav", "src/x/nav", "--apply"], "move_branch"),
+            (["--rename", "@old", "@new", "--apply"], "rename_branch"),
+        ],
+    )
+    def test_an_unexpected_error_exits_two_not_the_refusal_code(self, args, seam):
+        """Mutant: the except returns 1 again -> a crash reads as an ordinary refusal -> red."""
+        with patch(f"aipass.spawn.apps.modules.repair.{seam}", side_effect=RuntimeError("boom")):
+            assert handle_repair(args) == 2
 
 
 class TestRenameBranch:
@@ -694,6 +710,20 @@ class TestRepairCLI:
 
         result = handle_repair([])
         assert result == 1
+
+    @pytest.mark.parametrize("where", ["missing", "plain"])
+    def test_a_path_that_is_no_project_says_why_and_prints_no_report(self, tmp_path, monkeypatch, capsys, where):
+        """Mutant: the scan prints its report on a failed result -> 'No structural issues found' -> red."""
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        target = tmp_path / where
+        if where == "plain":
+            target.mkdir()
+
+        assert handle_repair([str(target)]) == 1
+
+        out, err = capsys.readouterr()
+        assert "Structure Report" not in out and "No structural issues" not in out
+        assert "is not a project or agent" in " ".join(err.split())
 
     def test_relocate_flag_moves_the_branch(self, tmp_path, monkeypatch):
         """--relocate, through handle_repair, moves the branch and rewrites its registry path.

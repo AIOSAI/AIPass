@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-05
 # Modified: 2026-11-21
 # =============================================
@@ -23,7 +23,13 @@ from aipass.spawn import restore_citizen, spawn_agent
 from aipass.spawn.apps.handlers.seed_ops import export_seeds
 from aipass.spawn.apps.handlers import mint_ops
 from aipass.spawn.apps.handlers.class_registry import get_template_dir
-from aipass.spawn.apps.handlers.metadata import get_branch_name, normalize_branch_name, detect_profile
+from aipass.spawn.apps.handlers.metadata import (
+    BRANCH_NAME_RULE,
+    branch_name_refusal,
+    get_branch_name,
+    normalize_branch_name,
+    detect_profile,
+)
 from aipass.spawn.apps.handlers.project_defaults import PROJECT_TEMPLATE_DIR, stamp_onboarding
 from aipass.spawn.apps.handlers.update_ignore import is_ignored, read_ignore
 from aipass.spawn.apps.handlers.placeholders import (
@@ -38,6 +44,7 @@ from aipass.spawn.apps.handlers.registry import (
     get_next_citizen_number,
 )
 from aipass.spawn.apps.modules.core import handle_command
+from aipass.spawn.apps.spawn import handle_create
 
 
 class TestCreateFlags:
@@ -594,3 +601,103 @@ class TestArrivalDefaults:
             '{"agent_test_writing": "on"}'
         )
         assert result["arrival"]["test_policy"] == "kept: the owner's file"
+
+
+def _passported(root, name="probe", registered=True, lane="passport"):
+    """A tmp project with a citizen folder at root/<name>: a passport or only a vault, a row or none."""
+    target = root / name
+    if lane == "passport":
+        (target / ".trinity").mkdir(parents=True)
+        (target / ".trinity" / "passport.json").write_text(
+            json.dumps({"identity": {"citizen_class": "specialist", "purpose": "Live agent"}}), encoding="utf-8"
+        )
+    else:
+        (target / ".aipass").mkdir(parents=True)
+        (target / ".aipass" / "passport.vault.json").write_text("{}", encoding="utf-8")
+    rows = [{"name": name.upper(), "path": name}] if registered else []
+    reg = root / "TEST_REGISTRY.json"
+    reg.write_text(json.dumps({"metadata": {"id": "cred"}, "branches": rows}), encoding="utf-8")
+    return target, reg
+
+
+def _tree(root):
+    """Every file under root, relative path -> bytes."""
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+class TestCreateOverALiveAgent:
+    """A passport plus a row for the target's path makes it live: create refuses and points at update and repair."""
+
+    def test_a_registered_agent_is_refused_and_nothing_is_written(self, tmp_path):
+        """Mutant: the live-row check in spawn_at skipped -> adopt rewrites the tree and the registry -> red."""
+        target, reg = _passported(tmp_path)
+        before, reg_before = _tree(target), reg.read_bytes()
+
+        result = spawn_agent(str(target), registry_path=str(reg))
+
+        assert result["success"] is False
+        assert "drone @spawn update @probe" in result["error"]
+        assert "drone @spawn repair" in result["error"]
+        assert _tree(target) == before
+        assert reg.read_bytes() == reg_before
+
+    def test_the_cli_refusal_exits_non_zero_and_never_says_created(self, tmp_path, capsys):
+        target, reg = _passported(tmp_path)
+
+        assert handle_create([str(target), "--registry", str(reg)]) == 1
+        said = "".join(capsys.readouterr())
+        assert "already registered" in said and "Agent created" not in said
+
+    def test_a_registered_seat_with_only_a_vault_still_takes_the_vault_lane(self, tmp_path):
+        """No passport is no live agent: a cloned seat is born from its vault (docs/birth.md).
+
+        Mutant: the live-row check also runs for a vault-only seat -> refused as live -> red."""
+        target, reg = _passported(tmp_path, lane="vault")
+
+        result = spawn_agent(str(target), registry_path=str(reg))
+
+        assert "already registered" not in result["error"]
+        assert result["error"].startswith("VAULT REFUSED")
+
+    def test_a_passported_folder_with_no_row_still_adopts(self, tmp_path):
+        """Mutant: the check refuses every passported folder -> the create @existing lane dies -> red."""
+        target, reg = _passported(tmp_path, registered=False)
+
+        result = spawn_agent(str(target), registry_path=str(reg))
+
+        assert result["success"] is True and result["adopted"] is True
+        assert [b["name"] for b in load_registry(reg)["branches"]] == ["PROBE"]
+
+
+BAD_NAMES = ["probe bad", "ProbeCap", "probé", "p" * 200, "-probe_dash"]
+
+
+class TestBranchNameRule:
+    """One name rule, checked before create writes anything, on every lane create takes."""
+
+    @pytest.mark.parametrize("name", ["probe", "ai_mail", "my-agent", "p" * 32])
+    def test_good_names_pass(self, name):
+        assert branch_name_refusal(name) == ""
+
+    @pytest.mark.parametrize("name", [*BAD_NAMES, "p" * 33])
+    def test_bad_names_are_refused_with_the_rule_quoted(self, name):
+        """Mutant: the 32-char cap dropped from the pattern -> the long names pass -> red."""
+        assert BRANCH_NAME_RULE in branch_name_refusal(name)
+
+    @pytest.mark.parametrize("lane", ["mint", "passport", "vault"])
+    @pytest.mark.parametrize("name", BAD_NAMES)
+    def test_create_refuses_a_bad_name_before_any_write(self, tmp_path, lane, name):
+        """Mutant: the name check in spawn_at removed -> mint, adopt or seed birth goes ahead -> red."""
+        if lane == "mint":
+            target, reg = tmp_path / name, tmp_path / "TEST_REGISTRY.json"
+            reg.write_text(json.dumps({"metadata": {"id": "cred"}, "branches": []}), encoding="utf-8")
+        else:
+            target, reg = _passported(tmp_path, name=name, registered=False, lane=lane)
+        before, reg_before = _tree(tmp_path), reg.read_bytes()
+
+        result = spawn_agent(str(target), registry_path=str(reg))
+
+        assert result["success"] is False
+        assert BRANCH_NAME_RULE in result["error"]
+        assert _tree(tmp_path) == before and reg.read_bytes() == reg_before
+        assert target.exists() is (lane != "mint")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_registry.py
 # Description: Registry repair — thin CLI layer for registry synchronization
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """Registry synchronization for branch lifecycle management.
@@ -15,11 +15,13 @@ from aipass.prax import logger
 
 from aipass.cli import console, err_console, error, warning
 
+from aipass.spawn.apps.handlers.registry import find_registry
 from aipass.spawn.apps.handlers.sync_registry_ops import (
-    RESTORE_CURE,
+    DAMAGED_STATE,
     sync_registry,
     check_owner_identity,
     fix_owner_identity,
+    rebuild_registry,
 )
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.seat_gate import PREVIEW_NOTE, seat_refusal
@@ -64,7 +66,7 @@ def handle_sync_registry(args: list[str]) -> int:
     if args and args[0] in ["--help", "-h"]:
         console.print(
             "[bold cyan]Usage:[/bold cyan] drone @spawn sync-registry "
-            "\\[project-path] [--fix|--check] [--json] [--dry-run]"
+            "\\[project-path] [--fix|--check|--rebuild] [--json] [--dry-run] [--confirm]"
         )
         console.print()
         console.print("  [green](no args)[/green]      Report mismatches between registry and filesystem")
@@ -72,6 +74,11 @@ def handle_sync_registry(args: list[str]) -> int:
         console.print("  [green]--fix --dry-run[/green] Show planned owner/identity fixes without applying")
         console.print("  [green]--check[/green]        Read-only owner/identity health check (exit 0=clean)")
         console.print("  [green]--check --json[/green]  Machine-readable check output")
+        console.print("  [green]--rebuild[/green]      Preview rebuilding a CORRUPT registry from its passports")
+        console.print(
+            "  [green]--rebuild --confirm[/green] Move the corrupt file aside as <name>.corrupt-<stamp>, write the"
+            " rebuilt one; admin and ci_cure are not restored (re-run grant-admin, grant-ci-cure)"
+        )
         return 0
 
     project_path = None
@@ -96,6 +103,8 @@ def handle_sync_registry(args: list[str]) -> int:
 
     if "--check" in flags:
         return _handle_check(registry_path, json_output="--json" in flags)
+    if "--rebuild" in flags:
+        return _handle_rebuild(registry_path, confirm="--confirm" in flags)
 
     fix = "--fix" in flags
     dry_run = "--dry-run" in flags
@@ -158,6 +167,45 @@ def _handle_check(registry_path, json_output=False) -> int:
     console.print()
     console.print("[dim]Run with --fix to reconcile.[/dim]")
     return 1
+
+
+def _handle_rebuild(registry_path, confirm=False) -> int:
+    """Rebuild a corrupt registry from its passports; a preview unless --confirm."""
+    registry_path = registry_path or find_registry()
+    if registry_path is None:
+        error("No *_REGISTRY.json found above the current directory")
+        return 1
+    refusal = confirm and seat_refusal("sync-registry --rebuild --confirm", str(registry_path))
+    if refusal:
+        error(refusal)
+        return 1
+
+    try:
+        receipt = rebuild_registry(registry_path, confirm=confirm)
+    except Exception as exc:
+        logger.error(f"[sync-registry] Rebuild error: {exc}")
+        error(str(exc))
+        return 1
+    if receipt["refused"]:
+        error(f"Registry rebuild refused: {receipt['refused']}")
+        return 1
+
+    label = "Rebuilt" if receipt["written"] else "Would rebuild"
+    console.print()
+    console.print(f"[bold]{label} {registry_path} - credential {receipt['credential']}[/bold]")
+    for row in receipt["rows"]:
+        console.print(f"  {row['name']}  {row['path']}  {row['registry_id']}", markup=False)
+    console.print(f"  Owner: {receipt['owner'] or '(none)'}", markup=False)
+    if receipt["aside"]:
+        console.print(f"  Corrupt bytes kept at {receipt['aside']}", markup=False)
+    if receipt["ceremonies"]:
+        warning("Not restored by a rebuild - re-run each ceremony:")
+        for command in receipt["ceremonies"]:
+            err_console.print(f"    {command}", markup=False)
+    if not receipt["written"]:
+        console.print("[dim]Preview - nothing written. Add --confirm to rebuild.[/dim]")
+    console.print()
+    return 0
 
 
 def _print_notes(notes) -> None:
@@ -223,10 +271,9 @@ def _print_summary(result: dict) -> None:
 
     damaged = result.get("damaged", [])
     if damaged:
-        error(f"Damaged ({len(damaged)}): folder on disk, passport missing - kept registered")
+        error(f"Damaged ({len(damaged)}): {DAMAGED_STATE}")
         for name in sorted(damaged):
-            err_console.print(f"    {name}")
-        err_console.print(f"    Restore with: {RESTORE_CURE}")
+            err_console.print(f"    {name} - {result['damaged_cures'][name]}")
 
     if unregistered:
         warning(f"Unregistered ({len(unregistered)}): on disk but not in registry")

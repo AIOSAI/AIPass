@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: *_REGISTRY.json discovery and CRUD operations
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-05
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """*_REGISTRY.json discovery and CRUD operations.
@@ -96,6 +96,15 @@ def branches_as_list(branches):
     if isinstance(branches, list):
         return branches
     return []
+
+
+def row_at(registry_path, branch_dir) -> dict | None:
+    """The registry row whose path resolves to branch_dir, else None."""
+    branch_dir = Path(branch_dir).resolve()
+    for row in branches_as_list(load_registry(registry_path).get("branches", [])):
+        if row.get("path") and (Path(registry_path).parent / row["path"]).resolve() == branch_dir:
+            return row
+    return None
 
 
 def registry_files_in(directory) -> list[Path]:
