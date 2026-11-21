@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_close_ops.py
 # Description: Tests for close_ops handler — plan closure business logic
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-29
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/plan/close_ops.py and its close_helpers, append_closed_plan and registry_routing modules."""
@@ -12,6 +12,7 @@
 # sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
@@ -161,6 +162,32 @@ class TestClosePlanImplAlreadyClosed:
         assert result["success"] is False
         assert any("already closed" in m.get("text", "") for m in result["messages"])
         assert result["plan_key"] == "2"
+
+    @pytest.mark.parametrize(
+        "archived_name", [None, "FPLAN-0002_closed_2026-03-18.md", "FPLAN-0002_closed_2026-03-18_101500.md"]
+    )
+    @patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None)
+    @patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None)
+    def test_a_closed_plan_says_already_archived_only_when_its_archive_copy_exists(
+        self, _mock_find, _mock_resolve, tmp_path, monkeypatch, archived_name
+    ):
+        archive = tmp_path / "processed_plans"
+        archive.mkdir()
+        monkeypatch.setattr("aipass.flow.apps.handlers.plan.close_ops.PROCESSED_PLANS_DIR", archive)
+        plan_file = tmp_path / "FPLAN-0002_closed_2026-03-18.md"
+        if archived_name:
+            (archive / archived_name).write_text("# FPLAN-0002: closed\n", encoding="utf-8")
+        deps = _make_deps()
+        deps["load_registry"].return_value = {
+            "plans": {"2": {"status": "closed", "closed": "2026-03-19", "file_path": str(plan_file)}}
+        }
+        deps["validate_plan_exists"].return_value = (True, None)
+
+        texts = [m.get("text", "") for m in close_plan_impl(plan_num="2", **deps)["messages"]]
+
+        missing = f"Its archive copy is missing: expected {archive / plan_file.name}"
+        assert (missing in texts) is (archived_name is None)
+        assert ("Nothing to do - plan is already archived" in texts) is (archived_name is not None)
 
 
 class TestClosePlanImplAlreadyClosedOrphan:
@@ -694,7 +721,7 @@ class TestACloseAnswersToThePlansOwners:
     def _seats(self, make_seat):
         self.make_seat = make_seat
 
-    def _setup(self, tmp_path, monkeypatch, caller: str, admin=False, created_by=None):
+    def _setup(self, tmp_path, monkeypatch, caller: str, admin: bool | Callable[[], bool] = False, created_by=None):
         beta = self.make_seat(tmp_path / "beta")
         self.make_seat(tmp_path / "alpha")
         plan = beta / "FPLAN-0001_brief_2026-11-15.md"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: close_ops.py
 # Description: Plan Closure Implementation Handler
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-03-08
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -280,7 +280,14 @@ def close_plan_impl(
                 }
 
             messages.append({"type": "warning", "text": f"{plan_label} already closed on {closed_date}"})
-            messages.append({"type": "dim", "text": "Nothing to do - plan is already archived"})
+            archive = archive_dir_for(plan_file, PROCESSED_PLANS_DIR)
+            # A re-close archives a timestamp-suffixed copy, so the stem prefix finds either name.
+            if archive.is_dir() and any(archive.glob(f"{plan_file.stem}*.md")):
+                messages.append({"type": "dim", "text": "Nothing to do - plan is already archived"})
+            else:
+                messages.append(
+                    {"type": "warning", "text": f"Its archive copy is missing: expected {archive / plan_file.name}"}
+                )
             return {
                 "success": False,
                 "messages": messages,

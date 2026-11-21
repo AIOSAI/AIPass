@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: Plan Display Handler
-# Version: 0.3.0
+# Version: 0.3.1
 # Created: 2025-11-15
-# Modified: 2026-10-26
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -17,6 +17,8 @@ from typing import Dict, Any
 
 from aipass.prax import logger
 from aipass.flow.apps.handlers.json import json_handler
+
+SUBJECT_COLUMN_MAX = 60
 
 
 def display_plan_created(
@@ -148,7 +150,7 @@ def format_restore_error(
     elif error_type == "already_open":
         return f"[ERROR] {prefix}-{plan_key} is already open - cannot restore what isn't closed"
     elif error_type == "file_missing":
-        return f"[ERROR] {prefix}-{plan_key} file not found at registered location - move file back first"
+        return f"[ERROR] {prefix}-{plan_key} cannot be restored: its file is gone from the registered location"
     elif error_type == "invalid_number":
         return f"[ERROR] Invalid plan number: {plan_key}"
     elif error_type == "general":
@@ -170,7 +172,10 @@ def format_plan_info(plan_key: str, plan_info: Dict[str, Any], prefix: str = "FP
     # list_ops tags _source_prefix and _plan_num when merging multi-registry plans.
     display_prefix = plan_info.get("_source_prefix", prefix)
 
-    subject = plan_info.get("subject", "No subject")
+    # One line per plan: a newline or a 2,000-char subject must not break the table; the registry keeps it whole.
+    subject = " ".join(str(plan_info.get("subject", "No subject")).split())
+    if len(subject) > SUBJECT_COLUMN_MAX:
+        subject = subject[: SUBJECT_COLUMN_MAX - 1] + "…"
     location = plan_info.get("relative_path", "unknown")
     status = plan_info.get("status", "unknown")
     created = plan_info.get("created", "unknown")

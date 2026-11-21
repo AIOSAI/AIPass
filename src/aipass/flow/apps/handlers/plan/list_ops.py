@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: list_ops.py
 # Description: Plan Listing Implementation Handler
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-03-08
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -78,19 +78,16 @@ def list_plans_impl(
         merged_plans: Dict[str, Any] = {}
         reg_files, reg_prefix_map = _get_all_registry_info()
 
+        # No per-registry skip: an unreadable registry listed as "No plans found" while create refused it.
         for reg_file in reg_files:
-            try:
-                registry = load_registry(registry_file=reg_file)
-                source_prefix = reg_prefix_map.get(reg_file, "FPLAN")
-                for plan_num, plan_info in registry.get("plans", {}).items():
-                    plan_info["_source_prefix"] = source_prefix
-                    plan_info["_plan_num"] = plan_num
-                    # Plan numbers repeat across registries; the prefix keeps keys unique.
-                    merge_key = f"{source_prefix}-{plan_num}"
-                    merged_plans[merge_key] = plan_info
-            except Exception as e:
-                logger.warning(f"[{MODULE_NAME}] Failed to load registry '{reg_file}' for plan listing: {e}")
-                continue
+            registry = load_registry(registry_file=reg_file)
+            source_prefix = reg_prefix_map.get(reg_file, "FPLAN")
+            for plan_num, plan_info in registry.get("plans", {}).items():
+                plan_info["_source_prefix"] = source_prefix
+                plan_info["_plan_num"] = plan_num
+                # Plan numbers repeat across registries; the prefix keeps keys unique.
+                merge_key = f"{source_prefix}-{plan_num}"
+                merged_plans[merge_key] = plan_info
 
         if not whole_fleet:
             cache: Dict[Path, Any] = {}

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: create_plan.py
 # Description: PLAN creation module with location awareness
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2025-11-16
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -232,6 +232,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     json_handler.log_operation("plan_created", {"command": command, "args": args})
 
     location, subject, plan_type_key = parse_create_plan_args(args)
+
+    if not subject.strip():
+        cli_error('A plan needs a subject: drone @flow create <location> "Subject" [type]')
+        return True
 
     try:
         plan_type_config = get_plan_type(plan_type_key)

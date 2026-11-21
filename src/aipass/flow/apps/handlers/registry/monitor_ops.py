@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitor_ops.py
 # Description: Registry Monitor Implementation Handler
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-21
 # =============================================
 
 """Registry Monitor Operations Handler"""
@@ -82,15 +82,19 @@ def is_plan_file(path: Path) -> Optional[bool]:
 
 
 def _fire_event(event_name: str, **kwargs) -> bool:
-    """Fire a trigger event (internal helper)"""
+    """Fire a trigger event; True only when a handler ran (or the fire was queued) to act on it."""
     try:
         from aipass.trigger import trigger
 
-        trigger.fire(event_name, **kwargs)
-        return True
+        outcome = trigger.fire(event_name, **kwargs)
     except ImportError:
         logger.warning(f"[{MODULE_NAME}] Trigger not available - {event_name} event not fired")
         return False
+    # Counting a fire nobody handled reported "Updated: 9" for a scan that wrote nothing.
+    handled = isinstance(outcome, dict) and (outcome.get("ran", 0) > 0 or bool(outcome.get("deferred")))
+    if not handled:
+        logger.info(f"[{MODULE_NAME}] No handler acted on {event_name}; not counted as a change")
+    return handled
 
 
 def scan_plan_files_impl(
@@ -111,15 +115,21 @@ def scan_plan_files_impl(
             logger.warning(f"[{MODULE_NAME}] Error during scan: {error}")
 
     found: List[Tuple[Tuple[str, str], Path]] = []
+    unrecognised: List[str] = []
     for root, dirs, files in os.walk(str(ecosystem_root), topdown=True, onerror=handle_walk_error):
         # Exact-name match: a substring match ("dev" in "devpulse") skips whole project trees.
         dirs[:] = [d for d in dirs if d not in IGNORE_FOLDERS]
 
         for filename in files:
             match = PLAN_PATTERN.match(filename)
-            if match and is_plan_file(Path(root) / filename):
+            if not match:
+                continue
+            if is_plan_file(Path(root) / filename):
                 # Keyed by (prefix, number): every type numbers from 0001, so APLAN-0007 is not FPLAN-0007.
                 found.append(((match.group(1), match.group(2)), Path(root) / filename))
+            else:
+                unrecognised.append(str(Path(root) / filename))
+    unrecognised.sort()
 
     # os.walk order is OS order; sorting makes "first occurrence" the same file every run.
     found.sort(key=lambda entry: str(entry[1]))
@@ -208,6 +218,7 @@ def scan_plan_files_impl(
         "updated": updated,
         "removed": removed,
         "duplicates": duplicate_report,
+        "unrecognised": unrecognised,
         "healing_performed": len(added) + len(updated) + len(removed) > 0,
     }
 

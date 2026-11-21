@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_monitor.py
 # Description: Registry auto-healing module
-# Version: 3.7.0
+# Version: 3.8.0
 # Created: 2025-11-21
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -151,13 +151,19 @@ def handle_command(command: str, args: List[str]) -> bool:
                 number = heal.get("number", "?")
                 console.print(f"    - {prefix}-{number}: {heal.get('action', 'unknown')}")
 
-        if result["healing_performed"]:
-            change_count = len(result["added"]) + len(result["updated"]) + len(result["removed"])
+        unrecognised = result.get("unrecognised", [])
+        if unrecognised:
             warning(
-                f"Registry scan found {change_count} mismatch(es) — "
-                "trigger event handlers not wired, no changes applied"
+                f"{len(unrecognised)} file(s) named like a plan are not plans: no '# PREFIX-NNNN: subject' "
+                "first line, so no registry tracks them (reported, never adopted or moved)"
             )
-        else:
+            for path in unrecognised:
+                console.print(f"    - {path}")
+            console.print(
+                "  [dim]Next: give a real plan that first line and re-run scan to register it; otherwise rename it.[/dim]"
+            )
+
+        if not result["healing_performed"] and result.get("doctrine_healed", 0) == 0:
             console.print("\n[dim]No changes needed - registry is healthy[/dim]")
 
         console.print()
