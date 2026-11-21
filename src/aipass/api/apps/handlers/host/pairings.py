@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pairings.py
 # Description: Host API Pairings — one-use, five-minute codes a phone trades for its bearer
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-10-13
-# Modified: 2026-11-06
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -210,9 +210,13 @@ def _require_listener(label: str, scope: str) -> None:
 
 def mint_pairing(label: str, scope: str = "read", ttl_seconds: int = DEFAULT_TTL_SECONDS) -> Dict[str, Any]:
     """Mint a one-use pairing code."""
-    wanted = (label or "").strip()
-    if not wanted:
+    if not (label or "").strip():
         raise PairingError("A pairing needs a label: the token it mints is revoked by that name")
+    # Refused now, never at redeem: a code whose label issue_token refuses would mint nothing.
+    try:
+        wanted = host_tokens.require_label(label)
+    except host_tokens.TokenError as e:
+        raise PairingError(str(e)) from e
     if scope not in host_tokens.SCOPES:
         raise PairingError(f"Unknown scope {scope!r} — expected one of: {', '.join(host_tokens.SCOPES)}")
     if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):

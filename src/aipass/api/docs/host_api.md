@@ -48,8 +48,8 @@ still verify, and read back as `unknown`.
 
 **A raw token is never printed.** `issue-token` writes its receipt to
 `~/.secrets/aipass/host_api/<label>.token` (dir `0700`, file `0600`; `--out`
-overrides). The label is a filename, so it passes the routes' two-gate name fence.
-An existing receipt is refused, never truncated: its token is still live in the store.
+overrides). A label is ≤64 characters: a letter or digit, then those, spaces or
+`._'-`; `issue-token` and `pair` refuse others first. An existing receipt is refused.
 
 **The bind rule:** the server binds the address it was configured for or refuses
 to start. No fallback, ever. Wildcards (`0.0.0.0`, `::`), hostnames, and addresses

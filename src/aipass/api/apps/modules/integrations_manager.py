@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: integrations_manager.py
 # Description: Integrations command module — list and call generic contracts
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-04-15
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 """Integrations Module"""
 
@@ -130,7 +130,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         if subcommand == "call":
             if not sub_args:
                 error("Usage: drone @api integrations call <contract> [args...]")
-                sys.exit(1)
+                # Recognised and refused is 2; 1 means the command was not recognised (README).
+                sys.exit(2)
             registry.load_drivers()
             sys.exit(_run_call(sub_args[0], sub_args[1:]))
 

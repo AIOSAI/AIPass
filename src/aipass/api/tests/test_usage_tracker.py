@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_usage_tracker.py
 # Description: Tests for usage tracker module
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-24
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/usage_tracker.py, API usage monitoring orchestration."""
@@ -270,6 +270,18 @@ def test_show_caller_usage_no_data(mock_agg, mock_header, mock_warning, capsys):
 
     mock_warning.assert_called_once_with("No usage data found for caller: ghost_caller")
     assert capsys.readouterr() == ("\n", ""), "No usage rows should be printed when data is empty"
+
+
+@patch(f"{PATCH_ROOT}.error")
+@patch(f"{PATCH_ROOT}.header")
+@patch(f"{PATCH_ROOT}.aggregation", autospec=True)
+def test_show_caller_usage_refuses_an_oversized_name_without_echoing_it(mock_agg, mock_header, mock_error):
+    """A 10,000-character caller is refused through the error channel (exit 2), never printed in the header."""
+    usage_tracker.show_caller_usage(["c" * 10_000])
+
+    mock_error.assert_called_once_with("Caller name is 10000 characters, over the 100-character cap")
+    mock_header.assert_not_called()
+    mock_agg.get_caller_usage.assert_not_called()
 
 
 @patch(f"{PATCH_ROOT}.error")

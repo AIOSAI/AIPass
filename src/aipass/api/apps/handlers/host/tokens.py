@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tokens.py
 # Description: Host API Token Handler — bearer token issue, verify, revoke
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-08-14
-# Modified: 2026-11-14
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -15,6 +15,7 @@ Reference: docs/host_api.md (two auth layers, the store, last_used).
 import hashlib
 import hmac
 import os
+import re
 import secrets as secrets_lib
 import time
 import uuid
@@ -61,6 +62,14 @@ _SCOPE_IMPLIES: Dict[str, Tuple[str, ...]] = {
 
 _TOKEN_BYTES = 32
 
+# The label names a receipt file and a log line: plain ASCII words, short enough for any filesystem.
+LABEL_MAX_CHARS = 64
+LABEL_RULE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._'-]*")
+LABEL_SENTENCE = (
+    f"A token label is up to {LABEL_MAX_CHARS} characters: a letter or digit, "
+    "then letters, digits, spaces, dots, underscores, apostrophes or hyphens"
+)
+
 
 class TokenError(Exception):
     """A token operation was refused."""
@@ -93,11 +102,15 @@ def prepare_receipt_dir(target: Path) -> None:
     os.chmod(target.parent, 0o700)
 
 
-def receipt_path(label: str) -> Path:
-    """Where a freshly minted token's raw value belongs, given its label."""
+def require_label(label: str) -> str:
+    """The label stripped, or TokenError: the one label rule for receipts, tokens and pairings."""
     wanted = (label or "").strip()
     if not wanted:
         raise TokenError("Token label is required — an unlabelled token cannot be revoked with confidence")
+
+    # Length first, and never echoed: a 10,000-character label must not come back in the refusal.
+    if len(wanted) > LABEL_MAX_CHARS:
+        raise TokenError(f"{LABEL_SENTENCE}; this one is {len(wanted)} characters")
 
     if wanted != Path(wanted).name or wanted in (".", ".."):
         raise TokenError(
@@ -109,6 +122,16 @@ def receipt_path(label: str) -> Path:
         raise TokenError(
             f"Label {label!r} would write a hidden receipt — a secret nobody can see is a secret nobody rotates"
         )
+
+    if not LABEL_RULE.fullmatch(wanted):
+        raise TokenError(f"{LABEL_SENTENCE}; refused {wanted!r}")
+
+    return wanted
+
+
+def receipt_path(label: str) -> Path:
+    """Where a freshly minted token's raw value belongs, given its label."""
+    wanted = require_label(label)
 
     # Gate two, not redundant: post-resolve containment holds however the escape was spelled.
     provider_dir = secrets_store.SECRETS_BASE / TOKEN_PROVIDER
@@ -196,8 +219,7 @@ def _drop_lock(path: Path) -> None:
 
 def issue_token(label: str, scope: str = "read") -> Tuple[Dict[str, Any], str]:
     """Mint a bearer token."""
-    if not label or not label.strip():
-        raise TokenError("Token label is required — an unlabelled token cannot be revoked with confidence")
+    wanted = require_label(label)
 
     if scope not in SCOPES:
         raise TokenError(f"Unknown scope {scope!r} — expected one of: {', '.join(SCOPES)}")
@@ -206,7 +228,7 @@ def issue_token(label: str, scope: str = "read") -> Tuple[Dict[str, Any], str]:
 
     record: Dict[str, Any] = {
         "id": uuid.uuid4().hex[:12],
-        "label": label.strip(),
+        "label": wanted,
         "scope": scope,
         "hash": _hash_token(raw),
         "created": datetime.now().isoformat(),

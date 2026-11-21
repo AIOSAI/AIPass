@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_token_store.py
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-14
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
@@ -739,6 +739,28 @@ class TestTheReceiptHasAHomeAndTheLabelIsFenced:
             host_tokens.receipt_path("   ")
 
         assert "label is required" in str(refusal.value)
+
+    @pytest.mark.parametrize("label", ["x" * 10_000, "x" * 65, "bad;rm-x", "uni-ünï-✓", "tab\there"])
+    def test_a_label_outside_the_rule_is_refused_before_a_file_is_named_or_a_token_minted(
+        self, store: Path, label: str
+    ) -> None:
+        """One rule for every door that takes a label; a long one is never echoed back."""
+        with pytest.raises(host_tokens.TokenError) as named:
+            host_tokens.receipt_path(label)
+        with pytest.raises(host_tokens.TokenError) as minted:
+            host_tokens.issue_token(label)
+
+        assert str(named.value) == str(minted.value)
+        assert str(named.value).startswith(host_tokens.LABEL_SENTENCE)
+        assert len(str(named.value)) < 200
+        assert host_tokens.list_tokens() == []
+
+    def test_a_label_at_the_length_cap_is_accepted(self, store: Path) -> None:
+        """64 characters is the cap, inclusive."""
+        record, _ = host_tokens.issue_token("x" * host_tokens.LABEL_MAX_CHARS)
+
+        assert record["label"] == "x" * 64
+        assert host_tokens.receipt_path("x" * 64).name == "x" * 64 + ".token"
 
     def test_an_ordinary_label_with_spaces_still_works(self, store: Path) -> None:
         """The fence refuses what is DANGEROUS, not what is untidy."""

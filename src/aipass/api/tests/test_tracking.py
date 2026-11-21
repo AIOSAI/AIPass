@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_tracking.py
 # Description: Tests for usage tracking handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-04-03
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/usage/tracking.py, the usage tracking handler."""
@@ -21,6 +21,7 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
+from aipass.api.apps.handlers.auth import keys
 from aipass.api.apps.handlers.usage import cleanup, tracking
 from aipass.api.apps.handlers.usage.tracking import (
     MetricsUnavailable,
@@ -134,7 +135,7 @@ def test_get_generation_metrics_request_exception(mock_urlopen: MagicMock):
 @pytest.mark.parametrize("timeout", [TimeoutError("timed out"), URLError(TimeoutError("timed out"))])
 @patch(f"{_TRACKING_MOD}.urlopen")
 def test_get_generation_metrics_timeout(mock_urlopen: MagicMock, timeout: Exception):
-    """A timeout raises, and says it was a timeout rather than any request error: bare on a read, wrapped on a connect."""
+    """A timeout raises, and says it was a timeout, not any request error: bare on a read, wrapped on a connect."""
     mock_urlopen.side_effect = timeout
 
     with pytest.raises(MetricsUnavailable) as refusal:
@@ -155,6 +156,17 @@ def test_track_usage_reports_why_the_metrics_were_unavailable(
     result = track_usage("gen-missing", "flow_mbank", api_key="FAKE-sk-or-key")
 
     assert result == {"success": False, "error": "OpenRouter answered status 404 for generation gen-missing"}
+    mock_store.assert_not_called()
+
+
+@patch(f"{_TRACKING_MOD}.store_usage_data")
+def test_track_usage_with_no_key_names_the_keyring_cause(mock_store: MagicMock):
+    """A locked keyring is not a missing key: the answer carries the backend's reason, as the key verbs do."""
+    locked = keys.KeyUnavailable("the keyring backend SecretService is locked")
+    with patch.object(keys, "get_api_key", side_effect=locked):
+        result = track_usage("gen-1", "flow_mbank")
+
+    assert result == {"success": False, "error": "No API key available: the keyring backend SecretService is locked"}
     mock_store.assert_not_called()
 
 
