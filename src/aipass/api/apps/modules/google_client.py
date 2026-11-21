@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: google_client.py
 # Description: Google API Client Module — public API for Google services
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-14
-# Modified: 2026-10-22
+# Modified: 2026-11-20
 # =============================================
 
 """
@@ -21,7 +21,6 @@ from aipass.api.apps.handlers.json import json_handler
 from aipass.prax import logger  # noqa: F401
 import aipass.api.apps.handlers.google.auth as google_auth
 import aipass.api.apps.handlers.google.service_factory as google_factory
-import aipass.api.apps.handlers.google.retry as google_retry
 
 IMPORT_HINT = "Put google_client_secret.json in the store, then run: drone @api secrets migrate"
 
@@ -45,7 +44,6 @@ def print_introspection() -> None:
     console.print("  - get_drive_service()     - Get authenticated Drive client")
     console.print("  - get_google_service()    - Get any Google API service")
     console.print("  - authenticate_google()   - Run OAuth2 authentication")
-    console.print("  - validate_google()       - Check credential status")
     console.print("  - reauth_google()         - Force re-authentication")
     console.print()
 
@@ -233,25 +231,10 @@ def authenticate_google(scopes: Optional[list] = None) -> bool:
     return creds is not None
 
 
-def validate_google(scopes: Optional[list] = None) -> bool:
-    """Check if valid Google credentials exist."""
-    return google_auth.validate_credentials(scopes=scopes)
-
-
 def reauth_google(scopes: Optional[list] = None) -> bool:
     """Force Google re-authentication."""
     creds = google_auth.reauth(scopes=scopes)
     return creds is not None
-
-
-def api_call_with_retry(*args, **kwargs):
-    """Execute API call with retry logic for SSL and transient errors."""
-    return google_retry.api_call_with_retry(*args, **kwargs)
-
-
-def is_ssl_error(error):
-    """Check if an error is an SSL-related error."""
-    return google_retry.is_ssl_error(error)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: openrouter_client.py
 # Description: OpenRouter Client Module
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2025-11-15
-# Modified: 2026-10-17
+# Modified: 2026-11-20
 # =============================================
 # pyright: reportMissingImports=false
 
@@ -294,11 +294,6 @@ def get_response(prompt: str, caller: str | None = None, model: str | None = Non
     Raises client.OpenRouterUnavailable or keys.KeyUnavailable with the reason.
     """
     return client.get_response(prompt, caller, model, **kwargs)
-
-
-def extract_response(response):
-    """Public API: Extract content from an OpenRouter API response object."""
-    return client.extract_response(response)
 
 
 if __name__ == "__main__":

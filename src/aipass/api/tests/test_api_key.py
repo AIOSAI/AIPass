@@ -1,16 +1,15 @@
 # =================== AIPass ====================
 # Name: test_api_key.py
 # Description: Tests for API Key Management Module
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-11-15
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/modules/api_key.py, the API key management module."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that api_key.py parses and imports
-# sentry: no-test-needed(covered_elsewhere) — fetch_api_key and fetch_validate_key, tests/test_critical_paths.py
 # sentry: no-test-needed(covered_elsewhere) — get_secret_cmd's secret read, tests/test_secrets.py
 # sentry: no-test-needed(hardcoded_key) — any real key; the keyring is conftest's dict and the env writer is stubbed
 
@@ -457,35 +456,35 @@ def test_an_unreadable_secrets_file_is_named(
 
 
 class TestGetValidationRulesAuthKeys:
-    """Tests for api_key.get_validation_rules() — module entry point."""
+    """Tests for keys_handler.get_validation_rules() — the per-provider rule table."""
 
     def test_openrouter_rules(self):
         """openrouter should have prefix 'sk-or-v1-' and min_length 40."""
-        rules = api_key.get_validation_rules("openrouter")
+        rules = keys_handler.get_validation_rules("openrouter")
         assert rules["prefix"] == "sk-or-v1-"
         assert rules["min_length"] == 40
 
     def test_openai_rules(self):
         """openai should have prefix 'sk-' and min_length 40."""
-        rules = api_key.get_validation_rules("openai")
+        rules = keys_handler.get_validation_rules("openai")
         assert rules["prefix"] == "sk-"
         assert rules["min_length"] == 40
 
     def test_anthropic_rules(self):
         """anthropic should have prefix 'sk-ant-' and min_length 40."""
-        rules = api_key.get_validation_rules("anthropic")
+        rules = keys_handler.get_validation_rules("anthropic")
         assert rules["prefix"] == "sk-ant-"
         assert rules["min_length"] == 40
 
     def test_unknown_provider_falls_back_to_generic(self):
         """Unknown provider should fall back to generic rules."""
-        rules = api_key.get_validation_rules("unknown_provider")
+        rules = keys_handler.get_validation_rules("unknown_provider")
         assert rules["min_length"] == 10
         assert "prefix" not in rules
 
     def test_generic_rules_directly(self):
         """Requesting 'generic' should return generic rules."""
-        rules = api_key.get_validation_rules("generic")
+        rules = keys_handler.get_validation_rules("generic")
         assert rules["min_length"] == 10
         assert "prefix" not in rules
 
@@ -501,14 +500,14 @@ class TestGetValidationRulesAuthKeys:
         assert len(expected) == 3, "the provider table shrank — one of them is no longer checked"
 
         for provider, rule in expected.items():
-            assert api_key.get_validation_rules(provider) == rule
+            assert keys_handler.get_validation_rules(provider) == rule
 
     def test_an_unknown_provider_falls_back_to_the_generic_rule(self):
         """The fallback carries NO prefix, and that is the part worth pinning."""
         # An unknown provider inheriting another's prefix would reject every key it is given.
-        generic = api_key.get_validation_rules("generic")
+        generic = keys_handler.get_validation_rules("generic")
 
-        assert api_key.get_validation_rules("nonexistent") == generic
+        assert keys_handler.get_validation_rules("nonexistent") == generic
         assert "prefix" not in generic
         assert generic["min_length"] == 10
 
@@ -651,7 +650,10 @@ RUN_KEYS = {
     "openrouter": ("OPENROUTER_API_KEY", FIXTURE_KEY),
 }
 # The child writes the variable it was handed to argv[1], then exits with argv[2].
-CHILD = "import os, sys; open(sys.argv[1], 'w', encoding='utf-8').write(os.environ.get(sys.argv[3], '')); sys.exit(int(sys.argv[2]))"
+CHILD = (
+    "import os, sys; open(sys.argv[1], 'w', encoding='utf-8').write(os.environ.get(sys.argv[3], ''));"
+    " sys.exit(int(sys.argv[2]))"
+)
 
 
 class TestRunPutsTheKeyInTheChildOnly:
