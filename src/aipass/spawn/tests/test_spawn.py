@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/core.py (spawn_agent) and apps/handlers/registry.py."""
@@ -24,7 +24,7 @@ from aipass.spawn.apps.handlers.seed_ops import export_seeds
 from aipass.spawn.apps.handlers import mint_ops
 from aipass.spawn.apps.handlers.class_registry import get_template_dir
 from aipass.spawn.apps.handlers.metadata import get_branch_name, normalize_branch_name, detect_profile
-from aipass.spawn.apps.handlers.project_defaults import PROJECT_TEMPLATE_DIR
+from aipass.spawn.apps.handlers.project_defaults import PROJECT_TEMPLATE_DIR, stamp_onboarding
 from aipass.spawn.apps.handlers.update_ignore import is_ignored, read_ignore
 from aipass.spawn.apps.handlers.placeholders import (
     build_replacements_dict,
@@ -453,6 +453,28 @@ class TestArrivalDefaults:
         assert (root / ".updateignore").read_text(encoding="utf-8") == (
             PROJECT_TEMPLATE_DIR / "updateignore_fresh"
         ).read_text(encoding="utf-8")
+
+    def test_a_prompt_that_resolves_outside_the_seat_is_refused_never_followed(self, tmp_path):
+        """Mutant: the containment check is dropped -> the outside file's text is read into the seat -> red."""
+        seat = tmp_path / "seat"
+        (seat / ".aipass").mkdir(parents=True)
+        outside = tmp_path / "elsewhere.md"
+        outside.write_text("# not the seat's\nprivate\n", encoding="utf-8")
+        (seat / ".aipass" / "aipass_local_prompt.md").symlink_to(outside)
+
+        with pytest.raises(PermissionError, match="resolves outside the seat"):
+            stamp_onboarding(seat, "fresh")
+
+        assert outside.read_text(encoding="utf-8") == "# not the seat's\nprivate\n"
+        assert (seat / ".aipass" / "aipass_local_prompt.md").is_symlink()
+
+    def test_a_seat_that_is_not_a_directory_is_refused(self, tmp_path):
+        """Mutant: the directory check is dropped -> a file path is answered 'not stamped' like a seat -> red."""
+        not_a_seat = tmp_path / "file.txt"
+        not_a_seat.write_text("", encoding="utf-8")
+
+        with pytest.raises(NotADirectoryError):
+            stamp_onboarding(not_a_seat, "fresh")
 
     def test_the_stamped_rows_hold_every_seats_own_files_and_nothing_else(self, tmp_path):
         """The proof that stamping protects: the update lane's own matcher reads the stamped file."""

@@ -1,13 +1,14 @@
 # =================== AIPass ====================
 # Name: project_defaults.py
 # Description: A project's first-seat defaults: .updateignore, test-write policy, First wake checklist
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-11-20
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """A new project seat's defaults, chosen by the arrival its caller names (spawn never guesses it). See docs/birth.md"""
 
+import os
 from pathlib import Path
 
 from aipass.prax import logger
@@ -31,8 +32,17 @@ def arrival_refusal(arrival) -> str | None:
 
 
 def stamp_onboarding(target: Path, arrival: str) -> str:
-    """Put the First wake checklist under the local prompt's title; OSError when it cannot be written."""
-    prompt = Path(target) / LOCAL_PROMPT_REL
+    """Put the First wake checklist under the local prompt's title; OSError when it cannot be written.
+
+    The seat must be a directory, and its prompt must resolve inside it: the prompt is read and then
+    rewritten, so one that is a link out of the seat is refused, never followed."""
+    seat = os.path.realpath(target)
+    if not os.path.isdir(seat):
+        raise NotADirectoryError(f"seat {target} is not a directory, First wake not stamped")
+    prompt_path = os.path.realpath(os.path.join(seat, LOCAL_PROMPT_REL))
+    if not prompt_path.startswith(seat + os.sep):
+        raise PermissionError(f"{LOCAL_PROMPT_REL} in {target} resolves outside the seat, to {prompt_path}")
+    prompt = Path(prompt_path)
     if not prompt.is_file():
         logger.warning("[spawn] %s has no %s, First wake not stamped", target, LOCAL_PROMPT_REL)
         return f"not stamped: the template rendered no {LOCAL_PROMPT_REL}"
