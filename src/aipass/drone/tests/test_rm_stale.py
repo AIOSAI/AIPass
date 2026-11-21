@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rm_stale.py
 # Description: drone rm --stale: the stale-temp sweep, its age, args, record and summary
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-11-15
-# Modified: 2026-11-15
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/handlers/rm_handler.py's stale sweep and apps/modules/rm.py's --stale lane."""
@@ -29,11 +29,18 @@ from aipass.drone.apps.handlers.rm_handler import (
 )
 from aipass.drone.apps.modules.rm import handle_command
 
-from .conftest import logged_lines, rm_ledger
+from .conftest import logged_lines, rail_answers, rm_ledger
 
 #: A mode-0 folder only stops a caller the kernel holds to permissions: not as root.
 _PERMISSIONS_DO_NOT_BIND = os.geteuid() == 0
 _PERMISSIONS_REASON = "needs file permissions that bind the caller"
+
+
+@pytest.fixture(autouse=True)
+def _a_citizen_seat(monkeypatch):
+    """The verified-admin rail says no: run from the admin seat, the real rail says yes and the plain verb crosses."""
+    rail_answers(monkeypatch, False)
+
 
 # Stale mode crosses the sibling fence on purpose: the fixture stands in @drone and sweeps @api,
 # so a lost crossing turns the whole block red, not one test.

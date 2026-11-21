@@ -83,16 +83,6 @@
       "reason": "Pure argument inspection: no I/O, no state, no branch imports beyond typing, so it can be called as the FIRST thing in every handle_command before anything else runs. log_operation() here would write a line per CLI invocation into the operation log, and would make the help gate depend on the JSON layer it is meant to run ahead of. Same call and same reason as @memory's identical helper (their bypass.json, 2026-08-13); their file is the standard's own reference implementation."
     },
     {
-      "file": "apps/log_watcher_service.py",
-      "standard": "encapsulation",
-      "lines": [
-        16
-      ],
-      "pattern": "import aipass.trigger.apps.handlers.reload_sentinel",
-      "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). trigger publishes no modules/ entry point for the reload sentinel and should not - it is not a CLI surface, it is the service's own supervisor hook, while modules/ is auto-discovered for drone routing. Same shape as the ai_mail dispatch.wake exemption. Line drifts if anything above L26 changes - re-derive rather than nudge it.",
-      "anchor": "import aipass.trigger.apps.handlers.reload_sentinel"
-    },
-    {
       "file": "apps/modules/errors.py",
       "standard": "logged_fallback",
       "lines": [
