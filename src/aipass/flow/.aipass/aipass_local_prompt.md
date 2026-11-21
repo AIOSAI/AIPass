@@ -39,7 +39,7 @@ apps/
     config/  events/  summary/    EMPTY package markers, no code
 templates/                one directory per plan type, data not code
   flow_plans/ dev_plans/ research_plans/ team_dev_plans/ audit_plans/
-  playbook_plans/ capture_plans/
+  playbook_plans/ capture_plans/ night_plans/
 flow_json/                per-type registries + template_registry.json
 tests/  docs/  docs.local/  dropbox/  artifacts/  logs/  tools/  .archive/
 ```

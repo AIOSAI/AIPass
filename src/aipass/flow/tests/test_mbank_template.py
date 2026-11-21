@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_mbank_template.py
 # Description: Tests for mbank/process.py and template handler functions
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-20
-# Modified: 2026-11-15
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for mbank/process.py and template handler functions."""
@@ -628,6 +628,19 @@ class TestGetTemplate:
         assert "The coordinator's branch holds this file and is its only writer." in header
         assert "sends it in its reply to the dispatch" in header
         assert "Edit freely" not in result
+
+    @pytest.mark.parametrize("tpl", sorted(TEMPLATES_DIR.glob("*/*.md")), ids=lambda p: f"{p.parent.name}/{p.name}")
+    def test_every_shipped_template_says_finished_is_closed_near_the_top(self, tpl):
+        """Owner ruling 2026-11-20: whoever finishes a plan closes it; any agent may consolidate."""
+        result = get_template(template_path=tpl, number=7, subject="Fresh", prefix="XPLAN")
+        intro = "\n---\n".join(result.split("\n---\n", 2)[:2])
+
+        assert "**Finished = closed.**" in intro
+        assert "no permission asked" in intro
+        assert "drone @flow restore XPLAN-0007" in intro
+        assert "close the lot and open ONE new plan" in intro
+        assert "STAY OPEN" not in result
+        assert "rarely closed" not in result
 
     @pytest.mark.parametrize(
         "tpl",

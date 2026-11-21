@@ -12,6 +12,8 @@ Capture Plans (CPLANs) are **records, not plans** — a soft memo wearing the pl
 
 **Born to close.** A CPLAN is created, filled, and closed in the same sitting. If it stays open past a day, it probably wanted to be a DPLAN.
 
+**Finished = closed.** Whoever wrote it closes it, no permission asked: `drone @flow close {plan_number}`. Closing loses nothing: the registry keeps its row and `drone @flow restore {plan_number}` reopens it. When several open plans orbit one subject, any agent may close the lot and open ONE new plan for the live remainder, pointing back to the closed IDs.
+
 **This IS for:**
 - External reviews, audits, contributions — capture the substance and our response
 - Discoveries — a mechanism traced, a connection found, a mystery solved

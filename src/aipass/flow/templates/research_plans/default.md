@@ -27,6 +27,8 @@ Research Plans (RPLANs) hold **research of any kind** -- work whose output is un
 
 **Never trim RPLAN.** Raw findings, dead ends, "this looked promising but wasn't" -- all valuable. Future you will thank past you.
 
+**Finished = closed.** When the question has its answer, or an honest "cannot tell", whoever finished it closes it, no permission asked: `drone @flow close {plan_number}`. Closing loses nothing: the registry keeps its row, @memory keeps the findings, `drone @flow restore {plan_number}` reopens it. When several open plans orbit one question, any agent may close the lot and open ONE new plan for the live remainder, pointing back to the closed IDs.
+
 ---
 
 ## Source

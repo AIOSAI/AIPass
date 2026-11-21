@@ -13,6 +13,8 @@
 
 An agent with no memory of AIPass, started by the owner because the agents inside it cannot work. Also the admin seat (@devpulse) in safe mode. Read the whole page before you run anything.
 
+**Finished = closed.** When drone runs again and the break is cured, whoever finished closes this plan, no permission asked: `drone @flow close {plan_number}`. Closing loses nothing: `drone @flow restore {plan_number}` reopens it. When several open plans orbit one break, any agent may close the lot and open ONE new plan for the live remainder, pointing back to the closed IDs.
+
 ## Owner: your whole job
 
 Open a terminal and start a fresh Claude from your home directory — not inside the project:

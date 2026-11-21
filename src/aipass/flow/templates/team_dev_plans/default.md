@@ -23,7 +23,9 @@ Team Design Plans (TDPLANs) are **collaborative thinking across multiple branche
 
 **TDPLANs have no fixed structure beyond Team Sections.** Shared sections above are starting points. Add sections, remove sections, go wherever thinking takes you. Team Sections below are structured part -- each branch owns theirs.
 
-**When plan ready to build**, create FPLANs per branch: `drone @flow create . "Subject"`. Each branch can create their own FPLAN from their section. TDPLAN stays as shared design record.
+**When plan ready to build**, create FPLANs per branch: `drone @flow create . "Subject"`. Each branch can create their own FPLAN from their section. Closed, the TDPLAN stays the shared design record.
+
+**Finished = closed.** When the shared design is settled and handed out, whoever finished it closes it, no permission asked: `drone @flow close {plan_number}`. Closing loses nothing: the registry keeps its row, @memory keeps the text, `drone @flow restore {plan_number}` reopens it. When several open plans orbit one problem, any agent may close the lot and open ONE new plan for the live remainder, pointing back to the closed IDs.
 
 **Never trim TDPLAN.** Story -- conversations, decisions, dead ends, pivots -- as important as results.
 

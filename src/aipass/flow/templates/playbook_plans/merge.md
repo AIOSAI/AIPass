@@ -13,7 +13,9 @@
 
 The `dev → main` merge + release tag — run on-demand, not on a fixed weekly cadence.
 Run by **devpulse** (only branch with git write). Tick each step as you go; fill the
-**Run Summary** with PR numbers and tags for the vectorized trail. Close when done.
+**Run Summary** with PR numbers and tags for the vectorized trail.
+
+**Finished = closed.** When the run is done, whoever ran it closes it, no permission asked: `drone @flow close {plan_number}`. Closing loses nothing: `drone @flow restore {plan_number}` reopens it. When several open plans orbit one merge, any agent may close the lot and open ONE new plan for the live remainder, pointing back to the closed IDs.
 
 > All git writes go through `drone @git` — **run drone from a branch dir** (it needs
 > `.trinity/passport.json` in the cwd; running from the repo root fails with "No

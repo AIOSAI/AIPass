@@ -11,6 +11,8 @@
 
 Any change to an injected prompt — the kernel, the navmap, a branch-local prompt, identity, a brand-new tier, a cadence tweak, or retiring one — must propagate to **every place that injects it AND every place that seeds it into a fresh install**. This SOP is the checklist that makes sure nothing is half-done. Run by **devpulse** (orchestrator); tick as you go; dispatch the owning branch where a step lives in its core. Born from FPLAN-0284, where the live wiring was fixed but `aipass init` kept handing new projects the retired global prompt for days because the *seed* template was never updated.
 
+**Finished = closed.** When every injection and seed path carries the change, whoever ran it closes it, no permission asked: `drone @flow close {plan_number}`. Closing loses nothing: `drone @flow restore {plan_number}` reopens it. When several open plans orbit one prompt change, any agent may close the lot and open ONE new plan for the live remainder, pointing back to the closed IDs.
+
 ---
 
 ## The Law (read first — this is the trap)

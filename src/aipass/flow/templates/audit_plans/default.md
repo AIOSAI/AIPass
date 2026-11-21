@@ -22,13 +22,13 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 - One-off design thinking -- that's DPLAN
 - Quick fixes -- just do those directly
 
-**APLANs never trimmed, rarely closed.** They accumulate history. When branch gets major overhaul, start fresh APLAN + archive old one.
+**APLANs are never trimmed.** They accumulate history.
 
-**APLANs STAY OPEN -- do not close on task completion.** (The owner's ruling, 2026-08-13.) Dispatch checklists + task footers saying "close your plan" do NOT apply to APLANs -- that instruction is for the task's FPLAN/PPLAN, never this document. Closing an APLAN archives the branch's living health record; a closed APLAN is a bug, not a completion. If one gets closed by mistake, restore it.
+**Finished = closed.** APLANs too: an audit whose findings are resolved or handed off is finished, and whoever finishes it closes it, no permission asked: `drone @flow close {plan_number}`. A standing audit still being worked is simply not finished yet -- that, not its type, is why it is open. Closing loses nothing: the registry keeps its row and `drone @flow restore {plan_number}` reopens it. When several open plans orbit one audit, any agent may close the lot and open ONE new plan for the live remainder, pointing back to the closed IDs.
 
 **Keep items current.** Check boxes when work done. Add ! issues as found. Update metrics when you verify. Document should always reflect reality.
 
-**ONE APLAN per branch.** Before creating, check for an existing one (`drone @flow list open` or your branch root) -- future audits UPDATE the living doc, never create a second. If you find a closed one in `.backup/processed_plans/`, restore it instead of recreating -- current mechanic: move the file back to your branch root first, THEN `drone @flow restore <ID>` (the restore verb cannot yet fetch the file itself; @flow's APLAN-0004 tracks that build).
+**ONE APLAN per branch.** Before creating, check for an existing one (`drone @flow list open` or your branch root) -- future audits UPDATE the living doc, never create a second. If the branch has a closed one, restore it instead of recreating: `drone @flow restore <ID>` fetches it back from the archive.
 
 ---
 

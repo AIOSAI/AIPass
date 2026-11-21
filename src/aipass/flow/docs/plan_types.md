@@ -15,6 +15,7 @@ How a plan type is registered, what makes one discoverable, and the three self-h
 | audit_plans | APLAN | aplan_registry.json | default |
 | playbook_plans | PPLAN | pplan_registry.json | default, merge, prompt_change, recovery, weekly_update |
 | capture_plans | CPLAN | cplan_registry.json | default |
+| night_plans | NPLAN | nplan_registry.json | default |
 
 Plans follow the naming convention `{PREFIX}-{NNNN}_topic_slug_YYYY-MM-DD.md` where NNNN auto-increments per type.
 
@@ -22,7 +23,7 @@ Plans follow the naming convention `{PREFIX}-{NNNN}_topic_slug_YYYY-MM-DD.md` wh
 drops a trailing `plans` segment, takes one initial per remaining word, and adds
 `PLAN`: `dev_plans` → `DPLAN`, `team_dev_plans` → `TDPLAN`. The rule is
 deterministic — the same directory name yields the same prefix on every install,
-and all seven directories above derive exactly the prefix their registry row
+and every directory above derives exactly the prefix their registry row
 holds (pinned against the live registry, not a table in a test). Every word
 counts: a prefix from the first word alone would give `team_dev_plans` a
 different prefix on a fresh clone than the one its existing files carry. Only a
