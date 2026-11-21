@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: Spawn's front door: the names other branches take, each loaded from its home
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-03-05
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """Spawn - the agent factory: mint, update, retire and register citizens.
@@ -12,7 +12,22 @@ Public surface for other branches: from aipass.spawn import <name>. apps/spawn.p
 """
 
 import importlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # each name typed from its home
+    from aipass.spawn.apps.handlers.bootstrap_render import render_bootstrap_trinity, restore_citizen
+    from aipass.spawn.apps.handlers.class_registry import (
+        CITIZEN_CLASSES,
+        FORBIDDEN_CLASSES,
+        LEGACY_CLASSES,
+        get_available_classes,
+        get_template_dir,
+        refuse_legacy_class,
+        refuse_retired_or_forbidden,
+        validate_class,
+    )
+    from aipass.spawn.apps.handlers.registry import find_registry, get_owner, is_owner, registry_is_writable_document
+    from aipass.spawn.apps.modules.core import spawn_agent
 
 _HANDLERS = "aipass.spawn.apps.handlers"
 _CLASSES = f"{_HANDLERS}.class_registry"

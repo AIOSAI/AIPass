@@ -85,9 +85,18 @@ tests/ · docs/ · docs.local/ · dropbox/ · artifacts/ · spawn_json/ · tools
 
  - The template is the source of truth: change `templates/citizen/`, then regenerate the template registry in the same pass
  - Preview is the default on every write-capable lane; `--apply` and `--confirm` are the only ways to act
- - Another branch's `.py` and `.md` are theirs — a template change reaches them by dispatch, never by overwriting
+ - Another branch's content is theirs: a judgment call about it goes to its owner, never overwritten
  - Caps and contracts owned elsewhere are READ at use time, never copied into this branch
  - Break a pin before trusting it: mutate the code it names, watch it go red, restore, verify the restore
+
+# Scaffold Lane
+
+Spawn keeps every branch's folder structure to the standards. Its code may create, change, move and retire other branches' scaffold files; this is a service lane, like sync.
+
+ - Only on an approved dispatch; the code writes directly, generating from each branch's own data where content differs
+ - Owners get an FYI email; nobody is woken for a mechanical change
+ - Never by hand: the Edit tool on another branch's files stays off
+ - A judgment call about a branch's content still goes to its owner
 
 # Known Gotchas
 

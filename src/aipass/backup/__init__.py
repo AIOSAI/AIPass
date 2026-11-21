@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: Backup's front door: the names other branches take, each loaded from its home
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-04-16
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """Backup - project-owned, local-first snapshots and the optional Drive sync.
@@ -12,7 +12,10 @@ Public surface for other branches: from aipass.backup import <name>. apps/backup
 """
 
 import importlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # each name typed from its home
+    from aipass.backup.apps.handlers.audit.trail import log_operation
 
 # Door name -> (home module, attribute there).
 _HOMES = {"log_operation": ("aipass.backup.apps.handlers.audit.trail", "log_operation")}

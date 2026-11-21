@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: API's front door: the names other branches take, each loaded from its home
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-11-17
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """API - External API integrations for AIPass.
@@ -12,7 +12,24 @@ Public surface for other branches: from aipass.api import <name>. apps/api.py st
 """
 
 import importlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # each name typed from its home
+    from aipass.api.apps.handlers.google.retry import api_call_with_retry
+    from aipass.api.apps.handlers.host.autostart import AutostartUnsupported, SupervisorUnreachable
+    from aipass.api.apps.handlers.host.config import (
+        BindRefused,
+        baud_bin,
+        face_dir,
+        load_config,
+        set_baud_bin,
+        set_bind,
+        set_face_dir,
+    )
+    from aipass.api.apps.handlers.host.lifetime import LifetimeError, serve_detached
+    from aipass.api.apps.handlers.host.pairings import PairingError, mint_pairing, render_qr
+    from aipass.api.apps.modules.google_client import get_drive_service
+    from aipass.api.apps.modules.host_api import autostart, enable_unit, install_unit
 
 _HOST = "aipass.api.apps.handlers.host"
 _HOST_CONFIG = f"{_HOST}.config"

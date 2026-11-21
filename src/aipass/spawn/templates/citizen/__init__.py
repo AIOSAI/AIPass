@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: {{BRANCHNAME}}'s front door: the names other branches take, each loaded from its home
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: {{DATE}}
 # Modified: {{DATE}}
 # =============================================
@@ -9,7 +9,10 @@
 """{{BRANCHNAME}}'s public surface: from aipass.{{BRANCH}} import <name>; apps/{{BRANCH}}.py stays the command door."""
 
 import importlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # each name typed from its home: one import here per _HOMES row, so an editor resolves it
+    pass
 
 # A name joins the table, mapped to the module that defines it, when another branch needs it.
 _HOMES: dict[str, str] = {}
