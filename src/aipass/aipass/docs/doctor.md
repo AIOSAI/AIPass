@@ -11,15 +11,34 @@ prints is something another owner could be asked directly.
 
 ## The groups
 
+The report opens with its scope: `scope: project <root>`, or
+`scope: no project at <cwd>: Structure is not checked`. The Structure checks
+follow the working directory, so a run from outside a project counts fewer
+rows and cannot see a project's damaged citizens. A clean count from there is
+no verdict on a project.
+
 One pass produces seven groups, in this order:
 
 - **System** — OS, shell, Python, RAM, CPU, install method, and the Claude Code
   version (AGENTS.md is read from v2.1.277; below it the row warns)
   ([`apps/handlers/system_detect/`](../apps/handlers/system_detect)).
-- **Identity** — `AIPASS_HOME`, the registry and its shape, `hooks.json`, the
-  passport's role, and the registry's record of the owner (repaired through
-  `drone @spawn sync-registry --fix`).
-- **Services** — what a session depends on: `drone systems` reachability,
+- **Identity** — `AIPASS_HOME`, the trust list (one WARN row, `trust`, per
+  enrolled project whose folder is gone, naming `aipass trust prune`), the
+  registry and its shape, `hooks.json`, the passport's role, and the
+  registry's record of the owner (repaired through
+  `drone @spawn sync-registry --fix`). The registry is one row: its branch
+  count, or one FAIL. A registry that is not a readable JSON object (empty,
+  torn, a list) names `aipass doctor --fix`, which rebuilds it in-process
+  through spawn's door, `from aipass.spawn import rebuild_registry`, because
+  drone cannot route to @spawn while the registry is corrupt. `--fix` prints
+  spawn's plan (the rows from the passports on disk), then what it wrote and
+  where the corrupt file was moved aside, and one WARN row per seat-flag
+  ceremony the rebuild cannot restore. Spawn's refusal is a FAIL, verbatim,
+  and nothing is written. A `hooks.json` that exists but does not parse is a
+  FAIL, `unreadable: <reason>`, never `present`.
+- **Services** — what a session depends on: `drone systems` reachability
+  (when drone fails because the registry is unreadable, the row names the
+  registry and `aipass doctor --fix`, not the install),
   pytest collection, the provider manifest rows (hooks, env vars, permission
   rules, the settings scalars), the wire verification and stale deny rules.
 - **Community** — the mailbox is readable and `dropbox/` is writable.

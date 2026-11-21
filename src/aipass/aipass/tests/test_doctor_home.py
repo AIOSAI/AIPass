@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
-# Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills, shadow and smoke rows
-# Version: 1.12.0
+# Description: Tests for doctor's home, seating, preflight, citizen-count, skills, shadow, smoke, registry, scope rows
+# Version: 1.13.0
 # Created: 2026-10-08
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/doctor.py and _doctor_smoke.py: home, seating, preflight, drone, skills, shadows, smoke."""
@@ -1288,3 +1288,90 @@ class TestDoctorRowsJson:
         handle_command("doctor", ["--fix", "--rows-json", str(rows_file), "--non-interactive", "--yes"])
 
         assert calls == [((rows_file,), {"non_interactive": True, "yes": True})]
+
+
+_DOCTOR = "aipass.aipass.apps.modules.doctor"
+
+
+class TestOneLinePerFact:
+    """A damaged registry, hooks.json or trust list is one row naming the real fault; the report states its scope."""
+
+    @staticmethod
+    def _identity(tmp_path, registry_text: str, hooks_text: str | None = None) -> list:
+        registry = tmp_path / "TEST_REGISTRY.json"
+        registry.write_text(registry_text, encoding="utf-8")
+        if hooks_text is not None:
+            (tmp_path / ".aipass").mkdir()
+            (tmp_path / ".aipass" / "hooks.json").write_text(hooks_text, encoding="utf-8")
+        with patch(f"{_DOCTOR}._find_registry", return_value=registry):
+            return check_identity()
+
+    @staticmethod
+    def _rows(results, *labels) -> list:
+        return [(r.label, r.glyph, r.detail, r.remediation) for r in results if r.label in labels]
+
+    @pytest.mark.parametrize("text", ["", "[]", "{not json"])
+    def test_an_unreadable_registry_is_one_fail_row_naming_doctor_fix(self, tmp_path, text) -> None:
+        rows = self._rows(self._identity(tmp_path, text), "registry", "registry valid")
+        assert [(label, glyph) for label, glyph, _d, _r in rows] == [("registry", GLYPH_FAIL)]
+        assert rows[0][3] == "Run 'aipass doctor --fix'"
+
+    def test_a_registry_without_branches_has_no_pass_row_beside_its_fail(self, tmp_path) -> None:
+        rows = self._rows(self._identity(tmp_path, '{"metadata": {}}'), "registry", "registry valid")
+        assert [(label, glyph, detail) for label, glyph, detail, _r in rows] == [
+            ("registry", GLYPH_FAIL, "missing 'branches' key")
+        ]
+
+    def test_a_good_registry_is_one_row_with_no_validity_claim_beside_it(self, tmp_path) -> None:
+        """A duplicate row is the owner checks' finding: no '✓ registry valid' contradicts it."""
+        rows = self._rows(self._identity(tmp_path, '{"branches": [{"name": "A"}]}'), "registry", "registry valid")
+        assert rows == [("registry", GLYPH_PASS, "1 branches", "")]
+
+    @pytest.mark.parametrize("text", ["", "{torn"])
+    def test_an_unreadable_hooks_json_is_a_fail_never_present(self, tmp_path, text) -> None:
+        rows = self._rows(self._identity(tmp_path, '{"branches": []}', hooks_text=text), "hooks.json")
+        assert len(rows) == 1
+        assert rows[0][1] == GLYPH_FAIL
+        assert rows[0][2].startswith("unreadable")
+
+    def test_an_enrolled_project_whose_folder_is_gone_is_flagged_naming_prune(self, tmp_path, monkeypatch) -> None:
+        gone = tmp_path / "deleted_project"
+        enrolled = {"projects": {str(gone): {}, str(tmp_path): {}}}
+        monkeypatch.setattr(f"{_DOCTOR}.read_trust_registry", lambda: enrolled)
+        rows = self._rows(self._identity(tmp_path, '{"branches": []}'), "trust")
+        assert rows == [("trust", GLYPH_WARN, f"enrolled project gone: {gone}", "Run 'aipass trust prune'")]
+
+    def test_a_trust_list_of_live_projects_adds_no_row(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(f"{_DOCTOR}.read_trust_registry", lambda: {"projects": {str(tmp_path): {}}})
+        assert self._rows(self._identity(tmp_path, '{"branches": []}'), "trust") == []
+
+    def test_drone_failing_on_a_corrupt_registry_names_the_registry_not_the_install(self, tmp_path, monkeypatch):
+        registry = tmp_path / "TEST_REGISTRY.json"
+        registry.write_text("", encoding="utf-8")
+        printed: dict = {}
+        for name in ("_check_system", "check_identity", "_check_community", "_check_structure"):
+            monkeypatch.setattr(f"{_DOCTOR}.{name}", lambda: [])
+        for name in ("_check_scaffold", "_check_sandbox", "check_wire_verify", "check_admin_lane"):
+            monkeypatch.setattr(f"{_DOCTOR}.{name}", lambda: [])
+        monkeypatch.setattr(f"{_DOCTOR}._check_pytest_collect", lambda _verbose: [])
+        monkeypatch.setattr(f"{_DOCTOR}.check_provider_manifest", lambda **_kw: [])
+        monkeypatch.setattr(f"{_DOCTOR}.reconcile_stale_deny", lambda **_kw: [])
+        monkeypatch.setattr(f"{_DOCTOR}._find_registry", lambda: registry)
+        monkeypatch.setattr(f"{_DOCTOR}.subprocess.run", lambda *a, **k: subprocess.CompletedProcess(a, 1, "", ""))
+        with patch(f"{_DOCTOR}._print_doctor_groups", side_effect=lambda g: printed.update(g) or (0, 0, 0)):
+            run_doctor()
+        drone = [(r.glyph, r.detail, r.remediation) for r in printed["Services"] if r.label == "drone"]
+        assert drone == [(GLYPH_FAIL, f"exit non-zero: {registry.name} unreadable", "Run 'aipass doctor --fix'")]
+
+    @pytest.mark.parametrize("root", [None, "project"])
+    def test_the_report_states_its_scope_first(self, tmp_path, monkeypatch, capsys, root) -> None:
+        """From outside a project the Structure checks do not run: a clean count must not read as a clean project."""
+        project = tmp_path if root else None
+        monkeypatch.setattr(f"{_DOCTOR}.find_project_root", lambda _cwd: project)
+        monkeypatch.setattr(f"{_DOCTOR}._compute_doctor_groups", lambda **_kw: {})
+        run_doctor()
+        out = " ".join(capsys.readouterr().out.split())
+        if root:
+            assert f"scope: project {tmp_path}" in out
+        else:
+            assert f"scope: no project at {os.getcwd()}: Structure is not checked" in out

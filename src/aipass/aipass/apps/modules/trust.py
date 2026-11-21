@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trust.py
 # Description: Trust management — aipass trust / aipass revoke commands
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-07-15
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -151,8 +151,11 @@ def handle_command(command: str, args: list[str]) -> bool:
             return _do_prune()
         return _do_trust(args)
     if command == _COMMAND_REVOKE:
-        if not args or wants_help(args):
+        if wants_help(args):
             print_help()
+            return True
+        if not args:
+            error("revoke needs a path: aipass revoke <path>")
             return True
         return _do_revoke(args)
     return False

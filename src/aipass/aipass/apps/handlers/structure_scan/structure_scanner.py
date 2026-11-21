@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: structure_scanner.py
 # Description: Project structure validation for aipass doctor
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-05-14
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -319,6 +319,26 @@ TREE_REGISTRY_NAME = "AIPASS_REGISTRY.json"
 VAULT_RELATIVE_PATH = Path(".aipass") / "passport.vault.json"
 # spawn still reads the pre-vault name until a citizen's next export, so it is no gap.
 LEGACY_VAULT_RELATIVE_PATH = Path(".aipass") / "passport.seed.json"
+
+
+def json_object_problem(path: Path) -> str:
+    """Why *path* is not a readable JSON object, or '' when it is: an empty or torn file is never 'present'."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("[structure] %s unreadable: %s", path, exc)
+        return str(exc) or type(exc).__name__
+    return "" if isinstance(document, dict) else "not a JSON object"
+
+
+def registry_readable(registry_path: Path) -> bool:
+    """True when the registry parses as a JSON object: any other state is the one spawn's rebuild cures."""
+    return not json_object_problem(registry_path)
+
+
+def enrolled_projects_gone(projects: dict) -> list:
+    """Trust-registry paths whose folder no longer exists: their grant outlives them until pruned."""
+    return [path for path in projects if not Path(path).exists()]
 
 
 def has_passport_vault(folder: Path) -> bool:

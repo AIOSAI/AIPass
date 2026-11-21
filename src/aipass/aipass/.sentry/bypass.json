@@ -86,8 +86,8 @@
     {
       "file": "apps/modules/doctor.py",
       "standard": "logged_fallback",
-      "lines": [184, 629],
-      "reason": "187: _configured_aipass_home's two callers read \"\" as no setting: _check_home_agreement (doctor.py:360) skips the comparison, and the pytest collect row (_check_pytest_collect) falls back to the env AIPASS_HOME, then says not set; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 612: _registry_citizen_names's one caller (drone row, doctor.py:667) compares only when names exist; an unreadable registry is the registry row's FAIL ('corrupt JSON', doctor.py:374). Re-read in fleet green leg 7 (aipass's decision); re-pinned 2026-10-15 (FPLAN-0645: one import and the door keyword moved both lines); again 2026-10-15 (FPLAN-0646: the --yes import and the fix orchestration moved them). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: the claude code row and its constant moved both lines); 608 again 2026-10-24 (FPLAN-0665); both 2026-10-25 (FPLAN-0670: the codex hooks import and row); both 2026-10-26 (FPLAN-0704: the shadow import); both 2026-10-27 (FPLAN-0705: the gitignore coverage import); both 2026-10-28 (FPLAN-0732: the smoke import); FPLAN-0734 moved them."
+      "lines": [188, 637],
+      "reason": "187: _configured_aipass_home's two callers read \"\" as no setting: _check_home_agreement (doctor.py:360) skips the comparison, and the pytest collect row (_check_pytest_collect) falls back to the env AIPASS_HOME, then says not set; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 612: _registry_citizen_names's one caller (drone row, doctor.py:667) compares only when names exist; an unreadable registry is the registry row's FAIL naming 'aipass doctor --fix' (check_identity), and the drone row names the same registry. Re-read in fleet green leg 7 (aipass's decision); re-pinned 2026-10-15 (FPLAN-0645: one import and the door keyword moved both lines); again 2026-10-15 (FPLAN-0646: the --yes import and the fix orchestration moved them). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: the claude code row and its constant moved both lines); 608 again 2026-10-24 (FPLAN-0665); both 2026-10-25 (FPLAN-0670: the codex hooks import and row); both 2026-10-26 (FPLAN-0704: the shadow import); both 2026-10-27 (FPLAN-0705: the gitignore coverage import); both 2026-10-28 (FPLAN-0732: the smoke import); FPLAN-0734 moved them."
     },
     {
       "file": "apps/handlers/baud/fetch.py",
@@ -149,20 +149,20 @@
     {
       "file": "apps/modules/doctor.py",
       "standard": "fallback",
-      "lines": [182],
+      "lines": [186],
       "reason": "_configured_aipass_home: an unreadable ~/.claude/settings.json reads as no setting so the home-agreement and owner-root lookups go on with the env AIPASS_HOME; the same doctor run's Identity group shows the FAIL row 'global settings ~/.claude/settings.json unreadable - Repair its JSON' (_check_global_aipass_home), plus the [doctor] info line in the aipass log"
     },
     {
       "file": "apps/modules/doctor.py",
       "standard": "fallback",
-      "lines": [452],
+      "lines": [460],
       "reason": "_find_manifest: an unreadable ~/.claude/settings.json only drops the settings route to AIPASS_HOME; the walk from cwd still runs. Who finds out: the Identity group's FAIL row 'global settings ... unreadable - Repair its JSON' in the same doctor run, and the hooks WARN row 'manifest not found' when no route finds it"
     },
     {
       "file": "apps/modules/doctor.py",
       "standard": "fallback",
-      "lines": [627],
-      "reason": "_registry_citizen_names: an unreadable registry yields no names, so the drone row names no extras (it never claims more than its routed count). The same run's Identity group reads the same _find_registry file and shows the FAIL row 'registry corrupt JSON - Manually inspect AIPASS_REGISTRY.json'; warning line '[doctor] could not read registry for citizen names' in the log"
+      "lines": [635],
+      "reason": "_registry_citizen_names: an unreadable registry yields no names, so the drone row names no extras (it never claims more than its routed count). The same run's Identity group reads the same _find_registry file and shows the registry FAIL row naming 'aipass doctor --fix'; warning line '[doctor] could not read registry for citizen names' in the log"
     },
     {
       "file": "apps/modules/install.py",

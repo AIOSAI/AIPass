@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_fix.py
 # Description: Tests for doctor --fix remediation report (DPLAN-0177 Phase 2)
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-05-15
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/_doctor_fix.py."""
@@ -27,7 +27,9 @@ from aipass.aipass.apps.modules._doctor_fix import (
     handle_command,
     print_json_report,
     print_remediation_report,
+    rebuild_corrupt_registry,
 )
+from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 
 
 # =============================================================================
@@ -441,3 +443,51 @@ class TestDoctorFixHandleCommand:
             result = handle_command("doctor_fix", ["--info"])
         assert result is True
         mock.assert_called_once()
+
+
+class TestRebuildCorruptRegistry:
+    """doctor --fix rebuilds an unreadable registry through spawn's door: drone cannot route while it is corrupt."""
+
+    @staticmethod
+    def _spawn(monkeypatch, *, refused_at: str = "", ceremonies: tuple = ()) -> list:
+        """spawn's rebuild_registry on its door: a preview, then the write, or a refusal at either step."""
+        calls: list = []
+
+        def rebuild(path, confirm=False):
+            calls.append(confirm)
+            refused = "passports disagree" if refused_at == ("write" if confirm else "preview") else None
+            aside = f"{path}.corrupt-1" if confirm and not refused else None
+            rows = [{"name": "ALPHA"}, {"name": "BETA"}]
+            return {
+                "refused": refused,
+                "rows": rows,
+                "ceremonies": list(ceremonies),
+                "aside": aside,
+                "written": bool(aside),
+            }
+
+        monkeypatch.setattr("aipass.spawn.rebuild_registry", rebuild)
+        return calls
+
+    def test_previews_then_writes_and_relays_each_ceremony(self, monkeypatch, tmp_path) -> None:
+        reg = tmp_path / "TEST_REGISTRY.json"
+        ceremony = f"drone @spawn grant-admin @devpulse --registry {reg}"
+        calls = self._spawn(monkeypatch, ceremonies=(ceremony,))
+        rows = rebuild_corrupt_registry(reg)
+        assert calls == [False, True]
+        assert rows == [
+            ("registry rebuild", GLYPH_PASS, "plan: 2 row(s) from the passports: ALPHA, BETA", ""),
+            ("registry rebuild", GLYPH_PASS, f"written: 2 row(s); corrupt file kept at {reg}.corrupt-1", ""),
+            ("registry rebuild", GLYPH_WARN, "seat flag to restore", ceremony),
+        ]
+
+    def test_a_refused_preview_writes_nothing_and_carries_spawn_reason(self, monkeypatch, tmp_path) -> None:
+        calls = self._spawn(monkeypatch, refused_at="preview")
+        rows = rebuild_corrupt_registry(tmp_path / "TEST_REGISTRY.json")
+        assert rows == [("registry rebuild", GLYPH_FAIL, "not rebuilt: passports disagree", "")]
+        assert calls == [False]
+
+    def test_a_refused_write_is_a_fail_never_a_written_row(self, monkeypatch, tmp_path) -> None:
+        self._spawn(monkeypatch, refused_at="write")
+        rows = rebuild_corrupt_registry(tmp_path / "TEST_REGISTRY.json")
+        assert rows == [("registry rebuild", GLYPH_FAIL, "not rebuilt: passports disagree", "")]

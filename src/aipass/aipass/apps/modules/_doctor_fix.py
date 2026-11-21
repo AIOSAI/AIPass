@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_fix.py
 # Description: Structure remediation report for aipass doctor --fix
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-05-15
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -26,7 +26,7 @@ from aipass.aipass.shared.registry_discovery import find_registry as _discover_r
 from aipass.aipass.shared.project_home import _detect_aipass_home
 
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS
+from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
     TREE_REGISTRY_NAME,
     VAULT_RELATIVE_PATH,
@@ -152,6 +152,34 @@ def _export_refusal(folder_name: str, output: str) -> str:
             return line.strip()[len(prefix) :]
     lines = output.strip().splitlines()
     return lines[-1].strip() if lines else "export-vault wrote no vault"
+
+
+def rebuild_corrupt_registry(reg_path: Path) -> List[tuple]:
+    """doctor --fix: rebuild an unreadable registry from the passports on disk, preview first, then write.
+
+    drone cannot route to @spawn while its registry is corrupt, so spawn's door function runs in-process.
+    Rows are (label, glyph, detail, remediation); a refusal is a FAIL carrying spawn's reason, nothing written.
+    The seat flags a rebuild cannot restore come back as one WARN row per ceremony command spawn names.
+    """
+    from aipass.spawn import rebuild_registry
+
+    label = "registry rebuild"
+    try:
+        preview = rebuild_registry(reg_path, confirm=False)
+        if preview["refused"]:
+            raise ValueError(preview["refused"])
+        names = ", ".join(row["name"] for row in preview["rows"])
+        rows = [(label, GLYPH_PASS, f"plan: {len(preview['rows'])} row(s) from the passports: {names}", "")]
+        receipt = rebuild_registry(reg_path, confirm=True)
+        if receipt["refused"] or not receipt["written"]:
+            raise ValueError(receipt["refused"] or "spawn wrote nothing")
+    except (OSError, ValueError) as exc:
+        logger.error("[doctor] registry rebuild of %s refused: %s", reg_path, exc)
+        return [(label, GLYPH_FAIL, f"not rebuilt: {exc}", "")]
+    written = f"written: {len(receipt['rows'])} row(s); corrupt file kept at {receipt['aside']}"
+    rows.append((label, GLYPH_PASS, written, ""))
+    rows += [(label, GLYPH_WARN, "seat flag to restore", command) for command in receipt["ceremonies"]]
+    return rows
 
 
 def export_missing_seeds(project_root: Optional[Path]) -> List[tuple]:

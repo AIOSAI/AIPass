@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.18.2
+# Version: 1.19.0
 # Created: 2026-04-16
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -37,6 +37,7 @@ from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     check_srt_resolvable,
 )
 from aipass.aipass.apps.handlers.admin_lane import check_admin_lane
+from aipass.hooks import read_registry as read_trust_registry
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
     PackagesUnknown,
     check_placement,
@@ -46,8 +47,11 @@ from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
     check_root_artifacts,
     detect_pollution,
     disable_shadows,
+    enrolled_projects_gone,
     find_instruction_shadows,
     find_project_root,
+    json_object_problem,
+    registry_readable,
     scan_agents,
 )
 from aipass.aipass.apps.modules._doctor_smoke import check_smoke, print_smoke_json
@@ -364,6 +368,10 @@ def _fix_owner_seating() -> List[CheckResult]:
     return [CheckResult("owner fix", GLYPH_FAIL, detail, "")]
 
 
+_HOOKS_CURE = "Restore .aipass/hooks.json from a backup, or move it aside and run 'aipass init update' to recreate it"
+_INSTALL_CURE = "Ensure aipass is installed: clone the repo and run setup.sh"
+
+
 def check_identity() -> List[CheckResult]:
     """Run Identity group checks. Public for tests/test_doctor.py; product caller: _compute_doctor_groups."""
     results: List[CheckResult] = []
@@ -389,29 +397,29 @@ def check_identity() -> List[CheckResult]:
     results.extend(_check_global_aipass_home())
     results.extend(_check_home_agreement(active_home, _configured_aipass_home()))
 
+    for gone in enrolled_projects_gone(read_trust_registry().get("projects", {})):
+        results.append(CheckResult("trust", GLYPH_WARN, f"enrolled project gone: {gone}", "Run 'aipass trust prune'"))
+
     if reg_path is None:
         results.append(CheckResult("registry", GLYPH_FAIL, "not found", "Run 'aipass init' to create registry"))
         return results
 
-    branch_count = 0
-    try:
-        with open(reg_path, "r", encoding="utf-8") as f:
-            reg_data = json.load(f)
-        branch_count = len(reg_data.get("branches", []))
-        results.append(CheckResult("registry", GLYPH_PASS, f"{branch_count} branches", ""))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("[doctor] registry parse error: %s", exc)
-        results.append(CheckResult("registry", GLYPH_FAIL, "corrupt JSON", "Manually inspect AIPASS_REGISTRY.json"))
+    # One row per fact: a count beside a FAIL, or a "valid" beside the owner checks' duplicate row, contradicts it.
+    if not registry_readable(reg_path):
+        detail = f"{reg_path.name} is not a readable JSON object"
+        results.append(CheckResult("registry", GLYPH_FAIL, detail, "Run 'aipass doctor --fix'"))
         return results
-
+    reg_data = json.loads(reg_path.read_text(encoding="utf-8"))
     if "branches" in reg_data:
-        results.append(CheckResult("registry valid", GLYPH_PASS, "", ""))
+        results.append(CheckResult("registry", GLYPH_PASS, f"{len(reg_data['branches'])} branches", ""))
     else:
-        results.append(CheckResult("registry valid", GLYPH_FAIL, "missing 'branches' key", "Re-run 'aipass init'"))
+        results.append(CheckResult("registry", GLYPH_FAIL, "missing 'branches' key", "Re-run 'aipass init'"))
 
     hooks_json = reg_path.parent / ".aipass" / "hooks.json"
     if hooks_json.exists():
-        results.append(CheckResult("hooks.json", GLYPH_PASS, "present", ""))
+        problem = json_object_problem(hooks_json)  # the hook engine cannot load an empty or torn file
+        row = ("hooks.json", GLYPH_FAIL, f"unreadable: {problem}", _HOOKS_CURE) if problem else None
+        results.append(CheckResult(*row) if row else CheckResult("hooks.json", GLYPH_PASS, "present", ""))
     else:
         results.append(
             CheckResult(
@@ -657,27 +665,18 @@ def _check_drone_systems() -> List[CheckResult]:
         proc = subprocess.run(["drone", "systems"], capture_output=True, text=True, timeout=10)
     except FileNotFoundError as exc:
         logger.warning("[doctor] drone not found: %s", exc)
-        return [
-            CheckResult(
-                "drone",
-                GLYPH_FAIL,
-                "not found",
-                "Ensure aipass is installed: clone the repo and run setup.sh",
-            )
-        ]
+        return [CheckResult("drone", GLYPH_FAIL, "not found", _INSTALL_CURE)]
     except subprocess.TimeoutExpired as exc:
         logger.warning("[doctor] drone systems timed out: %s", exc)
         return [CheckResult("drone", GLYPH_WARN, "timed out", "")]
 
     if proc.returncode != 0:
-        return [
-            CheckResult(
-                "drone",
-                GLYPH_FAIL,
-                "exit non-zero",
-                "Ensure aipass is installed: clone the repo and run setup.sh",
-            )
-        ]
+        reg_path = _find_registry()
+        if reg_path is not None and not registry_readable(reg_path):
+            # drone resolves every route through the registry: the install is fine, the registry is the fault.
+            detail = f"exit non-zero: {reg_path.name} unreadable"
+            return [CheckResult("drone", GLYPH_FAIL, detail, "Run 'aipass doctor --fix'")]
+        return [CheckResult("drone", GLYPH_FAIL, "exit non-zero", _INSTALL_CURE)]
 
     routed = _drone_system_names(proc.stdout)
     if not routed:
@@ -1247,6 +1246,15 @@ def _compute_doctor_groups(
             groups["Services"] = merge_manifest_rows(groups.get("Services", []), manifest_results)
 
     if fix:
+        reg_path = _find_registry()
+        if reg_path is not None and not registry_readable(reg_path):
+            from aipass.aipass.apps.modules._doctor_fix import rebuild_corrupt_registry
+
+            # First: drone, the seeds and the passports all read the registry this repairs.
+            rebuilt = [CheckResult(*row) for row in rebuild_corrupt_registry(reg_path)]
+            groups["Identity"] = check_identity() + rebuilt
+            groups["Services"] = _check_drone_systems() + [r for r in groups.get("Services", []) if r.label != "drone"]
+
         wire_recheck = [CheckResult(*r) for r in check_wire_verify()]
         services = groups.get("Services", [])
         groups["Services"] = [r for r in services if r.label != "wire verify"] + wire_recheck
@@ -1334,6 +1342,10 @@ def run_doctor(
     """
     console.print()
     console.print("[bold cyan]aipass doctor[/bold cyan]")
+    # The Structure checks follow the working directory: a clean count from outside a project is no clean project.
+    project = find_project_root(Path.cwd())
+    outside = f"no project at {Path.cwd()}: Structure is not checked; run from inside a project"
+    console.print(f"  scope: {f'project {project}' if project else outside}")
     console.print()
 
     groups = _compute_doctor_groups(verbose=verbose, interactive=interactive, fix=fix, yes=yes)

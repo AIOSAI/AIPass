@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_sandbox_check.py
 # Description: Tests for sandbox prerequisite checker and doctor integration
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-06-10
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/sandbox_check/sandbox_checker.py and the doctor integration it drives."""
@@ -557,10 +557,11 @@ def _prereqs_recorded(monkeypatch) -> list[str]:
         "check_srt_resolvable": {**missing, "install_hint": "npm install -g ..."},
         "check_rg_present": missing,
         "check_broker_alive": {"alive": False, "detail": "not found"},
-        "find_project_root": None,
     }
     for name, answer in stubs.items():
         monkeypatch.setattr(f"{_DOCTOR}.{name}", absent(name, answer))
+    # Not a prerequisite: the report's scope line reads the project root too, whatever the flag says.
+    monkeypatch.setattr(f"{_DOCTOR}.find_project_root", lambda _start: None)
     return called
 
 

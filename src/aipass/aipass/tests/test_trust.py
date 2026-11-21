@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trust.py
 # Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
-# Version: 1.2.6
+# Version: 1.3.0
 # Created: 2026-07-15
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/trust.py and the handlers it drives."""
@@ -21,6 +21,7 @@ import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers.init.bootstrap import init_project, update_project
 from aipass.aipass.apps.modules.trust import handle_command
+from aipass.cli import command_failed
 from aipass.hooks import (
     enroll,
     is_trusted,
@@ -126,6 +127,16 @@ def test_revoke_command_removes(tmp_path):
     enroll(str(project))
     assert handle_command("revoke", [str(project)]) is True
     assert is_trusted(str(project)) is False
+
+
+def test_revoke_without_a_path_fails_naming_the_argument_and_help_alone_does_not(capsys):
+    """A missing required argument is a failed command (exit 2), not usage at exit 0; --help stays clean."""
+    assert handle_command("revoke", ["--help"]) is True
+    assert not command_failed()
+
+    assert handle_command("revoke", []) is True
+    assert command_failed()
+    assert "aipass revoke <path>" in capsys.readouterr().err
 
 
 def test_trust_command_no_hooks_json(tmp_path):
