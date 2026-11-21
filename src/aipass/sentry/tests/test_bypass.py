@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_bypass.py
 # Description: Unit tests for handlers/bypass/
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-03-24
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/bypass/bypass_handler.py, ignore_handler.py, utils.py and inert.py."""
@@ -68,6 +68,42 @@ def test_load_bypass_rules_reads_a_missing_file_as_no_rules_and_writes_nothing(t
     """Reading rules created .sentry/bypass.json inside the audited branch; a read never writes."""
     assert load_bypass_rules(str(tmp_path)) == []
     assert not (tmp_path / ".sentry").exists()
+
+
+@pytest.mark.parametrize(
+    "content, named",
+    [
+        ("", "empty"),
+        ("  \n", "empty"),
+        ("{not json", "not JSON"),
+        ("[]", "not a"),
+        ('{"bypass": {}}', "not a"),
+    ],
+    ids=["zero_bytes", "whitespace", "not_json", "top_level_list", "bypass_not_a_list"],
+)
+def test_a_bypass_file_that_exists_but_cannot_be_used_is_named(tmp_path, content, named):
+    bypass_file = tmp_path / ".sentry" / "bypass.json"
+    bypass_file.parent.mkdir()
+    bypass_file.write_text(content, encoding="utf-8")
+
+    problem = bypass_handler.bypass_file_problem(str(tmp_path))
+
+    assert problem is not None and named in problem and str(bypass_file) in problem
+
+
+def test_a_bypass_file_that_cannot_be_opened_is_named(tmp_path):
+    (tmp_path / ".sentry" / "bypass.json").mkdir(parents=True)
+
+    assert "unreadable" in (bypass_handler.bypass_file_problem(str(tmp_path)) or "")
+
+
+@pytest.mark.parametrize("content", [None, '{"bypass": []}', "{}"], ids=["absent", "no_rules", "no_bypass_key"])
+def test_an_absent_or_well_formed_bypass_file_has_no_problem(tmp_path, content):
+    if content is not None:
+        (tmp_path / ".sentry").mkdir()
+        (tmp_path / ".sentry" / "bypass.json").write_text(content, encoding="utf-8")
+
+    assert bypass_handler.bypass_file_problem(str(tmp_path)) is None
 
 
 def test_get_branch_from_path_reads_a_dict_shaped_registry(tmp_path, monkeypatch):

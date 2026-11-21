@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_standards_audit.py
 # Description: Unit tests for the standards_audit module and the sentry-audit CI gate
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-03-24
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/standards_audit.py and the sentry-audit CI gate."""
@@ -251,6 +251,51 @@ def test_normal_run_makes_no_bypass_claim(monkeypatch, capsys: pytest.CaptureFix
     _wire_branches(monkeypatch, "FLOW")
     standards_audit.handle_command("audit", ["aipass", "@flow", "--no-artifact"])
     assert "BYPASSES DISABLED" not in _console_text(capsys).upper()
+
+
+def _branch_with_bypass_file(monkeypatch, tmp_path, content):
+    """A wired FLOW branch in tmp_path whose .sentry/bypass.json holds ``content``; the real loader reads it."""
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    branch = tmp_path / "flow"
+    (branch / ".sentry").mkdir(parents=True)
+    (branch / ".sentry" / "bypass.json").write_text(content, encoding="utf-8")
+    discover = MagicMock(return_value=[{"name": "FLOW", "path": str(branch), "entry_file": ""}])
+    monkeypatch.setattr(standards_audit, "discover_branches", discover)
+    monkeypatch.setattr(standards_audit, "load_bypass_rules", bypass_handler.load_bypass_rules)
+    return audit_mock, cast(MagicMock, standards_audit.error), branch
+
+
+def test_a_zero_byte_bypass_file_is_named_first_and_the_audit_exits_non_zero(monkeypatch, tmp_path):
+    """A damaged waiver file must never pass as a result: named before the scores, and the run refuses."""
+    audit_mock, error, branch = _branch_with_bypass_file(monkeypatch, tmp_path, "")
+    named_before_scoring = []
+    error.side_effect = lambda msg, *a, **k: named_before_scoring.append(audit_mock.call_count)
+
+    with pytest.raises(CommandRefused) as refused:
+        standards_audit.handle_command("audit", ["aipass", "@flow", "--no-artifact"])
+
+    assert refused.value.code == refusal.EXIT_UNPROVEN
+    message = error.call_args.args[0]
+    assert str(branch / ".sentry" / "bypass.json") in message and "Next:" in message
+    assert named_before_scoring == [0]
+    assert audit_mock.call_count == 1, "the scores still print, read as unwaived"
+
+
+def test_a_no_bypass_run_never_reads_the_damaged_file(monkeypatch, tmp_path):
+    """--no-bypass applies no rows, so a damaged file changes nothing it reports."""
+    audit_mock, error, _ = _branch_with_bypass_file(monkeypatch, tmp_path, "")
+
+    assert standards_audit.handle_command("audit", ["aipass", "@flow", "--no-bypass", "--no-artifact"]) is True
+    error.assert_not_called()
+    assert _rules_per_branch(audit_mock) == [[]]
+
+
+def test_a_well_formed_bypass_file_audits_and_exits_zero(monkeypatch, tmp_path):
+    audit_mock, error, _ = _branch_with_bypass_file(monkeypatch, tmp_path, '{"bypass": []}')
+
+    assert standards_audit.handle_command("audit", ["aipass", "@flow", "--no-artifact"]) is True
+    error.assert_not_called()
+    assert audit_mock.call_count == 1
 
 
 def _audit_reading_the_registry(tmp_path, monkeypatch, content):
