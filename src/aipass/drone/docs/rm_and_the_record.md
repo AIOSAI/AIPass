@@ -8,7 +8,8 @@
 `drone rm` is the fleet's only sanctioned delete path — raw recursive `rm` is gate-blocked — which
 makes it the choke point where the record belongs: if something deletes, there is a record of it.
 Inside the project it deletes nothing; the target moves to the `.archive` beside it. The rules and
-the flags are `drone rm --help`.
+the flags are `drone rm --help`. `drone rm` with no path prints the same page and exits 1, since a
+missing path is a usage error. `--help` exits 0.
 
 ---
 

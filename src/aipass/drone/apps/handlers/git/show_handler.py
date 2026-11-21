@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: show_handler.py
 # Description: Git show handler — read repository history at a commit
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-13
-# Modified: 2026-10-21
+# Modified: 2026-11-21
 # =============================================
 
 """Git show handler — read repository history at a commit.
@@ -29,8 +29,8 @@ def _rejects_as_flag(token: str) -> bool:
     return not token or token.startswith("-")
 
 
-def show_object(ref: str, path: str | None = None, repo_root: Path | None = None) -> dict:
-    """Show a commit, or with repo-relative *path* the file's contents at that commit, in *repo_root*."""
+def show_object(ref: str, path: str | None = None, repo_root: Path | None = None, *, stat: bool = False) -> dict:
+    """Show a commit, or with *path* the file at that commit, in *repo_root*; *stat* adds git's --stat summary."""
     if _rejects_as_flag(ref):
         msg = f"Refusing ref that git would read as a flag: {ref!r}"
         logger.warning(msg)
@@ -46,7 +46,7 @@ def show_object(ref: str, path: str | None = None, repo_root: Path | None = None
 
     try:
         result = subprocess.run(
-            ["git", "show", target],
+            ["git", "show", *(["--stat"] if stat else []), target],
             capture_output=True,
             text=True,
             cwd=str(repo_root),

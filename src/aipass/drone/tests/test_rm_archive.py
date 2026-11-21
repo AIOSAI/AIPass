@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_rm_archive.py
 # Description: drone rm: the in-tree move to .archive, the name clash, the log line, the rm module
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-11-15
 # Modified: 2026-11-21
 # =============================================
@@ -308,3 +308,11 @@ class TestRmModule:
         monkeypatch.setattr("aipass.drone.apps.modules.rm.handle_command", answer(True))
         assert drone_cli.main() == 0
         assert calls == [(target, None), (target, None)]
+
+    def test_no_path_prints_the_usage_and_exits_non_zero(self, monkeypatch, capsys):
+        """A missing required argument is a usage error; --help alone exits 0. Mutant: no-arg returning 0."""
+        monkeypatch.setattr("sys.argv", ["drone", "rm"])
+        assert drone_cli.main() == 1
+        assert "Usage: drone rm" in capsys.readouterr().out
+        monkeypatch.setattr("sys.argv", ["drone", "rm", "--help"])
+        assert drone_cli.main() == 0

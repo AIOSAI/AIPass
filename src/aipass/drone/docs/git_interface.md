@@ -19,7 +19,9 @@ noise. `show` sits at global tier because reading history is not a write, and it
 past. Auditing a deletion means reading what was deleted, and the present-tense verbs cannot.
 
 Both the ref and the optional path are refused before any argv is built if git would read them as a
-flag (empty, or a leading `-`) — the same guard the tag lanes use.
+flag (empty, or a leading `-`) — the same guard the tag lanes use. `--stat` is the one flag `show`
+takes: in any slot, it adds git's summary of the files the commit changed. Any other flag-shaped
+token still reaches that guard and is refused.
 
 ---
 

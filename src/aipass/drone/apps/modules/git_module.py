@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.18.1
+# Version: 1.19.0
 # Created: 2026-03-17
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -1035,16 +1035,19 @@ def _handle_show(args: list[str], repo_root: Path | None = None) -> dict:
     # Stripped BEFORE args[0] is read as the ref: left in, `show --json HEAD`
     # hands `--json` to show_object, which refuses it as a flag-shaped ref.
     args = strip_json_flag(args)
+    # The one flag ruled in, any slot; every other flag-shaped token is still refused as a ref or path.
+    stat = "--stat" in args
+    args = [arg for arg in args if arg != "--stat"]
 
     if not args:
-        message = "Usage: drone @git show <ref> [path]"
+        message = "Usage: drone @git show <ref> [path] [--stat]"
         if as_json:
             return _json_document({"ref": "", "path": None, "content": "", "message": message}, ok=False)
         return {"stdout": "", "stderr": message, "exit_code": 1}
 
     ref = args[0]
     path = args[1] if len(args) > 1 else None
-    result = show_handler.show_object(ref, path, repo_root=repo_root)
+    result = show_handler.show_object(ref, path, repo_root=repo_root, stat=stat)
 
     if as_json:
         return _json_document(

@@ -158,6 +158,11 @@ conflicts with the nearest passport's `citizenship.registry_id` → the AIPass h
 from the drone package → package-relative default. The env var is `AIPASS_REGISTRY`;
 `AIPASS_REGISTRY_PATH` is read by no code.
 
+A registry that will not parse answers every `@target` route in one line naming the file, then the
+repair: `drone @spawn sync-registry --rebuild` previews it, and `--rebuild --confirm` moves the file
+aside and rebuilds it from the passports. The repair runs while the registry is corrupt because
+`@spawn` routes in the module lane, which reads no registry.
+
 ### What counts as a registry file
 
 `is_registry_filename(name)` takes a file name and answers a bool: true when the name ends exactly,

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-03-05
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -21,7 +21,13 @@ from rich.text import Text
 
 from aipass.prax import logger
 from aipass.cli import console, err_console
-from aipass.drone.apps.modules import BranchNotFoundError, CommandExecutionError, RegistryError, RepoRootError
+from aipass.drone.apps.modules import (
+    BranchNotFoundError,
+    CommandExecutionError,
+    RegistryCorruptError,
+    RegistryError,
+    RepoRootError,
+)
 from aipass.drone.apps.modules.resolver import branch_exists, get_all_branches
 from aipass.drone.apps.modules.router import caller_cwd, registry_named_entries, route_command
 from aipass.drone.apps.modules.module_registry import (
@@ -177,8 +183,18 @@ def print_introspection() -> None:
     console.print()
 
 
+# @spawn routes in the module lane, which reads no registry: the repair runs while the registry is corrupt.
+REGISTRY_REPAIR = (
+    "Repair: drone @spawn sync-registry --rebuild (a preview), then --rebuild --confirm, "
+    "which moves the file aside and rebuilds it from the passports."
+)
+
+
 def _print_home_tip(exc: Exception) -> None:
-    """Under "Branch not found", say what was tried — only when no AIPass home resolved."""
+    """Under a routing error, the next step: the repair for a corrupt registry, what was tried when no home resolved."""
+    if isinstance(exc, RegistryCorruptError):
+        err_console.print(REGISTRY_REPAIR, markup=False, highlight=False, soft_wrap=True)
+        return
     if not isinstance(exc, BranchNotFoundError):
         return
     tip = missing_home_tip()
@@ -390,7 +406,8 @@ def _handle_rm(args: list[str]) -> int:
 
     if not args or args[0] in ("--help", "-h"):
         print_help()
-        return 0
+        # A missing path is a usage error; asking for help is not.
+        return 0 if args else 1
 
     result = handle_command(args[0], args[1:] if len(args) > 1 else None)
     return 0 if result else 1
@@ -526,7 +543,14 @@ def _handle_target(args: List[str]) -> int:
     # Interactive mode exists only for branch routing (_handle_module is in-process), so a
     # module-only target (@git) never defers to branch routing: that costs a BranchNotFoundError
     # per call. Module-and-branch names (@sentry, @cli) needing a live terminal take the subprocess.
-    if is_module(module_name) and not (needs_interactive and branch_exists(target)):
+    try:
+        takes_branch_lane = is_module(module_name) and needs_interactive and branch_exists(target)
+    except RegistryError as exc:
+        logger.warning("Routing %s: the registry could not load: %s", target, exc)
+        err_console.print(f"drone: {exc}")
+        _print_home_tip(exc)
+        return 1
+    if is_module(module_name) and not takes_branch_lane:
         _report_inert_timeout(explicit_timeout, "module routing runs in-process and is not timed")
         return _handle_module(module_name, rest)
 
@@ -594,6 +618,7 @@ def main() -> int:
         except RegistryError as exc:
             logger.warning("Registry error during introspection: %s", exc)
             err_console.print(f"drone: {exc}")
+            _print_home_tip(exc)
             return 1
         return 0
 
@@ -613,6 +638,7 @@ def main() -> int:
         except RegistryError as exc:
             logger.warning("Registry error during systems listing: %s", exc)
             err_console.print(f"drone: {exc}")
+            _print_home_tip(exc)
             return 1
         except Exception as exc:
             logger.error("[drone] Unhandled error in systems: %s", exc)

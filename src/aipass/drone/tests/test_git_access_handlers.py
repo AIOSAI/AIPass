@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_handlers.py
 # Description: Tests for the git door handlers — diff, log, show, commit, checkout, PR routing and help
-# Version: 1.0.4
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/git/commit_handler.py and the diff, log, show and checkout handlers beside it."""
@@ -243,9 +243,26 @@ class TestShowCommandRouting:
             mock_show.return_value = {"success": True, "content": "file body", "message": "ok"}
             result = handle_command("show", ["abc1234", "some/path.py"])
 
-        mock_show.assert_called_once_with("abc1234", "some/path.py", repo_root=None)
+        mock_show.assert_called_once_with("abc1234", "some/path.py", repo_root=None, stat=False)
         assert result["exit_code"] == 0
         assert result["stdout"] == "file body"
+
+    @pytest.mark.parametrize("args", [["abc1234", "--stat"], ["--stat", "abc1234"]])
+    def test_stat_is_accepted_in_any_slot_and_reaches_git(self, sentry_dir: Path, args: list[str]) -> None:
+        """Ruled read-only, the same output raw git gives. Mutant: --stat left in args, refused as a flag."""
+        done = MagicMock(returncode=0, stdout=" a.py | 2 +-\n", stderr="")
+        with patch("aipass.drone.apps.handlers.git.show_handler.subprocess.run", return_value=done) as run:
+            result = handle_command("show", args)
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert run.call_args[0][0] == ["git", "show", "--stat", "abc1234"]
+
+    def test_any_other_flag_is_still_refused(self, sentry_dir: Path) -> None:
+        with patch("aipass.drone.apps.handlers.git.show_handler.subprocess.run") as run:
+            result = handle_command("show", ["abc1234", "--output=pwned.patch"])
+
+        assert result["exit_code"] == 1
+        run.assert_not_called()
 
     def test_show_without_ref_returns_usage(self, sentry_dir: Path) -> None:
         result = handle_command("show", [])
