@@ -1,26 +1,40 @@
 # =================== AIPass ====================
 # Name: test_event_handlers.py
-# Description: Tests for simple event handler functions and the warning escalation lane
-# Version: 1.1.0
+# Description: Tests for simple event handler functions, the warning escalation lane and the mute expiry sweep
+# Version: 1.2.0
 # Created: 2026-04-25
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
-"""Tests for apps/handlers/events/memory_template_updated.py and warning_logged.py."""
+"""Tests for apps/handlers/events/memory_template_updated.py, warning_logged.py and mute_expiry.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(behaviour) — the lane internals in apps/handlers/escalation.py; the escalation tests cover them
 
 import json
+import os
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 from unittest.mock import MagicMock
 
 import pytest
+import aipass.ai_mail as ai_mail
+from aipass.ai_mail import CLAUDE, CODEX, OPENCODE
 from aipass.prax import trail
-from aipass.trigger.apps.handlers import escalation
-from aipass.trigger.apps.handlers.events import memory_template_updated, warning_logged
+from aipass.trigger.apps.handlers import escalation, medic_state
+from aipass.trigger.apps.handlers.ci import outbound
+from aipass.trigger.apps.handlers.events import (
+    error_detected,
+    memory_template_updated,
+    mute_expiry,
+    registry,
+    runaway_handler,
+    warning_logged,
+)
+from aipass.trigger.apps.modules import core
 
 
 @pytest.fixture(autouse=True)
@@ -276,3 +290,140 @@ class TestWarningLoggedFeedsEscalation:
 
         assert lane.mod.get_signatures() == []
         json_log.log_operation.assert_called_once_with("warning_logged_event", {"success": True})
+
+
+@pytest.fixture
+def sweep(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
+    """mute_expiry over a tmp medic_state, a tmp branch with a session pointer, and a mail recorder."""
+    monkeypatch.setattr(medic_state, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")
+    monkeypatch.setattr(mute_expiry, "json_handler", MagicMock())
+    monkeypatch.setattr(mute_expiry, "logger", MagicMock())
+    branch = tmp_path / "api"
+    (branch / ".ai_mail.local").mkdir(parents=True)
+    transcripts = tmp_path / "transcripts"
+    transcripts.mkdir()
+    monkeypatch.setattr(mute_expiry, "transcript_dir", lambda cwd: transcripts if cwd == str(branch) else None)
+    monkeypatch.setattr(mute_expiry, "_branch_paths", lambda: {"api": branch})
+    sent: List[Dict[str, Any]] = []
+    monkeypatch.setattr(mute_expiry, "_send_email", lambda **mail: sent.append(mail) or True)
+
+    def mute(expires_at: str) -> None:
+        medic_state.MEDIC_STATE_FILE.write_text(
+            json.dumps({"config": {"muted_branches": [{"name": "api", "expires_at": expires_at}]}}), encoding="utf-8"
+        )
+
+    def session(provider: str, age_seconds: float) -> Path:
+        pointer = {"session_id": "s1", "provider": provider, "cwd": str(branch)}
+        (branch / ".ai_mail.local" / "session.json").write_text(json.dumps(pointer), encoding="utf-8")
+        transcript = transcripts / "s1.jsonl"
+        transcript.write_text("{}\n", encoding="utf-8")
+        stamp = time.time() - age_seconds
+        os.utime(transcript, (stamp, stamp))
+        return transcript
+
+    return SimpleNamespace(branch=branch, sent=sent, mute=mute, session=session)
+
+
+def _expired() -> str:
+    return (datetime.now() - timedelta(minutes=1)).isoformat()
+
+
+class TestMuteExpirySweep:
+    """medic_mute_sweep: an expired mute mails its holder, unless the holder's session is still writing."""
+
+    def test_idle_branch_gets_the_nudge_with_the_remute_command(self, sweep: SimpleNamespace) -> None:
+        """No live session: the mute is dropped and @api gets one mail naming the re-mute command."""
+        sweep.mute(_expired())
+        sweep.session(CLAUDE, age_seconds=mute_expiry.ACTIVE_WINDOW_SECONDS + 60)
+
+        mute_expiry.handle_medic_mute_sweep()
+
+        assert [m["to_branch"] for m in sweep.sent] == ["@api"]
+        assert "drone @trigger medic mute @api" in sweep.sent[0]["message"]
+        assert "Still working?" in sweep.sent[0]["message"]
+        assert medic_state.get_muted_branches() == []
+
+    def test_live_claude_session_rearms_and_sends_nothing(self, sweep: SimpleNamespace) -> None:
+        """A transcript written inside ACTIVE_WINDOW_SECONDS re-arms the mute; no mail goes out."""
+        sweep.mute(_expired())
+        sweep.session(CLAUDE, age_seconds=30)
+
+        mute_expiry.handle_medic_mute_sweep()
+
+        assert sweep.sent == []
+        assert medic_state.get_muted_branches() == ["api"]
+
+    def test_live_codex_session_reads_its_rollout_file(
+        self, sweep: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex sessions are judged by codex_thread_file(session_id), not the Claude transcript dir."""
+        rollout = sweep.session(CODEX, age_seconds=30)
+        monkeypatch.setattr(mute_expiry, "codex_thread_file", lambda sid: rollout if sid == "s1" else None)
+
+        assert mute_expiry.session_is_active(sweep.branch) is True
+
+    def test_opencode_has_no_per_branch_signal(self, sweep: SimpleNamespace) -> None:
+        """OpenCode keeps one shared store: never judged live, so its holder always gets the mail."""
+        sweep.mute(_expired())
+        sweep.session(OPENCODE, age_seconds=0)
+
+        mute_expiry.handle_medic_mute_sweep()
+
+        assert [m["to_branch"] for m in sweep.sent] == ["@api"]
+
+    def test_unknown_branch_or_no_pointer_is_not_live(self, sweep: SimpleNamespace) -> None:
+        """No path, or no pointer file: not live."""
+        assert mute_expiry.session_is_active(None) is False
+        assert mute_expiry.session_is_active(sweep.branch) is False
+
+    def test_nothing_expired_reads_no_census_and_sends_nothing(
+        self, sweep: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The minute tick is cheap: with no expired mute the fleet census is never read."""
+        sweep.mute((datetime.now() + timedelta(hours=1)).isoformat())
+        census = MagicMock(return_value={})
+        monkeypatch.setattr(mute_expiry, "_branch_paths", census)
+
+        mute_expiry.handle_medic_mute_sweep()
+
+        census.assert_not_called()
+        assert sweep.sent == []
+
+    def test_failed_delivery_is_named_in_a_warning(
+        self, sweep: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A send that answers False is logged with the branch; the mute is still settled."""
+        sweep.mute(_expired())
+        monkeypatch.setattr(mute_expiry, "_send_email", lambda **mail: mail["to_branch"] != "@api")
+
+        mute_expiry.handle_medic_mute_sweep()
+
+        cast(MagicMock, mute_expiry.logger).warning.assert_called_once()
+        assert "api" in cast(MagicMock, mute_expiry.logger).warning.call_args.args[1]
+        assert medic_state.get_muted_branches() == []
+
+    def test_registry_wires_the_sweep_and_its_mail(
+        self, sweep: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """setup_handlers puts medic_mute_sweep on the bus, and the sweep's mail leaves through ai_mail's delivery."""
+        for module in (error_detected, runaway_handler, escalation, outbound, mute_expiry):
+            monkeypatch.setattr(module, "_send_email", None)
+        registry_log = MagicMock()
+        monkeypatch.setattr(registry, "json_handler", registry_log)
+        delivered: List[Any] = []
+
+        def deliver(to_branch: str, email: Dict[str, Any], upsert_key: Any = None) -> tuple:
+            delivered.append(email)
+            return True, ""
+
+        monkeypatch.setattr(ai_mail, "deliver_email_to_branch", deliver)
+        wired: Dict[str, Any] = {}
+        monkeypatch.setattr(core.Trigger, "on", staticmethod(lambda event, handler: wired.setdefault(event, handler)))
+
+        registry.setup_handlers()
+        sweep.mute(_expired())
+        wired["medic_mute_sweep"]()
+
+        assert wired["medic_mute_sweep"] is mute_expiry.handle_medic_mute_sweep
+        assert [(m["to"], m["from"]) for m in delivered] == [("@api", "@trigger")]
+        registry_log.log_operation.assert_called_once_with("handlers_registered", {"success": True})

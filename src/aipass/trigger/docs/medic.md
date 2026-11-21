@@ -46,10 +46,18 @@ On successful dispatch: sends email via `deliver_email_to_branch()` then calls `
 
 **Two mute classes, deliberately independent:**
 
-| Class | Config key | Gates | Set with |
-|---|---|---|---|
-| CONTENT | `muted_branches` | `error_detected` dispatch | `medic mute @branch` |
-| VOLUME | `volume_muted_branches` | `runaway_log_detected` alerts | `medic volume-mute @branch` |
+| Class | Config key | Gates | Set with | Default |
+|---|---|---|---|---|
+| CONTENT | `muted_branches` | `error_detected` dispatch | `medic mute @branch` | 4h |
+| VOLUME | `volume_muted_branches` | `runaway_log_detected` alerts | `medic volume-mute @branch` | 24h |
+
+**Content mute expiry.** The log watcher service fires `medic_mute_sweep` every 60 seconds (`handlers/events/mute_expiry.py`). Each expired content mute is settled under the state lock, and mail goes out after the lock is released:
+
+- **Re-armed** for another 4h, with no mail, when the branch's session is still working. That means the session pointer ai_mail keeps in `<branch>/.ai_mail.local/session.json` names a Claude transcript or Codex rollout file written in the last 15 minutes. A mute re-arms at most twice (`MAX_REARMS`), so a session left open keeps it 12h at most.
+- **Dropped** otherwise. The branch gets one mail, "Medic mute expired", with the re-mute command.
+- **OpenCode** sessions share one store with no per-branch file, so they are never judged live and always get the mail.
+- **Until the sweep runs**, an expired entry stays in the file but every reader treats it as inactive. Expired volume mutes are dropped silently on the next write.
+- **A manual `medic mute`** replaces the entry and resets its re-arm count.
 
 A content mute means "expect error lines from me while I build" — it says nothing about log volume. Because every dispatch checklist tells agents to medic-mute *before* build/edit work, and build windows are exactly when floods happen, gating runaway alerts on the content mute would leave that channel dead in its own peak window. Volume mutes must be set deliberately, and CRITICAL runaways bypass even those.
 

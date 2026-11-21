@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic.py
 # Description: Medic toggle module for auto-healing error dispatch control
-# Version: 1.12.0
+# Version: 1.13.0
 # Created: 2026-02-12
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -45,6 +45,7 @@ from aipass.trigger.apps.handlers.medic_state import (
     parse_duration,
     DEFAULT_MUTE_SECONDS,
     DEFAULT_OFF_SECONDS,
+    DEFAULT_VOLUME_MUTE_SECONDS,
 )
 
 
@@ -110,7 +111,7 @@ def print_help() -> None:
     console.print("  [bold]off[/bold]                Disable dispatch for 24h (detection continues)")
     console.print("  [bold]off --forever[/bold]      Disable dispatch permanently (stops log watcher)")
     console.print("  [bold]status[/bold]             Show current state, muted branches, and statistics")
-    console.print("  [bold]mute[/bold] @branch       Suppress dispatch for 24h (default)")
+    console.print("  [bold]mute[/bold] @branch       Suppress dispatch for 4h (default)")
     console.print("  [bold]mute[/bold] @branch --for 48h  Custom TTL (e.g. 48h, 7d)")
     console.print("  [bold]mute[/bold] @branch --forever  Permanent mute")
     console.print("  [bold]unmute[/bold] @branch     Resume dispatch for a muted branch")
@@ -125,9 +126,11 @@ def print_help() -> None:
     console.print("            Auto-resumes after 24 hours. Use --forever for")
     console.print("            permanent disable (stops log watcher too).")
     console.print()
-    console.print("  [yellow]mute[/yellow]      Per-branch suppress for 24h (default).")
+    console.print("  [yellow]mute[/yellow]      Per-branch suppress for 4h (default).")
     console.print("            --for 48h or --for 7d for custom duration.")
     console.print("            --forever for permanent. Auto-expires — no need to unmute.")
+    console.print("            At expiry the branch gets a mail with the re-mute command;")
+    console.print("            a session still writing its transcript re-arms instead (2x max).")
     console.print()
     console.rule("CONTENT MUTE vs VOLUME MUTE")
     console.print()
@@ -171,7 +174,7 @@ def print_help() -> None:
     console.print()
 
 
-def _parse_duration_args(args: list) -> tuple:
+def _parse_duration_args(args: list, default_seconds: int) -> tuple:
     """Extract --for <dur> and --forever from args; a --for value that does not parse raises ValueError."""
     remaining = []
     duration = None
@@ -193,7 +196,7 @@ def _parse_duration_args(args: list) -> tuple:
         return None, True, remaining
     if duration is not None:
         return duration, False, remaining
-    return float(DEFAULT_MUTE_SECONDS), False, remaining
+    return float(default_seconds), False, remaining
 
 
 def _fmt_remaining(iso_expiry: str) -> str:
@@ -223,7 +226,7 @@ def _handle_mute(console, args: list) -> None:
     from aipass.cli import error
 
     try:
-        duration_secs, is_forever, rest = _parse_duration_args(args)
+        duration_secs, is_forever, rest = _parse_duration_args(args, DEFAULT_MUTE_SECONDS)
     except ValueError as exc:
         error(str(exc), suggestion="Use <n>h or <n>d, e.g. --for 48h or --for 7d")
         return
@@ -269,7 +272,7 @@ def _handle_volume_mute(console, args: list) -> None:
     from aipass.cli import error
 
     try:
-        duration_secs, is_forever, rest = _parse_duration_args(args)
+        duration_secs, is_forever, rest = _parse_duration_args(args, DEFAULT_VOLUME_MUTE_SECONDS)
     except ValueError as exc:
         error(str(exc), suggestion="Use <n>h or <n>d, e.g. --for 48h or --for 7d")
         return

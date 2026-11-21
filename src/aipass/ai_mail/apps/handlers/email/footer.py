@@ -14,7 +14,7 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 
 STANDARD_FOOTER = """
 ---
-▶ BUILD/EDIT task? First: drone @trigger medic mute @<your-branch> — auto-expires 24h, no unmute.
+▶ BUILD/EDIT task? First: drone @trigger medic mute @<your-branch> — auto-expires 4h, re-arms mid-build, no unmute.
 
 ⚠️ TASK CHECKLIST (before marking complete):
 □ SENTRY CHECK → drone @sentry audit @branch (80%+)

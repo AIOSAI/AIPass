@@ -45,7 +45,7 @@ drone @ai_mail inbox                               # check mail → view <id> �
 drone @flow create . "Subject" [dplan]             # new plan (default FPLAN)
 drone @sentry audit aipass @branch                 # standards audit (drop @branch = all)
 drone @sentry checklist <file|dir>                 # quick standards check
-drone @trigger medic mute @<self>                  # BEFORE build/edit work — auto-expires 24h
+drone @trigger medic mute @<self>                  # BEFORE build/edit work — auto-expires 4h, re-arms mid-build
 ```
 
 # Talking to other agents

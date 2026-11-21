@@ -145,7 +145,7 @@ Feed events use `kind` `system`, `source` `ci`, and
 - `drone @git diff` does not show untracked files, so the diff sentry reviews leaves out a new
   file the cure adds.
 - `projects/*` paths name no owner. Such a red is unowned.
-- A `gated` cure waits for its gate. A 24h build mute holds it for up to 24h; `medic unmute @<owner>` sends it on the next poll.
+- A `gated` cure waits for its gate. A build mute holds it for up to its 4h default, longer while the owner's session is still working (re-armed at most twice); `medic unmute @<owner>` sends it on the next poll.
 - The poll reads only what `drone @git run list` returns (gh's newest 20 runs).
 - The event path logs only to `logs/ci_lane.jsonl` and never through prax. The `ci` verbs log
   through prax at WARNING and below.

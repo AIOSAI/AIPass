@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher_service.py
 # Description: Persistent log watcher process for Medic error detection
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-29
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -12,6 +12,7 @@ Log Watcher Service — Persistent process for Medic"""
 import signal
 import sys
 import threading
+from threading import Thread
 
 import aipass.trigger.apps.handlers.reload_sentinel as reload_sentinel
 from aipass.prax import logger
@@ -26,6 +27,8 @@ from aipass.trigger.apps.modules.log_events import (
     start as start_system_watcher,
     stop as stop_system_watcher,
 )
+
+MUTE_SWEEP_SECONDS = 60
 
 
 def _console():
@@ -58,6 +61,12 @@ def print_help():
     console.print("  systemctl --user start trigger-log-watcher.service")
     console.print("  drone @trigger medic status")
     console.print()
+
+
+def sweep_mutes(stop_event: threading.Event) -> None:
+    """Fire medic_mute_sweep every MUTE_SWEEP_SECONDS until the service stops; the bus has no clock of its own."""
+    while not stop_event.wait(MUTE_SWEEP_SECONDS):
+        trigger.fire("medic_mute_sweep")
 
 
 # Lifecycle goes to the prax logger, not the journal; the startup failure is
@@ -109,6 +118,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # The sentinel sets the same stop_event as a signal, so the wait is the only exit path.
     reload_requested = reload_sentinel.start(stop_event)
+    Thread(target=sweep_mutes, args=(stop_event,), name="medic-mute-sweep", daemon=True).start()
 
     stop_event.wait()
 
