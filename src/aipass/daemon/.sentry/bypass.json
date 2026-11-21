@@ -55,13 +55,13 @@
     {
       "file": "apps/handlers/schedule/command_job.py",
       "standard": "logged_fallback",
-      "lines": [104],
+      "lines": [126],
       "reason": "command_job_problem (daemon, fleet green leg 5): only ValueError is caught, and command_argv raises ValueError on purpose as its refusal, with a message that is never empty; every other exception, the 'check broke' case, propagates. So the string is the refusal reason, the same kind as every other return of the function, and the caller refuses the job and names why."
     },
     {
       "file": "apps/modules/timer_install.py",
       "standard": "logged_fallback",
-      "lines": [99, 103],
+      "lines": [105, 109],
       "reason": "_run_systemctl (daemon, fleet green leg 5): every False this seam returns is a failure the user was already shown through cli error(), the non-zero exit on the success path included, so the caller cannot mistake it for an answer; True only on success (or not loaded, when asked) and None only for not found, when asked (leg 4b)."
     },
     {

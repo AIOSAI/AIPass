@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: command_job.py
 # Description: Command jobs - a scheduled drone command run as a subprocess, no wake
-# Version: 1.1.0
+# Version: 1.2.1
 # Created: 2026-09-11
-# Modified: 2026-11-14
+# Modified: 2026-11-21
 # =============================================
 
 """Command jobs (DPLAN-0338): a schedule job that runs a drone command instead of waking an agent.
@@ -75,7 +75,29 @@ def command_argv(command) -> List[str]:
         raise ValueError(f"command does not parse ({e}): {command!r}") from e
     if argv[0] != COMMAND_EXECUTABLE:
         raise ValueError(f"the first token must be '{COMMAND_EXECUTABLE}', got '{argv[0]}'")
+    operators = _shell_operators(command)
+    if operators:
+        raise ValueError(
+            f"no shell runs a command job, so {' '.join(operators)} would reach drone as text: {command!r}"
+        )
+    if _target(argv) == "ai_mail" and argv[2:3] == ["dispatch"]:
+        raise ValueError("a command job wakes nobody and dispatch wakes its target: a scheduled wake is a prompt job")
     return argv
+
+
+def _shell_operators(command: str) -> List[str]:
+    """Unquoted shell operators in *command* (``|``, ``;``, ``&&``, ``>`` ...); quoted text stays one token.
+
+    Non-POSIX so a token keeps its quotes: ``'|'`` is text, never mistaken for the bare ``|``.
+    """
+    lexer = shlex.shlex(command, posix=False, punctuation_chars=True)
+    lexer.whitespace_split = True
+    return [token for token in lexer if token and set(token) <= set(lexer.punctuation_chars)]
+
+
+def _target(argv: List[str]) -> str:
+    """The branch a drone argv addresses, lower-case without its @, or '' for a bare drone verb."""
+    return argv[1].lstrip("@").lower() if len(argv) > 1 else ""
 
 
 def timeout_for(job: dict):

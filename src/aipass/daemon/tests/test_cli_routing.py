@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: CLI Routing Tests for DAEMON
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-28
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/daemon.py — the router: help, introspection, unknown commands, the argument gate."""
@@ -17,6 +17,7 @@ from unittest.mock import call, patch
 
 import pytest
 
+from aipass.ai_mail import resolve_verified_caller
 from aipass.cli import error, mark_command_failed
 
 from aipass.daemon.apps import daemon as _daemon_mod
@@ -244,12 +245,19 @@ class TestUnknownArgumentIsRefused:
 
     @pytest.mark.parametrize("verb", ["install-timer", "uninstall-timer"])
     def test_the_timer_verbs_cannot_reach_live_systemd_without_the_gate(
-        self, verb, _seal_timer_host_state, tmp_path
+        self, verb, _seal_timer_host_state, tmp_path, monkeypatch
     ) -> None:
         """With the gate no-op'd, the timer verbs run against the sealed seams, never live systemd.
 
         Asserts both that the verb RAN and that the live host is unchanged; either alone proves nothing.
+        The verbs belong to the admin seat, so the caller is stamped @devpulse with the grant's key legs stood in.
         """
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+        monkeypatch.delenv("AIPASS_CALLER_IDENTITY_SOURCE", raising=False)
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+        monkeypatch.setattr(
+            _daemon_mod.timer_install, "is_verified_admin_caller", lambda: resolve_verified_caller() == "@devpulse"
+        )
         live_dir = Path.home() / ".config" / "systemd" / "user"
         units = ("daemon-tick.service", "daemon-tick.timer")
         before = sorted(name for name in units if (live_dir / name).exists())

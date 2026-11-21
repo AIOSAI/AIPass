@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_timer_install.py
 # Description: Tests for the timer_install module (systemd user timer installer)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-25
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/timer_install.py — install-timer and uninstall-timer, the systemd user timer."""
@@ -20,6 +20,7 @@ from unittest.mock import call, patch
 import sys
 from pathlib import Path
 
+from aipass.ai_mail import resolve_verified_caller
 from aipass.daemon.apps.modules.timer_install import (
     handle_command,
     HANDLED_COMMANDS,
@@ -27,6 +28,18 @@ from aipass.daemon.apps.modules.timer_install import (
 
 # Verbs are reached through handle_command, inside conftest's seal; a failed install is sys.exit(1).
 TI = "aipass.daemon.apps.modules.timer_install"
+
+
+@pytest.fixture(autouse=True)
+def _admin_seat(monkeypatch):
+    """Every verb runs stamped as @devpulse holding the grant; TestSeat stamps another caller.
+
+    Only the grant's key legs are stood in (the edge: devpulse's signing key); the seat is the real rail's read.
+    """
+    monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+    monkeypatch.delenv("AIPASS_CALLER_IDENTITY_SOURCE", raising=False)
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+    monkeypatch.setattr(f"{TI}.is_verified_admin_caller", lambda: resolve_verified_caller() == "@devpulse")
 
 
 def _units(directory: Path) -> tuple:
@@ -144,11 +157,14 @@ class TestTheCommandsReadSystemctlsAnswers:
 
     @pytest.fixture(autouse=True)
     def _units_to_install(self, tmp_path):
-        """The two unit files install-timer copies, under a daemon root of this test's own."""
+        """The two unit files install-timer copies, under a daemon root of this test's own.
+
+        Trigger's fire is held too: a failed install removes what it copied and reports each removal.
+        """
         root = tmp_path / "daemon_root"
         root.mkdir()
         _units(root)
-        with patch(f"{TI}._DAEMON_ROOT", root):
+        with patch(f"{TI}._DAEMON_ROOT", root), patch("aipass.trigger.Trigger.fire"):
             yield
 
     def test_success_runs_reload_enable_start_in_that_order(self, systemctl_on_path):
@@ -206,7 +222,7 @@ class TestTheCommandsReadSystemctlsAnswers:
         assert "FAIL: systemctl --user enable daemon-tick.timer" in "".join(capsys.readouterr())
         assert _argv(log) == ["--user daemon-reload", "--user enable daemon-tick.timer"]
 
-    def test_systemctl_not_found(self, systemctl_on_path, capsys):
+    def test_systemctl_not_found(self, systemctl_on_path, tmp_path, capsys):
         """No systemctl on PATH: uninstall-timer (not_found_ok) says not installed and exits 0; install-timer fails.
 
         Only uninstall's stop passes not_found_ok; its None tells nothing installed from a failed stop.
@@ -219,6 +235,7 @@ class TestTheCommandsReadSystemctlsAnswers:
         assert _exit_of("install-timer") == 1
         said = "".join(capsys.readouterr())
         assert "systemctl not found — systemd not available" in said, said
+        assert list((tmp_path / "_sealed_unit_dir").iterdir()) == [], "an install that cannot enable leaves no units"
 
     def test_a_timeout_is_a_failure_never_not_found(self, systemctl_on_path, capsys):
         """systemctl times out: install-timer exits 1 naming the timeout; uninstall's stop is a failure, not None."""
@@ -290,8 +307,8 @@ class TestInstall:
         assert not [line for line in unit if "daemon-tick.log" in line or "journal" in line]
 
     @patch(f"{TI}._run_systemctl", return_value=False)
-    def test_install_systemctl_fails(self, mock_systemctl, tmp_path):
-        """install-timer exits 1 when systemctl fails, and stops at the first refusal."""
+    def test_install_systemctl_fails_and_leaves_no_unit_behind(self, mock_systemctl, tmp_path):
+        """install-timer exits 1 when systemctl fails, stops at the first refusal, and removes what it copied."""
         _units(tmp_path)
         install_dir = tmp_path / "systemd"
         install_dir.mkdir()
@@ -299,11 +316,36 @@ class TestInstall:
         with (
             patch(f"{TI}._DAEMON_ROOT", tmp_path),
             patch(f"{TI}._UNIT_DIR", install_dir),
+            patch("aipass.trigger.Trigger.fire") as fire,
             pytest.raises(SystemExit) as stopped,
         ):
             handle_command("install-timer", [])
         assert stopped.value.code == 1
         mock_systemctl.assert_called_once_with("daemon-reload")
+        assert list(install_dir.iterdir()) == []
+        assert fire.call_args_list == [
+            call("file_deleted", path=str(install_dir / name), source="timer_install")
+            for name in ("daemon-tick.service", "daemon-tick.timer")
+        ]
+
+    @patch(f"{TI}._run_systemctl", side_effect=lambda *args: args[0] != "start")
+    def test_a_failed_reinstall_puts_the_old_units_back(self, mock_systemctl, tmp_path):
+        """A unit already installed is restored byte for byte when the reinstall fails, never deleted."""
+        _units(tmp_path)
+        install_dir = tmp_path / "systemd"
+        install_dir.mkdir()
+        old = install_dir / "daemon-tick.timer"
+        old.write_text("[Unit]\nDescription=the running timer\n", encoding="utf-8")
+
+        with (
+            patch(f"{TI}._DAEMON_ROOT", tmp_path),
+            patch(f"{TI}._UNIT_DIR", install_dir),
+            patch("aipass.trigger.Trigger.fire"),
+            pytest.raises(SystemExit),
+        ):
+            handle_command("install-timer", [])
+        assert old.read_text(encoding="utf-8") == "[Unit]\nDescription=the running timer\n"
+        assert not (install_dir / "daemon-tick.service").exists()
 
 
 class TestUninstall:
@@ -377,18 +419,18 @@ class TestUninstall:
         assert "Not installed:" in out, f"an uninstall with nothing installed must say so: {out!r}"
 
     @patch(f"{TI}._run_systemctl", side_effect=_host_with_no_systemctl)
-    def test_no_systemctl_with_a_unit_file_fails_and_keeps_it(self, mock_systemctl, tmp_path, capsys):
-        """No systemctl while a unit file stands: the stop is named as the failed step, exit 1, the file stays."""
+    def test_no_systemctl_with_a_unit_file_removes_it(self, mock_systemctl, tmp_path, capsys):
+        """No systemctl while unit files stand: no systemd runs them, so they are removed, exit 0, no reload."""
         unit_dir = tmp_path / "units"
         unit_dir.mkdir()
         service, timer = _units(unit_dir)
-        with patch(f"{TI}._UNIT_DIR", unit_dir):
-            assert _exit_of("uninstall-timer") == 1
-        assert service.exists() and timer.exists(), "a timer that could not be stopped keeps its files"
+        with patch(f"{TI}._UNIT_DIR", unit_dir), patch("aipass.trigger.Trigger.fire"):
+            assert _exit_of("uninstall-timer") == 0
+        assert not service.exists() and not timer.exists()
         assert mock_systemctl.call_args_list == [
             call("stop", "daemon-tick.timer", not_loaded_ok=True, not_found_ok=True),
         ]
-        assert "uninstall-timer: systemctl --user stop daemon-tick.timer failed" in capsys.readouterr().err
+        assert "No systemctl on this host" in capsys.readouterr().out
 
     @patch(f"{TI}._run_systemctl", return_value=True)
     def test_uninstall_removes_files(self, mock_systemctl, tmp_path):
@@ -482,3 +524,30 @@ class TestNoRealHomeWrites:
         ]
         assert home_state == [], f"suite wrote into the real home: {home_state}"
         assert state_dir.is_dir(), "the state dir should still be created, just where it was told"
+
+
+class TestSeat:
+    """The timer wakes the whole fleet: only the verified admin seat installs or removes it."""
+
+    @pytest.mark.parametrize("verb", sorted(HANDLED_COMMANDS))
+    def test_another_seat_is_refused_naming_who_to_ask_and_nothing_moves(self, verb, monkeypatch, tmp_path, capsys):
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "flow")
+        unit_dir = tmp_path / "_sealed_unit_dir"
+        unit_dir.mkdir()
+        service, timer = _units(unit_dir)
+        with patch(f"{TI}._run_systemctl") as systemctl:
+            assert _exit_of(verb) == 1
+        systemctl.assert_not_called()
+        assert service.exists() and timer.exists()
+        err = capsys.readouterr().err
+        assert f"{verb} refused for @flow" in err
+        assert "drone @ai_mail email @devpulse" in err
+
+    def test_a_rail_that_raises_never_reads_as_granted(self, monkeypatch):
+        def rail_down():
+            raise RuntimeError("registry unreadable")
+
+        monkeypatch.setattr(f"{TI}.is_verified_admin_caller", rail_down)
+        with patch(f"{TI}._run_systemctl") as systemctl, pytest.raises(RuntimeError, match="registry unreadable"):
+            handle_command("install-timer", [])
+        systemctl.assert_not_called()

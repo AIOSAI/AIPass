@@ -15,6 +15,12 @@ Each citizen owns its schedule at `<branch>/.daemon/schedule.json`. The daemon d
 `Type=oneshot`, running `python3 -m aipass.daemon.apps.daemon run` once and exiting. Between ticks
 there is no daemon process at all.
 
+The timer wakes the whole fleet, so `install-timer` and `uninstall-timer` run for the verified admin
+seat (@devpulse) only, read through @ai_mail's verified-caller rail. Any other caller is refused by
+name, with the mail to send. An install that cannot reload, enable or start the timer puts the unit
+folder back as it was: units it copied are removed and units that stood before get their old bytes back.
+On a host with no `systemctl`, nothing runs the units, so `uninstall-timer` removes them and exits 0.
+
 The 2 min is nominal, not exact: `OnUnitActiveSec` measures from the *last activation*, and systemd's
 default `AccuracySec=1min` batches the wakeup, so observed gaps run **2–3 min**. A tick costs well
 under a second of CPU (`systemctl --user show daemon-tick.service -p CPUUsageNSec` reads it) and
@@ -51,6 +57,11 @@ The trust model behind the fleet definition remains asymmetric on purpose: a pas
 A job carries **exactly one** of `prompt` (wake the owner with it) or `command` (run a drone
 command, wake nobody; see [docs/command_jobs.md](command_jobs.md)). Both, or neither, is refused at discovery and
 logged, the same way a missing `id` or `schedule` is.
+
+The file's place names its owner. A `branch` field, on the file or on a job, must be the owner's
+address (with or without the `@`, any case). One that names another citizen, or is not a string,
+is refused and the refusal names it and the owner: on the file, the whole file is refused; on a job,
+only that job is. The field is a claim, so it can never move a job into someone else's name.
 
 ### Schedule types
 
