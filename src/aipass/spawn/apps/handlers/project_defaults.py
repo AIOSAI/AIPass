@@ -34,11 +34,9 @@ def arrival_refusal(arrival) -> str | None:
 def stamp_onboarding(target: Path, arrival: str) -> str:
     """Put the First wake checklist under the local prompt's title; OSError when it cannot be written.
 
-    The seat must be a directory, and its prompt must resolve inside it: the prompt is read and then
-    rewritten, so one that is a link out of the seat is refused, never followed."""
+    The prompt must resolve inside the seat: it is read and then rewritten, so one that is a link out
+    of the seat is refused, never followed. No filesystem call reads the seat path before that guard."""
     seat = os.path.realpath(target)
-    if not os.path.isdir(seat):
-        raise NotADirectoryError(f"seat {target} is not a directory, First wake not stamped")
     prompt_path = os.path.realpath(os.path.join(seat, LOCAL_PROMPT_REL))
     if not prompt_path.startswith(seat + os.sep):
         raise PermissionError(f"{LOCAL_PROMPT_REL} in {target} resolves outside the seat, to {prompt_path}")

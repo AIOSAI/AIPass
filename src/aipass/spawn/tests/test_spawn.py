@@ -468,13 +468,15 @@ class TestArrivalDefaults:
         assert outside.read_text(encoding="utf-8") == "# not the seat's\nprivate\n"
         assert (seat / ".aipass" / "aipass_local_prompt.md").is_symlink()
 
-    def test_a_seat_that_is_not_a_directory_is_refused(self, tmp_path):
-        """Mutant: the directory check is dropped -> a file path is answered 'not stamped' like a seat -> red."""
+    def test_a_seat_that_is_not_a_directory_is_answered_not_stamped(self, tmp_path):
+        """No filesystem call touches the raw seat path (CodeQL); a file seat has no prompt to stamp.
+
+        Mutant: the prompt's is_file check is dropped -> reading under a file raises -> red."""
         not_a_seat = tmp_path / "file.txt"
         not_a_seat.write_text("", encoding="utf-8")
 
-        with pytest.raises(NotADirectoryError):
-            stamp_onboarding(not_a_seat, "fresh")
+        assert stamp_onboarding(not_a_seat, "fresh").startswith("not stamped")
+        assert not_a_seat.read_text(encoding="utf-8") == ""
 
     def test_the_stamped_rows_hold_every_seats_own_files_and_nothing_else(self, tmp_path):
         """The proof that stamping protects: the update lane's own matcher reads the stamped file."""
