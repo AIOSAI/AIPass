@@ -66,7 +66,7 @@ docker run --rm -v "$AIPASS_HOME/tests/docker_dev_verify.sh":/verify.sh:ro \
 - [ ] `drone aipass`, `drone @aipass`, `aipass @drone`: guide, never crash.
 
 ### Phase 7 — passports built as intended (SEEDS, TDPLAN-0017)
-- [ ] 18/18 branches with a tracked `.aipass/passport.seed.json` got a live
+- [ ] 18/18 branches with a tracked `.aipass/passport.vault.json` got a live
       `.trinity/passport.json` minted FROM THE SEED (not a blank template).
 - [ ] Every stamp `citizenship.seed.sha256` == sha256 of the seed file bytes.
 - [ ] Every `citizenship.registry_id` == the fresh registry's `metadata.id`.

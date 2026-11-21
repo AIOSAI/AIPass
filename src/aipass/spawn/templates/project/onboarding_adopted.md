@@ -11,7 +11,7 @@ You joined a codebase that was alive before you. Work down the list, tick each l
  - [ ] The tracked `.gitignore` carries no AIPass line. Example: a `tools/` line would hide new product files under `src/tools/`.
  - [ ] The root `.updateignore`: turn its commented product examples into real rows for the files that exist. Never a folder a seat lives in.
  - [ ] If the product has its own tests, `.aipass/test_write_policy.json` exists; without it the test-write gate refuses every new test file.
- - [ ] Your passport seed exists. `aipass doctor` names a missing one; `drone @spawn export-seeds --confirm` at the project root writes it (`doctor --fix` is the owner's). If your seat folder is excluded from git, the seed lives on this disk only.
+ - [ ] Your passport vault exists. `aipass doctor` names a missing one; `drone @spawn export-vault --confirm` at the project root writes it (`doctor --fix` is the owner's). If your seat folder is excluded from git, the vault lives on this disk only.
  - [ ] Every release: `aipass doctor`, then `aipass init update --dry-run`. A stamp-only plan applies; anything else waits for the owner's go. Each kept-local file leaves a `.aipass-new` beside it: decide every one.
  - [ ] Never hand-edit `.aipass/hooks.json`: a changed file takes every hook dark until re-enrolled. Change hooks through `drone @hooks --help`. After an apply that says trust re-enrol, prove one hook fires (the Temporal line on your next prompt).
  - [ ] Run sub-agents and waits in the foreground: background work dies at the turn's end, with no reply sent.

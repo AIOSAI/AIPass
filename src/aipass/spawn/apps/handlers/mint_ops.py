@@ -255,8 +255,8 @@ def mint_citizen(
             logger.warning("[spawn] Could not mark the refused tree %s: %s", target, e)
         return refusal
 
-    # The seed is how a lost passport comes back, so a birth without one stops before it registers.
-    # A bare --template that renders no passport has no identity to seed; that is reported, not refused.
+    # The passport vault is how a lost passport comes back, so a birth without one stops before it registers.
+    # A bare --template that renders no passport has no identity to vault; that is reported, not refused.
     seed_issues = []
     passport_target = PassportTarget(
         target / ".trinity" / "passport.json", target, reg_path.parent, replacements["RESIDENCY"]
@@ -265,11 +265,11 @@ def mint_citizen(
         seed_record = export_seed(passport_target, confirm=True)
     else:
         seed_record = {"error": None}
-        seed_issues.append(f"No seed written: the template rendered no passport at {passport_target.path}")
+        seed_issues.append(f"No passport vault written: the template rendered no passport at {passport_target.path}")
         logger.warning("[spawn] %s", seed_issues[0])
     if seed_record["error"]:
         refusal = error_result(
-            f"BIRTH REFUSED: the seed for {branch_upper} could not be written ({seed_record['error']}). "
+            f"BIRTH REFUSED: the passport vault for {branch_upper} could not be written ({seed_record['error']}). "
             f"Nothing was registered; the tree is left at {target}."
         )
         logger.error("[spawn] %s", refusal["error"])

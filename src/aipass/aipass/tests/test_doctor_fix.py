@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_fix.py
 # Description: Tests for doctor --fix remediation report (DPLAN-0177 Phase 2)
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-05-15
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/modules/_doctor_fix.py."""
@@ -50,7 +50,7 @@ def _make_agent(tmp_path: Path, name: str, registry_id: str = "uuid-1", subdir: 
     (trinity / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
     if seed:
         (agent_dir / ".aipass").mkdir(exist_ok=True)
-        (agent_dir / ".aipass" / "passport.seed.json").write_text("{}", encoding="utf-8")
+        (agent_dir / ".aipass" / "passport.vault.json").write_text("{}", encoding="utf-8")
     return agent_dir
 
 
@@ -185,7 +185,7 @@ class TestGenerateRemediation:
         (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
         items = generate_remediation(tmp_path)
         registry = [(i.severity, i.description.split(":")[0], i.fix_command) for i in items if i.category == "registry"]
-        assert registry == [("critical", "No passport seed", "aipass doctor --fix")]
+        assert registry == [("critical", "No passport vault", "aipass doctor --fix")]
 
     def test_root_artifact_warn(self, tmp_path: Path) -> None:
         """Root artifact with warn severity produces warning remediation."""

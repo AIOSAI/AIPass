@@ -518,12 +518,12 @@ class TestArrivalDefaults:
         """Mutant: the mint skips the home copy -> a reclone loses the seat's identity -> red."""
         root, seat, result = first_seat(tmp_path, "adopted")
 
-        home_copy = aipass_home / ".aipass" / "seeds" / root.name / "grow.passport.seed.json"
+        home_copy = aipass_home / ".aipass" / "vault" / root.name / "grow.passport.vault.json"
         assert result["arrival"]["home_seed"] == f"copied to {home_copy}"
-        assert home_copy.read_bytes() == (seat / ".aipass" / "passport.seed.json").read_bytes()
+        assert home_copy.read_bytes() == (seat / ".aipass" / "passport.vault.json").read_bytes()
 
     def test_a_rewritten_seed_rewrites_its_home_copy(self, tmp_path, aipass_home):
-        """Mutant: export-seeds stops refreshing the home copy -> restore would read a stale identity -> red."""
+        """Mutant: export-vault stops refreshing the home copy -> restore would read a stale identity -> red."""
         root, seat, _ = first_seat(tmp_path, "adopted")
         passport_file = seat / ".trinity" / "passport.json"
         passport = json.loads(passport_file.read_text(encoding="utf-8"))
@@ -532,7 +532,7 @@ class TestArrivalDefaults:
 
         receipt = export_seeds(root, confirm=True)
 
-        home_copy = aipass_home / ".aipass" / "seeds" / root.name / "grow.passport.seed.json"
+        home_copy = aipass_home / ".aipass" / "vault" / root.name / "grow.passport.vault.json"
         assert receipt["errors"] == []
         assert json.loads(home_copy.read_text(encoding="utf-8"))["identity"]["role"] == "product_steward"
 
@@ -541,14 +541,14 @@ class TestArrivalDefaults:
         root, seat, _ = first_seat(tmp_path, "adopted")
         before = json.loads((seat / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         (seat / ".trinity" / "passport.json").unlink()
-        (seat / ".aipass" / "passport.seed.json").unlink()
+        (seat / ".aipass" / "passport.vault.json").unlink()
 
         written = restore_citizen("grow", root / "SEED_REGISTRY.json")
 
         restored = json.loads((seat / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert written == ["passport.json(seed)"]
         assert restored["identity"] == before["identity"]
-        assert (seat / ".aipass" / "passport.seed.json").is_file()
+        assert (seat / ".aipass" / "passport.vault.json").is_file()
 
     def test_an_external_project_gets_a_test_policy_that_is_off_and_named(self, tmp_path):
         """Mutant: the policy is never stamped -> the gate fail-closes with a missing-policy error -> red."""

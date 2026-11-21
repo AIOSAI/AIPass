@@ -90,7 +90,7 @@ def _seed_from_home(project_root: Path, target: Path) -> Path | None:
     dest = seed_path_for(target)
     dest.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(dest, home_copy.read_text(encoding="utf-8"))
-    logger.info("[spawn] restore: seed for %s put back from %s", target, home_copy)
+    logger.info("[spawn] restore: passport vault for %s put back from %s", target, home_copy)
     return dest
 
 
@@ -115,9 +115,9 @@ def restore_citizen(branch_name: str, registry_path: Path) -> list[str]:
     seed_file = find_seed(target) or _seed_from_home(registry_path.parent, target)
     if seed_file is None:
         reason = (
-            f"{branch_name} carries no seed at {seed_path_for(target)} or under the AIPass home "
+            f"{branch_name} carries no passport vault at {seed_path_for(target)} or under the AIPass home "
             f"- while a passport still exists, "
-            f"run `drone @spawn export-seeds --confirm` in {registry_path.parent} to write one"
+            f"run `drone @spawn export-vault --confirm` in {registry_path.parent} to write one"
         )
         logger.error("[spawn] restore: %s", reason)
         raise FileNotFoundError(reason)

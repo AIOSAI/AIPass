@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: structure_scanner.py
 # Description: Project structure validation for aipass doctor
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-05-14
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """
@@ -316,7 +316,14 @@ def detect_pollution(agents: List[AgentInfo]) -> List[PollutionHit]:
 
 
 TREE_REGISTRY_NAME = "AIPASS_REGISTRY.json"
-SEED_RELATIVE_PATH = Path(".aipass") / "passport.seed.json"
+VAULT_RELATIVE_PATH = Path(".aipass") / "passport.vault.json"
+# spawn still reads the pre-vault name until a citizen's next export, so it is no gap.
+LEGACY_VAULT_RELATIVE_PATH = Path(".aipass") / "passport.seed.json"
+
+
+def has_passport_vault(folder: Path) -> bool:
+    """True when the citizen carries a passport vault, under its name or the pre-vault one."""
+    return (folder / VAULT_RELATIVE_PATH).is_file() or (folder / LEGACY_VAULT_RELATIVE_PATH).is_file()
 
 
 def _passport_readable(passport: Path) -> bool:
@@ -369,7 +376,7 @@ def check_registry_consistency(
         elif not _passport_readable(passport := reg_path / ".trinity" / "passport.json"):
             if str(reg_path) not in agent_paths:
                 issues.append(RegistryIssue(name, path_str, "no_passport"))
-        elif _seed_expected(registry_path, passport) and not (reg_path / SEED_RELATIVE_PATH).is_file():
+        elif _seed_expected(registry_path, passport) and not has_passport_vault(reg_path):
             issues.append(RegistryIssue(name, path_str, "no_seed"))
 
     return issues

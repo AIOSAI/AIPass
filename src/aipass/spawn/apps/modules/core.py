@@ -79,7 +79,7 @@ def print_introspection():
         " get_available_classes, get_template_dir — citizen class lookup)[/dim]"
     )
     console.print(
-        "    [dim]- seed_ops.py (find_seed, load_seed, mint_from_seed — mint a citizen from its tracked seed)[/dim]"
+        "    [dim]- seed_ops.py (find_seed, load_seed, mint_from_seed — mint a citizen from its passport vault)[/dim]"
     )
     console.print()
 

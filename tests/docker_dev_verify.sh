@@ -136,7 +136,7 @@ if echo "$OUT" | grep -qi "drone"; then ok "'aipass @drone' mentions drone guida
 echo "--- Phase 7: passports from seeds ---"
 REG_ID=$(jq -r '.metadata.id' "$AH/AIPASS_REGISTRY.json" 2>/dev/null)
 SEEDED=0; MISSING=0; BADSTAMP=0; BADRID=0; BADIDENT=0
-for seed in "$AH"/src/aipass/*/.aipass/passport.seed.json; do
+for seed in "$AH"/src/aipass/*/.aipass/passport.vault.json; do
     [ -f "$seed" ] || continue
     bdir=$(dirname "$(dirname "$seed")")
     bname=$(basename "$bdir")
@@ -168,7 +168,7 @@ if [ "$DUPES" -eq 0 ]; then ok "citizen_ids unique across fleet"; else bad "$DUP
 # --- Phase 8: memory files ---
 echo "--- Phase 8: memory files ---"
 MEMBAD=0
-for seed in "$AH"/src/aipass/*/.aipass/passport.seed.json; do
+for seed in "$AH"/src/aipass/*/.aipass/passport.vault.json; do
     [ -f "$seed" ] || continue
     bdir=$(dirname "$(dirname "$seed")")
     bname=$(basename "$bdir")

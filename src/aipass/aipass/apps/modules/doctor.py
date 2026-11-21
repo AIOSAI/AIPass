@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.18.1
+# Version: 1.18.2
 # Created: 2026-04-16
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -801,7 +801,7 @@ def _check_community() -> List[CheckResult]:
 
 _UNSEATED = {
     "no_passport": ("no readable passport", "Run 'aipass doctor --fix'"),
-    "no_seed": ("no passport seed", "Run 'aipass doctor --fix'"),
+    "no_seed": ("no passport vault", "Run 'aipass doctor --fix'"),
 }
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills, shadow and smoke rows
-# Version: 1.11.0
+# Version: 1.12.0
 # Created: 2026-10-08
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/modules/doctor.py and _doctor_smoke.py: home, seating, preflight, drone, skills, shadows, smoke."""
@@ -431,7 +431,9 @@ class TestFixRestoresALostPassport:
 
         rows = self._restored_rows(FileNotFoundError("devpulse carries no seed"))
 
-        backup = "No seed was written while the passport existed: restore .trinity/passport.json from a backup"
+        backup = (
+            "No passport vault was written while the passport existed: restore .trinity/passport.json from a backup"
+        )
         assert rows == [(GLYPH_FAIL, "passport not restored: devpulse carries no seed", backup)]
 
     def _a_seedless_citizen(self) -> Path:
@@ -442,20 +444,20 @@ class TestFixRestoresALostPassport:
         rows = json.loads(self.registry.read_text(encoding="utf-8"))
         rows["branches"].append({"name": "flow", "path": "src/flow"})
         self.registry.write_text(json.dumps(rows), encoding="utf-8")
-        return flow / ".aipass" / "passport.seed.json"
+        return flow / ".aipass" / "passport.vault.json"
 
     def _stub_export(self, monkeypatch, seed: Path, refusal: str = "") -> None:
-        """spawn's export-seeds command: writes the seed, or prints its refusal the way its receipt does."""
+        """spawn's export-vault command: writes the vault, or prints its refusal the way its receipt does."""
         real = subprocess.run
         self.exports: list = []
 
         def export(cmd, **kwargs):
-            if cmd[:3] != ["drone", "@spawn", "export-seeds"]:
+            if cmd[:3] != ["drone", "@spawn", "export-vault"]:
                 return real(cmd, **kwargs)
             self.exports.append(cmd)
             self.events.append("seed")
             if refusal:
-                printed = f"1 seed(s) could not be exported:\n    flow: {refusal}\n"
+                printed = f"1 passport vault(s) could not be exported:\n    flow: {refusal}\n"
                 return subprocess.CompletedProcess(cmd, 1, "", printed)
             seed.parent.mkdir(parents=True, exist_ok=True)
             seed.write_text("{}", encoding="utf-8")
@@ -475,9 +477,9 @@ class TestFixRestoresALostPassport:
         self._restored_rows(lambda *a: self.events.append("restore") or self._write_passport())
 
         flow = [(r.glyph, r.detail, r.remediation) for r in self.printed["Structure"] if r.label == "registry: flow"]
-        assert flow == [(GLYPH_PASS, f"seed written: {seed}", "")]
+        assert flow == [(GLYPH_PASS, f"vault written: {seed}", "")]
         root = str(self.registry.parent)
-        assert self.exports == [["drone", "@spawn", "export-seeds", "--confirm", "--root", root, "--only", "flow"]]
+        assert self.exports == [["drone", "@spawn", "export-vault", "--confirm", "--root", root, "--only", "flow"]]
         assert self.events == ["seed", "restore", "seat"]
 
     def test_a_seed_spawn_refuses_fails_carrying_spawn_reason_verbatim(self, monkeypatch) -> None:
@@ -489,7 +491,7 @@ class TestFixRestoresALostPassport:
         self._restored_rows(self._write_passport)
 
         flow = [(r.glyph, r.detail, r.remediation) for r in self.printed["Structure"] if r.label == "registry: flow"]
-        assert flow == [(GLYPH_FAIL, f"seed not written: {reason}", "")]
+        assert flow == [(GLYPH_FAIL, f"vault not written: {reason}", "")]
         assert not seed.exists()
 
 

@@ -27,21 +27,22 @@ One pass produces seven groups, in this order:
   (a registered citizen whose folder exists but whose `.trinity/passport.json`
   is missing or unreadable is one FAIL row, `registry: <name>`,
   `no readable passport`, `Run 'aipass doctor --fix'`; a citizen with a
-  readable passport and no `.aipass/passport.seed.json` is one FAIL row,
-  `no passport seed`, `Run 'aipass doctor --fix'`, because a lost passport is
-  restored from its seed only. The AIPass tree's own registry expects seeds
+  readable passport and no `.aipass/passport.vault.json` (or the older name
+  `.aipass/passport.seed.json`, which spawn still reads) is one FAIL row,
+  `no passport vault`, `Run 'aipass doctor --fix'`, because a lost passport is
+  restored from its vault only. The AIPass tree's own registry expects vaults
   from its core citizens only, a project's registry from every citizen it
-  lists: the scope of `drone @spawn export-seeds`. `--fix` runs in this order:
-  it writes each missing seed through
-  `drone @spawn export-seeds --confirm --root <project> --only <citizen>`
-  and re-reads the check (the row names the seed written, or FAILs with
+  lists: the scope of `drone @spawn export-vault`. `--fix` runs in this order:
+  it writes each missing vault through
+  `drone @spawn export-vault --confirm --root <project> --only <citizen>`
+  and re-reads the check (the row names the vault written, or FAILs with
   spawn's refusal verbatim); it restores each lost passport through
   `from aipass.spawn import restore_citizen`, which writes only the missing
   `.trinity` files, and re-reads the check (the row names the files written,
   or FAILs with spawn's reason); then the owner repair runs. A failed restore
   names `./aipass install`, which rebuilds the environment and keeps personal
   files, only for a citizen of the AIPass tree; the installer cannot rebuild a
-  project's citizen, so a project citizen with no seed is told to restore
+  project's citizen, so a project citizen with no vault is told to restore
   `.trinity/passport.json` from a backup), and the instruction
   fence: every nested `projects/<name>` excludes the host's `AGENTS.md` and
   `CLAUDE.md` pairs through `claudeMdExcludes`; and the instruction shadow:

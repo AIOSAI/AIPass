@@ -24,6 +24,8 @@ PyPI version — not the changelog header.
 
 ### Changed
 
+- **spawn, aipass, sentry: the passport seed is renamed the passport vault** (2026-11-20). The owner's ruling: "seed" collided with the Seed project and misled the reader. A seat's durable identity file is now `.aipass/passport.vault.json`, the home-side store `.aipass/vault/<project>/`, and the verb `drone @spawn export-vault`; `export-seeds` exits with a pointer. Every reader — restore, mint, doctor, the repo pins — takes the vault name first and still reads a legacy `passport.seed.json`, so seats minted before the rename keep working until their next export retires the old file into `.spawn/.recovery/`. The 18 core seats' tracked seeds are re-exported under the new name in the same change.
+
 - **hooks: the engine's per-handler budget is removed** (2026-11-19). The engine kept its own fire count for a hook that declared `max_per_session`. Compass recall was its only user, and the handler's own cap was always reached first, so the engine's count never decided anything; when it did cut in, it froze the handler's message spacing. `max_per_session` stays in `hooks.json` as the handler's cap.
 
 - **devpulse: one shared word no longer surfaces a Compass decision** (2026-11-19). Recall scored a decision as relevant when the prompt shared a single uncommon word with it ("console", "remaining"), which cleared the surfacing threshold. Relevance is now m / (4 + m): one shared word scores 0.2 and stays silent, two score 0.33 and may surface, so the unchanged threshold of 0.3 means "at least two uncommon words in common". Spacing, cooldown and the cap are as they were.

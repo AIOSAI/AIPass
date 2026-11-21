@@ -139,42 +139,47 @@ carries the convention that depth goes one file per module or handler group.
 
 ---
 
-## Passport seeds
+## Passport vaults
 
-Every citizen carries a tracked `.aipass/passport.seed.json`: core, resident and external
+Every citizen carries a tracked `.aipass/passport.vault.json`: core, resident and external
 alike. It is the identity that ships with the repository, the passport with its machine-local
-values stripped (registered, registry_id, citizen_id).
+values stripped (registered, registry_id, citizen_id). The code keeps the older word: the
+handler is `seed_ops.py` and the passport's stamp of its vault is `citizenship.seed`.
 
- - **A core seed is strict 2.0.** A core passport off the 2.0 schema is refused, and the
+ - **A core vault is strict 2.0.** A core passport off the 2.0 schema is refused, and the
    refusal names `migrate-passports --confirm` as the cure.
- - **A project seed is the passport as it stands.** A passport declaring residency `resident`
-   or `external` is seeded with every field its user wrote, including fields and blocks 2.0
+ - **A project vault is the passport as it stands.** A passport declaring residency `resident`
+   or `external` is vaulted with every field its user wrote, including fields and blocks 2.0
    has no place for. No field is added, defaulted or dropped. The check is what restore reads:
    `branch_info.branch_name` and `identity.citizen_class` present, and no machine-local field
-   in the seed. A refusal names the field to fix.
+   in the vault. A refusal names the field to fix.
 
- - **Written at birth.** A mint writes the newborn's seed from its own passport before the
-   registry row. A seed that cannot be written refuses the birth, and nothing is registered.
-   A bare `--template` that renders no passport has nothing to seed; the result reports it.
- - **Refreshed by `export-seeds`.** Run in a project root, it refreshes every citizen in that
-   project's registry: `drone @spawn export-seeds --confirm`, or `--root <project root>` from
+ - **Written at birth.** A mint writes the newborn's vault from its own passport before the
+   registry row. A vault that cannot be written refuses the birth, and nothing is registered.
+   A bare `--template` that renders no passport has nothing to vault; the result reports it.
+ - **Refreshed by `export-vault`.** Run in a project root, it refreshes every citizen in that
+   project's registry: `drone @spawn export-vault --confirm`, or `--root <project root>` from
    elsewhere, `--only <branch>` for one. Run in the AIPass tree, it refreshes the core citizens
-   only and never reaches a project. Preview is the default; an up-to-date seed reports
-   `current`.
+   only and never reaches a project. Preview is the default; an up-to-date vault reports
+   `current`. `export-seeds` is refused and names `export-vault`.
+ - **The older file name.** A seat may still hold `.aipass/passport.seed.json`. Every reader
+   (restore, the target-exists mint, export) reads `passport.vault.json` first and that file
+   second. The next `export-vault --confirm` writes the vault and moves the older file into
+   the seat's `.spawn/.recovery/` as `passport.seed.json.retired-<time>`.
  - **As fresh as its last write.** Nothing watches the passport. A role or trait changed after
-   the last export is not in the seed until `export-seeds` runs again; `update --apply` does
-   not refresh seeds.
+   the last export is not in the vault until `export-vault` runs again; `update --apply` does
+   not refresh vaults.
  - **A home copy for a project seat.** A seat minted with an `arrival` also gets
-   `<AIPass home>/.aipass/seeds/<project folder>/<seat>.passport.seed.json`. That copy is
+   `<AIPass home>/.aipass/vault/<project folder>/<seat>.passport.vault.json`. That copy is
    outside the product's git, so it leaves no trace there, and inside @backup's nightly
-   scope, so it survives a reclone and a lost machine. Whenever `export-seeds` rewrites a
-   seat's seed, it rewrites an existing home copy too.
- - **Read back by restore.** A citizen whose passport is lost is restored from its seed with
-   the same name, class, role and traits. When the project's own seed is gone too, restore
-   first puts the home copy back as the seat's seed. A citizen with no seed is refused, and the refusal
-   names the cure: run `export-seeds` in its project while a passport still exists.
+   scope, so it survives a reclone and a lost machine. Whenever `export-vault` rewrites a
+   seat's vault, it rewrites an existing home copy too.
+ - **Read back by restore.** A citizen whose passport is lost is restored from its vault with
+   the same name, class, role and traits. When the project's own vault is gone too, restore
+   first puts the home copy back as the seat's vault. A citizen with no vault is refused, and
+   the refusal names the cure: run `export-vault` in its project while a passport still exists.
 
-A mint at a target that already holds a seed but no passport births from the seed.
+A mint at a target that already holds a vault but no passport births from the vault.
 `tests/test_passport_seeds.py` pins the lane.
 
 ---
@@ -189,7 +194,7 @@ other value, before anything is written. `result["arrival"]` says what was done.
  - **First wake.** `onboarding_<arrival>.md` goes under the title of the seat's
    `.aipass/aipass_local_prompt.md`: a checklist with an example on each line, which the
    seat ticks off and then edits out of the prompt. Both arrivals cover the test gate, the
-   passport seed, the release dry-run, hooks trust and foreground sub-agents. `fresh` is a
+   passport vault, the release dry-run, hooks trust and foreground sub-agents. `fresh` is a
    project born with the seat. `adopted` is a seat joining a codebase that was alive before
    it. It adds reading the tree, checking which startup file loaded, `.git/info/exclude`,
    the tracked `.gitignore`, the test-write policy, the `.aipass-new` sidecars, and naming
@@ -205,8 +210,8 @@ other value, before anything is written. `result["arrival"]` says what was done.
    empty `allow`: the same refusal of new test files that a missing file gave, now a named
    ruling the owner flips per project. The schema is @hooks' test-write gate; read it live
    with `drone @hooks testwrite`.
- - **Durable seed copy.** The seat's seed is copied under the AIPass home (see Passport
-   seeds), because a seat folder the product's git excludes never reaches a clone.
+ - **Durable vault copy.** The seat's passport vault is copied under the AIPass home (see
+   Passport vaults), because a seat folder the product's git excludes never reaches a clone.
  - **Matching limits.** A slashless row matches at any depth, so `.gitignore` also holds
    every seat's `.gitignore`. A trailing-`/` row is anchored at the project root, which is
    why seats need `*/docs.local/`. A leading-`/` row matches nothing.

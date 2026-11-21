@@ -6,7 +6,7 @@
 `apps/handlers/repair_ops.py`, `apps/handlers/passport_migration.py`,
 `apps/handlers/seed_ops.py`, `apps/handlers/regenerate_registry_ops.py`,
 `apps/modules/` (`sync_registry.py`, `repair.py`, `migrate_passports.py`,
-`export_seeds.py`, `regenerate_registry.py`, `grant_admin.py`)
+`export_vault.py`, `regenerate_registry.py`, `grant_admin.py`)
 
 Flags and usage are in `drone @spawn --help` and each verb's own `--help`. Everything below
 is the behaviour behind them.
@@ -81,12 +81,13 @@ success — see [cli_contract.md](cli_contract.md) for why that distinction is l
 
 ---
 
-## Passport seeds
+## Passport vaults
 
-`export-seeds` regenerates each branch's tracked `.aipass/passport.seed.json` from its live
-passport, stripping machine-local values. Dry-run by default; `--only` restricts to one
+`export-vault` regenerates each branch's tracked `.aipass/passport.vault.json` from its live
+passport, stripping machine-local values, and moves an older `passport.seed.json` into the
+seat's `.spawn/.recovery/`. `export-seeds` is refused and names `export-vault`. Dry-run by default; `--only` restricts to one
 branch and `--root` targets another project. It shares the migration's discovery, so it
-reads the same door; residents and externals are counted, never exported. The seeds are what a fresh clone carries, so
+reads the same door; residents and externals are counted, never exported. The vaults are what a fresh clone carries, so
 they are compared, never assumed — see [birth.md](birth.md). A run that scans nothing, or
 hits an error, exits 1 and never prints the all-current line.
 

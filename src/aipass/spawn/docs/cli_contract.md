@@ -67,17 +67,17 @@ every caller that reads through the door. `apps/modules/__init__.py` re-exports 
 | `render_bootstrap_trinity`, `restore_citizen` | `apps/handlers/bootstrap_render.py` |
 
 `render_bootstrap_trinity(branch_name, target, citizen_class, role, registry_path)` is the install
-script's one call: it writes the `.trinity` files a core branch lacks (a tracked passport seed
+script's one call: it writes the `.trinity` files a core branch lacks (a tracked passport vault
 first, then the template) and returns the names written. It never overwrites an existing file,
-and an unreadable registry or a seed that fails validation raises. A core citizen's module renders
+and an unreadable registry or a vault that fails validation raises. A core citizen's module renders
 as `aipass.<name>`; a project citizen's stays the bare name.
 
 `restore_citizen(branch_name, registry_path)` is the same render for a repair: the folder comes
-from the citizen's registry row, and its name, class and role from its own seed, so no class or
-role list lives outside the seeds. It writes only the missing files and returns their names. A
+from the citizen's registry row, and its name, class and role from its own passport vault, so no class or
+role list lives outside the vaults. It writes only the missing files and returns their names. A
 passport that is present but not a JSON object counts as missing: it is renamed beside itself to
 `passport.json.corrupt-<id>`, so its bytes are kept, and a fresh one is rendered. An
-unregistered name raises `LookupError`, and a citizen without a seed raises `FileNotFoundError`.
+unregistered name raises `LookupError`, and a citizen without a vault raises `FileNotFoundError`.
 
 Other branches that need to resolve a `citizen_class` read spawn's registry through the door
 rather than mirroring the class table — a mirror makes the reader a fleet-wide single point

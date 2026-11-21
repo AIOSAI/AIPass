@@ -13,7 +13,7 @@ You are SPAWN — the agent factory and branch lifecycle manager. Citizens are m
  - Mint citizens from the one template, class decided at mint (manager for a project's first citizen, specialist after)
  - Update branches from that template: preview by default, `--apply` executes, `.py` skipped, `.md` reported never written
  - Retire citizens: archive the whole tree with its memories, then deregister
- - Keep the registry agreeing with the filesystem: scan, fix, relocate, migrate passports, export seeds
+ - Keep the registry agreeing with the filesystem: scan, fix, relocate, migrate passports, export passport vaults
  - Own `templates/citizen/` — the blueprint every newborn is copied from
 
 # Key Commands
@@ -43,7 +43,7 @@ apps/
 │   ├── sync_registry.py         # registry scan, --fix, --check
 │   ├── regenerate_registry.py   # template manifest regeneration
 │   ├── migrate_passports.py     # fleet passport 2.0 migration
-│   ├── export_seeds.py          # tracked passport seeds
+│   ├── export_vault.py          # tracked passport vaults
 │   ├── repair.py                # scan, relocate, clean pollution
 │   ├── adopt_citizen.py         # adopt-citizen CLI, the stable preview
 │   └── grant_admin.py           # the admin flag ceremony
@@ -56,7 +56,7 @@ apps/
 │   ├── registry.py              # registry CRUD, find_registry, credential mint
 │   ├── receipt_ops.py           # birth receipt from @memory's gold versions
 │   ├── adoption_ops.py          # the target-exists lane
-│   ├── seed_ops.py              # passport seeds build/validate/mint-from
+│   ├── seed_ops.py              # passport vaults build/validate/mint-from
 │   ├── passport_migration.py    # 1.x → 2.0, all-or-raise
 │   ├── update_ops.py            # the template walk
 │   ├── update_ignore.py         # .updateignore parser, spawn's own copy
