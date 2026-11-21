@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: share.py
 # Description: Share module — single-file Drive upload with shareable link
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-07-01
-# Modified: 2026-10-17
+# Modified: 2026-11-21
 # =============================================
 
 """Share Module — upload a single file to Drive and return a shareable link."""
@@ -15,7 +15,9 @@ from aipass.prax import logger
 from aipass.cli import console, error as cli_error
 
 from aipass.backup.apps.handlers.audit import trail
+from aipass.backup.apps.handlers.drive.floor import never_leaves
 from aipass.backup.apps.handlers.path.caller import resolve_caller_path
+from aipass.backup.apps.handlers.project.registry import list_projects
 
 MODULE_NAME = "share"
 PRIMARY_COMMAND = "share"
@@ -47,6 +49,23 @@ def print_help():
     console.print()
 
 
+def _refusal(path: Path) -> str:
+    """Why this file may not be shared, or "" when it may.
+
+    A link sends the file off the machine, so the sync lane's floor applies, to the link name and its target.
+    Only files inside a registered project go: any seat can run share, and the machine holds more than projects.
+    """
+    if not path.is_file():
+        return f"Not a file: {path}"
+    real = path.resolve()
+    if never_leaves(path) or never_leaves(real):
+        return f"{path} never leaves the machine (the never-leaves floor names it)"
+    roots = [Path(entry.get("path", "")).resolve() for entry in list_projects().values() if entry.get("path")]
+    if not any(real.is_relative_to(root) for root in roots):
+        return f"{path} is outside every registered project"
+    return ""
+
+
 def run_share(file_path: str, *, public: bool = False) -> dict:
     """Upload a single file to Drive and return a shareable link."""
     from aipass.backup.apps.handlers.drive.client import DriveClient
@@ -56,11 +75,12 @@ def run_share(file_path: str, *, public: bool = False) -> dict:
     # against backup's own branch dir. Re-anchor it to where the user actually is.
     resolved_path = str(resolve_caller_path(file_path))
 
-    # A missing path is a local answer: refuse it before authenticating to Drive.
-    if not Path(resolved_path).is_file():
-        err_msg = f"Not a file: {resolved_path}"
+    # Every local refusal comes before authenticating to Drive.
+    err_msg = _refusal(Path(resolved_path))
+    if err_msg:
         cli_error(f"Share failed: {err_msg}")
         logger.warning(f"[backup] Share failed: {err_msg}")
+        trail.log_operation("share_refused", {"file": resolved_path, "public": public, "error": err_msg})
         return {"success": False, "link": None, "file_id": None, "error": err_msg}
 
     client = DriveClient()

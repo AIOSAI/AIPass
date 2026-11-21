@@ -3,7 +3,7 @@
 # Description: Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries
 # Version: 2.1.0
 # Created: 2026-06-12
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries."""
@@ -639,3 +639,25 @@ class TestStrayArgumentsAreRefused:
         assert code == 0
 
         assert ran == [("run_all", (str(tmp_path),), {"show_panels": True})]
+
+    @pytest.mark.parametrize("verb", ["snapshot", "all", "backup"])
+    def test_an_empty_path_is_refused_and_nothing_runs(self, verb: str, ran: list, tmp_path: Path, capsys) -> None:
+        """An empty path resolved to the cwd: snapshot "" backed up wherever the caller stood."""
+        assert self._main([verb, ""], tmp_path) == 1
+
+        assert f"{verb} needs a project path: got an empty one" in capsys.readouterr().err
+        assert ran == []
+
+    def test_an_unknown_verb_is_named_before_its_project_is_resolved(self, tmp_registry, tmp_path, capsys) -> None:
+        assert self._main(["bogusverb", "@devpulse"], tmp_path) == 1
+
+        err = capsys.readouterr().err
+        assert "Unknown command: bogusverb" in err
+        assert "Cannot resolve" not in err
+
+    def test_an_unresolved_name_says_why_and_how_to_register_it(self, tmp_registry, tmp_path: Path, capsys) -> None:
+        assert self._main(["status", "@devpulse"], tmp_path) == 1
+
+        err = capsys.readouterr().err
+        assert "Cannot resolve project: @devpulse (no registered project has that name)" in err
+        assert "register <project_path> --name devpulse" in err

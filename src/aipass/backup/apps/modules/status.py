@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: Status module — show backup status for a project, as a page or one JSON object
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-04-23
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Status Module — display backup info and recent history for a project.
@@ -132,9 +132,6 @@ def _running_line(entry: dict) -> str:
 
 def print_status_json(project_root: str, sizes: bool) -> None:
     """Print the status object as one JSON line on stdout, or one error line on stderr."""
-    if not Path(project_root).is_dir():
-        error(f"Project path is not a directory: {project_root}")
-        return
     try:
         status = build_status(project_root, sizes=sizes)
     except (InvalidDocument, OSError) as exc:
@@ -173,6 +170,9 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     project_root = str(resolve_caller_path(positional[0]))
+    if not Path(project_root).is_dir():
+        error(f"Project path is not a directory: {project_root}")
+        return True
     if "--json" in args:
         print_status_json(project_root, sizes="--sizes" in args)
         return True

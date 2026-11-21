@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_status_json.py
 # Description: Tests for apps/modules/status.py's --json and --sizes, the backup door's status contract
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-16
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/status.py's --json [--sizes], the backup door's status contract."""
@@ -202,6 +202,18 @@ class TestStatusJsonRefusals:
         assert code != 0
         assert out == ""
         assert len(err.strip().splitlines()) == 1
+        assert "Project path is not a directory" in err
+        assert missing.name in err
+
+    def test_the_plain_page_refuses_a_missing_path_as_json_does(self, tmp_path: Path, capsys) -> None:
+        """status /nonexistent said 'Run: backup register' and exited 0; register refuses that path."""
+        missing = tmp_path / "gone"
+
+        with patch("sys.argv", ["backup", "status", str(missing)]):
+            code = entry.main()
+
+        out, err = capsys.readouterr()
+        assert (code, out) == (2, "")
         assert "Project path is not a directory" in err
         assert missing.name in err
 

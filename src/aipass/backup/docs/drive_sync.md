@@ -228,7 +228,12 @@ for a run that copied nothing. The `all` cycle's Drive step is the same
 function, so it writes the same entry.
 
 `share` is the single-file lane: it uploads one file and prints the shareable
-link as its final line, so the link can be captured from stdout. A file of the
+link as its final line, so the link can be captured from stdout. Before any
+Drive call it refuses a file the never-leaves floor names, matched against the
+whole path and the symlink target (`<path> never leaves the machine`), and a
+file outside every registered project (`<path> is outside every registered
+project`): any seat can run share, and the machine holds more than projects.
+To share a file from elsewhere, copy it into a registered project. A file of the
 same name already in `Shared` is reused, not uploaded again; a search for it
 that gets no answer fails the share (`Upload failed: File search for '<name>'
 got no answer - not uploading a twin`), since no answer is not "not there".
