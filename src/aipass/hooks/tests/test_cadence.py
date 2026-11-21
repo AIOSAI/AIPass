@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.12.0
+# Version: 1.13.0
 # Description: Tests for cadence module (DPLAN-0200): the fire decision; regroup and counter in test_cadence_regroup.py
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/modules/cadence.py: the fire decision."""
@@ -107,7 +107,21 @@ class TestShouldFire:
             caplog.at_level("ERROR"),
         ):
             assert should_fire("global") is True
-        assert any(r.levelname == "ERROR" and "cadence.json" in r.getMessage() for r in caplog.records)
+            failure = cadence.config_failure()
+        assert failure is not None and str(config) in failure, "names the file"
+        assert ("JSONDecodeError" if body == "{broken" else "list, not a JSON object") in failure, "names the read"
+        assert "lost its custom cadence" in failure and "built-in cadence" in failure, "names what the seat lacks"
+        assert "drone @ai_mail dispatch @hooks" in failure, "names who fixes it"
+        assert [r.levelname for r in caplog.records if failure in r.getMessage()] == ["ERROR"]
+
+    def test_a_readable_config_reports_no_failure_even_after_a_broken_one(self, tmp_path, monkeypatch):
+        config = tmp_path / "cadence.json"
+        config.write_text("{broken", encoding="utf-8")
+        monkeypatch.setattr(f"{MODULE}._CONFIG_PATH", config)
+        assert "JSONDecodeError" in (cadence.config_failure() or "")
+        config.write_text(json.dumps({"period": 5}), encoding="utf-8")
+        monkeypatch.setattr(cadence, "_config", None)
+        assert cadence.config_failure() is None
 
     def test_cadence_disabled_always_fires(self, tmp_path):
         state_file = tmp_path / "aipass-cadence-test-session.json"

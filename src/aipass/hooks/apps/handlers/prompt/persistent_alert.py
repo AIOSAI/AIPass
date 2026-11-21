@@ -1,16 +1,17 @@
 # =================== AIPass ====================
 # Name: persistent_alert.py
-# Version: 1.2.2
+# Version: 1.3.0
 # Description: Injects advisory banners for active alerts on UserPromptSubmit — on arrival, then on cadence
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-14
-# Modified: 2026-11-15
+# Modified: 2026-11-20
 # =============================================
 
 """Injects advisory banners for active alerts from .aipass/alerts.json.
 
 An alert announces on the turn it arrives, then repeats on the cadence beat while it stays active.
+An unreadable cadence config prints to the seat's chat on every turn until it is fixed.
 """
 
 import importlib
@@ -141,7 +142,22 @@ def _format_banner(alerts: list[dict]) -> str:
 
 
 def handle(hook_data: dict) -> dict:
-    """Inject advisory banners for active alerts."""
+    """Inject advisory banners for active alerts, and the cadence config's critical notice as a chat line."""
+    result = _alerts(hook_data)
+    notice = importlib.import_module("aipass.hooks.apps.modules.cadence").config_failure()
+    if notice:
+        context = "\n\n".join(part for part in (notice, result["stdout"]) if part)
+        result["stdout"] = json.dumps(
+            {
+                "systemMessage": notice,
+                "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context},
+            }
+        )
+    return result
+
+
+def _alerts(hook_data: dict) -> dict:
+    """The active alerts' banner, gated on arrival and the cadence beat."""
     aipass_dir = _find_aipass_dir()
     if not aipass_dir:
         return {"stdout": "", "exit_code": 0}

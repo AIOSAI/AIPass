@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_persistent_alert.py
-# Version: 1.1.4
+# Version: 1.2.0
 # Description: Tests for persistent_alert handler and alert_dismiss module (cadence-gated since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-14
-# Modified: 2026-11-14
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/handlers/prompt/persistent_alert.py and apps/modules/alert_dismiss.py."""
@@ -44,6 +44,9 @@ def _isolated_guards_and_open_beat(tmp_path, monkeypatch):
     monkeypatch.setattr(f"{_MODULE}._GUARD_DIR", guards)
     # Open only for the alert loader's own beat: a handler asking the wrong loader stays shut.
     monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda loader_name, *_a, **_k: loader_name == "alert")
+    # The handler reads the cadence config; the live file must never decide a test here.
+    monkeypatch.setattr(f"{_CADENCE_MODULE}._CONFIG_PATH", tmp_path / "no-cadence-config.json")
+    monkeypatch.setattr(f"{_CADENCE_MODULE}._config", None)
 
 
 def _make_alert(
@@ -539,6 +542,54 @@ class TestAlertCadence:
 
         assert "Test alert" in result["stdout"]
         assert "FAIL-OPEN loader=alert" in caplog.text
+
+
+class TestAnUnreadableCadenceConfigPrintsToChat:
+    """The cadence config failing to read is a critical notice in the seat's chat, not a buried log line."""
+
+    NOTICE = "CRITICAL: cadence config unreadable. Who fixes it: @hooks"
+
+    def test_the_notice_reaches_the_chat_and_the_model_with_no_alert_standing(self, monkeypatch):
+
+        monkeypatch.setattr(f"{_CADENCE_MODULE}.config_failure", lambda: self.NOTICE)
+        with patch.object(persistent_alert, "_find_aipass_dir", return_value=None):
+            result = handle({})
+
+        assert result["exit_code"] == 0
+        assert json.loads(result["stdout"]) == {
+            "systemMessage": self.NOTICE,
+            "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": self.NOTICE},
+        }
+
+    def test_a_standing_banner_rides_beside_the_notice(self, tmp_path, monkeypatch):
+
+        aipass_dir = tmp_path / ".aipass"
+        aipass_dir.mkdir()
+        _write_alerts(aipass_dir, [_make_alert()])
+        monkeypatch.setattr(f"{_CADENCE_MODULE}.config_failure", lambda: self.NOTICE)
+        with patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir):
+            result = handle({"session_id": "s-notice"})
+
+        doc = json.loads(result["stdout"])
+        assert doc["systemMessage"] == self.NOTICE
+        context = doc["hookSpecificOutput"]["additionalContext"]
+        assert context.startswith(self.NOTICE) and "[WARNING] Test alert" in context
+        assert result["sound"] == "alert: 1 active alert"
+
+    def test_a_broken_config_file_names_its_path_and_owner_in_the_chat(self, tmp_path):
+
+        broken = tmp_path / "no-cadence-config.json"
+        broken.write_text("{broken", encoding="utf-8")
+        with patch.object(persistent_alert, "_find_aipass_dir", return_value=None):
+            result = handle({})
+
+        message = json.loads(result["stdout"])["systemMessage"]
+        assert str(broken) in message and "drone @ai_mail dispatch @hooks" in message
+
+    def test_a_readable_config_leaves_the_answer_plain(self, tmp_path):
+
+        with patch.object(persistent_alert, "_find_aipass_dir", return_value=None):
+            assert handle({}) == {"stdout": "", "exit_code": 0}
 
 
 class TestAlertDismiss:

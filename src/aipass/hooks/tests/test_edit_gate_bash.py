@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.14.0
+# Version: 1.15.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -1119,6 +1119,38 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
     def test_drone_and_own_branch_work_still_pass(self, registered_projects: dict):
         seat = registered_projects["hooks"]
         for command in ("drone @sentry checklist apps", "mkdir -p .archive && mv old.py .archive/", "pytest tests -q"):
+            assert _run(seat, command=command)["exit_code"] == 0, command
+
+
+class TestAnUnreadableRegistryFencesLoudAndLeavesTheRepairRouteOpen:
+    """Owner Q10 (a), 2026-11-20: a registry that cannot be read refuses writes at ERROR, naming itself and the cure."""
+
+    @staticmethod
+    def _corrupt(registered_projects: dict) -> Path:
+        registry = registered_projects["aipass"] / "AIPASS_REGISTRY.json"
+        registry.write_text("{not json", encoding="utf-8")
+        return registry
+
+    def test_a_shell_write_and_an_edit_in_the_own_branch_are_refused_at_error_naming_the_registry(
+        self, registered_projects: dict, grant_withheld, caplog
+    ):
+        registry = self._corrupt(registered_projects)
+        seat = registered_projects["hooks"]
+        refusals = [
+            _run(seat, command=f"cp x {(Path(seat) / 'new.py').as_posix()}"),
+            _run(seat, file_path=str(Path(seat) / "own.py"), tool="Edit"),
+        ]
+        for refused in refusals:
+            assert _blocked(refused)
+            assert str(registry) in _reason(refused) and "@spawn" in _reason(refused)
+            assert "Gate broken" not in _reason(refused), "a torn registry is not a broken gate"
+        logged = [r.levelname for r in caplog.records if "edit_gate: registry unreadable" in r.getMessage()]
+        assert logged == ["ERROR", "ERROR"]
+
+    def test_drone_and_a_read_still_run(self, registered_projects: dict, grant_withheld):
+        self._corrupt(registered_projects)
+        seat = registered_projects["hooks"]
+        for command in ("drone @spawn --help", "cat ../../../AIPASS_REGISTRY.json"):
             assert _run(seat, command=command)["exit_code"] == 0, command
 
 

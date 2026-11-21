@@ -47,6 +47,14 @@ and never on the period. `identity`, `alert` and mail beat every 5th turn and `b
 period (5), all at offset 0. An operator's `cadence_config.json` merges over each entry, so
 `{"loaders": {"tier0": {"beat": true}}}` puts the kernel back on the beat.
 
+**An unreadable cadence config prints to the seat's chat.** A `cadence_config.json` that cannot be read,
+does not parse, or is not a JSON object leaves the built-in cadence running: no raise, because edit_gate
+reads cadence and a raise there would refuse every memory write. `cadence.config_failure()` returns one
+CRITICAL text naming the file, the read error, the lost custom cadence and the cure (`drone @ai_mail
+dispatch @hooks`), logged at ERROR. `persistent_alert` prints it on every prompt until the file is fixed:
+a `systemMessage` (the chat line on Claude Code and Codex) and model context ahead of any alert banner.
+OpenCode's plugin carries the context only.
+
 **The mail line names the kinds.** `notification/email.py` counts the branch's unread inbox rows by
 their `kind` (@ai_mail `docs/mail_kinds.md`): `You have 4 new emails: 1 medic, 1 rounds, 2 mail - check
 with: drone @ai_mail inbox | then: drone @ai_mail view <id> | close with: drone @ai_mail close <id>`.
