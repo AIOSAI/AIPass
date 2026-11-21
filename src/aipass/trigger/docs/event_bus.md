@@ -58,7 +58,7 @@ other module's help at the entry point. The bare word `help` is deliberately
 positional (position 0 only): trigger's own commands take it as a legitimate
 value — `errors suppress <id> help` is a reason and `fire evt message=help` is
 event payload. Matching is exact for the same reason, so `message=--help` stays
-a payload too. Without the gate, `medic mute @branch --help` would set a 24-hour
+a payload too. Without the gate, `medic mute @branch --help` would set a 4-hour
 mute while appearing to print help.
 
 **Event data contracts are per-handler and are not published here.** Sibling

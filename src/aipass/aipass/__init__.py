@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: aipass's front door: the names other branches take, each loaded from its home
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-11-17
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """AIPass machine concierge — host diagnosis, doctor, installer, project scaffold (init, new, adopt).
@@ -12,7 +12,10 @@ Public surface for other branches: from aipass.aipass import <name>. The `aipass
 """
 
 import importlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # each name typed from its home
+    from aipass.aipass.apps.handlers.new_project import TEMPLATES, create_project
 
 _NEW_PROJECT = "aipass.aipass.apps.handlers.new_project"
 

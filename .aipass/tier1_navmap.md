@@ -4,16 +4,12 @@
 
 AIPass: autonomous agents (citizens) with identity, memory, and a mailbox, serving each other and external projects. Each lives in a branch, its home and address. Everything routes through `drone`. Open source, public repo: strangers read this code; treat their findings as contributions.
 
-# Platform: Linux only
-
-AIPass runs on Linux, built and tested on Ubuntu: native or WSL2, a Docker image to come. The owner's lifetime project, daily driver, open source forever. A user the move to Linux only affects: open a GitHub discussion or issue with `transition` in the title and their setup; we help them find a path (WSL2, Docker later, a fork).
-
 # Terminology
 
  - Branch — directory `src/aipass/<name>/`, your home and address.
  - Agent (citizen) — persistent identity in a branch: passport (`.trinity/`), memories, mailbox. Addressable as `@name`.
- - Sub-agent — disposable worker for one task. No passport, no memory.
- - Registry — machine-managed catalogs (`registry.json`, flow, spawn); never hand-edit.
+ - Sub-agent — disposable worker, one task. No passport, no memory.
+ - Registry — machine catalogs (`registry.json`, flow, spawn); never hand-edit.
  - Settings — provider files under `~/.claude` and `~/.codex` are the user's, a gate refuses AI edits · project `.claude/settings.json` ships with the clone, `settings.local.json` overrides it.
  - Your four directories — `docs/` tracked reference · `docs.local/` untracked scratch and research · `dropbox/` inbound, what other branches hand you · `artifacts/` what you publish.
 
@@ -49,29 +45,31 @@ drone @ai_mail inbox                               # check mail → view <id> �
 drone @flow create . "Subject" [dplan]             # new plan (default FPLAN)
 drone @sentry audit aipass @branch                 # standards audit (drop @branch = all)
 drone @sentry checklist <file|dir>                 # quick standards check
-drone @trigger medic mute @<self>                  # BEFORE build/edit work — auto-expires 24h
+drone @trigger medic mute @<self>                  # BEFORE build/edit work — auto-expires 4h, re-arms mid-build
 ```
 
 # Talking to other agents
 
-Citizens dispatch each other directly. One question: does the recipient need to act?
+Citizens dispatch each other. One question: does the recipient need to act?
 
- - Need an answer or work: `dispatch` (send + wake); a sleeping agent never reads plain email.
+ - Need an answer or work: `dispatch` (send + wake); a sleeping agent never reads email.
  - FYI only (status, steering an agent already awake): `email`.
  - Replies never wake; wake-back does: when your dispatch completes, you are woken to verify and hand off.
  - Managers (`citizen_class: manager`, e.g. @devpulse) are never dispatched; `email` them.
 
-Always reply to dispatches — reply auto-closes. No silent completions.
+Always reply to dispatches; reply auto-closes. No silent completions.
 
 # Plans — flow
 
 Create only via `drone @flow create <path> "Subject" [type]`, never by hand: manual files break the registry.
 
- - DPLAN — dev plan: thinking, architecture, before building.
- - FPLAN — flow plan, the default: building. `master` = multi-phase, spawns sub-FPLANs.
+ - DPLAN — dev plan: thinking and architecture before building.
+ - FPLAN — flow plan, the default: building. `master` = multi-phase.
  - PPLAN — playbook: a throwaway run of a reusable SOP. Operating the system, not changing it.
  - RPLAN — research: a trace, a study, a measurement. Brief, report path and verdict live in it.
- - APLAN — autonomous work, an audit or a night shift. CPLAN capture, TDPLAN team dev. `drone @flow templates` lists all seven.
+ - NPLAN — one night shift: the owner's brief is the contract, the morning report closes it.
+ - APLAN — autonomous audit. CPLAN capture, TDPLAN team dev. All eight: `drone @flow templates`.
+ - Finished = closed, no permission asked; part-done siblings consolidate.
 
 # Sub-agents
 
@@ -84,11 +82,11 @@ Create only via `drone @flow create <path> "Subject" [type]`, never by hand: man
 
 # Chrome — the claude-in-chrome MCP
 
-Drives the desktop's default-profile Chrome with the owner's sign-ins; never `--user-data-dir` or a hand-written DISPLAY. Connect: `list_connected_browsers`, `select_browser`, `tabs_context_mcp`. `[]` with Chrome up: the extension is asleep, the owner clicks the Claude icon. CAPTCHAs and credentials are the owner's.
+Drives the desktop's default-profile Chrome with the owner's sign-ins; never `--user-data-dir` or a hand-written DISPLAY. Connect: `list_connected_browsers`, `select_browser`, `tabs_context_mcp`. `[]` with Chrome up: the extension is asleep, the owner clicks the icon. CAPTCHAs and credentials are the owner's.
 
 # Memory — .trinity/
 
-Save proactively — after milestones, decisions, topic switches.
+Save proactively: after milestones, decisions, topic switches.
 
  - `passport.json` — identity. Update only when it genuinely evolves.
  - `local.json` — session log, key learnings, todos (a pad of 10 one-liners, no status; the oldest roll to the backlog).

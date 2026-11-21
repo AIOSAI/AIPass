@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: integrations_manager.py
 # Description: Integrations command module — list and call generic contracts
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-15
-# Modified: 2026-10-22
+# Modified: 2026-11-20
 # =============================================
 """Integrations Module"""
 
@@ -17,11 +17,6 @@ from aipass.api.apps.modules import registry
 from aipass.api.apps.modules.bridge import list_contracts, resolve
 from aipass.api.apps.handlers.integrations.list import get_contracts
 from aipass.api.apps.handlers.integrations.call import invoke
-
-
-def _ensure_loaded() -> None:
-    """Load drivers on first command invocation."""
-    registry.load_drivers()
 
 
 def print_introspection() -> None:
@@ -129,14 +124,14 @@ def handle_command(command: str, args: List[str]) -> bool:
         sub_args = args[1:]
 
         if subcommand == "list":
-            _ensure_loaded()
+            registry.load_drivers()
             sys.exit(_run_list())
 
         if subcommand == "call":
             if not sub_args:
                 error("Usage: drone @api integrations call <contract> [args...]")
                 sys.exit(1)
-            _ensure_loaded()
+            registry.load_drivers()
             sys.exit(_run_call(sub_args[0], sub_args[1:]))
 
         error(f"Unknown integrations subcommand: {subcommand}", suggestion="list, call")

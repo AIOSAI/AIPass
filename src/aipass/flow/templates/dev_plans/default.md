@@ -24,7 +24,9 @@ Design Plans (DPLANs) are **thinking** -- capturing ideas, brainstorming, invest
 
 **DPLANs have no fixed structure.** Sections below are starting points. Add sections, remove sections, go wherever thinking takes you. DPLAN might be quick idea capture or 50-phase investigation -- both valid.
 
-**When plan ready to build**, create FPLAN: `drone @flow create . "Subject"` (default for focused tasks, `master` for multi-phase builds). DPLAN stays as design record.
+**When plan ready to build**, create FPLAN: `drone @flow create . "Subject"` (default for focused tasks, `master` for multi-phase builds). Closed, the DPLAN stays the design record.
+
+**Finished = closed.** When the thinking is done -- decided, handed to an FPLAN, or dropped -- whoever finished it closes it, no permission asked: `drone @flow close {plan_number}`. Closing loses nothing: the registry keeps its row, @memory keeps the text, `drone @flow restore {plan_number}` reopens it. When several open plans orbit one question, any agent may close the lot and open ONE new plan for the live remainder, pointing back to the closed IDs.
 
 **Never trim DPLAN.** Story -- conversations, decisions, dead ends, pivots -- as important as results.
 

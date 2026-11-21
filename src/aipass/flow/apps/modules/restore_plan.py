@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: restore_plan.py
 # Description: PLAN restore module (reopen closed plans)
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2025-11-22
-# Modified: 2026-11-15
+# Modified: 2026-11-20
 # =============================================
 
 """
@@ -128,7 +128,7 @@ def print_help():
     console.print("  [dim]drone @flow restore DPLAN-0005[/dim]        # Reopen a closed DPLAN")
     console.print()
     console.print("[yellow]NOTES:[/yellow]")
-    console.print("  Plan must be closed. File must exist at registered location.")
+    console.print("  Plan must be closed. A file gone from its registered path is fetched from the archive.")
     console.print()
 
 
@@ -235,8 +235,7 @@ EXAMPLES:
 
 NOTES:
   - Plan must be closed to restore
-  - Plan file must exist at registered location
-  - Only updates registry metadata (does not move files)
+  - A file missing from its registered location is fetched back from the archive
             """,
         )
         PARSER.print_help()

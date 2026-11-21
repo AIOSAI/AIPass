@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.14.0
+# Version: 2.15.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -79,6 +79,14 @@ _turn: int | None = None
 _config: dict | None = None
 #: Why the turn counter cannot count, when it cannot; set beside _turn so the memo carries its provenance.
 _turn_degraded: str | None = None
+#: The critical notice when the config could not be used; persistent_alert prints it to the seat's chat.
+_config_failure: str | None = None
+
+CONFIG_FAILURE = (
+    "CRITICAL: cadence config unreadable. Reading {path} failed ({reason}). This seat has lost its custom "
+    "cadence: every loader runs on the built-in cadence until the file is fixed. Who fixes it: @hooks owns "
+    'the file: drone @ai_mail dispatch @hooks "cadence config unreadable" "<this text>"'
+)
 
 
 def _deep_merge(base: dict, updates: dict) -> dict:
@@ -92,13 +100,14 @@ def _deep_merge(base: dict, updates: dict) -> dict:
 
 
 def _load_config() -> dict:
-    global _config
+    global _config, _config_failure
     if _config is not None:
         return _config
 
     import copy
 
     result = copy.deepcopy(DEFAULTS)
+    _config_failure = None
 
     if _CONFIG_PATH.is_file():
         try:
@@ -108,10 +117,22 @@ def _load_config() -> dict:
         if isinstance(overrides, dict):
             _deep_merge(result, overrides)
         else:  # ERROR, not a raise: edit_gate reads cadence, and a raise there refuses every memory write
-            logger.error("[HOOKS] cadence: %s unusable (%s), the built-in cadence runs", _CONFIG_PATH, overrides)
+            reason = (
+                f"{type(overrides).__name__}: {overrides}"
+                if isinstance(overrides, Exception)
+                else f"its top level is a {type(overrides).__name__}, not a JSON object"
+            )
+            _config_failure = CONFIG_FAILURE.format(path=_CONFIG_PATH, reason=reason)
+            logger.error("[HOOKS] %s", _config_failure)
 
     _config = result
     return result
+
+
+def config_failure() -> str | None:
+    """The critical notice for a cadence config that could not be used, or None when it was read."""
+    _load_config()
+    return _config_failure
 
 
 def _state_path() -> Path | None:

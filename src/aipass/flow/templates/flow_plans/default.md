@@ -11,7 +11,9 @@
 
 Default Flow Plans (FPLANs) are **building** - autonomous construction: systems, features, modules.
 
-**FPLANs are disposable.** Exist exactly one task. When task complete, close this plan immediately -- do not leave open. Open FPLANs mean unfinished work. Work done = plan done: `drone @flow close {plan_number}`. The plan is never lost -- closing archives and vectorizes it to @memory.
+**FPLANs are disposable.** Exist exactly one task. Open FPLANs mean unfinished work.
+
+**Finished = closed.** Whoever finishes this plan closes it, no permission asked: `drone @flow close {plan_number}`. Closing loses nothing -- it archives and vectorizes the plan to @memory, the registry keeps its row, and `drone @flow restore {plan_number}` reopens it. When several open plans orbit one task, any agent may close the lot and open ONE new plan for the live remainder, pointing back to the closed IDs.
 
 **This is NOT for:**
 - Research or exploration (use DPLANs and APLANs directly)

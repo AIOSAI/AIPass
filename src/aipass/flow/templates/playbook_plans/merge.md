@@ -13,7 +13,9 @@
 
 The `dev → main` merge + release tag — run on-demand, not on a fixed weekly cadence.
 Run by **devpulse** (only branch with git write). Tick each step as you go; fill the
-**Run Summary** with PR numbers and tags for the vectorized trail. Close when done.
+**Run Summary** with PR numbers and tags for the vectorized trail.
+
+**Finished = closed.** When the run is done, whoever ran it closes it, no permission asked: `drone @flow close {plan_number}`. Closing loses nothing: `drone @flow restore {plan_number}` reopens it. When several open plans orbit one merge, any agent may close the lot and open ONE new plan for the live remainder, pointing back to the closed IDs.
 
 > All git writes go through `drone @git` — **run drone from a branch dir** (it needs
 > `.trinity/passport.json` in the cwd; running from the repo root fails with "No
@@ -153,7 +155,7 @@ Steps:
 - [ ] Confirm the CHANGELOG top section (dated in section 2) is the release notes you want
 - [ ] **Push the tag — `drone @git tag v<version>` (devpulse, no user input needed).** The verb (owner tier) does it all safely: `git fetch origin`, **VERSION GUARD** (refuses unless the tag's `X.Y.Z` matches BOTH `origin/main:pyproject.toml` version and `origin/main:src/aipass/__init__.py` `__version__` — so you can't tag the wrong version), **EXISTS GUARD** (refuses if the tag already exists local or remote), then tags `origin/main` (the remote ref, never stale local main) and pushes → fires `publish.yml`. It reports the pushed sha. `drone @git tag --list` shows existing tags. This replaced the old manual `git tag`/`push` step (S274).
 - [ ] Verify PyPI shows the new version + the GitHub Release appeared (`curl -s https://pypi.org/pypi/aipass/json | python3 -c "import sys,json;print(json.load(sys.stdin)['info']['version'])"`)
-- [ ] **Verify the image published:** `drone @git run list` shows **Publish Docker image** for the tag as `success`. PyPI green says nothing about the image: they are separate workflows on the same tag. Red: `drone @git run view <id> --log-failed`, cure it, and ship the cure in the next train. Record the result in the Run Summary.
+- [ ] **No image is published by a release.** The tag fires PyPI alone; **Publish Docker image** runs by hand from the Actions tab, on the owner's word, because a running AIPass updates itself from the remote. The local image build in section 1 is what proves the installer on a fresh machine.
 - [ ] **Notify project managers (DPLAN-0335):** `drone @devpulse release-notify v<version>` — mails every manager-class citizen outside the source repo (declared roots + `projects/*`) with the release link and the update ritual, and posts one commons thread. Idempotent per version; `--dry-run` first if in doubt. Managers preview with `aipass init update <root> --dry-run` and apply only on the owner's or devpulse's go.
 - [ ] **Wake @vera at the tag:** `drone @ai_mail dispatch @vera "Release v<version> (AIPass) — post or hold?" "<release link + the CHANGELOG section>"` (no backticks in the body). The release mail does not wake her; this dispatch does. She decides post or hold and logs why. At the tag only, never an intermediate merge, so she never describes something unreleased.
 - [ ] Record the tag → Run Summary

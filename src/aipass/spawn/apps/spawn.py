@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-20
 # =============================================
 
 """
@@ -32,7 +32,7 @@ def print_help():
         "  [dim]drone @spawn repair <project_path> [--clean-pollution | --relocate @branch <path>] [--apply][/dim]"
     )
     console.print("  [dim]drone @spawn migrate-passports [--dry-run|--confirm] [--root <path>] [--only <branch>][/dim]")
-    console.print("  [dim]drone @spawn export-seeds [--dry-run|--confirm] [--root <path>] [--only <branch>][/dim]")
+    console.print("  [dim]drone @spawn export-vault [--dry-run|--confirm] [--root <path>] [--only <branch>][/dim]")
     console.print("  [dim]drone @spawn --help[/dim]")
     console.print()
     console.print("[bold cyan]COMMANDS:[/bold cyan]")
@@ -61,7 +61,7 @@ def print_help():
         "(preview; add --confirm)"
     )
     console.print(
-        "  [green]export-seeds[/green]                  Regenerate each branch's tracked passport seed "
+        "  [green]export-vault[/green]                  Regenerate each branch's tracked passport vault "
         "(preview; add --confirm)"
     )
     console.print(
@@ -106,9 +106,9 @@ def print_help():
     console.print("  [green]--apply[/green]     Execute changes (update/repair are preview-only by default)")
     console.print("  [green]--dry-run[/green]   Preview changes without modifying files (default for update/repair)")
     console.print("  [green]--trace[/green]     Enable verbose logging")
-    console.print("  [green]--root[/green]      Another project root (migrate-passports, export-seeds)")
-    console.print("  [green]--only[/green]      Restrict to one branch (migrate-passports, export-seeds)")
-    console.print("  [green]--confirm[/green]   Execute a passport migration or seed export (preview by default)")
+    console.print("  [green]--root[/green]      Another project root (migrate-passports, export-vault)")
+    console.print("  [green]--only[/green]      Restrict to one branch (migrate-passports, export-vault)")
+    console.print("  [green]--confirm[/green]   Execute a passport migration or vault export (preview by default)")
     console.print("  [green]--yes[/green]       Skip the delete confirmation prompt")
     console.print("  [green]--retire[/green]    Let delete through for a registered citizen")
     console.print("  [green]--json[/green]      Machine-readable output (sync-registry --check)")
@@ -355,7 +355,7 @@ def print_introspection():
         "    [dim]- migrate-passports: migrate_passports.py "
         "(handle_migrate_passports — passport 2.0 fleet migration)[/dim]"
     )
-    console.print("    [dim]- export-seeds: export_seeds.py (handle_export_seeds — tracked passport seed export)[/dim]")
+    console.print("    [dim]- export-vault: export_vault.py (handle_export_vault — tracked passport vaults)[/dim]")
     console.print(
         "    [dim]- grant-admin, grant-ci-cure: grant_admin.py "
         "(handle_grant_admin, handle_grant_ci_cure — registry seat flag ceremonies)[/dim]"
@@ -433,10 +433,15 @@ def main():
 
         return _resolved(handle_migrate_passports(remaining))
 
-    if command == "export-seeds":
-        from aipass.spawn.apps.modules.export_seeds import handle_export_seeds
+    if command == "export-vault":
+        from aipass.spawn.apps.modules.export_vault import handle_export_vault
 
-        return _resolved(handle_export_seeds(remaining))
+        return _resolved(handle_export_vault(remaining))
+
+    if command == "export-seeds":
+        # 2.8.38 shipped this name; it is refused, never aliased, so the old word does not live on.
+        error("export-seeds is now export-vault", suggestion="drone @spawn export-vault --help")
+        return 1
 
     if command == "repair":
         from aipass.spawn.apps.modules.repair import handle_repair

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_fix.py
 # Description: Structure remediation report for aipass doctor --fix
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-05-15
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """
@@ -28,13 +28,14 @@ from aipass.aipass.shared.project_home import _detect_aipass_home
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
-    SEED_RELATIVE_PATH,
     TREE_REGISTRY_NAME,
+    VAULT_RELATIVE_PATH,
     check_placement,
     check_pyproject,
     check_registry_consistency,
     check_root_artifacts,
     detect_pollution,
+    has_passport_vault,
     scan_agents,
 )
 
@@ -94,7 +95,7 @@ def _build_placement_items(agents: list, project_root: Path, project: str) -> Li
     return items
 
 
-_DOCTOR_CURES = {"no_passport": "No readable passport", "no_seed": "No passport seed"}
+_DOCTOR_CURES = {"no_passport": "No readable passport", "no_seed": "No passport vault"}
 
 
 def _build_registry_items(project_root: Path, agents: list, project: str) -> List[RemediationItem]:
@@ -126,7 +127,9 @@ def _build_registry_items(project_root: Path, agents: list, project: str) -> Lis
 
 
 REINSTALL = "Run the installer again: ./aipass install (rebuilds the environment, keeps personal files)"
-NO_SEED_BACKUP = "No seed was written while the passport existed: restore .trinity/passport.json from a backup"
+NO_SEED_BACKUP = (
+    "No passport vault was written while the passport existed: restore .trinity/passport.json from a backup"
+)
 
 
 def _registry_for(project_root: Optional[Path]) -> Optional[Path]:
@@ -142,20 +145,20 @@ def _unseated(project_root: Path, reg_path: Path, problem: str) -> dict:
 
 
 def _export_refusal(folder_name: str, output: str) -> str:
-    """spawn's refusal for this citizen, verbatim: its export prints '<branch>: <reason>' per refused seed."""
+    """spawn's refusal for this citizen, verbatim: its export prints '<branch>: <reason>' per refused vault."""
     prefix = f"{folder_name.lower()}: "
     for line in output.splitlines():
         if line.strip().startswith(prefix):
             return line.strip()[len(prefix) :]
     lines = output.strip().splitlines()
-    return lines[-1].strip() if lines else "export-seeds wrote no seed"
+    return lines[-1].strip() if lines else "export-vault wrote no vault"
 
 
 def export_missing_seeds(project_root: Optional[Path]) -> List[tuple]:
-    """doctor --fix: write each missing seed through spawn's export-seeds, then re-read the check.
+    """doctor --fix: write each missing passport vault through spawn's export-vault, then re-read the check.
 
     Rows are (label, glyph, detail, remediation). spawn's door does not serve the export, so the command
-    runs, the way the owner fix runs sync-registry. A refused seed is a FAIL carrying spawn's reason.
+    runs, the way the owner fix runs sync-registry. A refused vault is a FAIL carrying spawn's reason.
     """
     reg_path = _registry_for(project_root)
     if project_root is None or reg_path is None:
@@ -163,7 +166,7 @@ def export_missing_seeds(project_root: Optional[Path]) -> List[tuple]:
     unseeded = _unseated(project_root, reg_path, "no_seed")
     refusals: dict = {}
     for name, folder in unseeded.items():
-        cmd = ["drone", "@spawn", "export-seeds", "--confirm", "--root", str(reg_path.parent), "--only", folder.name]
+        cmd = ["drone", "@spawn", "export-vault", "--confirm", "--root", str(reg_path.parent), "--only", folder.name]
         env = {**os.environ, "COLUMNS": "1000"}  # an unwrapped refusal line is the reason, verbatim
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=reg_path.parent, env=env)
@@ -176,10 +179,10 @@ def export_missing_seeds(project_root: Optional[Path]) -> List[tuple]:
     rows: List[tuple] = []
     for name, folder in unseeded.items():
         if name not in still:
-            rows.append((f"registry: {name}", GLYPH_PASS, f"seed written: {folder / SEED_RELATIVE_PATH}", ""))
+            rows.append((f"registry: {name}", GLYPH_PASS, f"vault written: {folder / VAULT_RELATIVE_PATH}", ""))
             continue
-        logger.error("[doctor] seed for %s not written: %s", name, refusals[name])
-        rows.append((f"registry: {name}", GLYPH_FAIL, f"seed not written: {refusals[name]}", ""))
+        logger.error("[doctor] passport vault for %s not written: %s", name, refusals[name])
+        rows.append((f"registry: {name}", GLYPH_FAIL, f"vault not written: {refusals[name]}", ""))
     return rows
 
 
@@ -187,7 +190,7 @@ def _restore_advice(reg_path: Path, folder: Path) -> str:
     """The installer rebuilds the AIPass tree's own citizens only; a project citizen gets its own truth."""
     if reg_path.name == TREE_REGISTRY_NAME:
         return REINSTALL
-    return "" if (folder / SEED_RELATIVE_PATH).is_file() else NO_SEED_BACKUP
+    return "" if has_passport_vault(folder) else NO_SEED_BACKUP
 
 
 def repair_passports(project_root: Optional[Path]) -> List[tuple]:

@@ -31,7 +31,7 @@
   <a href="https://aipass.ai">aipass.ai</a>
 </p>
 
-> **AIPass is Linux only.** It is built and tested on Ubuntu: native, WSL2, and a Docker image to come. AIPass stays open source and in daily development, the developer's lifetime project. If this changes how you use it, open a [discussion](https://github.com/AIOSAI/AIPass/discussions) or an [issue](https://github.com/AIOSAI/AIPass/issues) with `transition` in the title and tell us your setup. We will help you find your path: WSL2, Docker when it lands, or a fork.
+> **AIPass is Linux only.** Built and tested on Ubuntu, native or WSL2. Open source and in daily development, the developer's lifetime project.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/AIOSAI/AIPass/main/assets/demo.gif" alt="Terminal demo: the fleet listed, a memory an agent kept a month ago found by meaning, and an agent audited at 100%" width="760">
@@ -55,7 +55,7 @@ To work on AIPass itself, install from a clone instead (this route skips the pho
 git clone https://github.com/AIOSAI/AIPass.git && cd AIPass && ./aipass install
 ```
 
-Install adds AIPass hooks and deny rules to your user-level Claude Code settings, a few lines to your shell rc, and command links on your PATH; it may also set git's `pull.rebase` and add one npm package. [See every change it makes](#what-install-changes). Something off afterwards? `aipass doctor` names it and `aipass doctor --fix` cures what it can, a lost or corrupt agent passport included (restored from the agent's seed, the old file kept beside it). `--fix` is yours to run at a terminal: an agent is refused.
+Install adds AIPass hooks and deny rules to your user-level Claude Code settings, a few lines to your shell rc, and command links on your PATH; it may also set git's `pull.rebase` and add one npm package. [See every change it makes](#what-install-changes). Something off afterwards? `aipass doctor` names it and `aipass doctor --fix` cures what it can, a lost or corrupt agent passport included (restored from the agent's passport vault, the old file kept beside it). `--fix` is yours to run at a terminal: an agent is refused.
 
 ## Start here
 
@@ -100,7 +100,7 @@ In AIPass, agents are citizens. Each has an identity, a memory that survives the
 src/my_project/<agent>/
 ├── .trinity/              # Passport + memory: sessions, learnings, todos, observations; overflow rolls to @memory
 ├── .ai_mail.local/        # Mailbox: inbox, sent, deleted
-├── .aipass/               # Branch prompt: the agent's standing instructions, injected by hooks
+├── .aipass/               # Branch prompt (standing instructions, injected by hooks) + passport vault
 ├── apps/                  # Entry point → modules → handlers
 ├── docs/                  # Reference pages, tracked
 ├── docs.local/            # Scratch and research, not tracked
@@ -138,7 +138,7 @@ The boring stuff works. One human and these agents built it, and use it every da
 - **Plans that carry context.** Work is written down as a plan, so whoever picks it up knows why it exists and where it stands.
 - **Gates.** Hooks decide which agent may [edit which files](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/edit_gate.md). Git goes through [one door](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/git_gate.md). Raw deletes are refused. [Provider settings](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/settings_gate.md) (`~/.claude/settings.json`, `~/.codex/`) change only with the owner's yes.
 - **Works in your own repos.** A project that holds an agent calls the fleet right away. For the fleet to send work to it, declare it once with `drone @memory roots add <path>`.
-- **Standards audits.** AIPass's own 18 agents are audited in CI on every change against [one written standard](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/sentry/docs/aipass_standards.md); `drone @sentry audit` runs the same checks on yours.
+- **Standards audits.** AIPass's own 18 agents are audited against [one written standard](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/sentry/docs/aipass_standards.md); `drone @sentry audit` runs the same checks on yours.
 - **Logs and backups.** Every agent logs to its own place, and runaway logs are caught. Local snapshots you can restore from, with optional Google Drive sync.
 - **The daemon.** `drone @daemon install-timer` starts a scheduler for recurring jobs, and each agent owns its own schedule.
 - **Everything local.** Memory and mail are files on your machine. Nothing leaves it except what the CLI you run (Claude Code, or Codex or OpenCode when a seat runs on it) sends to its own provider, unless you turn on an outside API or Drive sync with your own keys. The phone face serves on your own tailnet, and the first memory search downloads its small embedding model once.
@@ -232,7 +232,6 @@ Ubuntu is the platform, native or WSL2: the daily driver, the one CI proves.
 
 <p>
   <a href="#project-status"><img alt="Project status: stable" src="https://img.shields.io/badge/status-stable-007ec6"></a>
-  <a href="https://codecov.io/gh/AIOSAI/AIPass"><img alt="Test coverage" src="https://codecov.io/gh/AIOSAI/AIPass/graph/badge.svg"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/AIOSAI/AIPass"><img alt="OpenSSF Scorecard" src="https://api.scorecard.dev/projects/github.com/AIOSAI/AIPass/badge"></a>
   <a href="https://www.bestpractices.dev/projects/13095"><img alt="OpenSSF Best Practices" src="https://www.bestpractices.dev/projects/13095/badge"></a>
   <a href="https://hvtracker.net/agents/aipass"><img alt="HVTrust" src="https://hvtracker.net/badge/aipass.svg"></a>
@@ -253,6 +252,12 @@ Ubuntu is the platform, native or WSL2: the daily driver, the one CI proves.
 - API keys / OAuth optional (OpenRouter, Google — only for optional add-on integrations)
 
 </details>
+
+## If it breaks: safe mode
+
+A half-done edit to live-loaded code can take the hook engine down; every agent then refuses every tool with a message that starts `HOOKS BROKEN`, and the system is in safe mode: one recovery command allowed, everything else held. The refusal itself names the command.
+
+If no agent can act, open [the recovery guide](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/flow/templates/playbook_plans/recovery.md) — `src/aipass/flow/templates/playbook_plans/recovery.md` in your checkout. It holds the full instructions, including a ready prompt to paste into a fresh Claude session started from your home directory. Nothing is deleted and nothing is pushed on that path.
 
 ## Documentation
 

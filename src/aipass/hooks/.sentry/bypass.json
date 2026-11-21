@@ -26,6 +26,12 @@
       "reason": "Stdlib-only by necessity (DPLAN-0356 item 3): it runs BEFORE aipass.hooks.apps exists in the hook process, and importing json_handler would import the source tree it is mounting the promoted copy in place of."
     },
     {
+      "file": "apps/handlers/bridges/safe_mode.py",
+      "standard": "json_structure",
+      "functions": ["<file>"],
+      "reason": "Stdlib-only by necessity: it runs when the hook engine cannot load, and importing json_handler would import the code that broke. Its trail is its own log, one line per command, outside the tree."
+    },
+    {
       "file": "apps/handlers/bridges/codex.py",
       "standard": "handlers",
       "functions": ["_run_calls"],
@@ -52,8 +58,8 @@
     {
       "file": "apps/modules/engine.py",
       "standard": "modules",
-      "functions": ["<file>", "_load_budget_state", "_save_budget_state", "dispatch"],
-      "reason": "dispatch() is the engine's core purpose: it IS the module's primary function, not a handler that belongs elsewhere. Its stdlib json is the stdin payload, handler stdouts and the per-seat budget state, never branch data. Moving dispatch to handlers/ would leave an empty module."
+      "functions": ["<file>", "dispatch"],
+      "reason": "dispatch() is the engine's core purpose: it IS the module's primary function, not a handler that belongs elsewhere. Its stdlib json is the stdin payload and handler stdouts, never branch data. Moving dispatch to handlers/ would leave an empty module."
     },
     {
       "file": "apps/sound.py",
@@ -241,13 +247,13 @@
       "file": "apps/modules/cadence.py",
       "standard": "logged_fallback",
       "lines": [
-        475,
-        480,
-        568,
-        752,
-        834,
-        887,
-        971
+        496,
+        501,
+        589,
+        773,
+        855,
+        908,
+        992
       ],
       "reason": "Fleet green leg 5: cadence decides which turn an injector fires on and guards no write. On doubt each answers its documented empty value ('never fired', not grounded, nothing pending), logged: the worst case is a grounding block early, late or twice, never a write let through."
     },
@@ -343,7 +349,7 @@
       "file": "apps/handlers/prompt/persistent_alert.py",
       "standard": "logged_fallback",
       "lines": [
-        56
+        57
       ],
       "reason": "Fleet green leg 5: an injector; an unreadable alerts.json shows no alert this turn (logged). Injectors are skipped on error by doctrine; guards no write."
     },
@@ -609,7 +615,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        1167
+        1175
       ],
       "reason": "tripwire_snapshot: the hook's own per-session snapshot store of in-flight Bash calls; a damaged copy holds only stale stats. Raising would refuse every Bash call for the rest of the session, as nothing else rewrites the store, so it starts fresh, stamped with FRESH_START_KEY. Once the fresh write lands, STORE_RESET_LOG reaches medic at ERROR (cause at INFO); a store the write cannot replace refuses the call. Calls in flight whose snapshots were lost are told their check did not run, at ERROR, while the stamp is younger than FRESH_START_WINDOW_S."
     },
@@ -789,7 +795,7 @@
       "file": "apps/handlers/prompt/persistent_alert.py",
       "standard": "fallback",
       "lines": [
-        54
+        55
       ],
       "reason": "Read-only: alerts.json is @trigger's, written under its lock, and is never written here. An unreadable file shows no banner this prompt; WARNING, which @trigger escalates, names the read error, and drone @hooks dismiss prints it in red."
     },
@@ -797,7 +803,7 @@
       "file": "apps/handlers/prompt/persistent_alert.py",
       "standard": "fallback",
       "lines": [
-        68
+        69
       ],
       "reason": "Fails toward showing: an alert whose expires_at cannot be read is kept active, so the banner is never hidden by a bad date; the agent can dismiss it by id."
     },
@@ -805,7 +811,7 @@
       "file": "apps/handlers/prompt/persistent_alert.py",
       "standard": "fallback",
       "lines": [
-        90
+        91
       ],
       "reason": "The guard file only stops a banner being announced twice; if it cannot be written the agent sees the banner again, which is itself the visible signal. No decision rests on it."
     },
@@ -813,7 +819,7 @@
       "file": "apps/handlers/prompt/persistent_alert.py",
       "standard": "fallback",
       "lines": [
-        102
+        103
       ],
       "reason": "Fails toward showing: a cadence that cannot answer lets the banner repeat every turn instead of hiding it. The WARNING says FAIL-OPEN and is escalated by @trigger."
     },
@@ -1007,15 +1013,7 @@
       "file": "apps/modules/write_ownership.py",
       "standard": "fallback",
       "lines": [
-        97
-      ],
-      "reason": "HELD from a raise: an unreadable registry still marks the project boundary and branches are still told by the src/<pkg>/<branch> shape, but project-level files lose their fence. Raising would refuse every write in the project, the repair included. WARNING on each gated call, escalated by @trigger."
-    },
-    {
-      "file": "apps/modules/write_ownership.py",
-      "standard": "fallback",
-      "lines": [
-        177
+        184
       ],
       "reason": "A host that publishes no PATH_MAX answers 0 and the length check falls to the real probe of the path, which still refuses an over-long one. Nothing is passed unjudged."
     },
@@ -1119,15 +1117,7 @@
       "file": "apps/modules/engine.py",
       "standard": "fallback",
       "lines": [
-        243
-      ],
-      "reason": "HELD from a raise: the per-session /tmp budget counts are read in dispatch, so a raise would crash every event, gates included. A corrupt copy is reset and later overwritten; the cost is budgeted injectors firing again. WARNING, escalated by @trigger, names it."
-    },
-    {
-      "file": "apps/modules/engine.py",
-      "standard": "fallback",
-      "lines": [
-        308
+        235
       ],
       "reason": "Fails closed: a fail-closed gate's exit 2 whose stdout does not parse reads as \"exited 2 without a decision\", which _refuse_broken_gate turns into a BLOCK logged at ERROR with a gate_broken row in engine.jsonl."
     },
@@ -1135,8 +1125,8 @@
       "file": "apps/modules/engine.py",
       "standard": "fallback",
       "lines": [
-        505,
-        541
+        408,
+        444
       ],
       "reason": "Sound is cosmetic: a timeout voice or hook chime that cannot play costs only the sound. The event itself is already recorded in engine.jsonl (the timeout row, or the hook's own row), and its output is delivered."
     },
@@ -1144,7 +1134,7 @@
       "file": "apps/modules/engine.py",
       "standard": "fallback",
       "lines": [
-        550
+        453
       ],
       "reason": "Not a default: a hook's exit 2 whose stdout does not parse is treated as a crash, never a block or an allow, and is logged at ERROR \"CRASHED exit=2\" with a crashed row in engine.jsonl. Fail-closed gates were already refused upstream."
     },
@@ -1191,9 +1181,9 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        473,
-        478,
-        607
+        494,
+        499,
+        628
       ],
       "reason": "Fails toward showing: unreadable mail or advisory throttle state reads as never fired, so the banner or advisory fires rather than hides. The file holds one turn number, wholly rewritten by the next fire, so nothing else is lost. WARNING, escalated by @trigger."
     },
@@ -1201,7 +1191,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        566
+        587
       ],
       "reason": "None is handed on as \"cannot be read\", documented in the signature: tier0_kernel raises its DEGRADED line to WARNING on it and the advisory throttle falls to elapsed seconds. Nothing reads None as a turn."
     },
@@ -1209,7 +1199,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        662
+        683
       ],
       "reason": "reset_counter rewrites the counter whole by purpose (a compaction or new session): unreadable old state only costs the prior turn in its log line and the debounce of a second reset on one boundary. The reset itself is the repair of a corrupt counter."
     },
@@ -1217,7 +1207,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        710
+        731
       ],
       "reason": "A reset that cannot open or write the counter file leaves the counter as it was, and the post-compact re-ground is not armed. Raising would fail the compaction hook; WARNING, escalated by @trigger, names the caller and session."
     },
@@ -1225,7 +1215,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        750
+        771
       ],
       "reason": "None reads as \"never stamped\": consumers then keep their counts for the current window instead of opening a new one. The stamp is rewritten whole at the next reset. WARNING, escalated by @trigger, names it."
     },
@@ -1233,8 +1223,8 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        930,
-        967
+        951,
+        988
       ],
       "reason": "A corrupt counter is never overwritten here: the parse fails before the truncate, so the queue is left as found and only the queued re-ground parts are skipped. WARNING on each, escalated by @trigger, names the session."
     },
@@ -1242,7 +1232,7 @@
       "file": "apps/modules/engine.py",
       "standard": "silent_catch",
       "lines": [
-        354
+        281
       ],
       "reason": "The decode error is handed on as the value; the next lines refuse a PreToolUse payload at ERROR with an engine.jsonl row, and log any other event's at WARNING."
     },
@@ -1250,7 +1240,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "silent_catch",
       "lines": [
-        106
+        115
       ],
       "reason": "The read error is handed on as the value; the next lines log it at ERROR and keep the built-in cadence (a raise would refuse every memory write through edit_gate)."
     },

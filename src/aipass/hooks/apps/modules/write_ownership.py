@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_ownership.py
-# Version: 2.8.0
+# Version: 2.9.0
 # Description: Who may write whose files: project roots and branch owners read from the registries
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-18
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """Answers, for the edit gate's two lanes, whose file a write lands in and whether this seat may make it.
@@ -95,8 +95,11 @@ def _read(marker: Path) -> object:
     try:
         return json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        logger.warning("[HOOKS] write_ownership: registry unreadable, still a boundary: %s: %s", marker, exc)
-        return None
+        raise RegistryUnreadable(
+            f"{marker} cannot be read ({type(exc).__name__}: {exc}), so whose file a write lands in is unknown "
+            "and writes here are refused. The registry is @spawn's: drone @ai_mail dispatch @spawn \"Registry "
+            'unreadable" "<this text>". Reads and drone commands still run.'
+        ) from exc
 
 
 def _branches(data: object, root: Path) -> tuple[Branch, ...] | None:
@@ -120,6 +123,10 @@ def _branches(data: object, root: Path) -> tuple[Branch, ...] | None:
 
 class ProjectUnreadable(OSError):
     """A directory on the project walk could not be listed: whose file a write lands in is unknown."""
+
+
+class RegistryUnreadable(ProjectUnreadable):
+    """A project registry that cannot be read: the boundary stands, but its branch rows are unknown."""
 
 
 def project_of(start: Path) -> Project | None:

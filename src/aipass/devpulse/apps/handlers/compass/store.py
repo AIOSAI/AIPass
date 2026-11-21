@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: store.py
 # Description: Compass storage core — SQLite/FTS5 rated decision store
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-06-16
-# Modified: 2026-11-17
+# Modified: 2026-11-19
 # =============================================
 
 """Compass storage core — the SQLite/FTS5 layer for rated decisions.
@@ -428,6 +428,8 @@ def review(
 
 
 _RECALL_MAX_TOKENS = 64
+# relevance = m / (damp + m). At 4, one shared rare word scores 0.2 and two score 0.33: governance's 0.3 sits between.
+_RECALL_SINGLE_WORD_DAMP = 4.0
 
 # Query-side only. Casual words are rare in a technical store, so rarity scoring cannot reject them;
 # in an OR query they outweigh topic words in BM25. The filler set is closed and small; the topic space is not.
@@ -452,7 +454,8 @@ def recall_decisions(
     """Return scored ambient-recall candidates for raw prompt text.
 
     Side-effect-free: a candidate is not yet surfaced, so the caller reports injections through mark_surfaced.
-    ``relevance`` is m / (1 + m) over rare matched tokens, a bounded scale for @memory's governance thresholds.
+    ``relevance`` is m / (4 + m) over the m rare tokens the prompt shares with the entry, a bounded scale for
+    @memory's governance threshold: at its default 0.3 one shared word stays silent and two may surface.
     """
     if limit <= 0:
         raise ValueError(f"limit must be a positive integer, got {limit!r}")
@@ -509,7 +512,8 @@ def recall_decisions(
                 for t in unique
                 if df[t.lower()] <= rare_cutoff and re.search(rf"\b{re.escape(t)}", text, re.IGNORECASE)
             )
-            item["relevance"] = matched_rare / (1.0 + matched_rare)
+            # One shared word is an accident ("console", "remaining"): it scores 0.2, under governance's 0.3.
+            item["relevance"] = matched_rare / (_RECALL_SINGLE_WORD_DAMP + matched_rare)
             item["_bm25"] = row["rank"]
             results.append(item)
 

@@ -1,7 +1,11 @@
 """DevPulse's import door: from aipass.devpulse import <name>, each read from its home on access, never cached."""
 
 import importlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # each name typed from its home
+    from aipass.devpulse.apps.handlers.compass import mark_surfaced, recall_decisions
+    from aipass.devpulse.apps.handlers.owner.admin_grant import compute_signature, verify_admin_grant
 
 _COMPASS = "aipass.devpulse.apps.handlers.compass"
 _GRANT = "aipass.devpulse.apps.handlers.owner.admin_grant"

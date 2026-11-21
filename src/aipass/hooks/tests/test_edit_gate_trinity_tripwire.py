@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity_tripwire.py
 # Description: edit_gate's memory tripwire: a .trinity write a shell made is reported at PostToolUse, project-wide
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-10-08
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py: tripwire_snapshot and tripwire."""
@@ -16,6 +16,7 @@
 
 import json
 import logging
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -365,6 +366,20 @@ class TestTripwireWatchesEveryTrinityInTheProject:
         assert result["exit_code"] == 0, "the tripwire never blocks: the command has already run"
         assert "systemMessage" not in json.loads(result["stdout"]), "a finding is the model's, never a chat line"
         return json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+
+    def test_an_unreadable_registry_leaves_the_call_running_and_watches_the_seats_own_memory(
+        self, tmp_path, monkeypatch
+    ):
+        seats = self._project(tmp_path, monkeypatch)
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
+        data = {"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": str(seats["hooks"])}
+        data.update(session_id="session-torn", tool_use_id="toolu_torn")
+
+        assert edit_gate.tripwire_snapshot(data) == self.SILENT
+
+        stored = json.loads((tmp_path / "aipass-trinity-tripwire-session-torn.json").read_text(encoding="utf-8"))
+        watched = {str(Path(key).parent) for key in stored["toolu_torn"]["stats"]}
+        assert watched == {str(seats["hooks"] / ".trinity")}
 
     def test_a_write_into_another_branchs_memory_is_reported(self, tmp_path, monkeypatch):
         seats = self._project(tmp_path, monkeypatch)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for CLI routing and help output
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-03-27
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/spawn.py's CLI routing, help output, and introspection."""
@@ -19,7 +19,7 @@ import pytest
 
 from aipass.spawn.apps.handlers import mint_ops, update_ops
 from aipass.spawn.apps.handlers.seed_ops import canonical_text, seed_path_for
-from aipass.spawn.apps.modules.export_seeds import handle_export_seeds
+from aipass.spawn.apps.modules.export_vault import handle_export_vault
 from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
 from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 from aipass.spawn.apps.modules.update import handle_update
@@ -413,8 +413,8 @@ class TestUpdateTraceFlag:
         assert not (tmp_path / "probe" / ".trinity").exists()
 
 
-class TestExportSeedsOnlyFlag:
-    """export-seeds --only, passed through handle_export_seeds in a tmp_path world."""
+class TestExportVaultOnlyFlag:
+    """export-vault --only, passed through handle_export_vault in a tmp_path world."""
 
     def test_only_restricts_the_written_seeds_to_the_named_branch(self, tmp_path, monkeypatch):
         """--only decides which seed is written; the other branch is left untouched.
@@ -427,30 +427,41 @@ class TestExportSeedsOnlyFlag:
         write_registry(tmp_path / "AIPASS_REGISTRY.json", {b: f"src/aipass/{b}" for b in ("wanderer", "stranger")})
         monkeypatch.chdir(tmp_path)
 
-        assert handle_export_seeds(["--root", str(tmp_path), "--only", "@wanderer", "--confirm"]) == 0
+        assert handle_export_vault(["--root", str(tmp_path), "--only", "@wanderer", "--confirm"]) == 0
 
         assert seed_path_for(tmp_path / "src" / "aipass" / "wanderer").is_file()
         assert not seed_path_for(tmp_path / "src" / "aipass" / "stranger").exists()
 
+    def test_the_2_8_38_verb_is_refused_naming_export_vault(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """export-seeds is no alias: it exits 1, writes nothing, and names the new verb.
+
+        Mutant: the old verb's refusal is dropped -> unknown-command path or a silent export -> red."""
+        with patch("sys.argv", ["spawn", "export-seeds", "--root", str(tmp_path), "--confirm"]):
+            assert main() == 1
+
+        captured = capsys.readouterr()
+        assert "drone @spawn export-vault" in captured.out + captured.err
+        assert list(tmp_path.iterdir()) == []
+
 
 class TestFleetCommandsNeverSayAllClearAfterAFailure:
-    """export-seeds and migrate-passports: no green line, and a non-zero exit, when nothing honest was done."""
+    """export-vault and migrate-passports: no green line, and a non-zero exit, when nothing honest was done."""
 
-    def test_export_seeds_over_nothing_exits_one_without_the_all_clear(
+    def test_export_vault_over_nothing_exits_one_without_the_all_clear(
         self, tmp_path, capsys: pytest.CaptureFixture[str]
     ):
-        assert handle_export_seeds(["--root", str(tmp_path)]) == 1
+        assert handle_export_vault(["--root", str(tmp_path)]) == 1
         captured = capsys.readouterr()
         assert "already current" not in captured.out
         assert "no *_REGISTRY.json" in captured.err
 
-    def test_export_seeds_with_only_errors_prints_no_all_clear(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+    def test_export_vault_with_only_errors_prints_no_all_clear(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         trinity = tmp_path / "src" / "aipass" / "wanderer" / ".trinity"
         trinity.mkdir(parents=True)
         (trinity / "passport.json").write_text("{not json", encoding="utf-8")
         write_registry(tmp_path / "AIPASS_REGISTRY.json", {"wanderer": "src/aipass/wanderer"})
 
-        assert handle_export_seeds(["--root", str(tmp_path)]) == 1
+        assert handle_export_vault(["--root", str(tmp_path)]) == 1
         assert "already current" not in capsys.readouterr().out
 
     def test_migrate_with_only_errors_prints_no_all_clear(self, tmp_path, capsys: pytest.CaptureFixture[str]):

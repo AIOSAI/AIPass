@@ -37,7 +37,7 @@ _send_email: Optional[Callable[..., bool]] = None
 
 _file_cooldowns: dict[str, float] = {}
 COOLDOWN_SECONDS = 1800
-DEFAULT_ALERT_TTL_SECONDS = 86400  # 24 hours — matches medic_state.py DEFAULT_MUTE_SECONDS
+DEFAULT_ALERT_TTL_SECONDS = 86400  # 24 hours — matches medic_state.py DEFAULT_VOLUME_MUTE_SECONDS
 
 
 def set_send_email_callback(callback: Callable[..., bool]) -> None:

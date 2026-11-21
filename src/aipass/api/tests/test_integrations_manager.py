@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_integrations_manager.py
 # Description: Tests for integrations_manager command handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-05-12
-# Modified: 2026-11-02
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/modules/integrations_manager.py, the integrations command handler."""
@@ -115,7 +115,7 @@ class TestHandleCommand:
 class TestRunList:
     """Tests for integrations_manager._run_list(), through `integrations list`."""
 
-    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
+    @patch(f"{_IM}.registry.load_drivers", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(f"{_IM}.get_contracts", return_value={"contracts": [], "count": 0, "success": True})
     @patch(f"{_IM}.list_contracts", return_value=[])
@@ -135,7 +135,7 @@ class TestRunList:
         assert "No integrations configured." in out
         assert "apps/integrations/{project}/driver.py" in out
 
-    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
+    @patch(f"{_IM}.registry.load_drivers", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(
         f"{_IM}.get_contracts",
@@ -162,7 +162,7 @@ class TestRunList:
 class TestRunCall:
     """Tests for integrations_manager._run_call(), through `integrations call`."""
 
-    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
+    @patch(f"{_IM}.registry.load_drivers", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     @patch(f"{_IM}.resolve", return_value=None)
     def test_contract_not_found(
@@ -177,7 +177,7 @@ class TestRunCall:
         assert result.value.code == 1
         mock_error.assert_called_once()
 
-    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
+    @patch(f"{_IM}.registry.load_drivers", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     @patch(
         f"{_IM}.invoke",
@@ -201,7 +201,7 @@ class TestRunCall:
         mock_invoke.assert_called_once_with(mock_resolve.return_value, "mycontract", ["arg1"])
         assert capsys.readouterr().out == "done\n"
 
-    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
+    @patch(f"{_IM}.registry.load_drivers", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     @patch(f"{_IM}.resolve", return_value=MagicMock())
     def test_a_result_reaches_stdout_byte_for_byte(
@@ -221,7 +221,7 @@ class TestRunCall:
         assert result.value.code == 0
         assert capsys.readouterr().out == data + "\n"
 
-    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
+    @patch(f"{_IM}.registry.load_drivers", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
     @patch(
         f"{_IM}.invoke",
@@ -281,7 +281,7 @@ class TestTrailingHelpDoesNotDispatch:
 
     @patch(f"{_IM}.print_help", new_callable=MagicMock)
     @patch(f"{_IM}._run_call", new_callable=MagicMock)
-    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
+    @patch(f"{_IM}.registry.load_drivers", new_callable=MagicMock)
     def test_call_with_trailing_help_does_not_run_contract(
         self,
         _mock_loaded: MagicMock,
@@ -296,7 +296,7 @@ class TestTrailingHelpDoesNotDispatch:
 
     @patch(f"{_IM}.print_help", new_callable=MagicMock)
     @patch(f"{_IM}._run_list", new_callable=MagicMock)
-    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
+    @patch(f"{_IM}.registry.load_drivers", new_callable=MagicMock)
     def test_list_with_trailing_help_shows_help(
         self,
         _mock_loaded: MagicMock,
@@ -311,7 +311,7 @@ class TestTrailingHelpDoesNotDispatch:
 
     @patch(f"{_IM}.print_help", new_callable=MagicMock)
     @patch(f"{_IM}._run_call", new_callable=MagicMock)
-    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
+    @patch(f"{_IM}.registry.load_drivers", new_callable=MagicMock)
     def test_contract_args_named_help_still_dispatch(
         self,
         _mock_loaded: MagicMock,

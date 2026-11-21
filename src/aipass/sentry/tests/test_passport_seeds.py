@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: test_passport_seeds.py
 # Description: Repo pins for tracked passport seeds - shape, leak-guard, naming
-# Version: 1.0.4
+# Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-11-02
+# Modified: 2026-11-20
 # =============================================
 
-"""Tests for the passport seeds that spawn/apps/modules/export_seeds.py writes (TDPLAN-0017)."""
+"""Tests for the passport vaults that spawn/apps/modules/export_vault.py writes (TDPLAN-0017)."""
 
-# A seed (src/aipass/<branch>/.aipass/passport.seed.json) is a branch's identity, tracked and pushed to a
+# A vault (src/aipass/<branch>/.aipass/passport.vault.json) is a branch's identity, tracked and pushed to a
 # public repo. Rules: SHAPE (mint reads it), LEAK-GUARD (no machine-local field: a leak is published
 # for good), NAMING (branch_name matches its directory). The guard re-derives the rules rather than
 # importing spawn's exporter, which would agree with itself about a bug. Zero seeds is a SKIP, never a pass.
@@ -30,12 +30,15 @@ _REQUIRED_SECTIONS = ("document_metadata", "branch_info", "citizenship", "identi
 
 _SCHEMA_VERSION = "2.0.0"
 
-_SEED_NAME = "passport.seed.json"
+_VAULT_NAME = "passport.vault.json"
+# Spawn still reads the pre-vault name when no vault sits beside it, so a seat mid-migration is measured, not skipped.
+_LEGACY_NAME = "passport.seed.json"
+_SEED_NAMES = (_VAULT_NAME, _LEGACY_NAME)
 _SEED_DIR = ".aipass"
 
 _NO_SEEDS_REASON = (
-    f"no src/aipass/*/{_SEED_DIR}/{_SEED_NAME} on disk -- seeds are minted by "
-    "drone @spawn export-seeds, which lands in a parallel lane (TDPLAN-0017 lane A). "
+    f"no src/aipass/*/{_SEED_DIR}/{_VAULT_NAME} (or legacy {_LEGACY_NAME}) on disk -- vaults are minted by "
+    "drone @spawn export-vault, which lands in a parallel lane (TDPLAN-0017 lane A). "
     "These pins go live the moment the first seed is written."
 )
 
@@ -49,10 +52,13 @@ def _repo_root() -> Path | None:
 
 
 def _seed_paths(root: Path | None) -> list[Path]:
-    """Every tracked seed under *root*, sorted by branch name."""
+    """Every branch's tracked seed under *root* -- its vault, else its legacy seed -- sorted by branch name."""
     if root is None:
         return []
-    return sorted(root.glob(f"src/aipass/*/{_SEED_DIR}/{_SEED_NAME}"))
+    found = []
+    for seed_dir in sorted(root.glob(f"src/aipass/*/{_SEED_DIR}")):
+        found.extend([seed for seed in (seed_dir / name for name in _SEED_NAMES) if seed.is_file()][:1])
+    return found
 
 
 def _seed_params() -> list:
@@ -64,7 +70,7 @@ def _seed_params() -> list:
 
 
 def _branch_of(seed: Path) -> str:
-    """The branch directory a seed sits in: <branch>/.aipass/passport.seed.json."""
+    """The branch directory a seed sits in: <branch>/.aipass/passport.vault.json, or its legacy name."""
     return seed.parent.parent.name
 
 
@@ -173,8 +179,8 @@ def _clean_seed(branch: str = "testbranch") -> dict:
 def planted(tmp_path):
     """Write a synthetic seed into a synthetic tree and hand back its path."""
 
-    def _plant(data, branch: str = "testbranch") -> Path:
-        seed = tmp_path / "src" / "aipass" / branch / _SEED_DIR / _SEED_NAME
+    def _plant(data, branch: str = "testbranch", name: str = _VAULT_NAME) -> Path:
+        seed = tmp_path / "src" / "aipass" / branch / _SEED_DIR / name
         seed.parent.mkdir(parents=True, exist_ok=True)
         payload = data if isinstance(data, str) else json.dumps(data, indent=2, ensure_ascii=False)
         seed.write_text(payload, encoding="utf-8")
@@ -220,7 +226,7 @@ class TestEverySeedInTheRepo:
 
         assert leaks == [], (
             f"{seed}: machine-local field(s) {', '.join(leaks)} must never appear in a tracked seed -- "
-            f"re-export with drone @spawn export-seeds rather than editing the file by hand"
+            f"re-export with drone @spawn export-vault rather than editing the file by hand"
         )
 
     @pytest.mark.parametrize("seed", _seed_params())
@@ -391,9 +397,33 @@ class TestDiscoveryItself:
 
         assert [_branch_of(path) for path in found] == ["alpha", "beta"]
 
-    def test_a_seed_deeper_than_one_level_is_not_a_citizen_seed(self, tmp_path):
+    def test_a_legacy_seed_still_counts_while_no_vault_sits_beside_it(self, planted, tmp_path):
+        planted(_clean_seed(branch="alpha"), branch="alpha")
+        planted(_clean_seed(branch="beta"), branch="beta", name=_LEGACY_NAME)
+
+        found = _seed_paths(tmp_path)
+
+        assert [(_branch_of(path), path.name) for path in found] == [("alpha", _VAULT_NAME), ("beta", _LEGACY_NAME)]
+
+    def test_a_vault_wins_over_a_legacy_seed_in_the_same_branch(self, planted, tmp_path):
+        """One identity per branch: the stale legacy file is never measured beside its vault."""
+        planted(_clean_seed(branch="alpha"), branch="alpha")
+        planted(_clean_seed(branch="alpha"), branch="alpha", name=_LEGACY_NAME)
+
+        assert [path.name for path in _seed_paths(tmp_path)] == [_VAULT_NAME]
+
+    def test_a_retired_seed_in_spawn_recovery_is_not_a_citizen_seed(self, tmp_path):
+        """export-vault parks the old file in .spawn/.recovery/; it is history, not the branch's identity."""
+        retired = tmp_path / "src" / "aipass" / "alpha" / ".spawn" / ".recovery" / _LEGACY_NAME
+        retired.parent.mkdir(parents=True)
+        retired.write_text("{}", encoding="utf-8")
+
+        assert _seed_paths(tmp_path) == []
+
+    @pytest.mark.parametrize("name", _SEED_NAMES)
+    def test_a_seed_deeper_than_one_level_is_not_a_citizen_seed(self, tmp_path, name):
         """Spawn's class templates sit deeper and are not branches, so they are not measured."""
-        deep = tmp_path / "src" / "aipass" / "spawn" / "templates" / "specialist" / _SEED_DIR / _SEED_NAME
+        deep = tmp_path / "src" / "aipass" / "spawn" / "templates" / "specialist" / _SEED_DIR / name
         deep.parent.mkdir(parents=True)
         deep.write_text("{}", encoding="utf-8")
 
@@ -414,7 +444,7 @@ class TestDiscoveryItself:
 
     def test_the_skip_reason_says_where_the_machinery_lives(self):
         """A skip nobody can act on is noise. This one names the verb."""
-        assert "export-seeds" in _NO_SEEDS_REASON
+        assert "export-vault" in _NO_SEEDS_REASON
         assert "parallel lane" in _NO_SEEDS_REASON
 
     def test_the_parameter_list_is_never_empty(self):

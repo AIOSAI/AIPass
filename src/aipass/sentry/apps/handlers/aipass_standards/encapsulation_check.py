@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: encapsulation_check.py
 # Description: Handler Encapsulation Standards Checker
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-03-05
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """Handler Encapsulation Standards Checker"""
@@ -21,6 +21,7 @@ from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
 from aipass.sentry.apps.handlers.aipass_standards.applicability import is_test_path
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 from aipass.sentry.apps.handlers.aipass_standards.string_imports import STRING_IMPORT_NOTE, iter_string_imports
+from aipass.sentry.apps.handlers.checklist.verdicts import is_entry_point
 
 AUDIT_SCOPE = "all_files"
 READS_BRANCH = True
@@ -596,52 +597,16 @@ def _allowed_handler_names(module_path: str) -> frozenset:
     return _DEFAULT_HANDLERS | _infrastructure_handlers(str(branch_root))
 
 
-def _is_type_checking(test: ast.expr) -> bool:
-    """``TYPE_CHECKING`` or ``typing.TYPE_CHECKING``."""
-    if isinstance(test, ast.Name):
-        return test.id == "TYPE_CHECKING"
-    return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING" and isinstance(test.value, ast.Name)
-
-
-def _door_type_only_lines(lines: List[str], module_path: str) -> AbstractSet[int]:
-    """Lines of own-handler imports in the package top file's top-level ``if TYPE_CHECKING:`` block.
-
-    The door types each name it hands out from its home; nothing loads at runtime, so laziness holds.
-    Anywhere else, and for a runtime import in the door, the import is judged as before.
-    """
-    path = Path(module_path)
-    root = _branch_root(module_path)
-    if path.name != "__init__.py" or root is None or path.resolve().parent != root:
-        return frozenset()
-    try:
-        tree = ast.parse("\n".join(lines))
-    except SyntaxError as exc:
-        # An empty set acquits nothing: the strict verdict, every handler line still judged.
-        logger.warning("encapsulation: door %s unparseable, no type-only acquittal: %s", module_path, exc)
-        return frozenset()
-    prefix = f"aipass.{root.name}.apps.handlers"
-    found: set = set()
-    for node in tree.body:
-        if not (isinstance(node, ast.If) and _is_type_checking(node.test)):
-            continue
-        for stmt in node.body:
-            if isinstance(stmt, ast.ImportFrom):
-                targets = [stmt.module or ""]
-            elif isinstance(stmt, ast.Import):
-                targets = [alias.name for alias in stmt.names]
-            else:
-                continue
-            if all(t == prefix or t.startswith(prefix + ".") for t in targets):
-                found.update(range(stmt.lineno, (stmt.end_lineno or stmt.lineno) + 1))
-    return frozenset(found)
-
-
 def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check that non-handler, non-module files don't import handlers directly"""
+    """Check that the branch's entry point (``apps/<branch>.py``) reaches its handlers through modules.
+
+    Anywhere else inside a branch, a file may import its own branch's handlers.
+    """
+    if not is_entry_point(module_path):
+        return {"name": "Direct handler imports", "passed": True, "message": "Not the entry point: not judged"}
     violations = []
 
     allowed_handlers = _allowed_handler_names(module_path)
-    door_typing = _door_type_only_lines(lines, module_path)
 
     skipped = _not_import_lines(lines)
     for i, line in enumerate(lines, 1):
@@ -674,9 +639,6 @@ def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rule
 
         # Whole names: profile_handler is not file_handler.
         if allowed_handlers & set(re.findall(r"\w+", code_part)):
-            continue
-
-        if i in door_typing:
             continue
 
         violations.append({"line": i, "code": code_part.strip()})

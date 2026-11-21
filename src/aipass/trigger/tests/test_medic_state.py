@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_medic_state.py
 # Description: Unit tests for medic_state handler — real file I/O via tmp_path
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for the medic_state handler (apps/handlers/medic_state.py)."""
@@ -796,7 +796,7 @@ class TestCleanExpiredMutes:
     """Tests for _clean_expired_mutes."""
 
     def test_clean_expired_mutes_removes_old(self, state_mod):
-        """_clean_expired_mutes removes expired dict entries, keeps strings and active dicts."""
+        """_clean_expired_mutes removes expired volume entries, keeps strings and active dicts."""
         from datetime import datetime, timedelta
 
         expired_ts = (datetime.now() - timedelta(hours=1)).isoformat()
@@ -804,7 +804,7 @@ class TestCleanExpiredMutes:
 
         data = {
             "config": {
-                "muted_branches": [
+                "volume_muted_branches": [
                     "speakeasy",
                     {"name": "api", "expires_at": expired_ts},
                     {"name": "drone", "expires_at": future_ts},
@@ -815,7 +815,7 @@ class TestCleanExpiredMutes:
 
         state_mod._clean_expired_mutes(data)
 
-        remaining = data["config"]["muted_branches"]
+        remaining = data["config"]["volume_muted_branches"]
         names = []
         for entry in remaining:
             if isinstance(entry, str):
@@ -832,10 +832,8 @@ class TestCleanExpiredMutes:
 class TestWriteConfigCleansMutes:
     """Tests for write_config calling _clean_expired_mutes."""
 
-    def test_write_config_cleans_expired_mutes(self, state_mod):
-        """write_config removes expired mute entries before persisting."""
-        from datetime import datetime, timedelta
-
+    def test_write_config_keeps_expired_content_mutes_for_the_sweep(self, state_mod):
+        """An expired content mute survives write_config, so the sweep can mail its holder; reads skip it."""
         expired_ts = (datetime.now() - timedelta(hours=1)).isoformat()
         future_ts = (datetime.now() + timedelta(hours=1)).isoformat()
 
@@ -850,11 +848,9 @@ class TestWriteConfigCleansMutes:
 
         state_mod.write_config(data)
 
-        config_file = state_mod.MEDIC_STATE_FILE
-        written = json.loads(config_file.read_text(encoding="utf-8"))
-        muted = written["config"]["muted_branches"]
-        assert len(muted) == 1
-        assert muted[0]["name"] == "drone"
+        written = json.loads(state_mod.MEDIC_STATE_FILE.read_text(encoding="utf-8"))
+        assert [m["name"] for m in written["config"]["muted_branches"]] == ["api", "drone"]
+        assert state_mod.get_muted_branches() == ["drone"]
 
     def test_write_config_cleans_expired_volume_mutes(self, state_mod):
         """write_config expires volume mutes too, not just content mutes."""
@@ -879,6 +875,81 @@ class TestWriteConfigCleansMutes:
         muted = written["config"]["volume_muted_branches"]
         assert len(muted) == 1
         assert muted[0]["name"] == "drone"
+
+
+class TestTakeExpiredContentMutes:
+    """The expiry sweep's state half: drop or re-arm each expired content mute, under the lock."""
+
+    def _seed(self, state_mod, entries):
+        state_mod.MEDIC_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        state_mod.MEDIC_STATE_FILE.write_text(json.dumps({"config": {"muted_branches": entries}}), encoding="utf-8")
+
+    def _stored(self, state_mod):
+        return json.loads(state_mod.MEDIC_STATE_FILE.read_text(encoding="utf-8"))["config"]["muted_branches"]
+
+    def test_defaults_are_4h_content_and_24h_volume(self, state_mod):
+        """Content mutes default to 4h; volume mutes keep 24h."""
+        assert state_mod.DEFAULT_MUTE_SECONDS == 4 * 3600
+        assert state_mod.DEFAULT_VOLUME_MUTE_SECONDS == 86400
+
+    def test_expired_mute_is_dropped_and_returned(self, state_mod):
+        """An expired mute with no live session leaves the list and is named for the mail; live ones stay."""
+        expired_ts = (datetime.now() - timedelta(minutes=1)).isoformat()
+        future_ts = (datetime.now() + timedelta(hours=1)).isoformat()
+        self._seed(
+            state_mod,
+            [{"name": "api", "expires_at": expired_ts}, {"name": "drone", "expires_at": future_ts}, "flow"],
+        )
+
+        dropped, rearmed = state_mod.take_expired_content_mutes(lambda name: name != "api")
+
+        assert (dropped, rearmed) == (["api"], [])
+        assert self._stored(state_mod) == [{"name": "drone", "expires_at": future_ts}, "flow"]
+
+    def test_mid_build_mute_rearms_for_the_default(self, state_mod):
+        """should_rearm True: the mute is renewed for DEFAULT_MUTE_SECONDS and its re-arm counted."""
+        self._seed(state_mod, [{"name": "api", "expires_at": (datetime.now() - timedelta(minutes=1)).isoformat()}])
+        before = datetime.now()
+
+        dropped, rearmed = state_mod.take_expired_content_mutes(lambda name: name == "api")
+
+        assert (dropped, rearmed) == ([], ["api"])
+        (entry,) = self._stored(state_mod)
+        assert entry["rearms"] == 1
+        expires = datetime.fromisoformat(entry["expires_at"])
+        assert before + timedelta(seconds=state_mod.DEFAULT_MUTE_SECONDS) <= expires
+        assert state_mod.get_muted_branches() == ["api"]
+
+    def test_rearm_stops_at_the_cap(self, state_mod):
+        """A mute already re-armed MAX_REARMS times is dropped even mid-build."""
+        expired_ts = (datetime.now() - timedelta(minutes=1)).isoformat()
+        self._seed(state_mod, [{"name": "api", "expires_at": expired_ts, "rearms": state_mod.MAX_REARMS}])
+
+        dropped, rearmed = state_mod.take_expired_content_mutes(lambda name: name == "api")
+
+        assert (dropped, rearmed) == (["api"], [])
+        assert self._stored(state_mod) == []
+
+    def test_nothing_expired_writes_nothing(self, state_mod):
+        """No expired entry: no write and should_rearm is never asked."""
+        future_ts = (datetime.now() + timedelta(hours=1)).isoformat()
+        self._seed(state_mod, [{"name": "api", "expires_at": future_ts}])
+        mtime = state_mod.MEDIC_STATE_FILE.stat().st_mtime_ns
+        asked = MagicMock(return_value=True)
+
+        assert state_mod.take_expired_content_mutes(asked) == ([], [])
+        asked.assert_not_called()
+        assert state_mod.MEDIC_STATE_FILE.stat().st_mtime_ns == mtime
+
+    def test_manual_remute_resets_the_rearm_count(self, state_mod):
+        """mute_branch replaces the entry whole, so a fresh mute starts with no re-arms spent."""
+        expired_ts = (datetime.now() - timedelta(minutes=1)).isoformat()
+        self._seed(state_mod, [{"name": "api", "expires_at": expired_ts, "rearms": 2}])
+
+        state_mod.mute_branch("api", duration_seconds=3600)
+
+        (entry,) = self._stored(state_mod)
+        assert "rearms" not in entry
 
 
 class TestVolumeMutes:

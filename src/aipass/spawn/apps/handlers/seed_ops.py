@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: seed_ops.py
-# Description: Passport seeds — tracked identity, untracked live file (TDPLAN-0017)
-# Version: 1.2.0
+# Description: Passport vaults — tracked identity, untracked live file (TDPLAN-0017)
+# Version: 1.4.0
 # Created: 2026-08-28
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
-"""Passport seeds: the identity that ships with the repo (TDPLAN-0017).
+"""Passport vaults: the identity that ships with the repo (TDPLAN-0017). Code names keep the older word seed.
 
-The live passport is gitignored (tracking it is pull-hostile); the tracked seed is
-generated from it by ``export-seeds``, never hand-edited. Schema knowledge is
+The live passport is gitignored (tracking it is pull-hostile); the tracked vault is
+generated from it by ``export-vault``, never hand-edited. Schema knowledge is
 borrowed from ``passport_migration``, never re-declared. Both lanes refuse an
 invalid document rather than write it.
 Reference: docs/birth.md
@@ -18,6 +18,7 @@ Reference: docs/birth.md
 import copy
 import hashlib
 import json
+from datetime import datetime
 from pathlib import Path
 
 from aipass.prax import logger
@@ -36,6 +37,7 @@ from aipass.spawn.apps.handlers.passport_migration import (
 from aipass.spawn.apps.handlers.placeholders import resolve_residency
 from aipass.spawn.apps.handlers.registry import (
     _validate_path_containment,
+    aipass_home,
     branches_as_list,
     entry_path,
     find_registry,
@@ -45,12 +47,15 @@ from aipass.spawn.apps.handlers.registry import (
 __all__ = [
     "MACHINE_LOCAL_CITIZENSHIP",
     "OPTIONAL_KEYS",
+    "LEGACY_FILE_NAME",
     "SEED_DIR_NAME",
-    "SEED_FILE_NAME",
-    "SEED_RELATIVE_PATH",
+    "VAULT_FILE_NAME",
+    "VAULT_RELATIVE_PATH",
     "STAMP_KEY",
     "SeedError",
     "build_seed",
+    "copy_seed_home",
+    "home_seed_path",
     "canonical_text",
     "export_seed",
     "export_seeds",
@@ -67,8 +72,11 @@ __all__ = [
 
 
 SEED_DIR_NAME = ".aipass"
-SEED_FILE_NAME = "passport.seed.json"
-SEED_RELATIVE_PATH = f"{SEED_DIR_NAME}/{SEED_FILE_NAME}"
+VAULT_FILE_NAME = "passport.vault.json"
+VAULT_RELATIVE_PATH = f"{SEED_DIR_NAME}/{VAULT_FILE_NAME}"
+# The name 2.8.38 shipped: read when no vault is there, and retired by the next export.
+LEGACY_FILE_NAME = "passport.seed.json"
+HOME_VAULT_DIR = Path(".aipass") / "vault"
 
 # Additive optional field: schema_version stays 2.0.0. A template mint gets no stamp.
 STAMP_KEY = "seed"
@@ -129,17 +137,41 @@ def _key_order(section: str) -> tuple:
 
 
 def seed_path_for(branch_dir) -> Path:
-    """Return the seed path for a branch directory — ``<branch>/.aipass/...``.
+    """Return the passport vault path for a branch directory — ``<branch>/.aipass/passport.vault.json``.
 
     Inside the branch, never looked up by name, so no citizen can get another's identity.
     """
-    return Path(branch_dir) / SEED_DIR_NAME / SEED_FILE_NAME
+    return Path(branch_dir) / SEED_DIR_NAME / VAULT_FILE_NAME
+
+
+def legacy_seed_path_for(branch_dir) -> Path:
+    """The pre-vault name, ``<branch>/.aipass/passport.seed.json``: read when no vault is there."""
+    return Path(branch_dir) / SEED_DIR_NAME / LEGACY_FILE_NAME
+
+
+def home_seed_path(project_root, branch_dir) -> Path:
+    """A project seat's durable vault copy: under the AIPass home (in @backup's scope), never in the product's git.
+
+    Raises RuntimeError when no AIPass home is found."""
+    seat = Path(branch_dir).name.lower()
+    return aipass_home() / HOME_VAULT_DIR / Path(project_root).name / f"{seat}.{VAULT_FILE_NAME}"
+
+
+def copy_seed_home(project_root, branch_dir) -> str:
+    """Copy the seat's vault to its home copy; OSError or RuntimeError (no home) when it cannot."""
+    dest = home_seed_path(project_root, branch_dir)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(dest, seed_path_for(branch_dir).read_text(encoding="utf-8"))
+    logger.info("[spawn] passport vault of %s copied to %s", branch_dir, dest)
+    return f"copied to {dest}"
 
 
 def find_seed(branch_dir) -> Path | None:
-    """Return the branch's seed file, or None when it carries none."""
-    candidate = seed_path_for(branch_dir)
-    return candidate if candidate.is_file() else None
+    """Return the branch's passport vault, else its pre-vault seed file, else None."""
+    for candidate in (seed_path_for(branch_dir), legacy_seed_path_for(branch_dir)):
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _validate_block(block: dict, section: str, *, kind: str) -> list[str]:
@@ -153,7 +185,7 @@ def _validate_block(block: dict, section: str, *, kind: str) -> list[str]:
 
     for key in forbidden & set(block):
         problems.append(
-            f"{section}.{key} is machine-local and must never appear in a seed (it is minted fresh per install)"
+            f"{section}.{key} is machine-local and must never appear in a vault (it is minted fresh per install)"
         )
     for key in required:
         if key not in block:
@@ -260,7 +292,7 @@ def _validate_project_document(document, *, kind: str) -> list[str]:
     if kind == "seed":
         leaked = set(MACHINE_LOCAL_CITIZENSHIP) & set(document.get("citizenship") or {})
         problems += [
-            f"citizenship.{key} is machine-local and must never appear in a seed (it is minted fresh per install)"
+            f"citizenship.{key} is machine-local and must never appear in a vault (it is minted fresh per install)"
             for key in sorted(leaked)
         ]
     return problems
@@ -341,17 +373,17 @@ def load_seed(path) -> dict:
     try:
         raw = path.read_bytes().decode("utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        raise SeedError(f"seed at {path} could not be read: {exc}") from exc
+        raise SeedError(f"passport vault at {path} could not be read: {exc}") from exc
 
     try:
         document = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise SeedError(f"seed at {path} is not valid JSON: {exc}") from exc
+        raise SeedError(f"passport vault at {path} is not valid JSON: {exc}") from exc
 
     problems = validate_seed(document)
     if problems:
         raise SeedError(
-            f"seed at {path} is not a valid {SCHEMA_VERSION} passport seed:\n  - " + "\n  - ".join(problems)
+            f"passport vault at {path} is not a valid {SCHEMA_VERSION} passport vault:\n  - " + "\n  - ".join(problems)
         )
     return document
 
@@ -364,7 +396,7 @@ def mint_from_seed(seed: dict, seed_file, *, branch_name: str, registry_id: str,
     declared = (seed.get("branch_info") or {}).get("branch_name", "")
     if declared != branch_name:
         raise SeedError(
-            f"seed at {seed_file} belongs to branch {declared!r}, not {branch_name!r} — "
+            f"passport vault at {seed_file} belongs to branch {declared!r}, not {branch_name!r} — "
             f"spawn will not mint one citizen's identity into another."
         )
 
@@ -423,7 +455,7 @@ def export_seed(target, *, confirm: bool = False) -> dict:
         document = json.loads(target.path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         record["error"] = f"unreadable passport: {exc}"
-        logger.error("[export-seeds] %s: %s", target.path, exc)
+        logger.error("[export-vault] %s: %s", target.path, exc)
         return record
 
     # A core branch is held to 2.0 by where it lives, whatever residency its passport declares.
@@ -432,26 +464,26 @@ def export_seed(target, *, confirm: bool = False) -> dict:
     if problems:
         # A bad seed shipped to every clone is worse than a missing one.
         if core or not _declares_project(document):
-            cure = "run `drone @spawn migrate-passports --confirm`, then re-run export-seeds"
+            cure = "run `drone @spawn migrate-passports --confirm`, then re-run export-vault"
             record["error"] = f"live passport is not a valid {SCHEMA_VERSION} passport: "
         else:
-            cure = "fix the named field in the passport, then re-run export-seeds"
-            record["error"] = "live passport cannot be restored from a seed: "
+            cure = "fix the named field in the passport, then re-run export-vault"
+            record["error"] = "live passport cannot be restored from a passport vault: "
         record["error"] += "; ".join(problems) + f" - {cure}"
-        logger.error("[export-seeds] %s skipped: %s", record["branch"], record["error"])
+        logger.error("[export-vault] %s skipped: %s", record["branch"], record["error"])
         return record
 
     try:
         seed = build_seed(document)
     except SeedError as exc:
         record["error"] = str(exc)
-        logger.error("[export-seeds] %s skipped: %s", record["branch"], exc)
+        logger.error("[export-vault] %s skipped: %s", record["branch"], exc)
         return record
 
     seed_problems = _validate_document(seed, kind="seed") if core else validate_seed(seed)
     if seed_problems:
-        record["error"] = "built seed did not validate: " + "; ".join(seed_problems)
-        logger.error("[export-seeds] %s skipped: %s", record["branch"], record["error"])
+        record["error"] = "built passport vault did not validate: " + "; ".join(seed_problems)
+        logger.error("[export-vault] %s skipped: %s", record["branch"], record["error"])
         return record
 
     wanted = canonical_text(seed)
@@ -461,35 +493,56 @@ def export_seed(target, *, confirm: bool = False) -> dict:
             current = seed_file.read_text(encoding="utf-8")
         except OSError as exc:
             # Refuse: a blind overwrite would lose whatever the unreadable seed holds.
-            record["error"] = f"existing seed unreadable: {exc}"
-            logger.error("[export-seeds] %s skipped: %s", record["branch"], exc)
+            record["error"] = f"existing passport vault unreadable: {exc}"
+            logger.error("[export-vault] %s skipped: %s", record["branch"], exc)
             return record
 
-    if current == wanted:
+    legacy = legacy_seed_path_for(target.branch_dir)
+    if current == wanted and not legacy.is_file():
         record["action"] = "current"
         return record
 
-    record["action"] = "updated" if current is not None else "created"
+    record["action"] = "updated" if current is not None or legacy.is_file() else "created"
     record["changed"] = True
     if not confirm:
         return record
 
+    recovery = target.branch_dir / ".spawn" / ".recovery"
     try:
         seed_file.parent.mkdir(parents=True, exist_ok=True)
         if current is not None:
-            # A refresh replaces a seed: the old one is kept where update keeps its backups.
-            backup_json(seed_file, backup_dir=target.branch_dir / ".spawn" / ".recovery")
+            # A refresh replaces a vault: the old one is kept where update keeps its backups.
+            backup_json(seed_file, backup_dir=recovery)
         atomic_write_text(seed_file, wanted)
+        if legacy.is_file():
+            # Moved, never deleted: the vault now holds the identity, the old name keeps its bytes in recovery.
+            recovery.mkdir(parents=True, exist_ok=True)
+            legacy.replace(recovery / f"{LEGACY_FILE_NAME}.retired-{datetime.now():%Y%m%d-%H%M%S}")
+            record["retired"] = str(legacy)
     except OSError as exc:
         record["error"] = f"write failed: {exc}"
         record["changed"] = False
         record["action"] = "skipped"
-        logger.error("[export-seeds] %s write failed: %s", record["branch"], exc)
+        logger.error("[export-vault] %s write failed: %s", record["branch"], exc)
         return record
 
     record["written"] = True
-    logger.info("[export-seeds] %s seed %s (%s)", record["branch"], record["action"], seed_file)
+    logger.info("[export-vault] %s seed %s (%s)", record["branch"], record["action"], seed_file)
+    if target.residency != SEED_RESIDENCY:
+        _refresh_home_copy(target, record)
     return record
+
+
+def _refresh_home_copy(target, record: dict) -> None:
+    """Rewrite a project seat's home copy when it has one, so a restore never reads a stale identity."""
+    try:
+        home_copy = home_seed_path(target.project_root, target.branch_dir)
+        if home_copy.is_file():
+            copy_seed_home(target.project_root, target.branch_dir)
+            record["home_copy"] = str(home_copy)
+    except (OSError, RuntimeError) as exc:
+        record["error"] = f"passport vault written, home copy not refreshed: {exc}"
+        logger.error("[export-vault] %s: %s", record["branch"], record["error"])
 
 
 def _project_targets(registry_path: Path) -> list[PassportTarget]:
@@ -498,12 +551,12 @@ def _project_targets(registry_path: Path) -> list[PassportTarget]:
     for row in branches_as_list(load_registry(registry_path).get("branches", [])):
         name = row.get("name", "?")
         if not _validate_path_containment(row.get("path", ""), registry_path):
-            logger.warning("[export-seeds] %s: path %r is outside %s, skipped", name, row.get("path"), registry_path)
+            logger.warning("[export-vault] %s: path %r is outside %s, skipped", name, row.get("path"), registry_path)
             continue
         branch_dir = registry_path.parent / entry_path(row)
         passport = branch_dir / ".trinity" / "passport.json"
         if not passport.is_file():
-            logger.warning("[export-seeds] %s at %s has no passport, not exported", name, branch_dir)
+            logger.warning("[export-vault] %s at %s has no passport, not exported", name, branch_dir)
             continue
         targets.append(PassportTarget(passport, branch_dir, registry_path.parent, resolve_residency(branch_dir)))
     return targets
@@ -519,8 +572,8 @@ def export_seeds(root=None, *, only: str | None = None, confirm: bool = False) -
     start = Path(root) if root is not None else Path.cwd()
     registry_path = find_registry(start_path=start)
     if registry_path is None:
-        logger.error("[export-seeds] no *_REGISTRY.json at or above %s", start)
-        raise FileNotFoundError(f"no *_REGISTRY.json at or above {start}: run export-seeds inside a project")
+        logger.error("[export-vault] no *_REGISTRY.json at or above %s", start)
+        raise FileNotFoundError(f"no *_REGISTRY.json at or above {start}: run export-vault inside a project")
     registry_path = Path(registry_path)
     base = registry_path.parent
 

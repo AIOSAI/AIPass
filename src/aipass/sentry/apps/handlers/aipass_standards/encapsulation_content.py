@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: encapsulation_content.py
 # Description: Encapsulation Standards Content Handler
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-03-09
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """
@@ -41,8 +41,9 @@ def get_encapsulation_standards() -> str:
         "  [green]✓[/green] [dim]from aipass.sentry.apps.handlers.bypass.utils import is_bypassed[/dim]",
         "  [green]✓[/green] [dim]from ..bypass.utils import is_bypassed[/dim]",
         "",
-        "[yellow]RULE 3: Entry Points Don't Import Handlers[/yellow]",
-        "  Main entry points (branch.py) use modules, not handlers directly.",
+        "[yellow]RULE 3: The Entry Point Doesn't Import Handlers[/yellow]",
+        "  apps/<branch>.py uses modules, not handlers directly. It is the one file judged:",
+        "  plugins, services and the package top file may import their own branch's handlers.",
         "  [red]✗[/red] [dim]from aipass.api.apps.handlers.openrouter.client import get_response[/dim]",
         "  [green]✓[/green] [dim]from aipass.api import load_config[/dim]  (the front door)",
         "",
@@ -51,12 +52,6 @@ def get_encapsulation_standards() -> str:
         "  [green]✓[/green] json_handler  - Default JSON operations",
         "  [green]✓[/green] file_handler  - Default file operations",
         "  [green]✓[/green] Same-package relative imports (from .X import Y)",
-        "",
-        "[yellow]The package top file types its door names from their homes:[/yellow]",
-        "  In src/aipass/<branch>/__init__.py, own-handler imports inside a top-level",
-        "  if TYPE_CHECKING: block are acquitted; nothing loads at runtime.",
-        "  [red]✗[/red] A runtime handler import there (it breaks the door's laziness).",
-        "  [red]✗[/red] Another branch's handlers, or a TYPE_CHECKING block in any other file.",
         "",
         f"[dim]{sep}[/dim]",
         "[bold cyan]EXCEPTIONS:[/bold cyan]",

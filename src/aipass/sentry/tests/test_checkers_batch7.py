@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for encapsulation_check sub-functions (the other checkers moved to test_checkers_batch7_*.py)
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-04-25
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/encapsulation_check.py and its sibling checkers (batch 7)."""
@@ -285,12 +285,12 @@ class TestEncapsulationReadsImportLinesOnly:
 
     def test_a_fixture_string_body_naming_an_import_is_not_one(self, tmp_path):
         lines = _lines('SOURCE = """\nfrom apps.handlers.other import X\n"""\n')
-        path = tmp_path.joinpath("sentry", "apps", "x.py").as_posix()
+        path = tmp_path.joinpath("sentry", "apps", "sentry.py").as_posix()
         assert check_direct_handler_imports(lines, path)["passed"] is True
 
     def test_a_direct_import_after_a_docstring_closing_mid_line_is_read(self, tmp_path):
         lines = _lines('"""Doc opens\nand closes here."""\nfrom sentry.apps.handlers.plan.validator import X\n')
-        result = check_direct_handler_imports(lines, tmp_path.joinpath("sentry", "apps", "x.py").as_posix())
+        result = check_direct_handler_imports(lines, tmp_path.joinpath("sentry", "apps", "sentry.py").as_posix())
         assert result["message"] == (
             "Line 3: Handler imported directly (inside its branch, through a module; "
             "another branch's, through its front door: from aipass.<branch> import <name>)"
@@ -443,37 +443,46 @@ class TestCheckDirectHandlerImports:
         assert result["passed"] is False
 
 
-#: A type-only block naming each door name from its own handler home; nothing runs at import.
-TYPED = (
-    "from typing import TYPE_CHECKING\n"
-    "if TYPE_CHECKING:\n"
-    "    from aipass.demo.apps.handlers.dash.ops import (\n"
-    "        cap as cap,\n"
-    "    )\n"
-)
+#: A runtime import of the branch's own handler, the line rule 3 judges.
+OWN_HANDLER = "from aipass.demo.apps.handlers.dash.ops import cap\n"
+
+#: The same import inside a type-only block.
+TYPED = "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from aipass.demo.apps.handlers.dash.ops import cap\n"
 
 
-class TestTheDoorTypesItsNamesFromTheirHomes:
-    """A package top file's TYPE_CHECKING import of its own handler is the door's static view, not a breach."""
+class TestRuleThreeJudgesTheEntryPointAlone:
+    """Inside a branch anything goes: only apps/<branch>.py must route through its modules."""
 
     @pytest.mark.parametrize(
         "rel, source, passed",
         [
-            ("__init__.py", TYPED, True),
-            ("__init__.py", "from aipass.demo.apps.handlers.dash.ops import cap\n", False),
-            ("__init__.py", TYPED.replace("if TYPE_CHECKING:", "if FAST:"), False),
+            ("apps/demo.py", OWN_HANDLER, False),
             ("apps/demo.py", TYPED, False),
+            ("apps/plugins/ops/merge_plugin.py", OWN_HANDLER, True),
+            ("apps/log_watcher_service.py", OWN_HANDLER, True),
+            ("artifacts/broker_acceptance_test.py", OWN_HANDLER, True),
+            ("__init__.py", OWN_HANDLER, True),
         ],
-        ids=["door_type_only", "door_runtime", "door_runtime_if_block", "entry_point_type_only"],
+        ids=["entry_point", "entry_point_type_only", "plugin", "service", "artifact", "package_top"],
     )
-    def test_only_the_doors_type_only_own_handler_import_is_acquitted(self, tmp_path, rel, source, passed):
+    def test_an_own_handler_import_convicts_only_the_entry_point(self, tmp_path, rel, source, passed):
         branch = tmp_path / "src" / "aipass" / "demo"
-        (branch / "apps").mkdir(parents=True)
         target = branch / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        (branch / "apps").mkdir(exist_ok=True)
         target.write_text(source, encoding="utf-8")
         assert check_direct_handler_imports(_lines(source), str(target))["passed"] is passed
 
-    def test_another_branchs_handler_in_the_doors_type_only_block_still_convicts(self, tmp_path):
+    @pytest.mark.parametrize("preferred_exists, passed", [(False, False), (True, True)], ids=["fallback", "shadowed"])
+    def test_branch_py_is_the_entry_point_only_when_the_named_file_is_absent(self, tmp_path, preferred_exists, passed):
+        apps = tmp_path / "src" / "aipass" / "demo" / "apps"
+        apps.mkdir(parents=True)
+        if preferred_exists:
+            (apps / "demo.py").write_text("", encoding="utf-8")
+        (apps / "branch.py").write_text(OWN_HANDLER, encoding="utf-8")
+        assert check_direct_handler_imports(_lines(OWN_HANDLER), str(apps / "branch.py"))["passed"] is passed
+
+    def test_another_branchs_handler_in_the_package_top_still_convicts_on_rule_one(self, tmp_path):
         branch = tmp_path / "src" / "aipass" / "demo"
         (branch / "apps").mkdir(parents=True)
         source = TYPED.replace("aipass.demo.apps", "aipass.flow.apps")
@@ -481,7 +490,7 @@ class TestTheDoorTypesItsNamesFromTheirHomes:
         checks = encapsulation_check.check_module(str(branch / "__init__.py"))["checks"]
         assert {c["name"]: c["passed"] for c in checks if "import" in c["name"].lower()} == {
             "Cross-branch handler imports": False,
-            "Direct handler imports": False,
+            "Direct handler imports": True,
         }
 
 

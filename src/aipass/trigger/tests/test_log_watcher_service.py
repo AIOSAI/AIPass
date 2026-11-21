@@ -1,20 +1,21 @@
 # =================== AIPass ====================
 # Name: test_log_watcher_service.py
 # Description: Tests for the log watcher service entry point
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/log_watcher_service.py — the persistent service entry point."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(covered_elsewhere) — the reload decision behind reload_sentinel.start, in test_reload_sentinel.py
+# sentry: no-test-needed(covered_elsewhere) — the reload decision behind reload_sentinel.start, test_reload_sentinel.py
 # sentry: no-test-needed(covered_elsewhere) — the branch watcher start_branch_watcher drives, in test_log_watcher.py
 
 import signal
 import threading
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -38,6 +39,8 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(log_watcher_service, "run_error_catchup", MagicMock())
     # The real purge rewrites the LIVE error registry.
     monkeypatch.setattr(log_watcher_service, "purge_stale", MagicMock(return_value=0))
+    # A real sweep thread fires medic_mute_sweep on the LIVE bus every minute.
+    monkeypatch.setattr(log_watcher_service, "Thread", MagicMock())
 
     # The shell may be systemd-supervised: main() starts reload_sentinel,
     # whose evaluate() only acts under INVOCATION_ID.
@@ -203,7 +206,7 @@ class TestMain:
 
         mod.main()
 
-        mod.purge_stale.assert_called_once_with(30, keep_suppressed=True)
+        cast(MagicMock, mod.purge_stale).assert_called_once_with(30, keep_suppressed=True)
 
     def test_calls_stop_on_shutdown(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """After stop_event is set, both stop functions are called (mutant: the two stops swapped)."""
@@ -460,3 +463,36 @@ class TestStartupCatchup:
             mod.main()
 
         catchup.assert_not_called()
+
+
+class TestMuteSweep:
+    """The daemon is the bus's clock for medic_mute_sweep."""
+
+    def test_main_starts_the_sweep_on_the_stop_event(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """main() starts one daemon thread running sweep_mutes with the service's own stop_event."""
+        mod = _import_module()
+        pre_set = threading.Event()
+        pre_set.set()
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
+        thread_cls = cast(MagicMock, mod.Thread)
+
+        mod.main()
+
+        thread_cls.assert_called_once_with(
+            target=mod.sweep_mutes, args=(pre_set,), name="medic-mute-sweep", daemon=True
+        )
+        thread_cls.return_value.start.assert_called_once_with()
+
+    def test_sweep_fires_each_tick_until_stopped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Each MUTE_SWEEP_SECONDS wait that times out fires medic_mute_sweep; a set event ends the loop."""
+        mod = _import_module()
+        bus = MagicMock()
+        monkeypatch.setattr(mod, "trigger", bus)
+        stop = MagicMock()
+        stop.wait.side_effect = [False, False, True]
+
+        mod.sweep_mutes(stop)
+
+        assert bus.fire.call_args_list == [(("medic_mute_sweep",),)] * 2
+        stop.wait.assert_called_with(mod.MUTE_SWEEP_SECONDS)
+        assert mod.MUTE_SWEEP_SECONDS == 60

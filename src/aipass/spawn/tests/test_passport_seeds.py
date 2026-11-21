@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_passport_seeds.py
 # Description: TDPLAN-0017 — passport seeds: export, validation, mint-from-seed
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-08-28
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/handlers/seed_ops.py and apps/modules/core.py's mint-from-seed path."""
@@ -559,7 +559,7 @@ class TestEveryCitizenCarriesASeed:
             result = spawn_agent(str(target), registry_path=str(registry))
 
         assert result["success"] is False
-        assert "seed" in result["error"] and "disk full" in result["error"]
+        assert "passport vault" in result["error"] and "disk full" in result["error"]
         assert not registry.exists() or "HALFBORN" not in registry.read_text(encoding="utf-8")
 
     def test_export_run_in_a_project_seeds_that_projects_citizens(self, tmp_path):
@@ -617,7 +617,7 @@ class TestEveryCitizenCarriesASeed:
         project, registry, target, _ = project_citizen(tmp_path)
         (target / ".trinity" / "passport.json").unlink()
 
-        with pytest.raises(FileNotFoundError, match="export-seeds --confirm"):
+        with pytest.raises(FileNotFoundError, match="export-vault --confirm"):
             restore_citizen("finch", registry)
 
 
@@ -695,7 +695,7 @@ class TestAProjectPassportIsSeededAsItStands:
 
         assert receipt["written"] == 0
         assert "branch_info.branch_name" in receipt["errors"][0]["error"]
-        assert "re-run export-seeds" in receipt["errors"][0]["error"]
+        assert "re-run export-vault" in receipt["errors"][0]["error"]
 
     def test_a_core_passport_off_2_0_is_refused_naming_the_migration(self, tmp_path):
         """Mutant: the core refusal drops its cure -> red."""
@@ -708,6 +708,50 @@ class TestAProjectPassportIsSeededAsItStands:
         receipt = export_seeds(root, confirm=True)
 
         assert "migrate-passports" in receipt["errors"][0]["error"]
+
+
+class TestThePassportVaultName:
+    """New seats get passport.vault.json; a seat still on 2.8.38's passport.seed.json keeps working."""
+
+    def test_a_newborn_writes_the_vault_name_and_never_the_old_one(self, tmp_path):
+        """Mutant: the mint writes passport.seed.json -> red."""
+        target = tmp_path / "newborn"
+        result = spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
+        assert result["success"] is True, result.get("error")
+
+        assert (target / ".aipass" / "passport.vault.json").is_file()
+        assert not (target / ".aipass" / "passport.seed.json").exists()
+
+    def test_a_seat_holding_only_the_old_name_is_restored_from_it(self, tmp_path):
+        """Mutant: find_seed drops the old-name fallback -> no vault found -> restore raises -> red."""
+        project, registry, target, passport = project_citizen(tmp_path)
+        export_seeds(project, confirm=True)
+        seed_path_for(target).replace(target / ".aipass" / "passport.seed.json")
+        (target / ".trinity" / "passport.json").unlink()
+        home = SimpleNamespace(path=tmp_path, source="test", tried=())
+
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            written = restore_citizen("finch", registry)
+
+        assert written[0] == "passport.json(seed)"
+        restored = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert restored["identity"] == passport["identity"]
+
+    def test_export_moves_the_old_name_into_recovery_beside_a_current_vault(self, tmp_path):
+        """Mutants: export reports a current vault 'current' while the old file stands, or keeps the old file -> red."""
+        project, _, target, _ = project_citizen(tmp_path)
+        export_seeds(project, confirm=True)
+        legacy = target / ".aipass" / "passport.seed.json"
+        legacy.write_bytes(seed_path_for(target).read_bytes())
+
+        preview = export_seeds(project)
+        assert (preview["updated"], legacy.is_file()) == (1, True)
+
+        export_seeds(project, confirm=True)
+
+        assert not legacy.exists() and seed_path_for(target).is_file()
+        [retired] = list((target / ".spawn" / ".recovery").glob("passport.seed.json.retired-*"))
+        assert retired.read_bytes() == seed_path_for(target).read_bytes()
 
 
 class TestExportSeeds:
@@ -807,7 +851,7 @@ class TestExportSeeds:
         assert receipt["updated"] == 1
         assert json.loads(seed_path_for(branch_dir(root)).read_text(encoding="utf-8"))["identity"]["role"] == "explorer"
         # Mutant: the refresh overwrites with no copy kept -> no backup in the recovery folder -> red.
-        [kept] = list((branch_dir(root) / ".spawn" / ".recovery").glob("passport.seed.json.*.backup"))
+        [kept] = list((branch_dir(root) / ".spawn" / ".recovery").glob("passport.vault.json.*.backup"))
         assert kept.read_text(encoding="utf-8") == before
 
     def test_residents_are_counted_but_never_exported(self, tmp_path):
@@ -940,7 +984,7 @@ class TestMintFromSeedEndToEnd:
         result = spawn_agent(str(target), registry_path=str(_registry(tmp_path)))
 
         assert result["success"] is False
-        assert "SEED REFUSED" in result["error"]
+        assert "VAULT REFUSED" in result["error"]
         assert "citizen_id" in result["error"]
         assert not (target / ".trinity" / "passport.json").exists()
 

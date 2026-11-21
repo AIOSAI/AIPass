@@ -1,17 +1,18 @@
 # =================== AIPass ====================
 # Name: claude.py
-# Version: 2.2.0
+# Version: 2.3.0
 # Description: Claude Code bridge — mounts the promoted hook code, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-05-18
-# Modified: 2026-11-17
+# Modified: 2026-11-19
 # =============================================
 
 """Claude Code bridge: runs the promoted copy (`drone @hooks promote`), never the tree being edited.
 
 A PreToolUse that cannot load or raises is refused (exit 2, set in a finally): Claude Code runs the
 tool on any other exit. Every other event exits 0 with the reason on stderr.
+One call is let through while the engine is broken: the admin seat's recovery command (safe_mode.py).
 """
 
 import contextlib
@@ -27,9 +28,15 @@ GUARDED_EVENTS = frozenset({"PreToolUse"})
 BREAK_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "logs", "bridge.log")
 LIVE_BREAK_LOG = BREAK_LOG
 
+#: Loaded by path, and only once the engine has failed: it imports nothing of aipass.
+SAFE_MODE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "safe_mode.py")
+
 BROKEN = (
     "HOOKS BROKEN: the AIPass hook engine could not run ({error}).\n"
     "Every gate it runs is down, so nothing they guard runs until it is fixed.\n"
+    "Safe mode, the admin seat only: {diagnose}\n"
+    "No seat can act: a fresh agent started outside the project works "
+    "src/aipass/flow/templates/playbook_plans/recovery.md\n"
     'Mail @hooks and @devpulse: drone @ai_mail email @hooks "Hooks broken" "<what you ran, and this text>"'
 )
 
@@ -46,6 +53,16 @@ def _mount() -> str:
     if os.environ.get(mount.OVERRIDE_ENV):
         sys.stderr.write(f"[HOOKS] served by {served}\n")
     return served
+
+
+def _safe_mode(stdin_data: str) -> bool:
+    """True when safe_mode.py lets this one call through; raises when it cannot load or judge (the caller refuses)."""
+    spec = importlib.util.spec_from_file_location("_aipass_hooks_safe_mode", SAFE_MODE)
+    if spec is None or spec.loader is None:
+        raise ImportError("safe_mode.py has no import spec")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.allows(stdin_data) is True
 
 
 def _printable(text: str) -> str:
@@ -71,11 +88,21 @@ def _record_break(event_type: str, line: str) -> None:
             )
 
 
-def _broken(event_type: str, exc: BaseException) -> None:
-    """Refuse a guarded event outright; any other event passes, the reason on stderr. Answer first, record after."""
+def _broken(event_type: str, exc: BaseException, stdin_data: str = "") -> None:
+    """Refuse a guarded event outright, unless safe mode lets this call through; any other event passes.
+
+    Answer first, record after.
+    """
     code = 2 if event_type in GUARDED_EVENTS else 0
     try:
-        reason = _printable(BROKEN.format(error=f"{type(exc).__name__}: {exc}"))
+        if code and _safe_mode(stdin_data):
+            return
+    except BaseException as trouble:  # the engine is already down: a safe mode that cannot judge refuses, loudly
+        with contextlib.suppress(BaseException):
+            sys.stderr.write(f"[HOOKS] safe mode could not judge this call: {type(trouble).__name__}: {trouble}\n")
+    try:
+        diagnose = " ".join(("python3", "-I", SAFE_MODE, "diagnose"))
+        reason = _printable(BROKEN.format(error=f"{type(exc).__name__}: {exc}", diagnose=diagnose))
         sys.stderr.write(reason + "\n")
         if code:
             sys.stdout.write(json.dumps({"decision": "block", "reason": reason}))
@@ -96,6 +123,7 @@ def main() -> None:
     arg = sys.argv[1]
     event_type = arg.split(":", 1)[0]
 
+    stdin_data = ""
     try:
         stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
         _mount()
@@ -105,7 +133,7 @@ def main() -> None:
         output, exit_code = run_event(arg, stdin_data)
         json_handler.log_operation("bridge", {"event": arg, "exit_code": exit_code})
     except BaseException as exc:  # fail closed on the guarded event, however it broke: see _broken
-        _broken(event_type, exc)
+        _broken(event_type, exc, stdin_data)
         return
 
     try:

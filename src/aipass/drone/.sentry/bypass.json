@@ -40,29 +40,14 @@
       "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure."
     },
     {
-      "file": "apps/plugins/devpulse_ops/merge_plugin.py",
-      "standard": "encapsulation",
-      "reason": "Plugin imports lock_handler.find_repo_root() — drone-internal plugin, same branch."
-    },
-    {
       "file": "apps/plugins/devpulse_ops/sync_plugin.py",
       "standard": "architecture",
       "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure."
     },
     {
-      "file": "apps/plugins/devpulse_ops/sync_plugin.py",
-      "standard": "encapsulation",
-      "reason": "Plugin imports lock_handler.find_repo_root() — drone-internal plugin, same branch."
-    },
-    {
       "file": "apps/plugins/devpulse_ops/fix_plugin.py",
       "standard": "architecture",
       "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure."
-    },
-    {
-      "file": "apps/plugins/devpulse_ops/fix_plugin.py",
-      "standard": "encapsulation",
-      "reason": "Plugin imports lock_handler.find_repo_root() — drone-internal plugin, same branch."
     },
     {
       "file": "tests/test_devpulse_plugins.py",
@@ -73,11 +58,6 @@
       "file": "artifacts/broker_acceptance_test.py",
       "standard": "architecture",
       "reason": "Acceptance test artifact — standalone demo script, not part of 3-layer production structure."
-    },
-    {
-      "file": "artifacts/broker_acceptance_test.py",
-      "standard": "encapsulation",
-      "reason": "Acceptance test imports handlers directly to verify broker daemon behavior end-to-end."
     },
     {
       "file": "artifacts/broker_acceptance_test.py",
@@ -114,24 +94,6 @@
         "start_background"
       ],
       "reason": "Threaded broker entrypoint, exercised by tests/test_broker.py; production uses blocking start(); intentionally not called in shipped non-test code."
-    },
-    {
-      "file": "apps/plugins/devpulse_ops/auth.py",
-      "standard": "encapsulation",
-      "lines": [
-        22
-      ],
-      "reason": "Line 27 imports AIPASS_REGISTRY_NAME from handlers/git/repo_context.py — drone-internal, same branch, same subsystem (merge/sync/fix_plugin hold the identical rule for lock_handler). The alternative is a second literal of the registry filename: the auth gate and the tag handler must agree on which repo is AIPass's own, and two copies of that fact can drift. Line-scoped on purpose — auth.py is the git authority gate and any OTHER direct handler import in it must still be reported. ANCHORED 2026-08-31: the 'anchor' key states what line 27 must CONTAIN, and TestLineScopedBypassesAreOnTarget fails the day it does not. A line number is a pointer that edits invalidate silently — @trigger had four shift in round 5 and @sentry measured drone's other nine adrift — so a waiver that cannot say what it points at cannot be trusted to still point there.",
-      "anchor": "from aipass.drone.apps.handlers.git.repo_context import AIPASS_REGISTRY_NAME"
-    },
-    {
-      "file": "apps/plugins/devpulse_ops/auth.py",
-      "standard": "encapsulation",
-      "lines": [
-        23
-      ],
-      "reason": "Line 23 imports release_handler, repo_door and session_home from handlers/git — drone-internal, same branch, same subsystem as line 22. The gate must read the upstream slug the release handler targets, ask the same admin rail the --repo door asks, and place the session the same way the handlers log it; git_module imports this plugin, so routing through the module would be a cycle. Line-scoped and anchored like line 22: any other direct handler import in the authority gate must still be reported.",
-      "anchor": "from aipass.drone.apps.handlers.git import release_handler, repo_door, session_home"
     },
     {
       "file": "apps/handlers/git/repo_context.py",

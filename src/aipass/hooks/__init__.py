@@ -4,7 +4,20 @@ Without it pytest imports this branch's conftest as the bare `tests.conftest`; t
 """
 
 import importlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # each name typed from its home
+    from aipass.hooks.apps.handlers.config.trust_registry import (
+        REGISTRY_PATH,
+        enroll,
+        is_trusted,
+        read_registry,
+        registry_path,
+        revoke,
+    )
+    from aipass.hooks.apps.modules.grounding_content import BRANCH_CHAR_BUDGET
+    from aipass.hooks.apps.modules.sandbox import build_policy, build_srt_config, resolve_bwrap_command
+    from aipass.hooks.apps.sound import SOUND_FLAG, is_muted
 
 _TRUST = "aipass.hooks.apps.handlers.config.trust_registry"
 _SANDBOX = "aipass.hooks.apps.modules.sandbox"

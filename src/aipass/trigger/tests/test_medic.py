@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_medic.py
 # Description: Unit tests for medic module handle_command
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for the medic toggle module (apps/modules/medic.py)."""
@@ -46,6 +46,7 @@ _STATE_NAMES = (
     "get_failing_handlers",
     "parse_duration",
     "DEFAULT_MUTE_SECONDS",
+    "DEFAULT_VOLUME_MUTE_SECONDS",
     "DEFAULT_OFF_SECONDS",
 )
 
@@ -87,7 +88,8 @@ def _mock_infrastructure(monkeypatch):
     medic_state_mod.get_failing_handlers = MagicMock(return_value=[])
     # The real parser: a stub answering None let no test pin --for (sentry flag_never_passed).
     medic_state_mod.parse_duration = parse_duration
-    medic_state_mod.DEFAULT_MUTE_SECONDS = 86400
+    medic_state_mod.DEFAULT_MUTE_SECONDS = 14400
+    medic_state_mod.DEFAULT_VOLUME_MUTE_SECONDS = 86400
     medic_state_mod.DEFAULT_OFF_SECONDS = 86400
     for name in _STATE_NAMES:
         monkeypatch.setattr(medic, name, getattr(medic_state_mod, name))
@@ -309,13 +311,13 @@ def test_handle_command_status_suppression_hint_when_disabled(capsys):
 
 
 def test_handle_command_mute_branch():
-    """handle_command('mute', ['@speakeasy']) mutes the branch with 24h default TTL."""
+    """handle_command('mute', ['@speakeasy']) mutes the branch with the 4h content default."""
     medic = _import_medic()
     result = medic.handle_command("mute", ["@speakeasy"])
 
     assert result is True
     state = _get_medic_state()
-    state.mute_branch.assert_called_once_with("speakeasy", duration_seconds=86400.0)
+    state.mute_branch.assert_called_once_with("speakeasy", duration_seconds=14400.0)
 
 
 def test_handle_command_mute_for_sets_the_asked_duration_not_the_default():
@@ -344,7 +346,7 @@ def test_handle_command_mute_branch_without_at():
     medic.handle_command("mute", ["speakeasy"])
 
     state = _get_medic_state()
-    state.mute_branch.assert_called_once_with("speakeasy", duration_seconds=86400.0)
+    state.mute_branch.assert_called_once_with("speakeasy", duration_seconds=14400.0)
 
 
 def test_handle_command_mute_prints_confirmation(capsys):
@@ -353,7 +355,17 @@ def test_handle_command_mute_prints_confirmation(capsys):
     medic.handle_command("mute", ["@api"])
 
     printed = _printed(capsys)
-    assert "  Muted @api — auto-expires in 24h" in printed, printed
+    assert "  Muted @api — auto-expires in 4h" in printed, printed
+
+
+def test_volume_mute_keeps_its_own_24h_default():
+    """volume-mute takes DEFAULT_VOLUME_MUTE_SECONDS, not the 4h content default."""
+    medic = _import_medic()
+    medic.handle_command("volume-mute", ["@speakeasy"])
+
+    state = _get_medic_state()
+    state.mute_branch_volume.assert_called_once_with("speakeasy", duration_seconds=86400.0)
+    state.mute_branch.assert_not_called()
 
 
 def test_handle_command_mute_failure_prints_error(capsys):
@@ -503,7 +515,7 @@ def test_handle_command_medic_routes_mute_with_args():
 
     assert result is True
     state = _get_medic_state()
-    state.mute_branch.assert_called_once_with("speakeasy", duration_seconds=86400.0)
+    state.mute_branch.assert_called_once_with("speakeasy", duration_seconds=14400.0)
 
 
 @pytest.mark.parametrize("raw", ["@Speakeasy", "src/aipass/speakeasy", "speakeasy"])
@@ -513,7 +525,7 @@ def test_mute_normalises_the_branch_name_it_is_given(raw):
     medic.handle_command("mute", [raw])
 
     state = _get_medic_state()
-    state.mute_branch.assert_called_once_with("speakeasy", duration_seconds=86400.0)
+    state.mute_branch.assert_called_once_with("speakeasy", duration_seconds=14400.0)
 
 
 def test_handle_command_none_command_returns_false():

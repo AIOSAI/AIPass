@@ -1,7 +1,41 @@
 """AIPass Drone's package door: every name another branch takes from drone (docs/routing_and_resolution.md)."""
 
 import importlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # each name typed from its home
+    from aipass.drone.apps.handlers.broker.client import create_identified_connection
+    from aipass.drone.apps.handlers.broker.daemon import BrokerDaemon
+    from aipass.drone.apps.handlers.deletion_log import record_foreign_deletion, record_gate_refusal
+    from aipass.drone.apps.handlers.discovery_handler import HelpResult
+    from aipass.drone.apps.handlers.exceptions import (
+        BranchAlreadyExistsError,
+        BranchNotFoundError,
+        CommandExecutionError,
+        InvalidPathError,
+        RegistryCorruptError,
+        RegistryError,
+        RegistryNotFoundError,
+        RegistryPermissionError,
+        RoutingError,
+    )
+    from aipass.drone.apps.handlers.executor import CommandResult
+    from aipass.drone.apps.handlers.registry_handler import (
+        get_registry_path,
+        reset_registry_path,
+        resolve_aipass_home,
+        set_registry_path,
+    )
+    from aipass.drone.apps.handlers.registry_name import is_registry_filename
+    from aipass.drone.apps.modules.discovery import discover_modules, get_help, get_system_help
+    from aipass.drone.apps.modules.resolver import (
+        branch_exists,
+        get_branch_info,
+        list_branches,
+        normalize_branch_arg,
+        resolve_branch,
+    )
+    from aipass.drone.apps.modules.router import route_all, route_command
 
 __version__ = "1.3.0"
 

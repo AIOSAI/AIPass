@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_adopt.py
 # Description: Tests for aipass adopt — project adoption handler
-# Version: 1.5.0
+# Version: 1.7.0
 # Created: 2026-07-20
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/handlers/new_project/adopt.py and apps/modules/adopt.py."""
@@ -374,6 +374,8 @@ def test_adopt_with_agent_spawns(host_env):
     ):
         result = adopt_project(target, no_agent=False)
     mock_spawn.assert_called_once()
+    # spawn stamps the adopted seat's defaults (wider .updateignore, codebase onboarding) on this value only.
+    assert mock_spawn.call_args.kwargs["arrival"] == "adopted"
     assert result["agent_created"] is True
     assert result["agent_home"] == str(target / "src" / "existing_site" / "existing_site")
 
@@ -657,6 +659,80 @@ def test_a_framework_adopt_with_no_aipass_home_refuses_naming_it_and_writes_noth
     ):
         adopt_project(target, no_agent=True)
     assert sorted(p.name for p in target.iterdir()) == before
+
+
+# ---------------------------------------------------------------------------
+# framework mode on a product repo: exclude-first, the tracked .gitignore never written
+# ---------------------------------------------------------------------------
+
+
+class TestFrameworkProductRepo:
+    """A fresh-docker run found adopt appending AIPass lines to a product's tracked .gitignore, excluding nothing."""
+
+    @staticmethod
+    def _seat(**kwargs):
+        """spawn_agent's stand-in: writes the seat's local state and stamps the adopted .updateignore rows."""
+        home = Path(kwargs["target_path"])
+        (home / ".trinity").mkdir(parents=True)
+        (home / ".trinity" / "passport.json").write_text("{}\n", encoding="utf-8")
+        root = home.parents[2]  # <root>/src/<pkg>/<pkg>: spawn stamps at the registry's folder
+        with (root / ".updateignore").open("a", encoding="utf-8") as stamp:
+            stamp.write("AGENTS.md\n.gitignore\n")
+        return {"success": True, "branch_name": "SEED", "files_copied": 1}
+
+    def _adopt(self, repo: Path, home: Path) -> dict:
+        (home / ".venv").mkdir()
+        with (
+            patch("aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home", return_value=str(home)),
+            patch("aipass.aipass.apps.handlers.new_project.adopt.is_throwaway_path", return_value=False),
+            patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"),
+            patch("aipass.aipass.apps.handlers.new_project._localize_imports"),
+            patch("aipass.aipass.apps.handlers.new_project.spawn_agent", side_effect=self._seat),
+        ):
+            return adopt_project(repo)
+
+    def test_adopt_leaves_the_tracked_gitignore_byte_identical_and_git_status_clean(self, client_repo, tmp_path):
+        """Mutant: the .gitignore merge kept for a repo -> red at the bytes. Mutant: no exclude -> red at status."""
+        gitignore = (client_repo / ".gitignore").read_bytes()
+
+        result = self._adopt(client_repo, _fake_home(tmp_path))
+
+        assert (client_repo / ".gitignore").read_bytes() == gitignore
+        assert _git(client_repo, "status", "--porcelain", "--untracked-files=all") == ""
+        assert result["gitignore_action"] == "untouched"
+        assert (client_repo / "src" / "seed" / "seed" / ".trinity" / "passport.json").is_file()
+
+    def test_the_exclude_names_what_adopt_wrote_and_swallows_no_product_path(self, client_repo, tmp_path):
+        """Vera's warning: the template's tools/ and logs/ lines would hide product code, so none is copied."""
+        self._adopt(client_repo, _fake_home(tmp_path))
+
+        lines = (client_repo / ".git" / "info" / "exclude").read_text(encoding="utf-8").splitlines()
+        assert {"/src/seed/seed/", "/SEED_REGISTRY.json", "/.SEED_REGISTRY.lock", "/.venv", "*.aipass-new"} <= set(
+            lines
+        )
+        # The mint's import localizer writes src/<pkg>/__init__.py when the product has none; it is
+        # adopt's file, excluded - found as live untracked trace by the container truth run.
+        assert "/src/seed/__init__.py" in lines
+        assert {"/.aipass/", "/.claude/", "/.agents/", "/.updateignore"} <= set(lines)
+        assert not {"/src/", "/AGENTS.md", "tools/", "logs/", ".trinity/"} & set(lines)
+
+
+def test_without_a_repo_the_gitignore_lane_honours_the_updateignore_the_mint_stamps(host_env):
+    """The lane runs after the seat is stamped: an adopted seat's .updateignore claims .gitignore.
+
+    Mutant: the lane moved back before the mint -> it appends to .gitignore -> red.
+    """
+    _, target = host_env
+    with (
+        _no_home(),
+        patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"),
+        patch("aipass.aipass.apps.handlers.new_project._localize_imports"),
+        patch("aipass.aipass.apps.handlers.new_project.spawn_agent", side_effect=TestFrameworkProductRepo._seat),
+    ):
+        result = adopt_project(target)
+    assert not (target / ".gitignore").exists()
+    assert result["gitignore_action"] == "updateignore"
+    assert _actions(result)[".gitignore"] == "skip"
 
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,36 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-11-21] — v2.8.40: loud fences for a corrupt registry and a broken cadence, the NPLAN is born, typed blocks on every door
+
+### Added
+
+- **flow: the NPLAN, one night shift as a plan** (2026-11-21). The owner's go-brief is the contract, the shift logs into it, and the morning report closes it; an NPLAN never outlives its night. Beside it, every plan template now says the same thing about endings: finished = closed, by whoever finished it, no permission asked — closing archives and vectorizes, and `restore` reopens, so nothing is lost.
+- **drone: `delete-branch` reaches a project seat's own repo** (2026-11-20). Retiring a seat that lives inside an external project's repository now cleans its traces there under the same rules as inside the tree.
+
+- **spawn, aipass: external project seats are born protected** (2026-11-20). `aipass new` and `aipass adopt` tell spawn how the first seat arrives (`fresh` or `adopted`), and the mint stamps the project's defaults: a root `.updateignore` naming the owner's files the update lane must never write, a "First wake" onboarding checklist in the seat's local prompt that the seat checks off and edits out, a `.aipass/test_write_policy.json` the project's owner flips (off by default — the same refusal a missing policy gave, now ruled and named), and a copy of the passport seed under the AIPass home's `.aipass/seeds/`, inside the nightly backup's scope, so a seat whose folder is excluded from the product's git survives a machine loss; restore falls back to it. A file the owner already wrote is never touched, and spawn never guesses an arrival. Proven end to end in a clean container: a fresh project and an adopted product repo both come out fully stamped with zero AIPass trace in git.
+
+### Fixed
+
+- **aipass: adopt keeps out of a product's git** (2026-11-20). Adopting a directory with its own repo appended the AIPass block into the product's tracked `.gitignore` — ignoring the `.updateignore` the mint had just stamped — and left every AIPass path as untracked trace, the package init included. Adopt now never writes a tracked `.gitignore`: every path it creates goes to `.git/info/exclude`, root-anchored to exactly what it wrote, and the template's broad lines (`tools/`, `logs/`, `.trinity/`) are never copied, since they would swallow product code. `aipass init update --json` without `--dry-run` applied the update while its help read like a preview; it is refused before anything runs, and the help names `--dry-run --json`.
+
+- **hooks: safe mode, the admin seat can recover a broken hook engine** (2026-11-19). When the engine could not load, the bridge refused every tool call of every agent, so none could put the broken code back; three outages each waited for a person at a terminal. The Claude bridge now lets one call through while the engine is broken: the admin seat running `python3 -I <path>/safe_mode.py` with `diagnose`, `park <path>` or `rollback`. `park` moves the uncommitted changes under one branch's `apps/` into a named git stash, a readable patch beside it; `rollback` serves the promoted hooks copy before the live one and undoes itself when that is no cure. Both refuse while the engine runs, nothing is deleted, every command is logged in `~/.aipass/recovery/log.jsonl`, and the `HOOKS BROKEN` text prints the command. A committed break, a broken config file and the Codex, OpenCode and Seed bridges are not covered.
+- **flow: the `recovery` playbook** (2026-11-19). One page for an agent with no memory, started outside the project when no agent inside can work: what the break is, what must never be done, and the steps with the same recovery command. `drone @flow create . "What broke" recovery pplan`, or read `src/aipass/flow/templates/playbook_plans/recovery.md` where it lies when drone does not run.
+
+### Changed
+
+- **hooks: a corrupt citizen registry fences loud, without a lockout** (2026-11-20). An unreadable `AIPASS_REGISTRY.json` used to refuse every write as a broken gate; the refusal now names the registry, the read error, @spawn as the owner and the dispatch line that summons the repair — the fence holds where it protects and opens the path where it repairs. A cadence config that cannot be read is no longer silent either: the seat sees one CRITICAL line in chat on every prompt, naming the file and who fixes it, until a good reload clears it.
+- **sentry: rule 3 judges the entry point alone** (2026-11-20). The one-import-door rule convicted same-branch internals that were never doors; it now reads only the branch's entry point, and seven waiver rows that existed to paper over those false convictions are retired.
+- **fleet: typed blocks are the door baseline** (2026-11-20). Every branch's lazy import door, and the newborn template, carry a `TYPE_CHECKING` block restating the door's own name table, so an IDE resolves `from aipass.x import y` to the real function — 5-of-18 drift became 18-of-18 consistency, each block applied and verified by its owner.
+- **api: eight pass-through wrappers are deleted** (2026-11-20). Callers now import the real functions; a wrapper that only forwarded its arguments was indirection with no contract.
+- **memory: the 32000/17000 file budgets ship as the default** (2026-11-20). The live raise on this install — local.json 32,000, observations.json 17,000 — becomes `DEFAULT_CONFIG`, with the keep-count ceilings recomputed in lockstep.
+- **spawn, aipass, sentry: the passport seed is renamed the passport vault** (2026-11-20). The owner's ruling: "seed" collided with the Seed project and misled the reader. A seat's durable identity file is now `.aipass/passport.vault.json`, the home-side store `.aipass/vault/<project>/`, and the verb `drone @spawn export-vault`; `export-seeds` exits with a pointer. Every reader — restore, mint, doctor, the repo pins — takes the vault name first and still reads a legacy `passport.seed.json`, so seats minted before the rename keep working until their next export retires the old file into `.spawn/.recovery/`. The 18 core seats' tracked seeds are re-exported under the new name in the same change.
+
+- **hooks: the engine's per-handler budget is removed** (2026-11-19). The engine kept its own fire count for a hook that declared `max_per_session`. Compass recall was its only user, and the handler's own cap was always reached first, so the engine's count never decided anything; when it did cut in, it froze the handler's message spacing. `max_per_session` stays in `hooks.json` as the handler's cap.
+
+- **devpulse: one shared word no longer surfaces a Compass decision** (2026-11-19). Recall scored a decision as relevant when the prompt shared a single uncommon word with it ("console", "remaining"), which cleared the surfacing threshold. Relevance is now m / (4 + m): one shared word scores 0.2 and stays silent, two score 0.33 and may surface, so the unchanged threshold of 0.3 means "at least two uncommon words in common". Spacing, cooldown and the cap are as they were.
+
+- **ci: the Docker image is published by hand, not by every release** (2026-11-19). A version tag fired the image build beside PyPI, and a slow package mirror or an installer fault then marked the release red. A running AIPass updates itself from the remote, so a release needs no new image; the workflow runs from the Actions tab when one is wanted.
 
 ## [2026-11-19] — v2.8.39: the Docker image builds, the README says what install does
 

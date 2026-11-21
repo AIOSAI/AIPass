@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_template_hygiene.py
 # Description: Canaries for what the shipped templates are allowed to contain
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-13
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for the shipped templates under templates/citizen/ and apps/handlers/file_ops.py's copy engine."""
@@ -255,8 +255,8 @@ class TestMintCompleteness:
         assert result["success"] is True, result.get("error")
         assert (target / "apps" / "bare_minted.py").is_file()
         assert (target / "notes.md").is_file()
-        assert not (target / ".aipass" / "passport.seed.json").exists()
-        assert any("No seed written" in issue for issue in result["validation_issues"])
+        assert not (target / ".aipass" / "passport.vault.json").exists()
+        assert any("No passport vault written" in issue for issue in result["validation_issues"])
 
 
 class TestExpectedMintPaths:

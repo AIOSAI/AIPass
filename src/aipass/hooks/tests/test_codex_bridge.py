@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.13.0
+# Version: 2.14.0
 # Description: Tests for Codex, OpenCode and Seed bridges: payload mapping, output envelope, apply_patch, fail closed
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-11-17
+# Modified: 2026-11-19
 # =============================================
 
-"""Tests for bridges/codex.py, bridges/opencode.py and its plugin opencode_plugin.ts, and bridges/seed.py."""
+"""Tests for bridges/codex.py, opencode.py and its plugin, seed.py, and the Claude bridge's safe mode (safe_mode.py)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that handlers/bridges/codex.py parses and imports its engine and loader
@@ -16,6 +16,8 @@
 # sentry: no-test-needed(generated) — opencode_plugin.ts inside a real OpenCode server: a live run (Node runs it here)
 # sentry: no-test-needed(stdlib) — json.loads and json.dumps round-tripping a payload
 
+import hashlib
+import hmac
 import importlib.util
 import io
 import json
@@ -28,7 +30,7 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.hooks.apps.handlers.bridges import codex, opencode, seed
+from aipass.hooks.apps.handlers.bridges import claude, codex, opencode, safe_mode, seed
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules import engine
 import aipass.prax as prax
@@ -995,3 +997,241 @@ class TestNothingAfterTheBreakLetsTheToolRun:
         with pytest.raises(SystemExit) as refused:
             seed.main()
         assert refused.value.code == 2
+
+
+_GIT_ID = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+
+
+@pytest.fixture
+def broken_home(tmp_path, monkeypatch):
+    """A checkout with one committed prax file, a signed admin seat, and safe_mode pointed at it."""
+    repo = tmp_path / "AIPass"
+    code = repo / "src" / "aipass" / "prax" / "apps" / "load.py"
+    seat = repo / "src" / "aipass" / "devpulse"
+    for folder in (code.parent, seat / ".trinity", seat / "artifacts", seat.parent / "flow" / ".trinity"):
+        folder.mkdir(parents=True)
+    code.write_text("VALUE = 1\n", encoding="utf-8")
+    for name, value in _GIT_ID.items():
+        monkeypatch.setenv(name, value)
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "base"]):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    (seat / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+    (seat.parent / "flow" / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+    key = tmp_path / "admin_grant.key"
+    key.write_text("ab" * 32 + "\n", encoding="utf-8")
+    cert = {"owner": "devpulse", "type": "birth_certificate", "privileges": {"admin": True}}
+    payload = json.dumps(cert, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    value = hmac.new(bytes.fromhex("ab" * 32), payload, hashlib.sha256).hexdigest()
+    signed = {**cert, "signature": {"algo": "hmac-sha256", "value": value}}
+    (seat / "artifacts" / "birth_certificate.json").write_text(json.dumps(signed), encoding="utf-8")
+    monkeypatch.setattr(safe_mode, "repo_root", lambda: str(repo))
+    monkeypatch.setattr(safe_mode, "KEY_PATH", str(key))
+    monkeypatch.setattr(safe_mode, "RECOVERY_DIR", str(tmp_path / "recovery"))
+    return repo
+
+
+def _bash(repo: Path, command: str, seat: str = "devpulse", tool: str = "Bash") -> str:
+    cwd = str(repo / "src" / "aipass" / seat)
+    return json.dumps({"tool_name": tool, "tool_input": {"command": command}, "cwd": cwd})
+
+
+class TestSafeModeAllowsOneCall:
+    """While the engine is broken the admin seat may run safe_mode.py's own command, and nothing else."""
+
+    def test_the_admin_seat_running_the_printed_command_is_let_through(self, broken_home):
+        assert safe_mode.allows(_bash(broken_home, f"{safe_mode.INVOKE} diagnose")) is True
+        assert safe_mode.allows(_bash(broken_home, f"{safe_mode.INVOKE} park src/aipass/prax/apps")) is True
+
+    @pytest.mark.parametrize(
+        "tail",
+        ("diagnose; rm -rf x", "diagnose && ls", "park $(pwd)", "park a b", "diagnose\n", "edit x", ""),
+        ids=("second_command", "and", "substitution", "two_paths", "newline", "other_verb", "bare"),
+    )
+    def test_anything_riding_on_the_command_is_refused(self, broken_home, tail):
+        assert safe_mode.allows(_bash(broken_home, f"{safe_mode.INVOKE} {tail}")) is False
+
+    def test_another_tool_or_another_command_is_refused(self, broken_home):
+        assert safe_mode.allows(_bash(broken_home, f"{safe_mode.INVOKE} diagnose", tool="Edit")) is False
+        assert safe_mode.allows(_bash(broken_home, "ls")) is False
+
+    def test_a_seat_with_no_certificate_is_not_let_through(self, broken_home):
+        assert safe_mode.allows(_bash(broken_home, f"{safe_mode.INVOKE} diagnose", seat="flow")) is False
+
+    def test_a_missing_signing_key_raises_so_the_bridge_can_say_why(self, broken_home, monkeypatch, tmp_path):
+        monkeypatch.setattr(safe_mode, "KEY_PATH", str(tmp_path / "no.key"))
+        with pytest.raises(FileNotFoundError):
+            safe_mode.allows(_bash(broken_home, f"{safe_mode.INVOKE} diagnose"))
+
+    def test_a_certificate_changed_after_signing_is_refused(self, broken_home):
+        cert_path = broken_home / "src" / "aipass" / "devpulse" / "artifacts" / "birth_certificate.json"
+        cert = json.loads(cert_path.read_text(encoding="utf-8"))
+        cert_path.write_text(json.dumps({**cert, "creator": "someone else"}), encoding="utf-8")
+        assert safe_mode.allows(_bash(broken_home, f"{safe_mode.INVOKE} diagnose")) is False
+
+    def test_a_certificate_copied_into_a_branch_outside_this_checkout_is_refused(self, broken_home, tmp_path):
+        outside = tmp_path / "elsewhere" / "devpulse"
+        shutil.copytree(broken_home / "src" / "aipass" / "devpulse", outside)
+        payload = {"tool_name": "Bash", "tool_input": {"command": f"{safe_mode.INVOKE} diagnose"}, "cwd": str(outside)}
+        assert safe_mode.allows(json.dumps(payload)) is False
+
+    def test_a_certificate_copied_into_another_branch_of_this_checkout_is_refused(self, broken_home):
+        flow = broken_home / "src" / "aipass" / "flow"
+        shutil.copytree(broken_home / "src" / "aipass" / "devpulse" / "artifacts", flow / "artifacts")
+        assert safe_mode.allows(_bash(broken_home, f"{safe_mode.INVOKE} diagnose", seat="flow")) is False
+
+    def test_rollback_is_let_through_and_takes_no_argument(self, broken_home):
+        assert safe_mode.allows(_bash(broken_home, f"{safe_mode.INVOKE} rollback")) is True
+        assert safe_mode.allows(_bash(broken_home, f"{safe_mode.INVOKE} rollback .live-x")) is False
+
+
+class TestSafeModeRollback:
+    """rollback serves the promoted copy before the live one, and undoes itself when that is no cure."""
+
+    @pytest.fixture
+    def hooks(self, tmp_path, monkeypatch):
+        root = tmp_path / "hooks"
+        for name in (".live-20260101T000000Z", ".live-20260102T000000Z", ".live-20260103T000000Z"):
+            (root / name).mkdir(parents=True)
+            (root / name / "__init__.py").write_text("", encoding="utf-8")
+        (root / ".live-current").write_text(".live-20260103T000000Z\n", encoding="utf-8")
+        monkeypatch.setattr(safe_mode, "hooks_root", lambda: str(root))
+        monkeypatch.setattr(safe_mode, "RECOVERY_DIR", str(tmp_path / "recovery"))
+        return root
+
+    def _live(self, hooks: Path) -> str:
+        return (hooks / ".live-current").read_text(encoding="utf-8").strip()
+
+    def test_the_copy_before_the_live_one_is_served_when_it_cures(self, hooks, monkeypatch):
+        answers = iter(["broken", ""])
+        monkeypatch.setattr(safe_mode, "engine_error", lambda: next(answers))
+        assert safe_mode.rollback() == 0
+        assert self._live(hooks) == ".live-20260102T000000Z"
+        assert sorted(p.name for p in hooks.glob(".live-2*")) == [f".live-2026010{n}T000000Z" for n in (1, 2, 3)]
+
+    def test_the_pointer_goes_back_when_the_older_copy_is_no_cure(self, hooks, monkeypatch, capsys):
+        monkeypatch.setattr(safe_mode, "engine_error", lambda: "still broken")
+        assert safe_mode.rollback() == 1
+        assert self._live(hooks) == ".live-20260103T000000Z"
+        assert "live again, as it was" in capsys.readouterr().out
+
+    def test_rollback_refuses_while_the_engine_runs(self, hooks, monkeypatch):
+        monkeypatch.setattr(safe_mode, "engine_error", lambda: "")
+        assert safe_mode.rollback() == 2
+        assert self._live(hooks) == ".live-20260103T000000Z"
+
+    def test_with_no_older_copy_nothing_changes(self, hooks, monkeypatch):
+        (hooks / ".live-current").write_text(".live-20260101T000000Z\n", encoding="utf-8")
+        monkeypatch.setattr(safe_mode, "engine_error", lambda: "broken")
+        assert safe_mode.rollback() == 1
+        assert self._live(hooks) == ".live-20260101T000000Z"
+
+
+class TestSafeModePark:
+    """park moves uncommitted code into a stash while the engine is broken, and refuses everything else."""
+
+    def test_park_refuses_a_path_that_passes_through_a_link(self, broken_home, monkeypatch):
+        monkeypatch.setattr(safe_mode, "engine_error", lambda: "broken")
+        apps = broken_home / "src" / "aipass" / "flow" / "apps"
+        apps.symlink_to(broken_home / "src" / "aipass" / "prax" / "apps")
+        code = self._break(broken_home)
+        assert safe_mode.park("src/aipass/flow/apps") == 3
+        assert code.read_text(encoding="utf-8") == "VALUE = Optional\n"
+
+    def _break(self, repo: Path) -> Path:
+        code = repo / "src" / "aipass" / "prax" / "apps" / "load.py"
+        code.write_text("VALUE = Optional\n", encoding="utf-8")
+        (code.parent / "half_done.py").write_text("x = 1\n", encoding="utf-8")
+        return code
+
+    def test_park_puts_the_code_back_and_keeps_the_work(self, broken_home, monkeypatch, capsys, tmp_path):
+        code = self._break(broken_home)
+        answers = iter(["NameError: name 'Optional' is not defined", ""])
+        monkeypatch.setattr(safe_mode, "engine_error", lambda: next(answers))
+        assert safe_mode.park("src/aipass/prax/apps") == 0
+        assert code.read_text(encoding="utf-8") == "VALUE = 1\n"
+        assert not (code.parent / "half_done.py").exists()
+        git = ["git", "-C", str(broken_home), "stash"]
+        stashes = subprocess.run([*git, "list"], capture_output=True, encoding="utf-8")
+        assert "safe mode" in stashes.stdout and "src/aipass/prax/apps" in stashes.stdout
+        shown = subprocess.run([*git, "show", "-p", "--include-untracked"], capture_output=True, encoding="utf-8")
+        assert "VALUE = Optional" in shown.stdout and "half_done.py" in shown.stdout
+        patch_file = next((tmp_path / "recovery").glob("*.patch"))
+        assert "+VALUE = Optional" in patch_file.read_text(encoding="utf-8")
+        lines = (tmp_path / "recovery" / "log.jsonl").read_text(encoding="utf-8").splitlines()
+        log = [json.loads(line) for line in lines]
+        assert [(e["verb"], e.get("broken")) for e in log] == [("park", None), ("park-result", False)]
+        assert "The hook engine runs again" in capsys.readouterr().out
+
+    def test_park_refuses_while_the_engine_runs_and_moves_nothing(self, broken_home, monkeypatch):
+        code = self._break(broken_home)
+        monkeypatch.setattr(safe_mode, "engine_error", lambda: "")
+        assert safe_mode.park("src/aipass/prax/apps") == 2
+        assert code.read_text(encoding="utf-8") == "VALUE = Optional\n"
+
+    @pytest.mark.parametrize(
+        "path",
+        ("src/aipass/devpulse/.trinity", "src/aipass/prax", "src/aipass/prax/apps/../../devpulse", ".", "/etc"),
+        ids=("memory", "whole_branch", "climbs_out", "checkout", "outside"),
+    )
+    def test_park_refuses_a_path_that_is_not_a_branchs_code(self, broken_home, monkeypatch, path):
+        monkeypatch.setattr(safe_mode, "engine_error", lambda: "broken")
+        (broken_home / "src" / "aipass" / "devpulse" / ".trinity" / "local.json").write_text("{}", encoding="utf-8")
+        assert safe_mode.park(path) == 3
+        assert (broken_home / "src" / "aipass" / "devpulse" / ".trinity" / "local.json").exists()
+
+    def test_diagnose_names_the_error_and_the_uncommitted_code(self, broken_home, monkeypatch, capsys):
+        self._break(broken_home)
+        monkeypatch.setattr(safe_mode, "engine_error", lambda: "NameError: name 'Optional' is not defined")
+        assert safe_mode.diagnose() == 1
+        out = capsys.readouterr().out
+        assert "NameError" in out and "src/aipass/prax/apps/load.py" in out
+
+    def test_diagnose_says_so_when_nothing_is_uncommitted(self, broken_home, monkeypatch, capsys):
+        monkeypatch.setattr(safe_mode, "engine_error", lambda: "ImportError: gone")
+        assert safe_mode.diagnose() == 1
+        out = capsys.readouterr().out
+        assert "  none\n" in out and "the break is committed" in out
+
+
+class TestClaudeBridgeSafeMode:
+    """The Claude bridge asks safe mode before it refuses, and any trouble asking is a refusal."""
+
+    def _run(self, monkeypatch, capsys, tmp_path, payload: str, event: str = "PreToolUse") -> tuple[str, str, int]:
+        monkeypatch.setattr(claude, "_mount", _engine_gone)
+        monkeypatch.setattr(claude, "BREAK_LOG", str(tmp_path / "bridge.log"))
+        monkeypatch.setattr(sys, "argv", ["claude.py", event])
+        monkeypatch.setattr(sys, "stdin", io.StringIO(payload))
+        code = 0
+        try:
+            claude.main()
+        except SystemExit as exit_:
+            code = int(exit_.code or 0)
+        out, err = capsys.readouterr()
+        return out, err, code
+
+    def test_a_call_safe_mode_allows_runs_with_nothing_said(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(claude, "_safe_mode", lambda stdin_data: stdin_data == "the one call")
+        assert self._run(monkeypatch, capsys, tmp_path, "the one call") == ("", "", 0)
+
+    def test_a_call_safe_mode_refuses_is_blocked_and_told_where_recovery_is(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(claude, "_safe_mode", lambda stdin_data: stdin_data == "the one call")
+        out, err, code = self._run(monkeypatch, capsys, tmp_path, "{}")
+        assert (json.loads(out)["decision"], code) == ("block", 2)
+        assert err.startswith("HOOKS BROKEN") and "engine gone" in err
+        assert f"{safe_mode.INVOKE} diagnose" in err and "playbook_plans/recovery.md" in err
+
+    def test_safe_mode_is_never_asked_outside_a_guarded_event(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(claude, "_safe_mode", lambda stdin_data: pytest.fail("asked"))
+        assert self._run(monkeypatch, capsys, tmp_path, "{}", event="UserPromptSubmit")[2] == 0
+
+    @pytest.mark.parametrize(
+        "payload", ("not json", "[]", '{"tool_name": "Bash"}', ""), ids=("text", "list", "bare", "empty")
+    )
+    def test_a_payload_the_real_safe_mode_cannot_judge_is_refused(self, monkeypatch, capsys, tmp_path, payload):
+        assert self._run(monkeypatch, capsys, tmp_path, payload)[2] == 2
+
+    def test_a_safe_mode_file_that_cannot_load_is_a_refusal_that_says_so(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(claude, "SAFE_MODE", str(tmp_path / "missing.py"))
+        out, err, code = self._run(monkeypatch, capsys, tmp_path, "{}")
+        assert (json.loads(out)["decision"], code) == ("block", 2)
+        assert "safe mode could not judge this call: FileNotFoundError" in err and "HOOKS BROKEN" in err

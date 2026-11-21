@@ -3,7 +3,7 @@
 # Description: Memory's front door: the names other branches take, each loaded from its home
 # Version: 1.0.1
 # Created: 2026-11-16
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """Memory - the fleet's long-term memory: rollover, search, the .trinity caps and shape.
@@ -12,7 +12,34 @@ Public surface for other branches: from aipass.memory import <name>. apps/memory
 """
 
 import importlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # each name typed from its home
+    from aipass.memory.apps.handlers.governance.engine import new_state, record_message, should_surface
+    from aipass.memory.apps.handlers.intake.auto_process import spawn_background
+    from aipass.memory.apps.handlers.intake.plans_processor import process_plans
+    from aipass.memory.apps.handlers.json.config_loader import get_todos_count, section
+    from aipass.memory.apps.handlers.json.entry_limits import (
+        changed_entries,
+        check_file_budget,
+        draft_target,
+        fields_for,
+        load_entry_limits,
+    )
+    from aipass.memory.apps.handlers.monitor.registry_scope import (
+        RESIDENCY_CORE,
+        RESIDENCY_EXTERNAL,
+        RESIDENCY_RESIDENT,
+        declared_residency,
+        declared_roots,
+        external_branches,
+        find_repo_root,
+        fleet_branches,
+    )
+    from aipass.memory.apps.handlers.rollover.todo_report import READY_PHRASE
+    from aipass.memory.apps.handlers.templates.trinity_push import entry_rules
+    from aipass.memory.apps.handlers.tracking.tab_renderer import compose_meta, render_all_meta_tabs
+    from aipass.memory.apps.modules.health import get_branch_health
 
 _HANDLERS = "aipass.memory.apps.handlers"
 _SCOPE = f"{_HANDLERS}.monitor.registry_scope"

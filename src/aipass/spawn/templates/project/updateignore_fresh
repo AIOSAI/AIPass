@@ -1,0 +1,13 @@
+# Owner-protected: aipass init update and drone @spawn update never write, back up or retire a match.
+# One fnmatch pattern per line, relative to the project root. A slashless name matches at any depth;
+# a trailing / claims a folder from the root, so */ reaches every seat. A leading / matches nothing.
+# Stamped by @spawn at the first seat's birth. These rows are the owner's from here on: edit freely.
+
+# The project's own startup file, cut to what this project needs.
+AGENTS.md
+# The project's own map: who lives here, its rooms and house rules.
+.aipass/tier1_navmap.md
+# Every seat's prompt: pure project knowledge, the file the owner edits most.
+aipass_local_prompt.md
+# Every seat's working layer: drafts, research, post-mortems.
+*/docs.local/

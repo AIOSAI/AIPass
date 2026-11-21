@@ -11,7 +11,9 @@
 
 Flow Plans (FPLANs) are **BUILDING** - autonomous construction: systems, features, modules. Structured way to execute work without constant human oversight.
 
-**FPLANs are disposable.** Exist exactly one build. When ALL phases complete, close this plan immediately -- do not leave open. Open FPLANs mean unfinished work. Work done = plan done: `drone @flow close {plan_number}`
+**FPLANs are disposable.** Exist exactly one build. Open FPLANs mean unfinished work.
+
+**Finished = closed.** When ALL phases are complete, whoever finishes closes this plan, no permission asked: `drone @flow close {plan_number}`. Closing loses nothing -- the registry keeps its row and `drone @flow restore {plan_number}` reopens it. When several open plans orbit one build, any agent may close the lot and open ONE new plan for the live remainder, pointing back to the closed IDs.
 
 **This is NOT for:**
 - Research or exploration (use agents directly)

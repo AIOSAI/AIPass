@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/core.py (spawn_agent) and apps/handlers/registry.py."""
@@ -14,12 +14,18 @@
 
 import json
 import shutil
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import pytest
 
-from aipass.spawn import spawn_agent
+from aipass.spawn import restore_citizen, spawn_agent
+from aipass.spawn.apps.handlers.seed_ops import export_seeds
 from aipass.spawn.apps.handlers import mint_ops
 from aipass.spawn.apps.handlers.class_registry import get_template_dir
 from aipass.spawn.apps.handlers.metadata import get_branch_name, normalize_branch_name, detect_profile
+from aipass.spawn.apps.handlers.project_defaults import PROJECT_TEMPLATE_DIR, stamp_onboarding
+from aipass.spawn.apps.handlers.update_ignore import is_ignored, read_ignore
 from aipass.spawn.apps.handlers.placeholders import (
     build_replacements_dict,
     replace_placeholders,
@@ -414,3 +420,177 @@ class TestMintRefusals:
         assert retry["success"] is False
         assert "refused mint" in retry["error"]
         assert load_registry(tmp_registry)["branches"] == []
+
+
+def first_seat(tmp_path, arrival=None):
+    """Mint a project's first seat at <project>/grow and return (project root, seat, result)."""
+    seat = tmp_path / "grow"
+    result = spawn_agent(str(seat), registry_path=str(tmp_path / "SEED_REGISTRY.json"), arrival=arrival)
+    assert result["success"] is True, result.get("error")
+    return tmp_path, seat, result
+
+
+class TestArrivalDefaults:
+    """A named arrival stamps the project's defaults and the seat's First wake; no arrival stamps nothing."""
+
+    @pytest.fixture(autouse=True)
+    def aipass_home(self, tmp_path):
+        """Every stamp's AIPass home is a tmp folder beside the project, never the live one."""
+        home = SimpleNamespace(path=tmp_path.parent / f"{tmp_path.name}_home", source="test", tried=())
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            yield home.path
+
+    def test_a_fresh_seat_gets_the_fresh_defaults(self, tmp_path):
+        """Mutant: the First wake is never stamped -> red."""
+        root, seat, result = first_seat(tmp_path, "fresh")
+
+        assert result["arrival"]["first_wake"] == "stamped (fresh)"
+        assert result["arrival"]["updateignore"] == "stamped (fresh)"
+        assert result["validation_issues"] == []
+        prompt = (seat / ".aipass" / "aipass_local_prompt.md").read_text(encoding="utf-8")
+        assert prompt.split("\n")[2] == "# First wake"
+        assert "born with you" in prompt and "Edit this section out of this prompt" in prompt
+        assert (root / ".updateignore").read_text(encoding="utf-8") == (
+            PROJECT_TEMPLATE_DIR / "updateignore_fresh"
+        ).read_text(encoding="utf-8")
+
+    def test_a_prompt_that_resolves_outside_the_seat_is_refused_never_followed(self, tmp_path):
+        """Mutant: the containment check is dropped -> the outside file's text is read into the seat -> red."""
+        seat = tmp_path / "seat"
+        (seat / ".aipass").mkdir(parents=True)
+        outside = tmp_path / "elsewhere.md"
+        outside.write_text("# not the seat's\nprivate\n", encoding="utf-8")
+        (seat / ".aipass" / "aipass_local_prompt.md").symlink_to(outside)
+
+        with pytest.raises(PermissionError, match="resolves outside the seat"):
+            stamp_onboarding(seat, "fresh")
+
+        assert outside.read_text(encoding="utf-8") == "# not the seat's\nprivate\n"
+        assert (seat / ".aipass" / "aipass_local_prompt.md").is_symlink()
+
+    def test_a_seat_that_is_not_a_directory_is_answered_not_stamped(self, tmp_path):
+        """No filesystem call touches the raw seat path (CodeQL); a file seat has no prompt to stamp.
+
+        Mutant: the prompt's is_file check is dropped -> reading under a file raises -> red."""
+        not_a_seat = tmp_path / "file.txt"
+        not_a_seat.write_text("", encoding="utf-8")
+
+        assert stamp_onboarding(not_a_seat, "fresh").startswith("not stamped")
+        assert not_a_seat.read_text(encoding="utf-8") == ""
+
+    def test_the_stamped_rows_hold_every_seats_own_files_and_nothing_else(self, tmp_path):
+        """The proof that stamping protects: the update lane's own matcher reads the stamped file."""
+        root, _, _ = first_seat(tmp_path, "adopted")
+        rows = read_ignore(root)
+
+        held = ["AGENTS.md", ".gitignore", ".aipass/tier1_navmap.md", "grow/.aipass/aipass_local_prompt.md"]
+        held += ["src/pkg/scout/.aipass/aipass_local_prompt.md", "grow/docs.local/draft.md", "src/pkg/scout/.gitignore"]
+        assert [rel for rel in held if not is_ignored(rel, rows)] == []
+        free = ["grow/apps/grow.py", ".aipass/tier0_kernel.md", "grow/README.md", "src/product/main.ts"]
+        assert [rel for rel in free if is_ignored(rel, rows)] == []
+
+    def test_an_adopted_seat_gets_the_adopted_defaults_below_a_header_only_file(self, tmp_path):
+        """Mutant: a header-only file is overwritten, losing its text -> red."""
+        header = "# Owner-protected: header only, no rows yet.\n"
+        (tmp_path / ".updateignore").write_text(header, encoding="utf-8")
+
+        root, seat, _ = first_seat(tmp_path, "adopted")
+
+        stamped = (root / ".updateignore").read_text(encoding="utf-8")
+        assert stamped.startswith(header)
+        assert ".gitignore" in read_ignore(root)
+        assert "alive before you" in (seat / ".aipass" / "aipass_local_prompt.md").read_text(encoding="utf-8")
+
+    def test_the_owners_rows_are_never_touched(self, tmp_path):
+        """Mutant: the row check is dropped and the default stamped over the owner's file -> red."""
+        (tmp_path / ".updateignore").write_text("CHANGELOG.md\n", encoding="utf-8")
+
+        root, _, result = first_seat(tmp_path, "adopted")
+
+        assert (root / ".updateignore").read_text(encoding="utf-8") == "CHANGELOG.md\n"
+        assert result["arrival"]["updateignore"] == "kept: the owner's 1 row(s)"
+
+    def test_no_arrival_stamps_nothing(self, tmp_path):
+        """Mutant: the defaults stamp without an arrival -> red."""
+        root, seat, result = first_seat(tmp_path)
+
+        assert result["arrival"] == {}
+        assert not (root / ".updateignore").exists()
+        assert "# First wake" not in (seat / ".aipass" / "aipass_local_prompt.md").read_text(encoding="utf-8")
+
+    def test_an_unknown_arrival_is_refused_before_any_write(self, tmp_path):
+        """Mutant: the arrival check is dropped -> the mint reads a template that does not exist -> red."""
+        result = spawn_agent(str(tmp_path / "grow"), registry_path=str(tmp_path / "SEED_REGISTRY.json"), arrival="x")
+
+        assert result["success"] is False and "--arrival must be one of fresh, adopted" in result["error"]
+        assert list(tmp_path.iterdir()) == []
+
+    def test_a_core_citizen_takes_no_arrival(self, tmp_path):
+        """Mutant: the core guard is dropped -> the AIPass tree's own .updateignore is stamped -> red."""
+        home = SimpleNamespace(path=tmp_path, source="test", tried=())
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            result = spawn_agent(
+                str(tmp_path / "src" / "aipass" / "scout"),
+                registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
+                arrival="fresh",
+            )
+
+        assert result["success"] is False and "core citizen" in result["error"]
+        assert not (tmp_path / ".updateignore").exists()
+
+    def test_an_external_seat_keeps_a_durable_seed_copy_under_the_home(self, tmp_path, aipass_home):
+        """Mutant: the mint skips the home copy -> a reclone loses the seat's identity -> red."""
+        root, seat, result = first_seat(tmp_path, "adopted")
+
+        home_copy = aipass_home / ".aipass" / "vault" / root.name / "grow.passport.vault.json"
+        assert result["arrival"]["home_seed"] == f"copied to {home_copy}"
+        assert home_copy.read_bytes() == (seat / ".aipass" / "passport.vault.json").read_bytes()
+
+    def test_a_rewritten_seed_rewrites_its_home_copy(self, tmp_path, aipass_home):
+        """Mutant: export-vault stops refreshing the home copy -> restore would read a stale identity -> red."""
+        root, seat, _ = first_seat(tmp_path, "adopted")
+        passport_file = seat / ".trinity" / "passport.json"
+        passport = json.loads(passport_file.read_text(encoding="utf-8"))
+        passport["identity"]["role"] = "product_steward"
+        passport_file.write_text(json.dumps(passport, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        receipt = export_seeds(root, confirm=True)
+
+        home_copy = aipass_home / ".aipass" / "vault" / root.name / "grow.passport.vault.json"
+        assert receipt["errors"] == []
+        assert json.loads(home_copy.read_text(encoding="utf-8"))["identity"]["role"] == "product_steward"
+
+    def test_a_reclone_restores_the_seat_from_its_home_copy(self, tmp_path):
+        """Mutant: restore stops reading the home copy -> the seedless refusal -> red."""
+        root, seat, _ = first_seat(tmp_path, "adopted")
+        before = json.loads((seat / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        (seat / ".trinity" / "passport.json").unlink()
+        (seat / ".aipass" / "passport.vault.json").unlink()
+
+        written = restore_citizen("grow", root / "SEED_REGISTRY.json")
+
+        restored = json.loads((seat / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert written == ["passport.json(seed)"]
+        assert restored["identity"] == before["identity"]
+        assert (seat / ".aipass" / "passport.vault.json").is_file()
+
+    def test_an_external_project_gets_a_test_policy_that_is_off_and_named(self, tmp_path):
+        """Mutant: the policy is never stamped -> the gate fail-closes with a missing-policy error -> red."""
+        root, _, result = first_seat(tmp_path, "fresh")
+
+        policy = json.loads((root / ".aipass" / "test_write_policy.json").read_text(encoding="utf-8"))
+        assert result["arrival"]["test_policy"] == "stamped (off)"
+        assert (policy["agent_test_writing"], policy["allow"], policy["block_test_edits"]) == ("off", [], False)
+        assert "owner flips this per project" in policy["note"]
+
+    def test_an_existing_test_policy_is_never_touched(self, tmp_path):
+        """Mutant: the stamp overwrites the owner's policy -> the owner's 'on' is lost -> red."""
+        (tmp_path / ".aipass").mkdir()
+        (tmp_path / ".aipass" / "test_write_policy.json").write_text('{"agent_test_writing": "on"}', encoding="utf-8")
+
+        root, _, result = first_seat(tmp_path, "adopted")
+
+        assert (root / ".aipass" / "test_write_policy.json").read_text(encoding="utf-8") == (
+            '{"agent_test_writing": "on"}'
+        )
+        assert result["arrival"]["test_policy"] == "kept: the owner's file"

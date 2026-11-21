@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_init_flow.py
 # Description: Tests for aipass init — scaffold, update, agent routes
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-04-16
-# Modified: 2026-11-15
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/modules/init_flow.py and the handlers it drives."""
@@ -527,3 +527,26 @@ class TestInitUpdateGitAuth:
         assert emitted["handlers"][0]["name"] == "testwrite_gate"
         assert "Git authorization (owner-tier)" in err
         assert "would repair" in err
+
+    def test_json_alone_refuses_and_writes_nothing(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """A seat read the help's 'the same plan, machine-readable' as a preview and --json applied the update.
+
+        Mutant: the refusal removed -> update_project runs with apply=True, red at assert_not_called.
+        """
+        self._project(tmp_path)
+        with (
+            patch("aipass.aipass.apps.handlers.init.bootstrap.update_project") as update,
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            handle_command("init", ["update", str(tmp_path), "--json"])
+
+        assert exit_info.value.code == 1
+        update.assert_not_called()
+        out, err = capsys.readouterr()
+        assert "aipass init update --dry-run --json" in " ".join(f"{out} {err}".split())
+
+    def test_help_offers_json_only_with_dry_run(self, capsys: pytest.CaptureFixture[str]) -> None:
+        print_help()
+        lines = [" ".join(line.split()) for line in capsys.readouterr().out.splitlines() if "--json" in line]
+        assert lines == [lines[0]] and lines[0].startswith("aipass init update --dry-run --json")
+        assert "write nothing" in lines[0]

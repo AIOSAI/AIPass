@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.14.1
+# Version: 1.15.0
 # Created: 2026-03-30
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -163,7 +163,7 @@ _CI_CURE_FACT = "ci_cure"
 _MANAGER_CLASS = "manager"
 
 # These encode AIPass's own flow and would half-run in another project's repo.
-_AIPASS_FLOW_VERBS = frozenset({"pr", "close-pr", "smart-sync", "fix", "delete-branch", "ci-cure"})
+_AIPASS_FLOW_VERBS = frozenset({"pr", "close-pr", "smart-sync", "fix", "ci-cure"})
 
 # AIPass's own branches reach main only through dev-pr; a plain push would skip the PR.
 _EXTERNAL_ONLY_VERBS = frozenset({"push"})

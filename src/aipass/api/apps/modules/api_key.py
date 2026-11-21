@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: api_key.py
 # Description: API Key Management Module
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-15
-# Modified: 2026-11-15
+# Modified: 2026-11-20
 # =============================================
 
 """API Key Management Module"""
@@ -236,21 +236,6 @@ def _show_secret(provider: str, parts: List[str], has_json: bool, has_list: bool
 
     value_len = len(json.dumps(result)) if has_json else len(str(result))
     success(f"{provider}/{slug}: set ({value_len} chars)")
-
-
-def fetch_api_key(provider: str = "openrouter"):
-    """Retrieve a validated API key for a provider from secrets."""
-    return keys.get_api_key(provider)
-
-
-def fetch_validate_key(key: str, provider: str = "openrouter") -> bool:
-    """Validate an API key format for a given provider."""
-    return keys.validate_key(key, provider)
-
-
-def get_validation_rules(provider: str) -> dict:
-    """Retrieve validation rules for a provider from the auth handler."""
-    return keys.get_validation_rules(provider)
 
 
 def print_help():

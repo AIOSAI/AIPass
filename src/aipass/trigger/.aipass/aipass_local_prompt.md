@@ -32,6 +32,7 @@ apps/
     ├── json/               → json_handler shim (prax-owned service) + operator config_loader
     ├── events/             → registry.py wires the handlers on first fire
     │   ├── startup.py, error_detected.py, warning_logged.py, runaway_handler.py
+    │   ├── mute_expiry.py  → medic_mute_sweep: expired mute re-arms mid-session or mails its holder
     │   └── memory_pool.py, memory_template_updated.py, cli.py
     └── watchers/log_watcher.py → system_logs reader; the observer is withdrawn, the reader stays
 ```

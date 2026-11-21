@@ -59,7 +59,7 @@ A package top file that defines a module-level `__getattr__` is a door, and this
 
 A package top file with no `__getattr__` is not a door and is not judged by these. Forms the reader does not follow are left unjudged, never guessed: an `if` on anything but the name, or a loop, `try` or `with` block, before the guard; an `__all__` assigned more than once, extended with `+=`, or built by anything but a literal list or tuple of strings and `*NAME` spreads, a name, or `list`/`sorted`/`tuple`/`set` of a name.
 
-The encapsulation row convicts a runtime import of the branch's own handlers in the door (a `TYPE_CHECKING` import is acquitted). unused_function and the front-door verb read the door's `__all__`.
+The encapsulation row does not judge the door's imports of its own handlers; it judges only the entry point `apps/<branch>.py`. unused_function and the front-door verb read the door's `__all__`.
 
 ## Patching a door name in a test
 

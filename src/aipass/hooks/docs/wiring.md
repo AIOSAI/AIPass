@@ -75,6 +75,9 @@ per handler, so the name is reserved.
 `compass_recall` speaks to manager seats only: its handler walks up from the payload's cwd to the
 nearest `.trinity/passport.json` and recalls nothing unless the passport declares `citizen_class: manager`.
 Compass is the managers' decision store, so a builder seat, or a directory with no passport, hears nothing.
+Its `hooks.json` entry may carry `max_per_session`, `threshold`, `min_messages_between` and `cooldown_seconds`:
+the handler hands them to @memory's governance (`should_surface`), which counts surfaced decisions per context
+window. The engine reads none of them and calls the handler on every prompt.
 
 **Sound is off by default.** `apps/sound.py`'s `speak()` checks `is_muted()`, which is True
 unless `~/.aipass/aipass-hooks-sound-on` exists (outside the temp dir, so a reboot or `TMPDIR` cannot move it).

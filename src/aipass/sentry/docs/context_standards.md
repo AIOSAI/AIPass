@@ -18,8 +18,8 @@ Six files per branch, in **characters** (`wc -m`), each against the cap its OWNE
 |---|---|---|---|
 | `README.md` | 10,000 | **sentry** | `context_standards/pack.json` → `caps["README.md"].max_chars` |
 | `.aipass/aipass_local_prompt.md` | 9,000 | hooks | `aipass.hooks.BRANCH_CHAR_BUDGET` |
-| `.trinity/local.json` | 25,000 | memory | `memory.config.json` → `entry_limits.file_budgets` |
-| `.trinity/observations.json` | 15,000 | memory | same key |
+| `.trinity/local.json` | 32,000 | memory | `memory.config.json` → `entry_limits.file_budgets` |
+| `.trinity/observations.json` | 17,000 | memory | same key |
 | `.trinity/passport.json` | 6,000 file, 600 per string | memory | same key |
 | `DASHBOARD.local.json` | 6,000 | prax | `aipass.prax.DASHBOARD_CHAR_BUDGET` |
 

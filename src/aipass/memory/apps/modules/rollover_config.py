@@ -3,7 +3,7 @@
 # Description: The `config` verb surface over rollover limits - get / set / set-default
 # Version: 1.4.0
 # Created: 2026-09-15
-# Modified: 2026-11-15
+# Modified: 2026-11-20
 # =============================================
 
 """
@@ -153,7 +153,7 @@ def _validate_type(entry_type: str, ctx: _Json) -> bool:
 def _validate_count(raw: str, entry_type: str, ctx: _Json, branch: str | None = None) -> int | None:
     """Parse and bound-check a limit, emitting its own refusal; None when refused.
 
-    The budget bound depends on co-tenants: local.json's 25,000 chars are shared by three families.
+    The budget bound depends on co-tenants: local.json's 32,000 chars are shared by three families.
     """
     try:
         count = int(raw)

@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.29.0
+# Version: 1.30.0
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -884,7 +884,12 @@ def _watched_trinity_dirs(cwd: str) -> list[Path]:
     A stat is all it takes to notice; no file is read unless something changed."""
     seat = _seat_trinity(cwd)
     dirs: list[Path] = [seat] if seat is not None else []
-    project = _ownership().project_of(Path(cwd)) if cwd else None
+    wo = _ownership()
+    try:
+        project = wo.project_of(Path(cwd)) if cwd else None
+    except wo.ProjectUnreadable as exc:  # the fence refuses the writes; reads and the repair route keep running
+        logger.warning("[HOOKS] edit_gate tripwire: watching the seat's own memory only: %s", exc)
+        return dirs
     if project is None:
         return dirs
     root = project.root
@@ -1119,13 +1124,16 @@ def _decide(hook_data: dict) -> dict:
 
     except Exception as exc:  # fail closed on what this gate guards
         # sys.modules, not an import: a ProjectUnreadable can only come from an already-loaded write_ownership.
-        unreadable = getattr(sys.modules.get("aipass.hooks.apps.modules.write_ownership"), "ProjectUnreadable", ())
-        if isinstance(exc, unreadable):
+        wo = sys.modules.get("aipass.hooks.apps.modules.write_ownership")
+        registry = isinstance(exc, getattr(wo, "RegistryUnreadable", ()))
+        if registry:
+            logger.error("[HOOKS] edit_gate: registry unreadable, refused %s: %s", tool_name or "(no tool)", exc)
+        elif isinstance(exc, getattr(wo, "ProjectUnreadable", ())):
             logger.warning("[HOOKS] edit_gate: refused on %s: %s", tool_name or "(no tool)", exc)
         else:
             logger.error("[HOOKS] edit_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
         if tool_name == "Bash" or tool_name in EDIT_TOOLS:
-            return _refuse(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
+            return _refuse(str(exc) if registry else GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
         return {"stdout": "", "exit_code": 0}
 
 

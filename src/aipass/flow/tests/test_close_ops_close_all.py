@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_close_ops_close_all.py
 # Description: Tests for close_all_plans_impl, split from test_close_ops.py (oversize, leg 12)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-06
-# Modified: 2026-11-15
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for close_all_plans_impl in apps/handlers/plan/close_ops.py and the typed IDs it hands on."""
@@ -153,7 +153,7 @@ class TestCanonicalPlanId:
 
     def test_each_registered_type(self):
         fn = canonical_plan_id
-        for prefix in ("FPLAN", "DPLAN", "APLAN", "PPLAN", "RPLAN", "TDPLAN", "CPLAN"):
+        for prefix in ("FPLAN", "DPLAN", "APLAN", "PPLAN", "RPLAN", "TDPLAN", "CPLAN", "NPLAN"):
             assert fn("0007", {"file_path": f"/x/{prefix}-0007_topic_2026-01-01.md"}) == f"{prefix}-0007"
 
     def test_returns_none_when_file_path_missing(self):

@@ -3,13 +3,16 @@
 # Description: The Commons' front door: the names other branches take, each loaded from its home
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-11-17
+# Modified: 2026-11-20
 # =============================================
 
 """The Commons' public surface: from aipass.commons import <name>; apps/commons.py stays the command door."""
 
 import importlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # each name typed from its home
+    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
 
 __version__ = "1.0.0"
 

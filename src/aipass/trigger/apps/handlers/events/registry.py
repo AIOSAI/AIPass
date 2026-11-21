@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Event handler registry for startup registration
-# Version: 0.6.0
+# Version: 0.7.0
 # Created: 2025-12-04
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Event Handler Registry - Setup all event handlers on startup"""
@@ -20,6 +20,7 @@ def setup_handlers():
     from aipass.trigger.apps.handlers.escalation import set_send_email_callback as set_escalation_email_callback
     from aipass.trigger.apps.handlers.ci.outbound import set_send_email_callback as set_ci_email_callback
     from .ci_red import handle_ci_red
+    from .mute_expiry import handle_medic_mute_sweep, set_send_email_callback as set_mute_expiry_email_callback
 
     from aipass.ai_mail import deliver_email_to_branch
     from datetime import datetime
@@ -59,6 +60,7 @@ def setup_handlers():
     # Escalation digests keep auto_execute=False: an email to a manager, never a wake.
     set_escalation_email_callback(_send_email_adapter)
     set_ci_email_callback(_send_email_adapter)
+    set_mute_expiry_email_callback(_send_email_adapter)
 
     from .warning_logged import handle_warning_logged
     from .memory_template_updated import handle_memory_template_updated
@@ -72,5 +74,6 @@ def setup_handlers():
     trigger.on("memory_pool_auto_processed", handle_memory_pool_auto_processed)
     trigger.on("runaway_log_detected", handle_runaway_log_detected)
     trigger.on("ci_red", handle_ci_red)
+    trigger.on("medic_mute_sweep", handle_medic_mute_sweep)
 
     json_handler.log_operation("handlers_registered", {"success": True})

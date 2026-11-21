@@ -52,9 +52,11 @@ already one owner's code.
 
 ---
 
-### 3. Entry Points Don't Import Handlers
+### 3. The Entry Point Doesn't Import Handlers
 
-Main entry points (`branch.py`) should use modules, not handlers directly.
+The branch's entry point, `apps/<branch>.py` (or `apps/branch.py` where the named file is absent),
+uses modules, not handlers directly. It is the one file this rule judges. Inside a branch, anything
+else may import its own branch's handlers: a plugin, a service, an artifact or the package top file.
 
 **BAD:**
 ```python
@@ -82,20 +84,7 @@ from aipass.api import load_config   # the front door
   nothing from its own `apps/`) is not enough: ordinary handlers with no local dependencies are
   leaves too.
 
-**The package top file types its door names from their homes.** In `src/aipass/<branch>/__init__.py`,
-an import of the branch's own handlers inside a top-level `if TYPE_CHECKING:` (or
-`if typing.TYPE_CHECKING:`) block is acquitted: it is the static view of the names the door
-hands out, and nothing loads at runtime.
-
-```python
-# src/aipass/prax/__init__.py
-if TYPE_CHECKING:
-    from aipass.prax.apps.handlers.dashboard.operations import cap_subject as cap_subject
-```
-
-A runtime handler import in the same file stays convicted (it breaks the door's laziness), so
-does a type-only import of another branch's handlers, and a `TYPE_CHECKING` block anywhere else
-is judged as any import.
+An entry point's type-only (`if TYPE_CHECKING:`) handler import is judged like any other.
 
 ---
 
@@ -123,8 +112,8 @@ Trigger is where cross-branch reactions live, and it reaches other branches thro
 The `encapsulation_check.py` validates:
 
 1. **Cross-branch handler imports** - Detects imports from other branches' handlers
-2. **Direct handler imports** - Detects entry points importing handlers directly; the package
-   top file's type-only own-handler imports are acquitted (rule 3)
+2. **Direct handler imports** - Detects the entry point (`apps/<branch>.py`) importing handlers
+   directly; every other file passes this row (rule 3)
 3. **Handler guard** - `handlers/__init__.py` calls `_guard_branch_access()`, the runtime fence
 
 A handler file is never judged on which of its own branch's handlers it imports.

@@ -14,10 +14,9 @@ template for a recurring operation (merge, release cut, branch onboarding,
 incident response). You tick steps off as you go, log what happened, then close.
 
 - **The template = the SOP.** Stable. Refine it over time as the process improves.
-- **The instance (this file) = one run.** Disposable. Close when the run is done.
+- **The instance (this file) = one run.** Disposable.
 
-Closing vectorizes the run to @memory — so the **Run Summary** below (with PR numbers,
-tags, anything that broke) becomes a searchable trail. Costs nothing, gives history.
+**Finished = closed.** When the run is done, whoever ran it closes it, no permission asked: `drone @flow close {plan_number}`. Closing vectorizes the run to @memory — so the **Run Summary** below (with PR numbers, tags, anything that broke) becomes a searchable trail — and loses nothing: `drone @flow restore {plan_number}` reopens it. When several open plans orbit one run, any agent may close the lot and open ONE new plan for the live remainder, pointing back to the closed IDs.
 
 **This is NOT for:** building features (FPLAN), design/investigation (DPLAN),
 research (RPLAN), or multi-branch builds (TDPLAN). Playbooks are for *operating the

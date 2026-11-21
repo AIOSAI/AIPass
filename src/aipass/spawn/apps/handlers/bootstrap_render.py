@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap_render.py
 # Description: The install script's .trinity render for a core branch: seed first, then the template
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-11-17
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """Render a core branch's missing .trinity files at install time, before drone exists.
@@ -22,7 +22,7 @@ from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.metadata import normalize_branch_name
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
 from aipass.spawn.apps.handlers.registry import branches_as_list, entry_path
-from aipass.spawn.apps.handlers.seed_ops import find_seed, load_seed, mint_and_write, seed_path_for
+from aipass.spawn.apps.handlers.seed_ops import find_seed, home_seed_path, load_seed, mint_and_write, seed_path_for
 
 TRINITY_FILES = ("passport.json", "local.json", "observations.json")
 
@@ -80,6 +80,20 @@ def render_bootstrap_trinity(
     return written
 
 
+def _seed_from_home(project_root: Path, target: Path) -> Path | None:
+    """Put a seat's home copy back as its own seed when the project's copy is gone; None when there is none.
+
+    Raises RuntimeError when no AIPass home is found: a missing home is not the same answer as a missing copy."""
+    home_copy = home_seed_path(project_root, target)
+    if not home_copy.is_file():
+        return None
+    dest = seed_path_for(target)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(dest, home_copy.read_text(encoding="utf-8"))
+    logger.info("[spawn] restore: passport vault for %s put back from %s", target, home_copy)
+    return dest
+
+
 def restore_citizen(branch_name: str, registry_path: Path) -> list[str]:
     """Restore one registered citizen's missing .trinity files: the installer's render, fed by its row and seed.
 
@@ -98,11 +112,12 @@ def restore_citizen(branch_name: str, registry_path: Path) -> list[str]:
         logger.error("[spawn] restore: %s is not registered in %s", branch_name, registry_path)
         raise LookupError(f"{branch_name} is not registered in {registry_path}")
     target = registry_path.parent / entry_path(rows[0])
-    seed_file = find_seed(target)
+    seed_file = find_seed(target) or _seed_from_home(registry_path.parent, target)
     if seed_file is None:
         reason = (
-            f"{branch_name} carries no seed at {seed_path_for(target)} - while a passport still exists, "
-            f"run `drone @spawn export-seeds --confirm` in {registry_path.parent} to write one"
+            f"{branch_name} carries no passport vault at {seed_path_for(target)} or under the AIPass home "
+            f"- while a passport still exists, "
+            f"run `drone @spawn export-vault --confirm` in {registry_path.parent} to write one"
         )
         logger.error("[spawn] restore: %s", reason)
         raise FileNotFoundError(reason)

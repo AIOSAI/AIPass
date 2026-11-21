@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_compass_recall.py
-# Version: 1.5.0
+# Version: 1.6.0
 # Description: Tests for compass recall prompt handler
 # Branch: hooks
 # Created: 2026-07-16
-# Modified: 2026-11-17
+# Modified: 2026-11-19
 # =============================================
 
 """Tests for apps/handlers/prompt/compass_recall.py."""
@@ -609,95 +609,9 @@ class TestGovernanceKnobsAndWindow:
         assert _recall(tmp_path, "same", [_candidate(401)], knobs)["stdout"] == ""
 
 
-def _runs_under_budget(tmp_path, budget: dict, stored: dict | None, session_id: str) -> tuple[bool, list[str]]:
-    """Whether dispatch() runs a budgeted handler, and the budget lines it logged.
-
-    The engine's budget check and its state file are read through dispatch
-    (fleet green leg 8), not _check_budget / _load_budget_state by name.
-    `stored` is the budget file's content before the turn, None for no file.
-    A dispatch adds one turn before it checks.
-    """
-    config = {
-        "hooks_enabled": True,
-        "UserPromptSubmit": {
-            "test_hook": {
-                "enabled": True,
-                "handler": "aipass.hooks.apps.handlers.prompt.compass_recall.handle",
-                **budget,
-            },
-        },
-    }
-    budget_file = tmp_path / "budget.json"
-    if stored is not None:
-        budget_file.write_text(json.dumps({"test_hook": stored}), encoding="utf-8")
-    with (
-        patch("aipass.hooks.apps.modules.engine._budget_state_path", return_value=budget_file),
-        patch(
-            "aipass.hooks.apps.modules.engine._run_handler",
-            return_value={"exit_code": 0, "stdout": "", "stderr": "", "elapsed_ms": 1.0},
-        ) as mock_run,
-        patch("aipass.hooks.apps.modules.engine._log_detail") as detail,
-    ):
-        dispatch("UserPromptSubmit", json.dumps({"session_id": session_id, "prompt": "test"}), config)
-    logged = [c.args[0] % c.args[1:] for c in detail.call_args_list if "budget" in c.args[0]]
-    return mock_run.called, logged
-
-
-class TestEngineBudget:
-    def test_check_budget_allows_first_fire(self, tmp_path):
-        ran, _logged = _runs_under_budget(tmp_path, {"max_per_session": 5}, None, "b-first")
-        assert ran is True
-
-    def test_check_budget_blocks_when_exhausted(self, tmp_path):
-        ran, logged = _runs_under_budget(tmp_path, {"max_per_session": 5}, {"fire_count": 5}, "b-spent")
-        assert ran is False
-        assert logged == ["[HOOKS] UserPromptSubmit.test_hook budget: budget exhausted (5/5)"]
-
-    def test_check_budget_spacing_skipped_on_first_fire(self, tmp_path):
-        stored = {"fire_count": 0, "turns_since_fire": 0}
-        ran, _logged = _runs_under_budget(tmp_path, {"min_spacing_turns": 10}, stored, "b-space0")
-        assert ran is True
-
-    def test_check_budget_spacing_enforced_after_fire(self, tmp_path):
-        stored = {"fire_count": 1, "turns_since_fire": 3}
-        ran, logged = _runs_under_budget(tmp_path, {"min_spacing_turns": 10}, stored, "b-space1")
-        assert ran is False
-        assert logged == ["[HOOKS] UserPromptSubmit.test_hook budget: spacing (4/10)"]
-
-    def test_check_budget_spacing_passes_after_enough_turns(self, tmp_path):
-        stored = {"fire_count": 1, "turns_since_fire": 9}
-        ran, _logged = _runs_under_budget(tmp_path, {"min_spacing_turns": 10}, stored, "b-space2")
-        assert ran is True
-
-    def test_check_budget_cooldown_enforced(self, tmp_path):
-        import time
-
-        stored = {"fire_count": 1, "last_fire_time": time.time() - 10}
-        ran, logged = _runs_under_budget(tmp_path, {"cooldown_seconds": 300}, stored, "b-cool1")
-        assert ran is False
-        assert logged[0].startswith("[HOOKS] UserPromptSubmit.test_hook budget: cooldown (")
-
-    def test_check_budget_cooldown_expired(self, tmp_path):
-        import time
-
-        stored = {"fire_count": 1, "last_fire_time": time.time() - 400}
-        ran, _logged = _runs_under_budget(tmp_path, {"cooldown_seconds": 300}, stored, "b-cool2")
-        assert ran is True
-
-    def test_budget_state_persistence(self, tmp_path):
-        """A stored count is read back on the next turn and the turn is saved over it."""
-        stored = {"fire_count": 2, "last_fire_time": 1000.0, "turns_since_fire": 5}
-        ran, _logged = _runs_under_budget(tmp_path, {"max_per_session": 2}, stored, "b-persist")
-        assert ran is False
-        saved = json.loads((tmp_path / "budget.json").read_text(encoding="utf-8"))
-        assert saved["test_hook"]["fire_count"] == 2
-        assert saved["test_hook"]["turns_since_fire"] == 6
-
-    def test_budget_state_missing_returns_empty(self, tmp_path):
-        ran, _logged = _runs_under_budget(tmp_path, {"max_per_session": 1}, None, "b-missing")
-        assert ran is True
-
-    def test_dispatch_suppresses_over_budget_handler(self, tmp_path):
+class TestEngineCallsBudgetKeyedHandlers:
+    def test_a_max_per_session_key_never_stops_the_engine_calling_the_handler(self, tmp_path):
+        """max_per_session is the handler's own governance knob; the engine keeps no count of its own."""
         config = {
             "hooks_enabled": True,
             "UserPromptSubmit": {
@@ -708,107 +622,11 @@ class TestEngineBudget:
                 },
             },
         }
-        budget_file = tmp_path / "budget.json"
-
-        with (
-            patch("aipass.hooks.apps.modules.engine._budget_state_path", return_value=budget_file),
-            patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
-        ):
-            dispatch("UserPromptSubmit", json.dumps({"session_id": "budget-test", "prompt": "test"}), config)
-            mock_run.assert_not_called()
-
-    def test_dispatch_records_fire_on_output(self, tmp_path):
-        config = {
-            "hooks_enabled": True,
-            "UserPromptSubmit": {
-                "test_hook": {
-                    "enabled": True,
-                    "handler": "aipass.hooks.apps.handlers.prompt.compass_recall.handle",
-                    "max_per_session": 10,
-                },
-            },
-        }
-        budget_file = tmp_path / "budget.json"
-
-        with (
-            patch("aipass.hooks.apps.modules.engine._budget_state_path", return_value=budget_file),
-            patch(
-                "aipass.hooks.apps.modules.engine._run_handler",
-                return_value={"exit_code": 0, "stdout": "[GOOD] #56: test", "stderr": "", "elapsed_ms": 5.0},
-            ),
-        ):
-            dispatch("UserPromptSubmit", json.dumps({"session_id": "fire-test", "prompt": "test"}), config)
-
-            assert budget_file.exists()
-            state = json.loads(budget_file.read_text(encoding="utf-8"))
-            assert state["test_hook"]["fire_count"] == 1
-            assert state["test_hook"]["turns_since_fire"] == 0
-
-    def test_dispatch_threads_payload_session_id(self, tmp_path):
-        """Budget state file is keyed by payload session_id, not env var."""
-        config = {
-            "hooks_enabled": True,
-            "UserPromptSubmit": {
-                "test_hook": {
-                    "enabled": True,
-                    "handler": "aipass.hooks.apps.handlers.prompt.compass_recall.handle",
-                    "max_per_session": 10,
-                },
-            },
-        }
-
-        with (
-            patch(
-                "aipass.hooks.apps.modules.engine._budget_state_path",
-                side_effect=lambda sid="": tmp_path / f"budget-{sid}.json",
-            ),
-            patch(
-                "aipass.hooks.apps.modules.engine._run_handler",
-                return_value={"exit_code": 0, "stdout": "output", "stderr": "", "elapsed_ms": 1.0},
-            ),
-        ):
-            dispatch(
-                "UserPromptSubmit",
-                json.dumps({"session_id": "payload-sid", "prompt": "test"}),
-                config,
-            )
-
-        # The fire lands in the payload's file; the conftest env id gets none.
-        written = sorted(p.name for p in tmp_path.glob("budget-*.json"))
-        assert written == ["budget-payload-sid.json"]
-        state = json.loads((tmp_path / "budget-payload-sid.json").read_text(encoding="utf-8"))
-        assert state["test_hook"]["fire_count"] == 1
-
-    def test_dispatch_reopens_the_budget_when_a_new_window_opens(self, tmp_path, monkeypatch):
-        """The engine counts compass_recall's fires against the same max_per_session.
-        Kept per session id, it silences recall however many windows follow (FPLAN-0588)."""
-        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "reopen")
-        config = {
-            "hooks_enabled": True,
-            "UserPromptSubmit": {
-                "test_hook": {
-                    "enabled": True,
-                    "handler": "aipass.hooks.apps.handlers.prompt.compass_recall.handle",
-                    "max_per_session": 10,
-                },
-            },
-        }
-        budget_file = tmp_path / "budget.json"
-        budget_file.write_text(json.dumps({"test_hook": {"fire_count": 10, "turns_since_fire": 40}}), encoding="utf-8")
-        payload = json.dumps({"session_id": "reopen", "prompt": "test"})
-
-        with (
-            patch("aipass.hooks.apps.modules.engine._budget_state_path", return_value=budget_file),
-            patch(
-                "aipass.hooks.apps.modules.engine._run_handler",
-                return_value={"exit_code": 0, "stdout": "", "stderr": "", "elapsed_ms": 1.0},
-            ) as mock_run,
-        ):
-            dispatch("UserPromptSubmit", payload, config)
-            mock_run.assert_not_called()
-
-            reset_counter(hook_data={"session_id": "reopen"}, caller="compact")
-            dispatch("UserPromptSubmit", payload, config)
-            mock_run.assert_called_once()
-
-        assert json.loads(budget_file.read_text(encoding="utf-8"))["test_hook"]["fire_count"] == 0
+        with patch(
+            "aipass.hooks.apps.modules.engine._run_handler",
+            return_value={"exit_code": 0, "stdout": "", "stderr": "", "elapsed_ms": 1.0},
+        ) as mock_run:
+            dispatch("UserPromptSubmit", json.dumps({"session_id": "no-engine-budget", "prompt": "test"}), config)
+        assert [c.args[0] for c in mock_run.call_args_list] == [
+            "aipass.hooks.apps.handlers.prompt.compass_recall.handle"
+        ]

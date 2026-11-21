@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic_state.py
 # Description: Medic state persistence and status collection handler
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-02-12
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -18,7 +18,7 @@ import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aipass.prax import logger
 from aipass.trigger.apps.config import (
@@ -38,8 +38,10 @@ RATE_LIMITED_LOG = TRIGGER_LOGS_DIR / "rate_limited.jsonl"
 
 _DURATION_RE = re.compile(r"^(\d+)(h|d)$")
 
-DEFAULT_MUTE_SECONDS = 86400  # 24 hours
+DEFAULT_MUTE_SECONDS = 4 * 3600  # 4 hours
+DEFAULT_VOLUME_MUTE_SECONDS = 86400  # 24 hours
 DEFAULT_OFF_SECONDS = 86400  # 24 hours
+MAX_REARMS = 2  # a live session keeps its mute at most 4h + 2 x 4h before the nudge goes out
 
 MUTE_KEY_CONTENT = "muted_branches"  # content-based error noise (medic)
 MUTE_KEY_VOLUME = "volume_muted_branches"  # volume-based runaway alerts
@@ -71,10 +73,14 @@ def _is_mute_active(entry, now: datetime) -> bool:
 
 
 def _clean_expired_mutes(data: dict) -> None:
-    """Remove expired mute entries from every mute class in config data, in-place."""
+    """
+    Remove expired volume mutes in place.
+
+    Expired content mutes stay for the expiry sweep, which mails their holder; readers already treat them as inactive.
+    """
     config = data.get("config", {})
     now = datetime.now()
-    for key in MUTE_KEYS:
+    for key in (MUTE_KEY_VOLUME,):
         muted = config.get(key, [])
         if not muted:
             continue
@@ -245,6 +251,40 @@ def mute_branch(branch_name: str, duration_seconds: Optional[float] = None) -> b
 def unmute_branch(branch_name: str) -> bool:
     """Remove a branch from the CONTENT muted list."""
     return _unmute_branch_in(MUTE_KEY_CONTENT, branch_name)
+
+
+def take_expired_content_mutes(should_rearm: Callable[[str], bool]) -> Tuple[List[str], List[str]]:
+    """
+    Settle every expired content mute: re-arm it for DEFAULT_MUTE_SECONDS when should_rearm(name) and it has
+    re-armed fewer than MAX_REARMS times, else drop it. Returns (dropped, rearmed) names.
+
+    The caller mails after this returns: nothing is sent under the state lock.
+    """
+    dropped: List[str] = []
+    rearmed: List[str] = []
+    with json_file_lock(MEDIC_STATE_FILE):
+        data = read_config()
+        config = data.get("config", {})
+        now = datetime.now()
+        kept = []
+        for entry in config.get(MUTE_KEY_CONTENT, []):
+            if _is_mute_active(entry, now):
+                kept.append(entry)
+                continue
+            name = _mute_entry_name(entry)
+            rearms = int(entry.get("rearms", 0))
+            if name and rearms < MAX_REARMS and should_rearm(name):
+                expires = now + timedelta(seconds=DEFAULT_MUTE_SECONDS)
+                kept.append({"name": name, "expires_at": expires.isoformat(), "rearms": rearms + 1})
+                rearmed.append(name)
+            elif name:
+                dropped.append(name)
+        if not dropped and not rearmed:
+            return dropped, rearmed
+        config[MUTE_KEY_CONTENT] = kept
+        if not write_config(data):
+            raise OSError(f"cannot write {MEDIC_STATE_FILE.name}: expired mutes left for the next sweep")
+    return dropped, rearmed
 
 
 def mute_branch_volume(branch_name: str, duration_seconds: Optional[float] = None) -> bool:
