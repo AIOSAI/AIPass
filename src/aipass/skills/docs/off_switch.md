@@ -47,7 +47,8 @@ switch:
     - my-skill-worker@main
 ```
 
-A skill that declares nothing still toggles; it simply owns no processes to
+`on` and `off` refuse a name no search path holds: they name it, point to
+`drone @skills list`, exit 1 and write nothing. A skill that declares nothing still toggles; it simply owns no processes to
 stop. If `switch_state.json` is ever unreadable, skills **refuse to run** rather
 than defaulting to on — defaulting to on would restart exactly what someone
 deliberately switched off. `on` and `off` refuse too: they write nothing, leave

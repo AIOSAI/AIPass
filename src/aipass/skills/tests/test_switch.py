@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_switch.py
 # Description: Skill off-switch tests
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-08-18
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -255,7 +255,7 @@ class TestSwitchingOverAnUnreadableDocument:
         errors = []
         monkeypatch.setattr(switch_module.logger, "error", lambda msg, *a, **k: errors.append(msg % a))
 
-        assert switch_module.handle_command("off", ["sample"]) is False
+        assert switch_module.handle_command("off", ["github"]) is False
 
         out, err = capsys.readouterr()
         assert "switch_state.json" in err and "drone rm" in err
@@ -503,3 +503,28 @@ class TestSwitchRows:
         row = next(r for r in sh.switch_rows() if r["name"] == "screen_lock")
         assert row["enabled"] is False
         assert row["live_units"] == ["fake-bot@one"]
+
+
+class TestAnUnknownSkillName:
+    """on and off refuse a name no search path holds: named, the next step given, nothing written."""
+
+    @pytest.mark.parametrize("command", ["on", "off"])
+    def test_on_and_off_refuse_an_unknown_name_and_write_nothing(self, state_dir, monkeypatch, capsys, command):
+        fake = FakeSystemctl()
+        monkeypatch.setattr(sh, "_systemctl", fake)
+
+        assert switch_module.handle_command(command, ["nosuch"]) is False
+
+        out, err = capsys.readouterr()
+        assert "Error: unknown skill 'nosuch'" in err
+        assert "drone @skills list" in err
+        assert "is ON" not in out and "is OFF" not in out
+        assert not sh.get_state_path().exists()
+        assert fake.calls == []
+
+    def test_a_known_skill_still_switches(self, state_dir, monkeypatch):
+        monkeypatch.setattr(sh, "_systemctl", FakeSystemctl())
+
+        assert switch_module.handle_command("off", ["github"]) is True
+
+        assert sh.is_enabled("github") is False
