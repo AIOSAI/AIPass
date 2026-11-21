@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_compass_command.py
 # Description: Tests for the compass module command router (FPLAN P2)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-16
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/compass.py, driven through handle_command against a temp --db store."""
@@ -453,3 +453,32 @@ def test_include_archived_shows_archived_pointer(capsys, db):
     assert "1 result(s)" in q2
     assert "archived" in q2.lower()
     assert "superseded by #" in q2.lower()
+
+
+def test_query_shows_this_seats_open_dispatches(capsys, db, monkeypatch):
+    """An orientation surface leads with the live dispatch register, this seat's dispatches only."""
+    monkeypatch.setattr(compass_cmd._dispatches, "seat_email", lambda *a, **k: "@devpulse")
+    monkeypatch.setattr(
+        compass_cmd._dispatches,
+        "outstanding",
+        lambda *a, **k: [
+            {"sender": "@devpulse", "target": "@flow", "overdue": False},
+            {"sender": "@devpulse", "target": "@spawn", "overdue": True},
+            {"sender": "@vera", "target": "@other", "overdue": False},
+        ],
+    )
+    capsys.readouterr()
+    compass_cmd.handle_command("compass", ["query", "anything", "--db", db])
+    out = _output(capsys)
+    assert "2 dispatch(es) still out" in out
+    assert "@flow" in out and "@spawn (overdue)" in out
+    assert "@other" not in out  # another seat's dispatch is never shown
+
+
+def test_query_is_silent_when_no_dispatch_is_out(capsys, db, monkeypatch):
+    """No open dispatch means no banner — the surface stays clean."""
+    monkeypatch.setattr(compass_cmd._dispatches, "seat_email", lambda *a, **k: "@devpulse")
+    monkeypatch.setattr(compass_cmd._dispatches, "outstanding", lambda *a, **k: [])
+    capsys.readouterr()
+    compass_cmd.handle_command("compass", ["query", "anything", "--db", db])
+    assert "dispatch(es) still out" not in _output(capsys)
