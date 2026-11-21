@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.10.0
+# Version: 3.10.1
 # Created: 2026-02-02
-# Modified: 2026-11-03
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from aipass.prax import logger
-from aipass.cli import console, error, warning
+from aipass.cli import console, err_console, error, warning
 from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
 from aipass.ai_mail.apps.handlers.dispatch import grant as grant_handler
 from aipass.ai_mail.apps.handlers.json import json_handler
@@ -57,8 +57,8 @@ STOP:
   Ends the monitor and its agent (TERM, 5s grace, KILL), closes the register row as stopped and
   mails the dispatcher "Dispatch stopped: @branch (by <who>)"; no wake-back follows. The session
   pointer is kept, so a resume in the branch continues. Exit 0 prints
-  "stopped @branch (dispatch <id>, by <who>)"; nothing running prints
-  "no dispatch is running for @branch" and exits 1, as does an unknown agent.
+  "stopped @branch (dispatch <id>, by <who>)". A row whose monitor is GONE is closed as stopped
+  (no mail); nothing running prints "no dispatch is running for @branch" and exits 1, as does an unknown agent.
 
 CLOSE:
   drone @ai_mail dispatch close 4e215275 "unit ended by hand"   # id or a unique prefix of it
@@ -240,7 +240,7 @@ def _admin_lane() -> bool:
             logger.warning("[dispatch] admin verification failed unexpectedly: %s", exc)
             is_admin, admin_reason = False, f"admin verification error: {exc}"
         if not is_admin:
-            console.print(f"[dim]Admin lane closed: {admin_reason}[/dim]")
+            console.print(f"[dim]Admin lane not available ({admin_reason}) — continuing as an ordinary sender[/dim]")
     return is_admin
 
 
@@ -294,7 +294,6 @@ def _orchestrate_wake(args: List[str]) -> bool:
     is_admin = _admin_lane()
 
     logger.info(f"[dispatch] Manual wake requested for {branch_email}")
-    console.print(f"\n⏳ Waking {branch_email}...")
 
     from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
 
@@ -309,8 +308,10 @@ def _orchestrate_wake(args: List[str]) -> bool:
         opencode_config=opencode_config,
     )
 
-    console.print(dispatch_status.format())
-
+    # A failed wake's steps share stderr with its failure line, so drone cannot replay them after it.
+    out = console if success else err_console
+    out.print(f"\n⏳ Waking {branch_email}...")
+    out.print(dispatch_status.format())
     if not success:
         # The status block never marks the command failed; without this a dead wake exits 0.
         error(f"Wake failed for {branch_email} — see the step status above")
@@ -488,9 +489,11 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     if not sent:
         return True
 
-    console.print(f"\nWaking {target}...")
+    from aipass.ai_mail.apps.handlers.dispatch.wake import is_manager, wake_branch
 
-    from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
+    # A manager's wake is skipped at the gate; "Waking" ahead of that verdict would be false.
+    if is_admin or not is_manager(target):
+        console.print(f"\nWaking {target}...")
 
     # The wake is attributed to the VERIFIED caller; --from never moves who the wake came from.
     dispatch_status, wake_ok = wake_branch(

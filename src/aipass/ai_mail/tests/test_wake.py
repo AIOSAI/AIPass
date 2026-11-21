@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-03-29
-# Modified: 2026-11-03
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's wake_branch: the spawn, session pointer, model, provider and marking."""
@@ -587,7 +587,7 @@ class TestWakeBranch:
         status, ok = wake_branch("@testbranch")
         pid_alive.assert_called_once_with(_FakeProc().pid)
         assert ok is False
-        assert any(s[0] == "fail" and "alive" in s[1] for s in status.steps)
+        assert status.find_step("alive") == ("fail", "alive", "Monitor exited at once (PID 55555)")
         assert not lock_file.exists()
 
     def test_successful_full_path(self, tmp_path, monkeypatch):
@@ -608,6 +608,9 @@ class TestWakeBranch:
         assert "spawn" in labels
         assert "lock-acquire" in labels
         assert "alive" in labels
+        # FPLAN-1160: the check saw a monitor process, never an agent answer.
+        alive = ("ok", "alive", "Monitor started (PID 55555 running) — agent not yet heard from")
+        assert status.find_step("alive") == alive
         notify.assert_called_once_with(
             "@testbranch waking", "Manual wake: check inbox", source="testbranch", kind="wake"
         )

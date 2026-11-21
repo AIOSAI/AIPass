@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_case_sweep.py
 # Description: Registry globs must not widen on a case-insensitive filesystem
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-08-31
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/paths.py's registry glob readers on a case-insensitive filesystem."""
@@ -264,7 +264,7 @@ class TestReplyPathValidationIsNotSatisfiedByACounter:
         _real_registry(project)
         inbox = project / "seat" / ".ai_mail.local" / "inbox.json"
         inbox.parent.mkdir(parents=True)
-        inbox.write_text("{}", encoding="utf-8")
+        inbox.write_text(json.dumps({"mailbox": "inbox", "messages": []}), encoding="utf-8")
 
         success, msg = _reply_along(tmp_path, inbox)
         assert success is True, msg

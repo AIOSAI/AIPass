@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email.py
 # Description: Email Orchestration Module
-# Version: 3.6.0
+# Version: 3.6.1
 # Created: 2025-12-02
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -28,6 +28,7 @@ from aipass.ai_mail.apps.handlers.email.inbox_cleanup import (
     mark_all_read_and_archive,
     mark_as_opened,
     mark_as_closed_and_archive,
+    not_found_message,
 )
 from aipass.ai_mail.apps.handlers.email.reply import get_email_by_id, send_reply
 from aipass.ai_mail.apps.handlers.users.user import get_current_user
@@ -229,8 +230,8 @@ def handle_view(args: List[str]) -> bool:
             return True
         header = format_email_header(email_data)
         console.print(f"\n{header}")
-        # Raw sender text renders with markup off: markup=False cannot raise MarkupError on any content.
-        console.print(f"\n{email_data.get('message', '')}", markup=False)
+        # Raw sender text: markup off cannot raise MarkupError; highlight off, as its regexes go quadratic on long tokens.
+        console.print(f"\n{email_data.get('message', '')}", markup=False, highlight=False)
         console.print("=" * 70)
         # Echo the message's OWN id, never args[0] ("latest", or a sender's sent_id).
         resolved_id = email_data.get("id", message_id)
@@ -255,6 +256,10 @@ def handle_close(args: List[str]) -> bool:
     json_handler.log_operation("close_email_initiated", {"args": args})
     if not args:
         error("Usage: drone @ai_mail close <id> [id2 ...] | close all")
+        return True
+    # A stray word after `all` must not be dropped and the whole inbox archived anyway.
+    if args[0].lower() == "--all" or (args[0].lower() == "all" and len(args) > 1):
+        error(f"Usage: drone @ai_mail close all  (nothing else) — refused: close {' '.join(args)}")
         return True
     try:
         branch_path = _resolve_branch_path()
@@ -302,7 +307,7 @@ def handle_reply(args: List[str]) -> bool:
         inbox_file = branch_path / ".ai_mail.local" / "inbox.json"
         original = get_email_by_id(inbox_file, args[0])
         if not original:
-            error(f"Message not found: {args[0]}")
+            error(not_found_message(branch_path / ".ai_mail.local", args[0]))
             return True
         reply_message = " ".join(args[1:])
         flag_like = [a for a in args[1:] if a.startswith("--")]
@@ -358,6 +363,9 @@ def handle_sent(args: List[str]) -> bool:
 def handle_contacts(args: List[str]) -> bool:
     """View contacts."""
     json_handler.log_operation("contacts_viewed")
+    if args:
+        error(f"Usage: drone @ai_mail contacts  (no subcommands) — refused: contacts {' '.join(args)}")
+        return True
     try:
         branches = get_fleet_branches()
         if not branches:

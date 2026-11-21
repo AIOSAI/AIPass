@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_register.py
 # Description: Tests for the dispatch register append-only log
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-22
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/dispatch/register.py: the append-only dispatch register, and the grant its rows carry."""
@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from aipass.ai_mail.apps.handlers.dispatch import grant as grant_mod
-from aipass.ai_mail.apps.handlers.dispatch import register, report
+from aipass.ai_mail.apps.handlers.dispatch import pid_lock, register, report
 from aipass.ai_mail.apps.handlers.notify import jsonl_records
 from aipass.ai_mail.apps.modules import grants as grants_module
 from aipass.cli import display
@@ -185,6 +185,15 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
         register.record_monitor_pid(dispatch_id, os.getpid(), repo_root=repo)
 
         assert _only_open_row(repo)["monitor_alive"] is True
+
+    def test_a_zombie_monitor_reads_gone_not_alive(self, repo, monkeypatch):
+        """FPLAN-1160: a defunct monitor keeps its /proc entry; State: Z must read dead, as the lock reads it."""
+        dispatch_id = register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=repo)
+        assert dispatch_id
+        register.record_monitor_pid(dispatch_id, os.getpid(), repo_root=repo)
+        monkeypatch.setattr(pid_lock, "_is_zombie_linux", lambda pid: pid == os.getpid())
+
+        assert _only_open_row(repo)["monitor_alive"] is False
 
     def test_a_row_with_no_pid_is_unknown_not_dead(self, repo):
         """The distinction the whole tri-state exists for: absence of a pid is not death."""

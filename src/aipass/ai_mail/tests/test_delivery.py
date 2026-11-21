@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_delivery.py
 # Description: Tests for email delivery handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-29
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py."""
@@ -214,9 +214,17 @@ def test_private_branch_email_corrupted_json(repo_root):
 # ---- deliver_email_to_branch() tests ------------------------------
 
 
+def _give_passport(branch_path: Path) -> None:
+    """Delivery refuses a branch folder without a passport (no ghost mailboxes), so fixtures carry one."""
+    passport = branch_path / ".trinity" / "passport.json"
+    passport.parent.mkdir(parents=True, exist_ok=True)
+    passport.write_text("{}", encoding="utf-8")
+
+
 def _setup_branch(tmp_path, email: str = "@target", name: str = "TARGET"):
-    """Create branch directory with .ai_mail.local/inbox.json and return branch data."""
+    """Create branch directory with a passport and .ai_mail.local/inbox.json and return branch data."""
     branch_path = tmp_path / "branches" / name.lower()
+    _give_passport(branch_path)
     mailbox_dir = branch_path / ".ai_mail.local"
     mailbox_dir.mkdir(parents=True, exist_ok=True)
     inbox_file = mailbox_dir / "inbox.json"
@@ -239,6 +247,7 @@ def _deliver_into(recipient: Path, to_branch: str = "@target", sender: str = "@s
 
     Returns (success, message); the tmp inbox is provisioned and written when it passes.
     """
+    _give_passport(recipient)
     lookup = MagicMock(return_value=[{"name": "T", "path": str(recipient), "email": to_branch}])
     with patch.object(delivery_mod, "get_all_branches", lookup):
         success, msg = deliver_email_to_branch(to_branch, _make_email_data(sender=sender, recipient=to_branch))
@@ -387,7 +396,7 @@ def test_deliver_auto_provisions_inbox(tmp_path, repo_root, noop_inbox_lock):
     inconsistent fixture (found live, 2026-08-16, @devpulse).
     """
     branch_path = tmp_path / "branches" / "newbranch"
-    branch_path.mkdir(parents=True)
+    _give_passport(branch_path)
     branches = [{"name": "NEWBRANCH", "path": str(branch_path), "email": "@newbranch"}]
 
     with patch.object(delivery_mod, "get_all_branches", return_value=branches):
@@ -467,6 +476,7 @@ def test_deliver_multiple_messages_prepends(tmp_path, repo_root, noop_inbox_lock
 def test_deliver_path_input_resolves_to_email(tmp_path, repo_root, noop_inbox_lock):
     """Path-based to_branch (from DRONE @ resolution) resolves to email."""
     branch_path = tmp_path / "branches" / "target"
+    _give_passport(branch_path)
     mailbox_dir = branch_path / ".ai_mail.local"
     mailbox_dir.mkdir(parents=True, exist_ok=True)
     inbox_file = mailbox_dir / "inbox.json"
@@ -495,6 +505,40 @@ def test_deliver_path_input_unresolvable(repo_root, noop_inbox_lock, tmp_path):
 
     assert success is False
     assert "Could not resolve path" in error
+
+
+@pytest.mark.parametrize("stored", ['{"inbox": "x"}', '"x"', "null", "{}", '{"inbox": null}'])
+def test_deliver_refuses_a_wrong_shaped_store_and_keeps_it(tmp_path, repo_root, noop_inbox_lock, stored):
+    """Both lanes refuse a store that is no mailbox, naming it, and leave its bytes as they were."""
+    branches = _setup_branch(tmp_path)
+    inbox_file = Path(branches[0]["path"]) / ".ai_mail.local" / "inbox.json"
+    inbox_file.write_text(stored, encoding="utf-8")
+
+    with patch.object(delivery_mod, "get_all_branches", return_value=branches):
+        success, error = deliver_email_to_branch("@target", _make_email_data())
+    ok, file_error, _rid = delivery_mod.deliver_to_inbox_file(inbox_file, dict(_DELIVERED))
+
+    assert (success, ok) == (False, False)
+    for msg in (error, file_error):
+        assert str(inbox_file) in msg and "wrong-shaped" in msg
+    assert inbox_file.read_text(encoding="utf-8") == stored
+
+
+@pytest.mark.parametrize("state", ["folder gone", "no passport"])
+def test_deliver_refuses_a_registered_agent_without_a_branch(tmp_path, repo_root, noop_inbox_lock, state):
+    """A registry row whose folder is gone, or holds no passport, is refused: no ghost mailbox is made."""
+    branch_path = tmp_path / "branches" / "probe"
+    if state == "no passport":
+        branch_path.mkdir(parents=True)
+    branches = [{"name": "PROBE", "path": str(branch_path), "email": "@probe"}]
+
+    with patch.object(delivery_mod, "get_all_branches", return_value=branches):
+        success, error = deliver_email_to_branch("@probe", _make_email_data(recipient="@probe"))
+
+    assert success is False
+    assert "@probe" in error and ("missing" if state == "folder gone" else "passport") in error
+    assert not (branch_path / ".ai_mail.local").exists()
+    assert branch_path.exists() is (state == "no passport")
 
 
 # ---- _resolve_reply_path() tests ------------------------------
@@ -706,6 +750,7 @@ def external_world(tmp_path, monkeypatch, noop_inbox_lock):
     target = home / "src" / "aipass" / "target"
     devpulse = home / "src" / "aipass" / "devpulse"
     _write_json(target / ".ai_mail.local" / "inbox.json", _empty_inbox())
+    _give_passport(target)
     _write_json(devpulse / ".trinity" / "passport.json", {"branch_info": {"branch_name": "devpulse"}})
     fleet_rows = [
         {"name": "target", "email": "@target", "path": str(target)},

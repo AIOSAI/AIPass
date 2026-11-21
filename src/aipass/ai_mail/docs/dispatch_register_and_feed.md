@@ -183,7 +183,10 @@ its retries, bounce and wake-back, so it is the stop that closes the row
 pointer and transcript are left alone, so a resume in the branch continues where the agent
 stopped.
 
-Exit 0 prints `stopped @agent (dispatch <id>, by <who>)`. When nothing is running, the
+Exit 0 prints `stopped @agent (dispatch <id>, by <who>)`. When no monitor runs but the
+target's newest row reads `monitor GONE` (a zombie counts as gone), the stop closes that row
+as stopped, mails nobody, and prints `closed @agent's dispatch <id>: its monitor (PID <n>) is
+gone (by <who>)`, exit 0, so register and stop never disagree. When nothing is running, the
 stop prints `no dispatch is running for @agent` and changes nothing; an unknown agent
 prints `unknown agent @agent`. Both exit 2, the routed-but-failed code of
 [cli_contract.md](cli_contract.md). A second stop of the same dispatch gets the

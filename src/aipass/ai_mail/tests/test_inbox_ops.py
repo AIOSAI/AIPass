@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_inbox_ops.py
 # Description: Tests for inbox operations handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/email/inbox_ops.py -- inbox loading and migration."""
@@ -188,3 +188,15 @@ def test_load_inbox_migration_persists(tmp_path):
     assert persisted["unread_count"] == 1
     assert persisted["mailbox"] == "inbox"
     assert set(persisted.keys()) == {"messages", "total_messages", "unread_count", "mailbox"}
+
+
+@pytest.mark.parametrize("stored", ['{"inbox": "x"}', '"x"', "null", "{}", '{"inbox": null}'])
+def test_load_inbox_refuses_a_wrong_shaped_store_and_keeps_it(tmp_path, stored):
+    """A store that is no mailbox is refused by name, never read as empty and rewritten."""
+    inbox_path = tmp_path / "inbox.json"
+    inbox_path.write_text(stored, encoding="utf-8")
+
+    with pytest.raises(Exception, match=r"(?s)inbox\.json.*wrong-shaped"):
+        load_inbox(inbox_path)
+
+    assert inbox_path.read_text(encoding="utf-8") == stored

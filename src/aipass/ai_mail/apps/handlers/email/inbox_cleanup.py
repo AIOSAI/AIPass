@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: inbox_cleanup.py
 # Description: Inbox Cleanup Handler
-# Version: 3.3.2
+# Version: 3.3.3
 # Created: 2025-11-27
-# Modified: 2026-10-17
+# Modified: 2026-11-21
 # =============================================
 
 """
 Inbox Cleanup Handler
 """
 
+import glob
 import json
 from pathlib import Path
 from datetime import datetime
@@ -59,6 +60,14 @@ def _save_to_deleted_folder(mailbox_path: Path, message: Dict) -> Path:
         json.dump(message, f, indent=2, ensure_ascii=False)
 
     return email_file
+
+
+def not_found_message(mailbox_path: Path, message_id: str) -> str:
+    """The miss text for view/reply/close: an id still in deleted/ is named closed, not mistaken for a typo."""
+    pattern = f"????????_??????_{glob.escape(message_id)}_*.json"
+    if "/" not in message_id and any((mailbox_path / "deleted").glob(pattern)):
+        return f"Message {message_id} is already closed"
+    return f"Message not found: {message_id}"
 
 
 def _migrate_deleted_json_if_exists(mailbox_path: Path) -> Optional[int]:
@@ -208,7 +217,7 @@ def mark_as_opened(branch_path: Path, message_id: str) -> Tuple[bool, str, Optio
             target_msg = find_message(messages, message_id)
 
             if target_msg is None:
-                return False, f"Message not found: {message_id}", None
+                return False, not_found_message(inbox_file.parent, message_id), None
 
             target_msg["status"] = "opened"
             target_msg["read"] = True
@@ -255,7 +264,7 @@ def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops
             message_index = messages.index(message_to_archive) if message_to_archive is not None else None
 
             if message_to_archive is None:
-                return False, f"Message not found: {message_id}"
+                return False, not_found_message(mailbox_path, message_id)
 
             message_to_archive["status"] = "closed"
             message_to_archive["read"] = True  # backward compat

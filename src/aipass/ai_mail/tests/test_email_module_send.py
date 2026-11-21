@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_email_module_send.py
 # Description: Tests for email_send.py's send lane and email.py's command routing
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/email_send.py's handle_send and the routing of apps/modules/email.py."""
@@ -650,3 +650,25 @@ class TestDeclaredKind:
 
         assert handle_send(["@all", "--kind", "notice", "S", "B"]) is True
         assert seen == ["notice"]
+
+
+class TestSendRefusesAMissingSubject:
+    """An empty subject, or an unknown flag where the subject belongs, refuses and sends nothing."""
+
+    @pytest.mark.parametrize(
+        "args, named",
+        [
+            (["@target", "", ""], "subject"),
+            (["@target", "   ", "body"], "subject"),
+            (["@target", "--subject", "x", "--message", "y"], "--subject"),
+        ],
+        ids=["empty", "whitespace", "unknown-flag"],
+    )
+    def test_refused_and_nothing_sent(self, args, named, monkeypatch, tmp_path):
+        _stub_single_send(monkeypatch, tmp_path, on_send=lambda a: pytest.fail(f"sent despite refusal: {a!r}"))
+        errors: list[str] = []
+        monkeypatch.setattr(email_send_mod, "error", lambda msg: errors.append(msg))
+
+        assert handle_send(args) is True
+
+        assert len(errors) == 1 and named in errors[0], errors

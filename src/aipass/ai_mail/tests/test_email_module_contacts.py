@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_email_module_contacts.py
 # Description: Tests for email.py's address book commands - contacts and register
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-08
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/email.py's address book: handle_contacts and handle_register."""
@@ -156,3 +156,15 @@ def test_contacts_lists_a_citizen_of_a_declared_root(tmp_path, monkeypatch, caps
     out = capsys.readouterr().out
     assert "Total: 1 branches" in out
     assert "@grow" in out and str(grow) in out
+
+
+def test_contacts_refuses_an_unknown_subcommand_without_listing(monkeypatch, capsys):
+    """`contacts bogus` names the usage and lists nothing: a stray word must not read as success."""
+    monkeypatch.setattr(read_mod, "fleet_branches", lambda **kw: [{"name": "A", "path": "/a", "email": "@a"}])
+    errors: list[str] = []
+    monkeypatch.setattr("aipass.ai_mail.apps.modules.email.error", lambda msg: errors.append(msg))
+
+    assert handle_contacts(["bogus"]) is True
+
+    assert any("bogus" in e and "Usage" in e for e in errors), errors
+    assert "@a" not in capsys.readouterr().out

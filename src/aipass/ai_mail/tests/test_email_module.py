@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_email_module.py
 # Description: Tests for email.py's mailbox handlers - inbox, view, close, reply, sent
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/email.py's mailbox handlers: inbox, view, close, reply, sent."""
@@ -30,6 +30,7 @@ from unittest.mock import MagicMock
 # trigger/tests/test_memory_pool_handler.py) and never restore them, so any
 # string-path patch or in-test `from ... import x` would otherwise resolve to
 # a mock on an xdist worker that ran the polluter first.
+from aipass.ai_mail.apps.handlers.email import inbox_cleanup
 from aipass.ai_mail.apps.modules import email as email_mod
 from aipass.ai_mail.apps.modules.email import (
     handle_close,
@@ -1159,3 +1160,73 @@ class TestBodyRendersWhateverTheSenderTyped:
         """
         out = self._view_message(monkeypatch, tmp_path, "raw [bold]body[/bold] kept", capsys)
         assert "raw [bold]body[/bold] kept" in out, "body printed as markup — its tags were consumed"
+
+
+class TestCloseAllTakesNothingElse:
+    """A bulk close runs on `close all` alone: anything else after it, or `--all`, refuses and archives nothing."""
+
+    @pytest.mark.parametrize("args", [["all", "x"], ["ALL", "msg1"], ["--all"]])
+    def test_bulk_close_with_extra_words_refuses(self, args, tmp_path, monkeypatch):
+        monkeypatch.setattr(email_mod, "_resolve_branch_path", lambda: tmp_path)
+        archived: list = []
+        monkeypatch.setattr(email_mod, "mark_all_read_and_archive", lambda bp: archived.append(bp) or (True, "x", 1))
+        monkeypatch.setattr(email_mod, "batch_close", lambda *a: archived.append(a) or ([], 0, 0))
+        errors: list[str] = []
+        monkeypatch.setattr(email_mod, "error", lambda msg: errors.append(msg))
+
+        assert handle_close(args) is True
+
+        assert archived == []
+        assert any("close all" in e for e in errors), errors
+
+
+class TestViewLongUnbrokenBody:
+    """A 100,000-char body with no space once hung view past 45 s; the reader must get it back at once."""
+
+    def test_view_prints_a_long_unbroken_body_fast(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
+        import time
+
+        body = "a" * 100_000
+        monkeypatch.setattr(email_mod, "_resolve_branch_path", lambda: tmp_path)
+        email_data = {"id": "long0001", "subject": "S", "message": body, "from": "@x", "from_name": "X"}
+        monkeypatch.setattr(email_mod, "mark_as_opened", lambda bp, mid: (True, "Opened", email_data))
+
+        started = time.monotonic()
+        assert handle_view(["long0001"]) is True
+        elapsed = time.monotonic() - started
+
+        assert "".join(capsys.readouterr().out.split()).count("a" * 100_000) == 1
+        assert elapsed < 3, f"view took {elapsed:.1f}s on a long unbroken body"
+
+
+class TestClosedIdIsNamedClosed:
+    """view, reply and close on an id already archived to deleted/ say it is closed, not "not found"."""
+
+    def _closed_mailbox(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(inbox_cleanup, "json_handler", MagicMock())
+        _write_inbox(tmp_path, [{"id": "open0001", "subject": "still open"}, {"id": "gone0001", "subject": "done"}])
+        # The real close archives it, so the deleted/ naming and the lookup cannot drift apart.
+        assert inbox_cleanup.mark_as_closed_and_archive(tmp_path, "gone0001", skip_post_ops=True)[0]
+        monkeypatch.setattr(email_mod, "_resolve_branch_path", lambda: tmp_path)
+        errors: list[str] = []
+        monkeypatch.setattr(email_mod, "error", lambda msg: errors.append(msg))
+        return errors
+
+    @pytest.mark.parametrize(
+        "run",
+        [
+            lambda: handle_view(["gone0001"]),
+            lambda: handle_close(["gone0001"]),
+            lambda: handle_reply(["gone0001", "hi"]),
+        ],
+        ids=["view", "close", "reply"],
+    )
+    def test_closed_id_says_already_closed(self, run, tmp_path, monkeypatch):
+        errors = self._closed_mailbox(tmp_path, monkeypatch)
+        assert run() is True
+        assert errors == ["Message gone0001 is already closed"]
+
+    def test_unknown_id_still_says_not_found(self, tmp_path, monkeypatch):
+        errors = self._closed_mailbox(tmp_path, monkeypatch)
+        assert handle_view(["nope0001"]) is True
+        assert errors == ["Message not found: nope0001"]

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake_managers.py
 # Description: Tests for the wake's manager lanes, the wake-back opt-out, the Fable grant read and the dashboard refresh
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-10-08
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's manager lanes, wake-back and wake_dashboard.py's refresh."""
@@ -241,6 +241,8 @@ class TestAdminManagerLane:
         manager_step = status.find_step("manager")
         assert manager_step is not None and manager_step[0] == "info"
         assert status.find_step("admin") is None
+        # FPLAN-1160: "provider → claude" printed ahead of the skip, for a provider never used.
+        assert status.find_step("provider") is None
 
     def test_admin_wake_still_refuses_a_blocklisted_target(self, tmp_path, monkeypatch):
         """@devpulse stays undispatchable — admin raises the stakes, not the fence."""

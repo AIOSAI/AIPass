@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.12.1
+# Version: 3.12.2
 # Created: 2026-03-02
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -709,14 +709,6 @@ def wake_branch(
     branch_path, email = result
     status.ok("resolve", f"{email} → {branch_path}")
 
-    if provider not in KNOWN_PROVIDERS:
-        status.fail("provider", f"unknown provider {provider!r} — known: {', '.join(KNOWN_PROVIDERS)}")
-        return status, False
-    status.ok("provider", provider)
-    if opencode_config is not None and provider != PROVIDER_OPENCODE:
-        status.fail("config", f"an OpenCode config applies to provider opencode only, not {provider!r}")
-        return status, False
-
     # Before the passport read: an unreadable passport must never be why @devpulse is spawned.
     if (scheduled or admin) and is_wake_blocked(email):
         lane = "scheduled" if scheduled else "admin"
@@ -763,6 +755,15 @@ def wake_branch(
             logger.warning("[wake] %s passport unreadable, treated as a manager — wake skipped: %s", email, exc)
             return status, True
         logger.warning("[wake] %s passport unreadable, waking in a lane that wakes managers too: %s", email, exc)
+
+    # After the manager gate: a skipped wake must not first print a provider it never uses.
+    if provider not in KNOWN_PROVIDERS:
+        status.fail("provider", f"unknown provider {provider!r} — known: {', '.join(KNOWN_PROVIDERS)}")
+        return status, False
+    status.ok("provider", provider)
+    if opencode_config is not None and provider != PROVIDER_OPENCODE:
+        status.fail("config", f"an OpenCode config applies to provider opencode only, not {provider!r}")
+        return status, False
 
     # Decided ONCE for both spawn lanes; a second site would let the rule drift.
     if provider in (PROVIDER_CODEX, PROVIDER_OPENCODE):
@@ -1058,9 +1059,9 @@ def wake_branch(
                 timeout=5,
             )
             if check.stdout.strip() == "active":
-                status.ok("alive", f"Agent responding (unit {_unit} active)")
+                status.ok("alive", f"Monitor started (unit {_unit} active) — agent not yet heard from")
             else:
-                status.fail("alive", f"Agent died immediately ({check.stdout.strip()})")
+                status.fail("alive", f"Monitor exited at once ({check.stdout.strip()})")
                 lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
                 lock_file.unlink(missing_ok=True)
                 return status, False
@@ -1069,9 +1070,9 @@ def wake_branch(
             status.warn("alive", "Cannot verify systemd unit status — assuming running")
     else:
         if check_pid_alive(monitor_pid):
-            status.ok("alive", f"Agent responding (PID {monitor_pid} alive)")
+            status.ok("alive", f"Monitor started (PID {monitor_pid} running) — agent not yet heard from")
         else:
-            status.fail("alive", f"Agent died immediately (PID {monitor_pid})")
+            status.fail("alive", f"Monitor exited at once (PID {monitor_pid})")
             lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
             lock_file.unlink(missing_ok=True)
             return status, False

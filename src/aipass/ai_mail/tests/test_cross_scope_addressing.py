@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cross_scope_addressing.py
 # Description: Tests that an out-of-scope address is refused honestly, not reported as unknown
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py -- honest refusal of hosted-project addresses."""
@@ -186,7 +186,10 @@ def test_no_projects_tree_at_all_is_not_an_error(repo_root, noop_inbox_lock):
 def test_a_fleet_branch_still_resolves_normally(repo_root, hosted_baud, noop_inbox_lock):
     """The diagnostic sits on the failure path only — success is untouched."""
     branch_dir = repo_root / "src" / "aipass" / "devpulse"
-    branch_dir.mkdir(parents=True)
+    (branch_dir / ".trinity").mkdir(parents=True)
+    (branch_dir / ".trinity" / "passport.json").write_text(
+        "{}", encoding="utf-8"
+    )  # delivery refuses passport-less branches
 
     with patch.object(
         delivery_mod,

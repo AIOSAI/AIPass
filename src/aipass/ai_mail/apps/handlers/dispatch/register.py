@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: register.py
 # Description: Dispatch Register
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-08-22
-# Modified: 2026-11-14
+# Modified: 2026-11-21
 # =============================================
 
 """The dispatch register — what was promised, written before anything spawns.
@@ -22,6 +22,7 @@ from typing import Callable, Dict, List, Optional
 
 from aipass.prax import logger
 
+from aipass.ai_mail.apps.handlers.dispatch.pid_lock import check_pid_alive
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.notify import append_jsonl, jsonl_records
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
@@ -45,14 +46,11 @@ GRANT_KEY = "grant"
 
 
 def monitor_alive(pid: Optional[int]) -> Optional[bool]:
-    """Whether the monitor process *pid* still exists. None when it cannot be told.
-
-    Three answers: "no pid recorded" is None, never False, or every historic row would read dead.
-    """
+    """Whether monitor *pid* still runs, a zombie not. No pid is None, never False: old rows are not dead."""
     if not isinstance(pid, int) or pid <= 0:
         return None
 
-    return Path("/proc", str(pid)).exists()
+    return check_pid_alive(pid)
 
 
 def register_file(repo_root: Optional[Path] = None) -> Path:
