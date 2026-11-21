@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_footer.py
 # Description: Tests for email footer handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/email/footer.py."""
@@ -41,14 +41,15 @@ def test_get_footer_contains_checklist():
     assert "EMAIL SENDER" in result
 
 
-def test_close_your_plan_excludes_living_docs():
-    """The close line must not tell an APLAN owner to close a standing record.
-
-    The footer has no plan context, so the wording itself must carry the exception.
-    """
+def test_close_your_plan_closes_any_finished_type_and_keeps_none_open():
+    """Flow's rule (owner, 2026-11-20): whoever finishes a plan closes it, any type; no type stays open by kind."""
     result = mod.get_footer()
     close_line = next(line for line in result.splitlines() if "CLOSE YOUR PLAN" in line)
-    assert "APLAN" in close_line, "the close line must name the living-doc exception"
+    assert "drone @flow close <your_plan_id>" in close_line
+    assert "any type, once finished" in close_line
+    assert "a master once all its phases are" in close_line
+    assert "STAY OPEN" not in close_line
+    assert "only" not in close_line
 
 
 def test_append_footer_appends_to_message():
