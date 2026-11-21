@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: compass.py
 # Description: Compass Module — drone command for devpulse's rated decision store
-# Version: 1.1.0
+# Version: 1.0.4
 # Created: 2026-06-16
-# Modified: 2026-11-21
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -16,7 +16,6 @@ from aipass.prax import logger
 from aipass.cli import err_console, error
 from aipass.devpulse.apps.handlers import compass
 from aipass.devpulse.apps.handlers.json import json_handler
-from aipass.devpulse.apps.handlers.watchdog import dispatches as _dispatches
 
 __all__ = ["handle_command"]
 
@@ -109,26 +108,6 @@ def _wants_help(args: List[str]) -> bool:
     return bool(args) and (args[0] in ("--help", "-h", "help") or any(a in ("--help", "-h") for a in args))
 
 
-def _print_dispatch_awareness() -> None:
-    """Before an orientation surface, show this seat's still-open dispatches, read live from the register.
-
-    A decision made at a compass fork should know what work is still out; a count that disagrees with what
-    was dispatched (two sent, one shown) is a lost dispatch to chase. An unreadable register prints its
-    failure here rather than crashing compass, which is unrelated to dispatch tracking."""
-    try:
-        seat = _dispatches.seat_email()
-        mine = [entry for entry in _dispatches.outstanding() if _dispatches.is_mine(entry, seat)]
-    except (_dispatches.RegisterUnavailable, OSError) as exc:
-        console.print(f"[dim]dispatch register unreadable — {exc}[/dim]")
-        return
-    if not mine:
-        return
-    rendered = [
-        f"@{str(entry.get('target', '?')).lstrip('@')}{' (overdue)' if entry.get('overdue') else ''}" for entry in mine
-    ]
-    console.print(f"[cyan]⚡ {len(mine)} dispatch(es) still out:[/cyan] {', '.join(rendered)}")
-
-
 def handle_command(command: str, args: List[str]) -> bool:
     """Route compass subcommands to the storage handler."""
     if command != "compass":
@@ -151,9 +130,6 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     logger.info("[compass] subcommand=%s args=%s", subcommand, sub_args)
     json_handler.log_operation("compass_command", {"subcommand": subcommand})
-
-    if subcommand in ("query", "review"):
-        _print_dispatch_awareness()
 
     if subcommand == "add":
         return _handle_add(sub_args)

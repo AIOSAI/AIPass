@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_module.py
 # Description: Tests for the watchdog module router
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-14
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/watchdog.py, the watchdog module router (Phase 1, FPLAN-0186)."""
@@ -292,6 +292,36 @@ def test_status_reports_no_active_watches(capsys, monkeypatch):
     captured = capsys.readouterr()
     combined = captured.out + captured.err
     assert "no active watches" in combined.lower()
+
+
+_OPEN_FLOW = {"sender": "@devpulse", "target": "@flow"}
+
+
+def test_status_warns_when_dispatches_are_out_and_no_wire_is_armed(capsys, monkeypatch):
+    """Work out with no wire is the state nothing recovers from: status says so, with the arm command."""
+    _serve_registry(monkeypatch, _fake_registry_module(active=[]))
+    monkeypatch.setattr(wd_dispatches, "seat_email", lambda repo_root=None: "@devpulse")
+    monkeypatch.setattr(wd_dispatches, "outstanding", lambda repo_root=None: [_OPEN_FLOW])
+
+    wd_mod.handle_command("watchdog", ["status"])
+
+    out = capsys.readouterr().out
+    assert "outstanding: 1 (@flow)" in out
+    assert "NO WIRE ARMED" in out and "baseline --once" in out
+
+
+def test_status_is_quiet_about_the_wire_when_one_is_armed(capsys, monkeypatch):
+    """A live wire covers the open dispatch: the count shows, the alarm does not."""
+    wire = {"handle": "baseline_wire-1", "type": "baseline_wire", "pid": 1, "started_epoch": 1.0, "metadata": {}}
+    _serve_registry(monkeypatch, _fake_registry_module(active=[wire]))
+    monkeypatch.setattr(wd_dispatches, "seat_email", lambda repo_root=None: "@devpulse")
+    monkeypatch.setattr(wd_dispatches, "outstanding", lambda repo_root=None: [_OPEN_FLOW])
+
+    wd_mod.handle_command("watchdog", ["status"])
+
+    out = capsys.readouterr().out
+    assert "outstanding: 1 (@flow)" in out
+    assert "NO WIRE ARMED" not in out
 
 
 def test_status_prints_active_watches(capsys, monkeypatch):

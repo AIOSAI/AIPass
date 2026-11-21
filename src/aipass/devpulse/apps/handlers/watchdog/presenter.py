@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: presenter.py
 # Description: Watchdog presentation layer — handler result dicts rendered as CLI output
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-22
-# Modified: 2026-10-26
+# Modified: 2026-11-21
 # =============================================
 
 """Watchdog presentation — turning handler result dicts into console output.
@@ -133,11 +133,11 @@ def format_status_line(watch: dict, format_human) -> str:
     return f"  \\[{handle}]  {wtype:<8}  {format_human(elapsed):<10}  pid={pid}  {tail}"
 
 
-def print_delivery_lag() -> None:
-    """One line of dispatch truth: what this seat has out, and what is late.
+def print_delivery_lag() -> int | None:
+    """One line of dispatch truth: what this seat has out, and what is late. Returns the open count.
 
     Looking is the whole crash coverage: nothing polls, an entry past expected_by
-    is late on its own. A missing register is said as such, never "none outstanding".
+    is late on its own. A missing register is said as such (and returns None), never "none outstanding".
     """
     dispatches_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.dispatches")
     try:
@@ -147,7 +147,7 @@ def print_delivery_lag() -> None:
         # Logged too: the log is what remains if coverage went blind with nobody at the terminal.
         logger.warning("[watchdog] dispatch register unavailable: %s", exc)
         console.print(f"[dim]Dispatch register unavailable: {exc}[/dim]")
-        return
+        return None
     late = [entry for entry in open_now if entry.get("overdue")]
 
     # Tells a week of "nothing overdue" from a week of nobody looking.
@@ -164,6 +164,7 @@ def print_delivery_lag() -> None:
         console.print(f"[dim]Dispatches outstanding: {len(open_now)} ({names}), none overdue.[/dim]")
     else:
         console.print("[dim]Dispatches: none outstanding.[/dim]")
+    return len(open_now)
 
 
 def print_kill_result(result: dict) -> None:
