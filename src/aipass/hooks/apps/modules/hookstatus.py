@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hookstatus.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Hook status — read-only view of per-project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-28
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Hook status — read-only view of per-project hook configuration via drone @hooks status."""
@@ -14,7 +14,11 @@ import sys
 
 from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
-from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
+from aipass.hooks.apps.handlers.config.loader import (
+    config_break_banner,
+    config_unavailable_reason,
+    find_project_config,
+)
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger  # noqa: F401
 
@@ -34,6 +38,13 @@ EVENT_TYPES = [
     "SessionStart",
     "PreCompact",
 ]
+
+
+def print_config_break() -> None:
+    """Print the engine's own banner when the AIPass hook config cannot be read; nothing when it can."""
+    banner = config_break_banner()
+    if banner:
+        CONSOLE.print(f"[bold red]{banner}[/bold red]")
 
 
 def print_introspection():

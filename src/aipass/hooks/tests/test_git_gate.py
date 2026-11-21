@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 5.7.0
+# Version: 5.8.0
 # Description: Tests for git_gate: raw git, gh and the secrets store refused for every seat; protected writes
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -853,6 +853,31 @@ class TestTheProtectedLaneRefusesDeletesAndMovesOnItsOwn:
 
     def test_moving_an_ordinary_file_is_allowed(self, tmp_path, trust_home):
         _assert_allowed(_canary_bash("mv old.json new.json", _seat(tmp_path, "canary")))
+
+    def test_a_delete_in_a_branch_holding_claude_names_the_delete_and_drone_rm(self, tmp_path):
+        """Chaos finding: find -delete in a seat's own branch was refused as if the branch were .claude wiring."""
+        seat = _seat(tmp_path, "flow")
+        (Path(seat) / ".claude").mkdir()
+        for command in ('find . -name "*.tmp" -delete', 'find . -name "*.tmp" -exec rm {} +'):
+            reason = _reason(_canary_bash(command, seat))
+            assert "you do not delete" in reason and "drone rm <path>" in reason, command
+            assert "Config change" not in reason and "is protected" not in reason, command
+
+    def test_a_recursive_rm_over_a_protected_file_names_its_own_target(self, tmp_path, trust_home):
+        """Chaos addendum: rm -rf / was refused as '/ is protected: it is the trust registry'."""
+        target = _word(trust_home.parent.parent)
+        reason = _reason(_canary_bash(f"rm -rf {target}", _seat(tmp_path, "canary")))
+        assert reason.startswith(f"{target}: this command deletes under it")
+        assert "is protected" not in reason and "drone rm <path>" in reason
+
+    def test_the_admin_seat_is_not_refused_that_delete_here(self, tmp_path):
+        seat = _seat(tmp_path, "flow")
+        (Path(seat) / ".claude").mkdir()
+        with patch(_RAIL, return_value=True):
+            result = handle(
+                {"tool_name": "Bash", "tool_input": {"command": 'find . -name "*.tmp" -delete'}, "cwd": seat}
+            )
+        _assert_allowed(result)
 
 
 class TestGitFromInsideAProgramIsRawGit:

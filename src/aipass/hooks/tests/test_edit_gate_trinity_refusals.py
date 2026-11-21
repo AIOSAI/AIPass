@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity_refusals.py
 # Description: edit_gate's .trinity refusals: renamed fields, carried vs authored, field shapes, passport, logging
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py: what a .trinity refusal names, and what it carries."""
@@ -522,6 +522,47 @@ class TestPassportFileBudget:
 
         assert result == {"stdout": "", "exit_code": 0}
         assert "file_over_budget" in caplog.text
+
+
+class TestEveryBudgetedMemoryFileIsMeasuredWhole:
+    """A key the entry shape does not name is measured by the whole-file budget @memory publishes.
+
+    Chaos finding: an unknown top-level key of 60,000 chars landed in local.json while the same key inside an
+    entry was refused. @memory publishes a size budget for every .trinity file, not a top-level shape.
+    """
+
+    def _edit_local(self, tmp_path, new_string):
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        Path(file_path).write_text(
+            json.dumps({"document_metadata": {"managed_by": "hooks"}, "sessions": []}), encoding="utf-8"
+        )
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        data = _hook_data(
+            file_path, tool_name="Edit", cwd=cwd, old_string='"managed_by": "hooks"', new_string=new_string
+        )
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
+            return handle(data)
+
+    def test_an_unknown_top_level_key_of_60000_chars_is_refused(self, tmp_path):
+        result = self._edit_local(tmp_path, '"managed_by": "hooks", "probe": "' + "s" * 60000 + '"')
+
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert "local.json: the whole file is" in reason and "/32000 chars" in reason
+        assert "memory.config.json (file_budgets)" in reason
+        assert "identity block" not in reason, "the passport's own cost line is not local.json's"
+
+    def test_observations_over_its_budget_is_refused(self, tmp_path):
+        file_path = _make_trinity_path(tmp_path, "hooks", "observations.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
+            result = handle(_hook_data(file_path, json.dumps({"probe": "o" * 18000}), cwd=cwd))
+
+        assert result["exit_code"] == 2
+        assert "/17000 chars" in json.loads(result["stdout"])["reason"]
+
+    def test_a_small_unknown_top_level_key_inside_the_budget_writes(self, tmp_path):
+        assert self._edit_local(tmp_path, '"managed_by": "hooks", "probe": "s"') == {"stdout": "", "exit_code": 0}
 
 
 class TestTrinityRefusalsAreLogged:

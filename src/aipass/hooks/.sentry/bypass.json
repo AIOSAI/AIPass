@@ -198,8 +198,8 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "logged_fallback",
       "lines": [
-        637,
-        874
+        636,
+        873
       ],
       "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 637: the todos advisory text, never a verdict. 874 _seat_trinity: the tripwire's seat lookup, which decides nothing."
     },
@@ -283,8 +283,8 @@
       "file": "apps/modules/alert_dismiss.py",
       "standard": "logged_fallback",
       "lines": [
-        62,
-        77
+        65,
+        80
       ],
       "reason": "Fleet green leg 5: the dismiss verb prints the failure in red to the operator who ran it and logs an error; False is the verb's 'not dismissed'. Not silent, guards no write."
     },
@@ -599,7 +599,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        728
+        727
       ],
       "reason": "Advisory only: the section-count note never blocks, and the caps that do block are judged by _evaluate_limits under the fail-closed refusal. Raising here would turn a dark config door into a refused memory write. It logs at WARNING, which @trigger escalates."
     },
@@ -607,7 +607,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        829
+        828
       ],
       "reason": "The gate writes nothing: a memory file already unparseable on disk, met by an edit that parses, is the agent's repair, judged as a new file. Refusing it would lock a broken memory file forever. WARNING names the file, and @trigger escalates it."
     },
@@ -615,7 +615,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        1175
+        1176
       ],
       "reason": "tripwire_snapshot: the hook's own per-session snapshot store of in-flight Bash calls; a damaged copy holds only stale stats. Raising would refuse every Bash call for the rest of the session, as nothing else rewrites the store, so it starts fresh, stamped with FRESH_START_KEY. Once the fresh write lands, STORE_RESET_LOG reaches medic at ERROR (cause at INFO); a store the write cannot replace refuses the call. Calls in flight whose snapshots were lost are told their check did not run, at ERROR, while the stamp is younger than FRESH_START_WINDOW_S."
     },
@@ -655,7 +655,7 @@
       "file": "apps/handlers/security/git_gate.py",
       "standard": "fallback",
       "lines": [
-        210
+        219
       ],
       "reason": "Fails closed: an unimportable admin_seat leaves the answer (None, False), so the caller is unnamed and never the admin seat, and every git refusal stands. The refusal is the answer; WARNING names the dark admin lane."
     },
@@ -1013,7 +1013,7 @@
       "file": "apps/modules/write_ownership.py",
       "standard": "fallback",
       "lines": [
-        184
+        185
       ],
       "reason": "A host that publishes no PATH_MAX answers 0 and the length check falls to the real probe of the path, which still refuses an over-long one. Nothing is passed unjudged."
     },

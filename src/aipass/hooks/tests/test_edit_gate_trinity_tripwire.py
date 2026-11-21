@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity_tripwire.py
 # Description: edit_gate's memory tripwire: a .trinity write a shell made is reported at PostToolUse, project-wide
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-10-08
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py: tripwire_snapshot and tripwire."""
@@ -91,6 +91,14 @@ class TestShellMemoryTripwire:
         assert '| over: "tail"' in context
         assert "tripwire" in caplog.text
         assert "304/300" in caplog.text
+
+    def test_an_unknown_top_level_key_over_the_file_budget_is_named(self, tmp_path, monkeypatch):
+        seat = self._seat(tmp_path, monkeypatch)
+        grown = {"sessions": [{"summary": "short"}], "probe": "s" * 60000}
+        context = self._context(
+            self._around(seat, self.RESIDUAL, during=lambda: self._write(seat, "local.json", grown))
+        )
+        assert "local.json: the whole file is" in context and "/32000 chars" in context
 
     def test_a_clean_change_still_says_a_shell_wrote_memory(self, tmp_path, monkeypatch):
         seat = self._seat(tmp_path, monkeypatch)

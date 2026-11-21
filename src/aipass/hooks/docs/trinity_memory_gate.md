@@ -89,8 +89,11 @@ parse error), and an edit that *repairs* an already-broken file is allowed with 
 
 `edit_gate` also measures `.trinity/local.json`, `observations.json` and `passport.json` against
 @memory's published caps (`memory.config.json` → `entry_limits`, read through their `entry_limits`
-module — this gate never restates a cap). A passport is measured by **size only** — 6,000 chars per
-file, 600 per string, via `check_file_budget` — because @spawn owns its schema. @memory's two
+module — this gate never restates a cap). Each file is also measured whole against its
+`file_budgets` row via `check_file_budget` (local.json 32,000 chars, observations.json 17,000), so a
+top-level key the entry shape does not name still counts toward the file's size; the shell tripwire
+measures the same budget. A passport is measured by **size only** — 6,000 chars per file, 600 per
+string — because @spawn owns its schema. @memory's two
 newer refusal species are rendered as themselves: `unknown_field` names the allowed fields from
 `fields_for` (never a copy), and `field_over_cap` prints `'status' is 917/40 chars (+877 over)` in the
 units the violation carries, chars or items. An entry over its character limit is refused, and so is an entry whose

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_persistent_alert.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Tests for persistent_alert handler and alert_dismiss module (cadence-gated since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-14
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/prompt/persistent_alert.py and apps/modules/alert_dismiss.py."""
@@ -654,8 +654,8 @@ class TestAlertDismiss:
         assert exited.value.code == 1
         assert not (aipass_dir / "alerts.json").exists()
 
-    def test_dismiss_no_aipass_dir(self):
-
+    def test_dismiss_no_aipass_dir(self, capsys):
+        """Chaos finding: 'No .aipass/ directory found' was printed from a seat whose .aipass/ exists."""
         with (
             patch(
                 "aipass.hooks.apps.modules.alert_dismiss._find_aipass_dir",
@@ -663,9 +663,12 @@ class TestAlertDismiss:
             ),
             pytest.raises(SystemExit) as exited,
         ):
-            handle_command("dismiss", ["any"])
+            handle_command("dismiss", ["nosuch"])
 
         assert exited.value.code == 1
+        said = " ".join(capsys.readouterr().err.split())
+        assert "Alert nosuch is unknown" in said and ".aipass/alerts.json" in said
+        assert "No .aipass/ directory" not in said
 
     def test_handle_command_routes_dismiss(self, tmp_path):
 

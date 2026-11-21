@@ -55,7 +55,9 @@ glob that matches nothing. In a command naming a provider, a detached launcher i
 at the tmux client's cwd (measured on tmux 3.6), and their shell command is re-read from there; `screen`
 starts its program where it is invoked (`man screen`, chdir). Still refused: any other tmux command
 (`send-keys`, `respawn-pane`, ...), tmux's own `-c`, a `;` chain, screen with `-c`, `-X`, `-x`, `-r`, `-R`
-or `-ls`, and `at`, `batch`, `dtach` and `abduco`, whose help is not on this machine to read. A session
+or `-ls`, and `at`, `batch`, `dtach` and `abduco`, whose help is not on this machine to read, and
+`crontab`, whose lines cron runs from the home directory. Not read: a crontab file or `crontab -e`,
+where the line is not in the command. A session
 with no passport above its cwd has no branch and starts none. @devpulse's directory has no special
 rule. The refusal names the caller and the next step (`drone @ai_mail dispatch`); `logs/edit_gate.log`
 gets `provider launch refused: @<caller> -> <dir> | cmd=<command>`. The dispatch services (ai_mail's
@@ -79,7 +81,7 @@ Reading is never refused by this rule. A file outside every project (a temp file
 
 **Read from the registries, not from path shapes.** The caller's project is the nearest ancestor of the session cwd holding a `*_REGISTRY.json` (the marker @ai_mail's mail fence uses). The cwd is where the walk starts because it is the only identity evidence a PreToolUse hook has, the same evidence the admin rail's first leg reads. What the walk finds is then read from the registry: a branch is a row's `path`, a manager is a row's `owner` flag (spawn writes it to the registry entry, not to a passport an agent can edit). The `src/<package>/<branch>` shape is only the fallback where a project has no branches table. A registry that proves it catalogues something else (a non-empty table with no `branches` key, like `flow_json/PLAN_REGISTRY.json`) marks no project; an empty one still does.
 
-**An unreadable registry fences loud and leaves the repair route open.** A `*_REGISTRY.json` that cannot be read or parsed raises `RegistryUnreadable` (a `ProjectUnreadable`) from `write_ownership.project_of`: whose file a write lands in is unknown. The write fence refuses every Edit, Write and shell write in that project at ERROR, with a reason naming the registry and its owner, @spawn, instead of the broken-gate text. The memory tripwire's snapshot, which runs on every Bash call, watches the seat's own `.trinity` alone (WARNING), so reads and `drone` commands, the repair route included, keep running. A directory on the walk that cannot be listed raises the parent `ProjectUnreadable` and is refused at WARNING with the broken-gate text.
+**An unreadable registry fences loud and refuses no read.** A `*_REGISTRY.json` that cannot be read or parsed raises `RegistryUnreadable` (a `ProjectUnreadable`) from `write_ownership.project_of`: whose file a write lands in is unknown. The write fence refuses every Edit, Write and shell write in that project at ERROR, with a reason naming the registry and its owner, @spawn, instead of the broken-gate text. The memory tripwire's snapshot, which runs on every Bash call, watches the seat's own `.trinity` alone (WARNING), so this gate refuses no read and no `drone` command. A command that reads the registry itself (`drone systems`, the dispatch to @spawn) can still fail on it; the reason says to tell the user when it does. A directory on the walk that cannot be listed raises the parent `ProjectUnreadable` and is refused at WARNING with the broken-gate text.
 
 **Project-level files** (the repo root's own files: `.aipass/`, `.claude/`, `README.md`) belong to no branch row; a branch seat is refused and pointed at the manager, and the manager's seat, a session at the project root or the admin seat writes them. @hooks' own `.aipass/hooks.json`, `.aipass/project_hooks.json` and `.claude/provider_manifest.json` go through @devpulse.
 
