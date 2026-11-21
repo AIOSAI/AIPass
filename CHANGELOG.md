@@ -9,6 +9,19 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-11-21] — v2.8.41: the watchdog waits for the mail, status names work with no wire, the docs catch up with the code
+
+### Fixed
+
+- **devpulse: the watchdog wire holds for the completion mail** (2026-11-21). A dispatch's completion event reaches the wire before the mail that reports it, so a seat woken by the wire could read an empty inbox and take the work for still running. A one-shot wire now holds after a completion until that mail is unread in the inbox, then wakes. If no mail lands within 120 seconds it wakes anyway, flagged `completed_no_mail` and naming the agent, so an agent that stops without reporting still wakes its manager.
+- **devpulse: `watchdog status` always shows open dispatches** (2026-11-21). With no active watch, status printed "No active watches." and skipped the dispatch line: silent in the one state nothing recovers from, work out with no wire to wake the session. Status now prints the seat's open dispatches on every run and says `NO WIRE ARMED`, with the arm command, when any are out and no baseline wire is live.
+- **devpulse: release notices skip an unrendered template passport** (2026-11-21). A project root that carries spawn's manager template was mailed as `@{{name}}`. A passport whose name or address still holds placeholders is scaffold material and is skipped with a reason.
+- **aipass: a scaffolded `.gitignore` ignores NPLAN and CPLAN files** (2026-11-21). The scaffold listed six of flow's eight plan types, so a new project tracked its night and capture plans in git. Existing projects pick the two rows up on `aipass init update`, unless their `.updateignore` claims `.gitignore`.
+
+### Changed
+
+- **docs: every branch's README and docs page read against the code** (2026-11-21). 47 pages across 16 branches plus CONTRIBUTING and SECURITY. README versions follow the code's own number, retired door modules and passport-seed wording are gone, daemon jobs that ship disabled are described as disabled, cross-branch import examples use the package door, and counts are recounted.
+
 ## [2026-11-21] — v2.8.40: loud fences for a corrupt registry and a broken cadence, the NPLAN is born, typed blocks on every door
 
 ### Added
