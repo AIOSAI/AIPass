@@ -49,6 +49,8 @@ RPLAN-*.md
 TDPLAN-*.md
 PPLAN-*.md
 APLAN-*.md
+NPLAN-*.md
+CPLAN-*.md
 # Branch local directories
 logs/
 artifacts/
