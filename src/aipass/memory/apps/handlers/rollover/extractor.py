@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: extractor.py
 # Description: Memory Extraction Handler
-# Version: 0.9.0
+# Version: 0.10.0
 # Created: 2025-11-16
-# Modified: 2026-10-26
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -18,7 +18,7 @@ from datetime import datetime
 # Handler imports (relative within package)
 from aipass.memory.apps.handlers.json import json_handler, config_loader
 from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data, write_memory_file_simple
-from aipass.memory.apps.handlers.monitor.detector import _count_file_lines, file_limits, undrainable_in
+from aipass.memory.apps.handlers.monitor.detector import _count_file_lines, damage_in, file_limits, undrainable_in
 from aipass.prax import get_system_logger
 
 logger = get_system_logger()
@@ -158,6 +158,13 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     old_lines = _count_file_lines(file_path)
     branch_key, _file_type, limits = file_limits(config_loader.section("rollover"), file_path)
 
+    # Without a unique number on every entry the misplaced-write guard falls back to dates and holds
+    # back the whole tail, or the re-sort moves a reused number's newest entry into it.
+    damage = damage_in(data, limits)
+    if damage:
+        logger.error(f"[extractor] {branch_key}: refused, damaged - {'; '.join(damage)}")
+        return {"success": False, "error": f"refused, damaged - {'; '.join(damage)}"}
+
     all_extracted = []
 
     # auto-compact snapshots get their own cap and never count against the regular session budget.
@@ -271,7 +278,12 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
                 "skipped": True,
                 "message": f"nothing drainable - {'; '.join(undrainable)}; rollover drains lists only",
             }
-        return {"success": True, "skipped": True, "message": "No entries exceed v2 limits"}
+        return {
+            "success": True,
+            "skipped": True,
+            "message": "nothing archived - every entry past the limit was held back as a fresh write "
+            "(numbered above the head, or dated today)",
+        }
 
     # Not written here: the file keeps every entry until the orchestrator has them in the
     # store and calls commit_trimmed. A crash between extraction and storage loses nothing.

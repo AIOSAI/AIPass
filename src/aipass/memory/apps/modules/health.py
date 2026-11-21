@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: health.py
 # Description: Branch health module — public API (entry-count + entry-size)
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-16
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -11,7 +11,8 @@ Branch Health Module — Public API
 
 Cross-branch surface: sentry blocks importing another branch's handlers. Read-only.
 Consumer severity: should_rollover -> INFO (auto-fires at PreCompact), never WARNING;
-total_violations > 0 -> WARNING (a write got past the cap gate).
+total_violations > 0 -> WARNING (a write got past the cap gate); a non-empty entry_count
+``damaged`` -> ERROR (rollover refuses the file).
 """
 
 from aipass.prax import logger
@@ -75,6 +76,9 @@ def get_branch_health(branch_name: str) -> dict:
                 "current_lines": result.get("current_lines"),
                 "reason": result.get("v2_reason", ""),
             }
+            # Only when present: a clean row keeps the three keys @daemon's activity report reads.
+            if result.get("damaged"):
+                entry_count[memory_type]["damaged"] = result["damaged"]
 
     lint_result = run_lint([branch], branch_filter=canonical_name)
     entry_size = {
@@ -158,12 +162,17 @@ def _print_health(result: dict) -> None:
             console.print(f"  {memory_type}.json: not found")
         elif row["should_rollover"]:
             console.print(f"  {memory_type}.json: rollover due - {row['reason']}")
+        elif row.get("damaged"):
+            error(f"{memory_type}.json: DAMAGED - {'; '.join(row['damaged'])}")
         else:
             console.print(f"  {memory_type}.json: ok ({row['current_lines']} lines)")
 
     total = result["entry_size"]["total_violations"]
     console.print(f"  entry size: {total} violation{'' if total == 1 else 's'}")
     for v in result["entry_size"]["violations"]:
+        if v.get("detail"):
+            warning(f"{v['file']} {v['detail']}")
+            continue
         warning(
             f"{v['file']} {v['container']}[{v['key']}]: {v['length']} chars, cap {v['cap']} (over by {v['over_by']})"
         )

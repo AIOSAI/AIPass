@@ -3,7 +3,7 @@
 # Description: Tests for the orchestrator execute_rollover pipeline
 # Version: 1.1.1
 # Created: 2026-04-26
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # Category: memory/tests
 # =============================================
 
@@ -22,6 +22,7 @@ import json
 import subprocess
 import types
 from types import SimpleNamespace
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from aipass.memory.apps.handlers.monitor import detector
@@ -730,3 +731,81 @@ class TestAnEditDuringStorageSurvivesTheTrim:
         assert after["todos_meta"] == "pad of 10 - next #386"
         assert [s["number"] for s in after["sessions"]] == list(range(734, 724, -1))
         no_local_store.assert_called_once_with("STANDIN")
+
+
+class TestWhatARealRolloverArchives:
+    """The real extractor and trim over a tmp local.json, the vector store stubbed: which entries leave, which stay.
+
+    Count 15. Each test reads the archived numbers off what reached the store, and the kept ones off the file.
+    """
+
+    def _roll(self, monkeypatch, tmp_path, sessions):
+        ext = _REAL_EXTRACTOR
+        assert isinstance(ext.write_memory_file_simple, types.FunctionType), "extractor bound to a mocked writer"
+        rollover_cfg = {"defaults": {"local": {"sessions": {"count": 15}}}, "per_branch": {}}
+        monkeypatch.setattr(ext, "config_loader", SimpleNamespace(section=lambda name: rollover_cfg))
+        local = tmp_path / "standin" / ".trinity" / "local.json"
+        local.parent.mkdir(parents=True)
+        before = json.dumps({"document_metadata": {"schema_version": "3.0.0"}, "sessions": sessions}, indent=2)
+        local.write_text(before, encoding="utf-8")
+        stored = []
+
+        def store(**kwargs):
+            stored.extend((m.get("entry_number"), d) for m, d in zip(kwargs["metadatas"], kwargs["documents"]))
+            return {"success": True, "collection": "c", "total_vectors": len(stored)}
+
+        trigger = MagicMock(file_path=local, branch="STANDIN", memory_type="local")
+        trigger.__str__ = MagicMock(return_value="standin.local (18/15 sessions)")
+        monkeypatch.setattr(
+            orchestrator, "detector", MagicMock(check_all_branches=lambda: {"success": True, "triggers": [trigger]})
+        )
+        monkeypatch.setattr(
+            orchestrator, "encode_batch_subprocess", lambda texts: {"success": True, "embeddings": [[0.1]] * len(texts)}
+        )
+        monkeypatch.setattr(orchestrator, "get_branch_local_chroma_path", MagicMock(return_value=None))
+        monkeypatch.setattr(orchestrator, "store_vectors_subprocess", store)
+        monkeypatch.setattr(_CENTRAL_UPDATE, MagicMock(return_value={"success": True}))
+        monkeypatch.setattr(_POOL_PROCESS, MagicMock(return_value={"files_processed": 0}))
+
+        result = orchestrator.execute_rollover()
+        kept = [(s.get("number"), s["summary"]) for s in json.loads(local.read_text(encoding="utf-8"))["sessions"]]
+        return result, stored, kept, local.read_text(encoding="utf-8") == before
+
+    @staticmethod
+    def _old(numbers, date="2026-11-01"):
+        return [{"number": n, "date": date, "summary": f"old {n}", "status": "completed"} for n in numbers]
+
+    def test_a_newest_entry_without_a_number_is_refused_by_name_not_skipped_as_no_excess(self, monkeypatch, tmp_path):
+        """Dated today, the unnumbered head left the guard only dates: all 3 tail entries held back, 0/1 'skipped'."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        newest = {"date": today, "summary": "newest, no number", "status": "completed"}
+
+        result, stored, _kept, untouched = self._roll(
+            monkeypatch, tmp_path, [newest, *self._old(range(17, 0, -1), today)]
+        )
+
+        assert (result["success_count"], result["skipped"], stored, untouched) == (0, [], [], True)
+        assert result["failed"] == [
+            {
+                "trigger": "standin.local (18/15 sessions)",
+                "stage": "extraction",
+                "error": "refused, damaged - sessions[0] (sessions entry) has no 'number'",
+            }
+        ]
+
+    def test_a_newest_entry_reusing_an_old_number_is_refused_not_archived(self, monkeypatch, tmp_path):
+        """Unrefused, the re-sort by number moved the newest (#2 again) into the tail and archived it."""
+        newest = {"number": 2, "date": "2026-11-01", "summary": "NEWEST reuses 2", "status": "completed"}
+
+        result, stored, _kept, untouched = self._roll(monkeypatch, tmp_path, [newest, *self._old(range(17, 0, -1))])
+
+        assert (result["success_count"], stored, untouched) == (0, [], True)
+        assert result["failed"][0]["error"] == "refused, damaged - sessions[16] repeats number 2 of sessions[0]"
+
+    def test_oldest_first_archives_the_three_oldest_and_keeps_the_rest_newest_first(self, monkeypatch, tmp_path):
+        """Not refused: the extractor re-sorts by number before it takes the tail, and the trim persists that order."""
+        result, stored, kept, _untouched = self._roll(monkeypatch, tmp_path, self._old(range(1, 19)))
+
+        assert result["success_count"] == 1
+        assert [number for number, _doc in stored] == [3, 2, 1]
+        assert [number for number, _summary in kept] == list(range(18, 3, -1))

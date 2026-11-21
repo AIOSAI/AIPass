@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lint.py
 # Description: Lint module — CLI routing for entry limit auditing
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-06-13
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -13,11 +13,11 @@ Lint Module — Entry Limit Violation Scanner
 from typing import Any
 
 from aipass.prax import logger
-from aipass.cli import console, error, success, warning
+from aipass.cli import console, error, escape, success, warning
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
-from aipass.memory.apps.handlers.json.lint_handler import PASSPORT_FILE, run_lint, run_lint_fields
+from aipass.memory.apps.handlers.json.lint_handler import FILE_DAMAGE, PASSPORT_FILE, run_lint, run_lint_fields
 
 # read_scope, not write_scope: lint never writes, so externals are in scope.
 from aipass.memory.apps.handlers.monitor.detector import read_scope
@@ -170,7 +170,11 @@ def _display_results(result: dict[str, Any], branch_filter: str | None) -> None:
 
         branch_count += 1
         # No honest length to print here: "0/300 chars" would read as compliant.
-        if v.get("reason") == "missing_field":
+        if v.get("detail"):
+            console.print(
+                f"    [red]![/red] {v['file']} [dim]({v['entry_type']})[/dim] [red]{escape(v['detail'])}[/red]"
+            )
+        elif v.get("reason") == "missing_field":
             console.print(
                 f"    [red]![/red] {v['file']}:{v['container']}/{v['key']} "
                 f"[dim]({v['entry_type']})[/dim] "
@@ -195,6 +199,10 @@ def _display_results(result: dict[str, Any], branch_filter: str | None) -> None:
     console.print()
     console.print(f"[dim]Scanned {scanned} branch(es), skipped {skipped}[/dim]")
     console.print()
+
+    damaged = sum(1 for v in violations if v.get("reason") in FILE_DAMAGE)
+    if damaged:
+        error(f"{damaged} damaged file(s) or container(s) - nothing in them can be judged until repaired")
 
     json_handler.log_operation(
         "lint_display",
@@ -382,6 +390,9 @@ def print_help() -> None:
     console.print("  Reads .trinity/local.json and .trinity/observations.json for every")
     console.print("  registered branch. Checks each entry against configured character")
     console.print("  caps from memory.config.json. Reports violations sorted worst-first.")
+    console.print("  Also names damage: a file that is empty or not JSON, a container of the wrong")
+    console.print("  kind (both exit 2), and in sessions / key_learnings / observations an entry with")
+    console.print("  no number, a repeated number, or a list not stored newest-first.")
     console.print()
     console.print("[bold]FIELDS MODE:[/bold]")
     console.print("  [cyan]lint fields[/cyan] measures every OTHER field against the closed shape")

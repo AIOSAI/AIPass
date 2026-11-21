@@ -3,17 +3,28 @@
 # Description: Embedding Subprocess Handler
 # Version: 2.1.0
 # Created: 2026-03-12
-# Modified: 2026-10-17
+# Modified: 2026-11-21
 # =============================================
 
-"""
-Embedding Subprocess Handler
-
-JSON {"texts": [...]} on stdin, JSON embeddings on stdout (fastembed, no torch).
-"""
+"""Embedding Subprocess Handler: JSON {"texts": [...]} on stdin, JSON embeddings on stdout (fastembed, no torch)."""
 
 import sys
 import json
+
+
+def _reason(exc: Exception) -> str:
+    """The refusal text; fastembed's offline miss gets what is missing and how to get it."""
+    text = str(exc)
+    if not text.startswith("Could not load model"):
+        return text
+    from fastembed.common.utils import define_cache_dir
+
+    return (
+        f"{text} The model is not in fastembed's cache at {define_cache_dir()} and could not be fetched: "
+        "it has to be downloaded once with network access. Run any 'drone @memory search \"<words>\"' "
+        "while online and fastembed downloads it (Hugging Face qdrant/all-MiniLM-L6-v2-onnx, or its "
+        "storage.googleapis.com mirror) into that directory; FASTEMBED_CACHE_PATH sets where that cache lives."
+    )
 
 
 def main():
@@ -36,7 +47,7 @@ def main():
         print(json.dumps({"success": True, "embeddings": ordered, "count": len(ordered), "dimension": 384}))
 
     except Exception as e:
-        print(json.dumps({"success": False, "error": str(e)}))
+        print(json.dumps({"success": False, "error": _reason(e)}))
         sys.exit(1)
 
 

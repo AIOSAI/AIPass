@@ -31,7 +31,9 @@ lane: where a todo goes, when, and what refuses.
 - **`drone @memory rollover run`**, for ONE branch: `--branch @name`, or the branch the caller's working
   directory sits in. From the repo root nothing rolls, and one line says so. Past the count, the oldest
   by `number` move with reason `overflow`: append to the backlog, replace atomically, read back and
-  compare every record json-equal, and only then write the pruned pad. A mismatch refuses and leaves
+  compare every record json-equal, and only then write the pruned pad. A rolling todo with no
+  `number` key (or a null one) rolls under the next number (below), so `todo restore` can reach it; a
+  wrong-typed number is kept as written and shows as `#?`. A mismatch refuses and leaves
   the pad untouched — a todo may end up in both places, never in neither. `rollover check` counts the
   same pad and prints `ready for rollover` when it is over.
   A `--branch` naming another seat's pad rolls only for @memory's seat or the verified admin
@@ -88,8 +90,10 @@ verbatim, and that text can be long.
   an error. An unreadable or misshapen backlog is refused (exit 2) and never written over.
 - **`todo restore <number>`** puts one backlog todo back on the CALLER's own pad. It writes
   `.trinity/local.json`, so a `--branch` naming another branch is refused, and so is a caller standing
-  in no branch. It is refused when the pad already holds its count (read from config), when no record
-  carries the number, and when several do (the candidates are named by rolled time and task). The todo
+  in no branch. It is refused when no record carries the number, when several do (the candidates are
+  named by rolled time and task), and when the pad already holds its count (read from config). The
+  backlog lookup comes first, so a number that is not there is answered as not found whatever the
+  pad holds. The todo
   returns **on top of the pad** (lists are newest-first) under the next number (below) with task, date
   and priority identical. The same pad write re-renders `todos_meta` through the tab renderer, so the
   tab's `next #N` is the restored number + 1 the moment the verb returns (a tab that cannot be rendered

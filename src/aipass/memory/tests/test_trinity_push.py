@@ -3,7 +3,7 @@
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
 # Version: 1.4.1
 # Created: 2026-08-27
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
@@ -902,6 +902,18 @@ class TestTheFleetGate:
 
         push_module.handle_command("push", [])
         assert ran == []
+
+    def test_a_bare_push_names_the_flags_it_needs_and_fails(self, monkeypatch):
+        said = []
+        monkeypatch.setattr(push_module, "error", lambda message, suggestion=None: said.append((message, suggestion)))
+        monkeypatch.setattr(push_module, "_run_push", lambda *a, **k: said.append("ran"))
+
+        push_module.handle_command("push", [])
+
+        assert len(said) == 1 and said[0] != "ran", said
+        message, suggestion = said[0]
+        assert "--dry-run" in message and "--confirm" in message and "@devpulse" in message
+        assert "--help" in suggestion
 
     def test_a_fleet_push_without_confirm_never_reaches_the_engine(self, monkeypatch):
         ran = []

@@ -3,7 +3,7 @@
 # Description: Rollover pipeline - the orchestrator's subprocess lanes and chroma path, and extraction
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # Category: memory/tests
 # =============================================
 
@@ -427,9 +427,9 @@ class TestExtractWithMetadata:
                 "status": {},
             },
             "sessions": [
-                {"session_number": 1, "summary": "newest"},
-                {"session_number": 2, "summary": "middle"},
-                {"session_number": 3, "summary": "oldest"},
+                {"number": 3, "session_number": 1, "summary": "newest"},
+                {"number": 2, "session_number": 2, "summary": "middle"},
+                {"number": 1, "session_number": 3, "summary": "oldest"},
             ],
         }
         file_path = tmp_path / ".trinity" / "local.json"
@@ -456,7 +456,8 @@ class TestExtractWithMetadata:
         ext, mocks = _import_extractor(monkeypatch)
 
         observations = [
-            {"date": f"2026-01-{i:02d}", "session": i, "entries": [{"title": f"obs {i}"}]} for i in range(1, 11)
+            {"number": i, "date": f"2026-01-{i:02d}", "session": i, "entries": [{"title": f"obs {i}"}]}
+            for i in range(10, 0, -1)
         ]
         data = {
             "document_metadata": {

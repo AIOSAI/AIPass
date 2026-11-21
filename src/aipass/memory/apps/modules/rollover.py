@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rollover.py
 # Description: Rollover Orchestration Module
-# Version: 0.10.1
+# Version: 0.11.0
 # Created: 2025-11-16
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -119,6 +119,8 @@ UNDRAINABLE_NOTE = (
     "Rollover drains lists only. These need their container migrated to the 3.0.0 list shape - "
     "another run changes nothing."
 )
+
+DAMAGED_NOTE = "Repair each named file or entry by hand; rollover never guesses a number or a shape."
 
 # The `verb` field of every JSON payload; one constant so payload and routing cannot drift.
 _VERB_ROLLOVER = "rollover"
@@ -246,6 +248,8 @@ def print_help() -> None:
     console.print("  v2 entry-count based (sessions, key_learnings, observations) from config")
     console.print("  A container held as a dict (schema 2.0.0) cannot be drained: check, run and status")
     console.print("  list it as UNDRAINABLE, never as ready, until it is migrated to the 3.0.0 list shape")
+    console.print("  A DAMAGED file is never rolled and exits 2: empty or not JSON, a capped container that")
+    console.print("  is not a list, or a list over its count with an entry missing or repeating its number")
     console.print("  todos: count only (rollover.defaults.local.todos.count) — own branch, never the fleet walk")
     console.print()
     console.print("[bold]TODO ROLL (one branch, file only, never vectors):[/bold]")
@@ -294,6 +298,13 @@ def _print_undrainable(items: list) -> None:
     warning(f"{header}\n{listing}", UNDRAINABLE_NOTE)
 
 
+def _print_damaged(items: list) -> None:
+    """Print the files rollover refuses as damaged, through ``error()``; nothing when there are none."""
+    if items:
+        listing = "\n".join(f"  ! {item}" for item in items)
+        error(f"{len(items)} damaged files rollover refuses (fleet-wide):\n{listing}", suggestion=DAMAGED_NOTE)
+
+
 def run_rollover(branch: str | None = None) -> bool:
     """Execute rollover: ONE branch's todo pad first, then the fleet vector rollover.
 
@@ -323,6 +334,7 @@ def run_rollover(branch: str | None = None) -> bool:
     if triggers_count == 0:
         console.print("[green]>[/green] No files need rollover")
         _print_undrainable(undrainable)
+        _print_damaged(result.get("damaged", []))
         return True
 
     console.print(f"[green]>[/green] Found {triggers_count} files ready for rollover (fleet-wide)")
@@ -346,8 +358,9 @@ def run_rollover(branch: str | None = None) -> bool:
     console.print(f"{marker} Rollover complete: {success_count}/{triggers_count} successful")
 
     # A declined trigger is neither win nor break; unprinted, "0/1 successful" sat above an empty failure list.
+    # error(), so the exit is non-zero: a skipped trigger is a file over its limit left unrolled.
     for item in result.get("skipped", []):
-        console.print(f"  [yellow]-[/yellow] {item['trigger']} skipped: {item['reason']}")
+        error(f"{item['trigger']} skipped: {item['reason']}")
 
     if failed:
         console.print()
@@ -355,6 +368,7 @@ def run_rollover(branch: str | None = None) -> bool:
             error(f"{fail['trigger']} - {fail['stage']}: {fail['error']}")
 
     _print_undrainable(undrainable)
+    _print_damaged(result.get("damaged", []))
 
     json_handler.log_operation("rollover_execute", {"triggers": triggers_count, "success_count": success_count})
 
@@ -520,6 +534,7 @@ def show_status() -> None:
     console.print(f"[cyan]Files checked:[/cyan] {stats['files_checked']}")
     console.print(f"[cyan]Ready for rollover:[/cyan] {stats['files_ready']}")
     console.print(f"[cyan]Over, and rollover cannot drain them:[/cyan] {stats.get('files_undrainable', 0)}")
+    console.print(f"[cyan]Damaged, rollover refuses them:[/cyan] {stats.get('files_damaged', 0)}")
     console.print()
 
     if stats["branches"]:
@@ -534,14 +549,19 @@ def show_status() -> None:
                 v2_reason = file_stats.get("v2_reason", "")
                 # Never "OK": the file is over its limit, and no run will change that.
                 undrainable = file_stats.get("undrainable", [])
+                damaged = file_stats.get("damaged", [])
 
-                status_marker = "[red]![/red]" if ready or undrainable else "[green]OK[/green]"
+                status_marker = "[red]![/red]" if ready or undrainable or damaged else "[green]OK[/green]"
                 parts = [f"READY ({v2_reason})"] if ready else []
                 parts += [f"UNDRAINABLE ({reason})" for reason in undrainable]
+                parts += [f"DAMAGED ({reason})" for reason in damaged]
                 status_text = "; ".join(parts) or "OK"
                 console.print(f"    {status_marker} {memory_type}: {status_text}")
 
             console.print()
+
+    if stats.get("files_damaged"):
+        error(f"{stats['files_damaged']} damaged files - rollover refuses them", suggestion=DAMAGED_NOTE)
 
     json_handler.log_operation(
         "rollover_status", {"branches_checked": stats["total_branches"], "files_ready": stats["files_ready"]}
@@ -569,6 +589,7 @@ def _check_fleet_triggers() -> None:
 
     triggers = triggers_result.get("triggers", [])
     undrainable = triggers_result.get("undrainable", [])
+    _print_damaged(triggers_result.get("damaged", []))
 
     if not triggers:
         console.print("[green]>[/green] No files need rollover")

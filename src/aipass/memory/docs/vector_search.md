@@ -26,6 +26,18 @@ case through prax at WARNING — the label, the exit code and the stderr tail (l
 2000 characters) — and logs a reply that is not a JSON object. A non-zero exit that carries a JSON
 refusal is returned unlogged; the caller logs it.
 
+**Options are checked before the lane starts.** `search` refuses a `--branch`, `--type` or `--n` with
+no value, a `--branch`/`--type` that is not a name (a letter or digit, then letters, digits, `_` or
+`-`; a leading `@` on `--branch` is dropped) and an `--n` below 1, before the embedding subprocess
+runs. Whether a branch or type has vectors is the store's answer, after the model loads.
+
+**The model is downloaded once, with network.** `embed_subprocess.py` loads
+`sentence-transformers/all-MiniLM-L6-v2` through fastembed, which reads it from its cache
+(`$FASTEMBED_CACHE_PATH`, default `<tempdir>/fastembed_cache`) or downloads it there from Hugging Face
+(`qdrant/all-MiniLM-L6-v2-onnx`) or fastembed's storage.googleapis.com mirror. Offline with an empty
+cache, fastembed retries and then refuses with "Could not load model ... from any source."; the
+refusal names the cache directory and says to run one search while online. There is no fallback.
+
 ---
 
 ## `vectorize_and_store` — text in, this branch owns the model

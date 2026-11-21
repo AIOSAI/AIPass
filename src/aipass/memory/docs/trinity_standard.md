@@ -42,6 +42,13 @@ carries its own reason because the repair differs:
 write gate refuses it: a branch told it was compliant would otherwise be blocked on its next write
 for a shape lint had already seen.
 
+**Lint names damage by its reason, not a length.** Plain `lint` (and `health`, which runs it) reports
+a `.trinity` file that is empty or not valid JSON (`unreadable_file`), a container of the wrong kind
+(`wrong_container`), and in `sessions`, `key_learnings` and `observations` an entry with no int
+`number` (`missing_number`), a repeated number (`duplicate_number`) and a list not stored
+newest-first (`not_newest_first`). Each carries a `detail` line naming the entry by index; the first
+two make `lint` exit 2, because nothing in that file can be judged.
+
 ### Judged by what it authors, not by what it carries
 
 **A write is refused for the text it wrote, never for the text it is holding.** `classify_entries`

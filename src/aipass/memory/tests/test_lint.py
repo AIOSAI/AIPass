@@ -3,7 +3,7 @@
 # Description: check_entry validator, the read-only lint handler and the lint module (FPLAN-0270 phase 2)
 # Version: 1.1.1
 # Created: 2026-06-13
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for entry_limits.py check_entry, handlers/json/lint_handler.py and apps/modules/lint.py."""
@@ -207,8 +207,8 @@ class TestListContainer:
         trinity.mkdir(parents=True)
         obs_data = {
             "observations": [
-                {"note": "short"},  # 5 chars
-                {"note": "this observation is way too long for the cap"},  # over
+                {"number": 2, "note": "short"},  # 5 chars
+                {"number": 1, "note": "this observation is way too long for the cap"},  # over
             ],
         }
         (trinity / "observations.json").write_text(json.dumps(obs_data), encoding="utf-8")
@@ -244,9 +244,9 @@ class TestListContainerMissingField:
         trinity.mkdir(parents=True)
         obs_data = {
             "observations": [
-                {"note": "short"},  # has field
-                {"other_key": "no note here"},  # missing field
-                {"note": "also short"},  # has field
+                {"number": 3, "note": "short"},  # has field
+                {"number": 2, "other_key": "no note here"},  # missing field
+                {"number": 1, "note": "also short"},  # has field
             ],
         }
         (trinity / "observations.json").write_text(json.dumps(obs_data), encoding="utf-8")
@@ -637,8 +637,8 @@ class TestLintAgreesWithTheGate:
         section = {**_shape_limits(), "tolerance_percent": 10}
         limits = {**section, "entry_types": entry_limits.resolve_entry_types(section, "alpha")}
         sessions = [
-            _session(summary="x" * 330, status="s" * 44),
-            _session(number=2, summary="y" * 331, status="t" * 45),
+            _session(number=2, summary="x" * 330, status="s" * 44),
+            _session(summary="y" * 331, status="t" * 45),
         ]
         branches = _plant(tmp_path, "alpha", sessions)
 
@@ -1033,3 +1033,81 @@ class TestFieldsModeDisplay:
 
         errored.assert_called_once()
         scanned.assert_not_called()
+
+
+def _plain_lint(tmp_path: Path, raw: str) -> dict[str, Any]:
+    """Plain run_lint over one branch whose local.json is *raw*, against the test shape."""
+    trinity = tmp_path / "flow" / ".trinity"
+    trinity.mkdir(parents=True)
+    (trinity / "local.json").write_text(raw, encoding="utf-8")
+    with patch.object(lint_handler, "load_entry_limits", return_value=_shape_limits()):
+        return lint_handler.run_lint([{"name": "flow", "path": str(tmp_path / "flow")}])
+
+
+def _named(result: dict[str, Any]) -> list[tuple[str, str]]:
+    """``(reason, detail)`` of every violation that carries a named reason in place of a length."""
+    return [(v["reason"], v["detail"]) for v in result["violations"] if v.get("detail")]
+
+
+class TestADamagedFileIsANamedErrorInLint:
+    """A zero-byte local.json, or a sessions string, used to read 'No violations found', exit 0."""
+
+    @pytest.mark.parametrize(
+        ("raw", "reason", "detail"),
+        [
+            ("", "unreadable_file", "unreadable: empty file"),
+            ("{not json", "unreadable_file", "unreadable: Expecting property name enclosed in double quotes"),
+            ('{"sessions": "a string"}', "wrong_container", "'sessions' is a str, not a list"),
+        ],
+    )
+    def test_the_damage_is_named(self, tmp_path: Path, raw: str, reason: str, detail: str) -> None:
+        named = _named(_plain_lint(tmp_path, raw))
+
+        assert len(named) == 1, named
+        assert named[0][0] == reason
+        assert named[0][1].startswith(detail), named
+
+    def test_the_screen_names_it_and_the_exit_is_two(self, tmp_path: Path, capsys) -> None:
+        trinity = tmp_path / "flow" / ".trinity"
+        trinity.mkdir(parents=True)
+        (trinity / "local.json").write_text("", encoding="utf-8")
+        reset_command_state()
+
+        with patch.object(lint_module, "read_scope", return_value=[{"name": "flow", "path": str(tmp_path / "flow")}]):
+            with patch.object(lint_handler, "load_entry_limits", return_value=_shape_limits()):
+                assert lint_module.handle_command("lint", ["@flow"]) is True
+
+        captured = capsys.readouterr()
+        assert "No violations found" not in captured.out
+        assert "local.json (sessions) unreadable: empty file" in captured.out
+        assert "1 damaged file(s) or container(s)" in captured.err
+        assert resolve_exit(True) == 2
+
+
+class TestPlainLintNamesWhatRolloverOrdersBy:
+    """Plain lint said 'No violations found' to a missing number, a repeat, and an oldest-first list."""
+
+    @staticmethod
+    def _sessions(*entries: dict[str, Any]) -> str:
+        return json.dumps({"sessions": list(entries)})
+
+    def test_an_entry_without_a_number_is_named_by_index_and_type(self, tmp_path: Path) -> None:
+        unnumbered = {k: v for k, v in _session(number=0).items() if k != "number"}
+        result = _plain_lint(tmp_path, self._sessions(unnumbered, _session(number=2), _session()))
+
+        assert _named(result) == [("missing_number", "sessions[0] (sessions entry) has no 'number'")]
+
+    def test_a_repeated_number_is_named(self, tmp_path: Path) -> None:
+        result = _plain_lint(tmp_path, self._sessions(_session(number=2), _session(number=2), _session()))
+
+        assert _named(result) == [("duplicate_number", "sessions[1] repeats number 2 of sessions[0]")]
+
+    def test_oldest_first_is_named(self, tmp_path: Path) -> None:
+        result = _plain_lint(tmp_path, self._sessions(_session(), _session(number=2)))
+
+        assert _named(result) == [("not_newest_first", "sessions is not stored newest-first (head #1, tail #2)")]
+
+    def test_a_newest_first_unique_list_names_nothing(self, tmp_path: Path) -> None:
+        result = _plain_lint(tmp_path, self._sessions(_session(number=2), _session()))
+
+        assert result["violations"] == []

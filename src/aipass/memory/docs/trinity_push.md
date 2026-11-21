@@ -140,7 +140,8 @@ a branch never ends up with one canonical file and one drifted one.
   receipts. Its report is the artifact, written to `artifacts/push_reports/` and echoed to the
   terminal.
 - **A fleet write requires `--confirm`.** Encoding the gate as a flag rather than as an operator's
-  memory is the difference between a rule and a hope.
+  memory is the difference between a rule and a hope. A bare `drone @memory push` does nothing: it
+  prints the module panel, names the two flags it needs (`--dry-run`, and `--confirm`, @devpulse's lane) and exits non-zero.
 - **A write names only the caller's own branch**, unless the caller is @memory's seat or the
   verified admin (@ai_mail's verified-caller rail, `handlers/cli/caller_gate.py`). The fleet push
   is theirs alone. An unprovable caller, or a dark rail, is refused; every verdict is logged with

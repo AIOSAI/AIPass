@@ -3,7 +3,7 @@
 # Description: Handler-layer tests — rollover extractor, normalize and the todos operational schema
 # Version: 1.1.1
 # Created: 2026-04-01
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/rollover/extractor.py and schema/normalize.py."""
@@ -108,7 +108,7 @@ class TestExtractItemsV2:
     ):
         """Build a v2 memory data dict with controllable counts."""
         sessions = [
-            {"session_number": i, "date": f"2026-01-{i:02d}", "summary": f"Session {i}"}
+            {"number": num_sessions - i + 1, "session_number": i, "date": f"2026-01-{i:02d}", "summary": f"Session {i}"}
             for i in range(1, num_sessions + 1)
         ]
         key_learnings = [
@@ -456,7 +456,7 @@ class TestTodosOperational:
     def _make_data_with_todos(self, num_sessions=5, max_sessions=3, num_todos=5):
         """Build v2 data that includes a populated todos[] array."""
         sessions = [
-            {"session_number": i, "date": f"2026-01-{i:02d}", "summary": f"Session {i}"}
+            {"number": num_sessions - i + 1, "session_number": i, "date": f"2026-01-{i:02d}", "summary": f"Session {i}"}
             for i in range(1, num_sessions + 1)
         ]
         todos = [{"id": f"t{i}", "text": f"Todo item {i}", "created": f"2026-06-0{i}"} for i in range(1, num_todos + 1)]

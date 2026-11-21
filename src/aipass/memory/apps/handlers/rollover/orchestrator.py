@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: orchestrator.py
 # Description: Rollover Orchestration Handler
-# Version: 1.4.2
+# Version: 1.5.0
 # Created: 2026-03-08
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -155,6 +155,7 @@ def execute_rollover() -> Dict[str, Any]:
     # Over a limit no run can drain (a dict container): not triggers, but carried on
     # every return so the caller can say so.
     undrainable = [str(item) for item in triggers_result.get("undrainable", [])]
+    damaged = [str(item) for item in triggers_result.get("damaged", [])]
     if not triggers:
         logger.info("[rollover] No rollover triggers detected")
         return {
@@ -165,6 +166,7 @@ def execute_rollover() -> Dict[str, Any]:
             "skipped": [],
             "results": [],
             "undrainable": undrainable,
+            "damaged": damaged,
         }
 
     logger.info(f"[rollover] Found {len(triggers)} files ready for rollover")
@@ -360,4 +362,5 @@ def execute_rollover() -> Dict[str, Any]:
         "skipped": skipped,
         "results": results,
         "undrainable": undrainable,
+        "damaged": damaged,
     }

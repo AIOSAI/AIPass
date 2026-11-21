@@ -3,7 +3,7 @@
 # Description: Tests for the unified entry schema: normalize, extractor trim, entry_limits
 # Version: 1.0.2
 # Created: 2026-06-13
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # Category: memory/tests
 # =============================================
 
@@ -616,23 +616,20 @@ class TestExtractWithMetadataEntryIdentity:
         }
 
         sessions = self._sessions(4)
-        # strip identity off the two oldest (the ones that get archived)
+        # strip the date off the oldest (archived); a missing number is refused, not archived
         sessions[-1].pop("date")
-        sessions[-2].pop("number")
 
         result = self._run(ext, tmp_path, sessions)
 
         assert result["count"] == 2
-        # sessions[-2] lost its number and sessions[-1] its date, and those two
-        # are exactly the entries that archive -- so each metadata dict is short
-        # of ONE identity key and carries no None in its place. The `or` this
-        # replaced passed whenever the key was absent, which was every run.
+        # sessions[-1] lost its date and archives, so its metadata is short of
+        # that key and carries no None in its place. The `or` this replaced
+        # passed whenever the key was absent, which was every run.
         metas = [entry["_metadata"] for entry in result["entries"]]
         assert [sorted(k for k in meta if k.startswith("entry_")) for meta in metas] == [
-            ["entry_date"],
+            ["entry_date", "entry_number"],
             ["entry_number"],
         ]
-        assert isinstance(metas[0]["entry_date"], str)
         assert isinstance(metas[1]["entry_number"], int)
         for meta in metas:
             assert None not in meta.values(), meta

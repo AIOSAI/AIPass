@@ -3,7 +3,7 @@
 # Description: Tests for the search orchestration module
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/search.py."""
@@ -12,6 +12,8 @@
 # sentry: no-test-needed(documentation) — the wording of the print_help() panel
 
 from unittest.mock import MagicMock
+
+import pytest
 
 from aipass.memory.apps.modules import search
 
@@ -224,6 +226,36 @@ class TestHandleCommandArgParsing:
 
         assert result is True
         mocks["error"].assert_called_once()
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["q", "--n", "0"],
+            ["q", "--n", "-2"],
+            ["q", "--n"],
+            ["q", "--branch"],
+            ["q", "--type"],
+            ["q", "--branch", "--type", "local"],
+            ["q", "--type", "../local"],
+        ],
+    )
+    def test_a_bad_option_is_refused_before_the_model_loads(self, monkeypatch, args):
+        """Every option is checked before the 20-40 s embedding subprocess starts."""
+        search_mod, mocks = _import_search(monkeypatch)
+
+        assert search_mod.handle_command("search", args) is True
+
+        mocks["error"].assert_called_once()
+        mocks["execute_search"].assert_not_called()
+
+    def test_an_at_branch_names_the_branch(self, monkeypatch):
+        search_mod, mocks = _import_search(monkeypatch)
+        mock_show = MagicMock(return_value=True)
+        monkeypatch.setattr(search_mod, "show_search_results", mock_show)
+
+        search_mod.handle_command("search", ["q", "--branch", "@flow"])
+
+        mock_show.assert_called_once_with("q", branch="flow", memory_type=None, n_results=5)
 
     def test_empty_query_after_options_shows_error(self, monkeypatch):
         """Options only, no query text, should call error() and return True."""

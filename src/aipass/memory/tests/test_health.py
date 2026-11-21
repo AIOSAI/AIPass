@@ -3,7 +3,7 @@
 # Description: Tests for the branch health module (entry-count + entry-size wrapper)
 # Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/health.py -- get_branch_health()."""
@@ -177,7 +177,7 @@ class TestKnownBranchRolloverDue:
         trinity.mkdir(parents=True)
         data = {
             "document_metadata": {"schema_version": "3.0.0"},
-            "sessions": [{"id": f"s{i}"} for i in range(50)],
+            "sessions": [{"id": f"s{i}", "number": 50 - i} for i in range(50)],
         }
         (trinity / "local.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
         (trinity / "observations.json").write_text(json.dumps(_valid_observations_json(), indent=2), encoding="utf-8")
@@ -376,7 +376,7 @@ def _due_and_oversize_branch(tmp_path: Path, monkeypatch) -> dict[str, str]:
     trinity.mkdir(parents=True)
     data = {
         "document_metadata": {"schema_version": "3.0.0"},
-        "sessions": [{"id": f"s{i}"} for i in range(50)],
+        "sessions": [{"id": f"s{i}", "number": 50 - i} for i in range(50)],
         "key_learnings": {"ok_entry": "fine", "bad_entry": "x" * 15},
     }
     (trinity / "local.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -467,3 +467,84 @@ class TestTheBranchFormRendersItsHealth:
         assert "drone @memory health @branch" in out
         assert "@test_branch health" not in out
         assert scope.call_count == 0
+
+
+_SESSIONS_LIST = {
+    "enabled": True,
+    "enforce": False,
+    "entry_types": {
+        "sessions": {
+            "file": "local.json",
+            "container": "sessions",
+            "kind": "list",
+            "field": "summary",
+            "max_chars": 300,
+        }
+    },
+}
+
+
+def _local_branch(tmp_path: Path, monkeypatch, raw: str) -> dict[str, str]:
+    """A branch whose local.json is *raw*, judged against sessions count 15 and a list sessions entry type."""
+    trinity = tmp_path / "flow" / ".trinity"
+    trinity.mkdir(parents=True)
+    (trinity / "local.json").write_text(raw, encoding="utf-8")
+    monkeypatch.setattr(
+        _detector.config_loader,
+        "section",
+        lambda name: {"per_branch": {}, "defaults": {"local": {"sessions": {"count": 15}}}},
+    )
+    monkeypatch.setattr(_lint_handler, "load_entry_limits", lambda *a, **k: _SESSIONS_LIST)
+    return {"name": "flow", "path": str(tmp_path / "flow")}
+
+
+def _numbered(numbers: list[int]) -> str:
+    """A local.json holding one session per number, in the order given."""
+    sessions = [{"number": n, "date": "2026-11-01", "summary": f"s {n}", "status": "completed"} for n in numbers]
+    return json.dumps({"document_metadata": {"schema_version": "3.0.0"}, "sessions": sessions})
+
+
+class TestADamagedFileIsANamedErrorInHealth:
+    """A zero-byte or non-list local.json used to print 'local.json: ok' and exit 0."""
+
+    @pytest.mark.parametrize(
+        ("raw", "named"),
+        [("", "empty file"), ('{"sessions": "a string"}', "'sessions' is a str, not a list")],
+    )
+    def test_the_damage_is_named_and_the_exit_is_two(self, tmp_path: Path, monkeypatch, capsys, raw, named):
+        branch = _local_branch(tmp_path, monkeypatch, raw)
+        reset_command_state()
+
+        with patch.object(_health, "read_scope", return_value=[branch]):
+            result = _health.get_branch_health("flow")
+            _health.handle_command("health", ["@flow"])
+
+        out, err = capsys.readouterr()
+        assert result["entry_count"]["local"]["damaged"] == [named]
+        assert "local.json: ok" not in out
+        assert f"local.json: DAMAGED - {named}" in err
+        assert resolve_exit(True) == 2
+
+
+class TestDuplicateAndOldestFirstNumbersAreFlaggedByHealth:
+    """Both passed health clean: rollover chooses by number and position, so both are named."""
+
+    def test_a_repeated_number_is_flagged(self, tmp_path: Path, monkeypatch, capsys):
+        branch = _local_branch(tmp_path, monkeypatch, _numbered([3, 3, 2, 1]))
+
+        with patch.object(_health, "read_scope", return_value=[branch]):
+            result = _health.get_branch_health("flow")
+            _health.handle_command("health", ["@flow"])
+
+        reasons = [(v["reason"], v["detail"]) for v in result["entry_size"]["violations"]]
+        assert reasons == [("duplicate_number", "sessions[1] repeats number 3 of sessions[0]")]
+        assert "sessions[1] repeats number 3 of sessions[0]" in capsys.readouterr().err
+
+    def test_oldest_first_is_flagged(self, tmp_path: Path, monkeypatch):
+        branch = _local_branch(tmp_path, monkeypatch, _numbered([1, 2, 3]))
+
+        with patch.object(_health, "read_scope", return_value=[branch]):
+            result = _health.get_branch_health("flow")
+
+        reasons = [(v["reason"], v["detail"]) for v in result["entry_size"]["violations"]]
+        assert reasons == [("not_newest_first", "sessions is not stored newest-first (head #1, tail #3)")]

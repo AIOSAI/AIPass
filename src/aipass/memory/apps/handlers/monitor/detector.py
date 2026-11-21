@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: detector.py
 # Description: Rollover Trigger Detection Handler
-# Version: 0.8.0
+# Version: 0.9.0
 # Created: 2025-11-16
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -14,7 +14,7 @@ Todos are counted (check_todos, one branch) but never fed to the fleet walk: it 
 
 import json
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass
 
 from aipass.memory.apps.handlers import repo_root, write_fence
@@ -85,7 +85,7 @@ class RolloverTrigger:
 
 @dataclass
 class UndrainableFile:
-    """A file over its limit that rollover cannot drain (a capped container is not a list)."""
+    """A file rollover cannot drain: a capped container held as a dict, or (in ``damaged``) a damaged file."""
 
     branch: str
     memory_type: str
@@ -261,43 +261,116 @@ def undrainable_in(data: Any, file_limits: Dict[str, Any]) -> List[str]:
     return reasons
 
 
-def _read_memory(file_path: Path) -> tuple[int, Any]:
-    """One read of a memory file: its physical line count and its parsed JSON, None when it does not parse."""
+def entry_order_faults(name: str, entries: list) -> List[Tuple[str, str, str]]:
+    """``(key, reason, text)`` for each fault that stops rollover telling oldest from newest in one list.
+
+    Rollover archives the tail of a newest-first list and re-sorts by ``number``, so each entry needs
+    a unique int one. Pure and shared by lint and rollover, so the two cannot disagree.
+    """
+    faults: List[Tuple[str, str, str]] = []
+    seen: Dict[int, int] = {}
+    for idx, entry in enumerate(entries):
+        number = entry.get("number") if isinstance(entry, dict) else None
+        if not isinstance(number, int) or isinstance(number, bool):
+            found = (
+                "no 'number'"
+                if not isinstance(entry, dict) or "number" not in entry
+                else f"a {type(number).__name__} 'number'"
+            )
+            faults.append((f"[{idx}]", "missing_number", f"{name}[{idx}] ({name} entry) has {found}"))
+        elif number in seen:
+            faults.append(
+                (f"[{idx}]", "duplicate_number", f"{name}[{idx}] repeats number {number} of {name}[{seen[number]}]")
+            )
+        else:
+            seen[number] = idx
+    numbers = list(seen)
+    if numbers != sorted(numbers, reverse=True):
+        faults.append(
+            ("", "not_newest_first", f"{name} is not stored newest-first (head #{numbers[0]}, tail #{numbers[-1]})")
+        )
+    return faults
+
+
+def _over_count(name: str, entries: list, limits: Dict[str, Any]) -> bool:
+    """True when a list is over its count, judged as ``_should_rollover`` judges it."""
+    count = limits.get("count")
+    if name != "sessions":
+        return count is not None and len(entries) > count
+    auto = sum(1 for e in entries if isinstance(e, dict) and e.get("status") == "auto-compact")
+    auto_cap = limits.get("auto_compact_cap")
+    return (count is not None and len(entries) - auto > count) or (auto_cap is not None and auto > auto_cap)
+
+
+def damage_in(data: Any, file_limits: Dict[str, Any]) -> List[str]:
+    """Why rollover must refuse this file: a capped container that is not a list, or an over-count list
+    with an entry it cannot order (no int number, or a repeated one).
+
+    Oldest-first is not damage: the extractor re-sorts by number. A dict is ``undrainable_in``'s.
+    """
+    if not isinstance(data, dict):
+        return [f"top level is a {type(data).__name__}, not an object"]
+    reasons = []
+    for name in _CAPPED_CONTAINERS:
+        limits = file_limits.get(name)
+        container = data.get(name)
+        if not isinstance(limits, dict) or container is None or isinstance(container, dict):
+            continue
+        if not isinstance(container, list):
+            reasons.append(f"'{name}' is a {type(container).__name__}, not a list")
+        elif _over_count(name, container, limits):
+            faults = entry_order_faults(name, container)
+            reasons += [text for _key, reason, text in faults if reason != "not_newest_first"]
+    return reasons
+
+
+def _read_memory(file_path: Path) -> tuple[int, Any, str]:
+    """One read of a memory file: ``(lines, data, problem)``; ``problem`` names why it does not parse, else ""."""
     try:
         text = file_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         logger.warning(f"[detector] PARSE FAILURE for {file_path}: {e} — skipping rollover check")
-        return 0, None
+        return 0, None, f"unreadable: {e}"
     lines = len(text.splitlines())
     try:
-        return lines, json.loads(text)
+        return lines, json.loads(text), ""
     except json.JSONDecodeError as e:
         logger.warning(f"[detector] PARSE FAILURE for {file_path}: {e} — skipping rollover check")
-        return lines, None
+        problem = "empty file" if not text.strip() else f"not valid JSON ({e})"
+        return lines, None, problem
 
 
-def undrainable_containers(file_path: Path, loaded: tuple[int, Any] | None = None) -> List[str]:
+def undrainable_containers(file_path: Path, loaded: tuple[int, Any, str] | None = None) -> List[str]:
     """``undrainable_in`` for one file; ``[]`` when it cannot be read or has no limits.
 
     ``loaded`` is ``_read_memory``'s answer when the caller already holds it.
     """
-    _lines, data = loaded if loaded is not None else _read_memory(file_path)
+    _lines, data, _problem = loaded if loaded is not None else _read_memory(file_path)
     if data is None:
         return []
     _branch, _type, file_limits = _limits_for(file_path)
     return undrainable_in(data, file_limits)
 
 
-def _should_rollover(file_path: Path, loaded: tuple[int, Any] | None = None) -> tuple[bool, int, str, str]:
+def damaged_containers(file_path: Path, loaded: tuple[int, Any, str] | None = None) -> List[str]:
+    """``damage_in`` for one file, led by the parse problem when it does not parse."""
+    _lines, data, problem = loaded if loaded is not None else _read_memory(file_path)
+    if problem:
+        return [problem]
+    _branch, _type, file_limits = _limits_for(file_path)
+    return damage_in(data, file_limits)
+
+
+def _should_rollover(file_path: Path, loaded: tuple[int, Any, str] | None = None) -> tuple[bool, int, str, str]:
     """
     Check if file should rollover -> (should_rollover, current_lines, schema_version, v2_reason).
 
     Fires only ABOVE the limit: the extractor drains `len - limit`, so `>=` here would spin forever.
     ``loaded`` is ``_read_memory``'s answer when the caller already holds it.
     """
-    current_lines, data = loaded if loaded is not None else _read_memory(file_path)
+    current_lines, data, problem = loaded if loaded is not None else _read_memory(file_path)
     if data is None:
-        return (False, current_lines, "3.0.0", "parse failure — skipped")
+        return (False, current_lines, "3.0.0", f"damaged - {problem}")
 
     branch_name, file_type, file_limits = _limits_for(file_path)
 
@@ -307,6 +380,11 @@ def _should_rollover(file_path: Path, loaded: tuple[int, Any] | None = None) -> 
             f"in per_branch or defaults — skipping rollover"
         )
         return (False, current_lines, "3.0.0", f"config gap for {branch_name}/{file_type}")
+
+    # Never a trigger: the extractor refuses it, so the run would only fail on it again.
+    damage = damage_in(data, file_limits)
+    if damage:
+        return (False, current_lines, "3.0.0", f"damaged - {'; '.join(damage)}")
 
     reasons = []
 
@@ -346,18 +424,26 @@ def check_all_branches() -> Dict[str, Any]:
     """
     Check all branches for rollover triggers
 
-    ``undrainable`` files never trigger and never go silent: one WARNING per file per walk.
+    ``undrainable`` and ``damaged`` files never trigger and never go silent: one log line per file per walk.
     """
     triggers = []
     undrainable: List[UndrainableFile] = []
+    damaged: List[UndrainableFile] = []
 
     try:
         branches = write_scope()
     except RegistryUnreadable as e:
         logger.error(f"[detector] {e}")
-        return {"success": False, "error": str(e), "triggers": [], "count": 0, "undrainable": []}
+        return {"success": False, "error": str(e), "triggers": [], "count": 0, "undrainable": [], "damaged": []}
     if not branches:
-        return {"success": True, "triggers": [], "count": 0, "undrainable": [], "message": "No branches in registry"}
+        return {
+            "success": True,
+            "triggers": [],
+            "count": 0,
+            "undrainable": [],
+            "damaged": [],
+            "message": "No branches in registry",
+        }
 
     for branch in branches:
         branch_name = branch.get("name", "UNKNOWN")
@@ -382,7 +468,7 @@ def check_all_branches() -> Dict[str, Any]:
                 )
                 triggers.append(trigger)
 
-            reasons = undrainable_containers(file_path)
+            reasons = undrainable_containers(file_path, loaded)
             if reasons:
                 stuck = UndrainableFile(
                     branch=branch_name, memory_type=memory_type, file_path=file_path, reasons=reasons
@@ -392,6 +478,12 @@ def check_all_branches() -> Dict[str, Any]:
                     f"[detector] UNDRAINABLE {stuck} — rollover drains lists only, so this stays over its "
                     f"limit on every run until the container is migrated to the 3.0.0 list shape"
                 )
+
+            broken = damaged_containers(file_path, loaded)
+            if broken:
+                hurt = UndrainableFile(branch=branch_name, memory_type=memory_type, file_path=file_path, reasons=broken)
+                damaged.append(hurt)
+                logger.error(f"[detector] DAMAGED {hurt} — rollover refuses this file until it is repaired")
 
     json_handler.log_operation(
         "check_all_branches",
@@ -403,6 +495,7 @@ def check_all_branches() -> Dict[str, Any]:
         "triggers": triggers,
         "count": len(triggers),
         "undrainable": undrainable,
+        "damaged": damaged,
         "message": f"Found {len(triggers)} rollover triggers" if triggers else "No rollover triggers detected",
     }
 
@@ -412,7 +505,8 @@ def check_single_file(file_path: Path) -> Dict[str, Any]:
     if not file_path.exists():
         return {"success": False, "error": f"File not found: {file_path}"}
 
-    should_trigger, current_lines, schema_ver, v2_reason = _should_rollover(file_path)
+    loaded = _read_memory(file_path)
+    should_trigger, current_lines, schema_ver, v2_reason = _should_rollover(file_path, loaded)
 
     if should_trigger:
         if file_path.parent.name == ".trinity":
@@ -441,6 +535,7 @@ def check_single_file(file_path: Path) -> Dict[str, Any]:
             "current_lines": current_lines,
             "schema_version": schema_ver,
             "v2_reason": v2_reason,
+            "damaged": damaged_containers(file_path, loaded),
         }
 
 
@@ -486,6 +581,7 @@ def get_rollover_stats() -> Dict[str, Any]:
         "files_checked": 0,
         "files_ready": 0,
         "files_undrainable": 0,
+        "files_damaged": 0,
         "branches": {},
     }
 
@@ -521,6 +617,10 @@ def get_rollover_stats() -> Dict[str, Any]:
             if undrainable:
                 stat_entry["undrainable"] = undrainable
                 stats["files_undrainable"] += 1
+            damaged = damaged_containers(file_path, loaded)
+            if damaged:
+                stat_entry["damaged"] = damaged
+                stats["files_damaged"] += 1
 
             branch_stats[memory_type] = stat_entry
 

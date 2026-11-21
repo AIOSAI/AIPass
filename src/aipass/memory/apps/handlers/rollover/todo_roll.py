@@ -3,7 +3,7 @@
 # Description: Todo pad roll-off to .backup/todo/<branch>/backlog.json, file only, verified before the pad is pruned
 # Version: 1.5.0
 # Created: 2026-09-15
-# Modified: 2026-10-17
+# Modified: 2026-11-21
 # =============================================
 
 """Todo Roll Handler (DPLAN-0345 row 1, FPLAN-0590)
@@ -581,6 +581,33 @@ def trim_backlog(backlog_path: Path, branch_dir: str, *, ceiling: int | None = N
     return result
 
 
+def _numbered(
+    rolled: list[Any], pad: list[Any], backlog_path: Path, data: dict[str, Any]
+) -> tuple[list[Any] | None, str | None]:
+    """*rolled* with the next numbers given to any todo whose ``number`` is absent, so restore can reach it.
+
+    A wrong-typed number is kept as written: overwriting it would lose what the pad held.
+    """
+    if not any(isinstance(todo, dict) and todo.get("number") is None for todo in rolled):
+        return rolled, None
+    backlog = read_backlog(backlog_path)
+    if backlog["error"]:
+        return None, backlog["error"]
+    fresh = next_number(
+        pad,
+        backlog["entries"],
+        high_water=high_water_of(backlog["document"]),
+        tab_floor=floor_from_tab(data.get("todos_meta")),
+    )
+    numbered = []
+    for todo in rolled:
+        if isinstance(todo, dict) and todo.get("number") is None:
+            todo = {**todo, "number": fresh}
+            fresh += 1
+        numbered.append(todo)
+    return numbered, None
+
+
 def roll_todos(
     branch: str,
     *,
@@ -619,8 +646,11 @@ def roll_todos(
 
     ranked = sorted(range(len(todos)), key=lambda index: _age(todos[index], index))
     rolled_indices = ranked[: len(todos) - count]
-    rolled = [todos[index] for index in rolled_indices]
     kept = [todo for index, todo in enumerate(todos) if index not in set(rolled_indices)]
+    rolled, problem = _numbered([todos[index] for index in rolled_indices], todos, target["backlog"], data)
+    if rolled is None:
+        result["error"] = f"NOTHING PRUNED - {problem}"
+        return result
 
     appended = append_to_backlog(target["backlog"], target["name"], rolled, REASON_OVERFLOW, pad=todos)
     if not appended["success"]:
@@ -740,9 +770,6 @@ def restore_todo(
         result["error"] = problem or pad_problem
         return result
     result.update(pad=len(todos), count=count)
-    if len(todos) >= count:
-        result["error"] = f"pad is full ({len(todos)}/{count}) - finish or delete one before restoring #{number}"
-        return result
 
     backlog = read_backlog(target["backlog"])
     if backlog["error"] or not backlog["exists"]:
@@ -751,6 +778,9 @@ def restore_todo(
     index, problem = _find_record(backlog["entries"], number, target["backlog"])
     if index is None:
         result["error"] = problem
+        return result
+    if len(todos) >= count:
+        result["error"] = f"pad is full ({len(todos)}/{count}) - finish or delete one before restoring #{number}"
         return result
 
     record = backlog["entries"][index]
