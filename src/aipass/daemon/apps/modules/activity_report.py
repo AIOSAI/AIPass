@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: activity_report.py
 # Description: Branch Activity Report Generator Module
-# Version: 0.5.1
+# Version: 0.6.0
 # Created: 2026-01-30
-# Modified: 2026-11-14
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -136,6 +136,7 @@ def _print_branch_health_help() -> None:
 SYMBOL_OK = "[OK]"
 SYMBOL_WARNING = "[!]"
 SYMBOL_PENDING = "[PENDING]"
+SYMBOL_ERROR = "[ERROR]"
 SYMBOL_SKIP = "[SKIP]"
 
 
@@ -168,7 +169,9 @@ def _render_entry_health(branch_name: str) -> str:
             lines.append(f"  {SYMBOL_SKIP} {memory_type}: no file")
             continue
         current_lines = result.get("current_lines")
-        if result.get("should_rollover"):
+        if result.get("damaged"):
+            lines.append(f"  {SYMBOL_ERROR} {memory_type}: DAMAGED - {'; '.join(result['damaged'])}")
+        elif result.get("should_rollover"):
             reason = result.get("reason") or "over trigger"
             lines.append(f"  {SYMBOL_PENDING} {memory_type}: rollover pending ({current_lines} lines) - {reason}")
         else:
@@ -182,8 +185,12 @@ def _render_entry_health(branch_name: str) -> str:
         lines.append(f"Entry size: {SYMBOL_OK} no cap violations")
         return "\n".join(lines)
 
-    lines.append(f"Entry size: {SYMBOL_WARNING} WARNING - {total_violations} cap violation(s)")
+    lines.append(f"Entry size: {SYMBOL_WARNING} WARNING - {total_violations} violation(s)")
     for violation in entry_size.get("violations", []):
+        # A damage record has no length or cap (both 0); its detail is the whole reason.
+        if violation.get("detail"):
+            lines.append(f"  - {violation.get('file')}: {violation['detail']}")
+            continue
         lines.append(
             f"  - {violation.get('file')} {violation.get('container')} "
             f"'{violation.get('key')}': {violation.get('length')} chars "

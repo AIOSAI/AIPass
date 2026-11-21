@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_activity_report.py
 # Description: Tests for the activity_report CLI module
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/activity_report.py — activity, activity-report, branch-health."""
@@ -366,6 +366,54 @@ class TestRenderEntryHealthSeverity:
         assert "WARNING" in out
         assert "key_learnings" in out
         assert "212" in out and "200" in out
+
+    def test_a_damaged_file_is_an_error_with_memorys_reason_never_ok(self):
+        """A damaged file printed [OK] with its line count: the report never read memory's damaged list."""
+        payload = _clean_payload(
+            entry_count={
+                "local": {
+                    "should_rollover": False,
+                    "current_lines": 221,
+                    "reason": "",
+                    "damaged": ["'todos' is a dict, not a list"],
+                },
+                "observations": {"should_rollover": False, "current_lines": 145, "reason": ""},
+            }
+        )
+        with patch(HEALTH_TARGET, return_value=payload):
+            out = _render()
+
+        assert "[ERROR] local: DAMAGED - 'todos' is a dict, not a list" in out
+        assert "[OK] local" not in out
+        assert "[OK] observations: 145 lines" in out
+
+    def test_a_named_lint_fault_prints_its_detail_not_a_zero_cap(self):
+        """A damage record carries length 0 and cap 0; its detail is the whole reason."""
+        payload = _clean_payload(
+            entry_size={
+                "violations": [
+                    {
+                        "branch": "DAEMON",
+                        "file": "local.json",
+                        "container": "todos",
+                        "key": "",
+                        "length": 0,
+                        "cap": 0,
+                        "over_by": 0,
+                        "entry_type": "todos",
+                        "reason": "wrong_container",
+                        "detail": "'todos' is a dict, not a list",
+                    }
+                ],
+                "total_violations": 1,
+            }
+        )
+        with patch(HEALTH_TARGET, return_value=payload):
+            out = _render()
+
+        assert "WARNING" in out
+        assert "local.json: 'todos' is a dict, not a list" in out
+        assert "cap 0" not in out and "0 chars" not in out
 
     def test_clean_branch_has_no_warning(self):
         with patch(HEALTH_TARGET, return_value=_clean_payload()):
