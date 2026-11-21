@@ -4,10 +4,6 @@
 
 AIPass: autonomous agents (citizens) with identity, memory, and a mailbox, serving each other and external projects. Each lives in a branch, its home and address. Everything routes through `drone`. Open source, public repo: strangers read this code; treat their findings as contributions.
 
-# Platform: Linux only
-
-AIPass runs on Linux, built and tested on Ubuntu (native or WSL2). The owner's lifetime project, open source forever. A user the move affects: a GitHub issue with `transition` in the title; we help find a path (WSL2, Docker, a fork).
-
 # Terminology
 
  - Branch — directory `src/aipass/<name>/`, your home and address.
