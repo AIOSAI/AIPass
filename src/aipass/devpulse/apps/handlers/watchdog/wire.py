@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wire.py
 # Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
-# Version: 2.8.0
+# Version: 2.9.0
 # Created: 2026-08-19
-# Modified: 2026-10-29
+# Modified: 2026-11-21
 # =============================================
 
 """Watchdog Wire Handler — deliver this seat's dispatch completions into THIS session."""
@@ -40,6 +40,11 @@ _HEARTBEAT_INTERVAL_SECONDS = 5.0
 # A dead monitor pushes nothing, so the register is read through @ai_mail's door at this
 # cadence: no agent polled, no process armed, a stdout line only when a death is found.
 DEAD_CHECK_SECONDS = 300.0
+
+# The completion event races the completion mail. The wire holds after a completion until the
+# mail is readable, then wakes; if none lands within the grace it wakes FLAGGED (completed_no_mail)
+# so a silent stopped agent still wakes the manager to ask for the report. Owner ruling 2026-11-21.
+COMPLETION_MAIL_GRACE_SECONDS = 120.0
 
 # Announced once ever per dispatch, so a re-sign-in never repeats a death.
 DEAD_CURSOR_NAME = "wire_dead_cursor.json"
@@ -104,8 +109,7 @@ WRAPPER_FOREGROUND = "foreground"
 def _wrapper_of(target: Path | None) -> str:
     """Which harness wrapper this wire runs under, read from stdout alone.
 
-    A Monitor child's stdout is a socket (notifies per line); a run_in_background child's is
-    a file under a session tasks dir (notifies on exit only). Recorded at arm time: the pid is gone later.
+    Monitor child's stdout is a socket (notifies per line); a run_in_background child's is a tasks-dir file.
     """
     if target is None:
         return WRAPPER_FOREGROUND
@@ -137,9 +141,8 @@ def looks_like_ours(pid: int) -> bool:
 def _sweep_wires(storage_path: Path | None, seat: str) -> None:
     """One pass over the registry: bury the dead, take over every live wire of THIS seat.
 
-    Same session or not: a wire proves a writer, never a listener; only the arm happening
-    now is known to have ears. Another seat's wire (a project manager's) is left alone: it
-    delivers that seat's completions, which this arm never would.
+    Same session or not: a wire proves a writer, never a listener; only the arm happening now is
+    known to have ears. Another seat's wire is left alone: it delivers that seat's completions.
     """
     for watch in _registry.list_active(storage_path=storage_path, prune_stale=False):
         if watch.get("type") != _WIRE_KIND:
@@ -214,6 +217,65 @@ def _result(state: str, **extra) -> dict:
     base = {"state": state, "replayed": 0, "delivered": 0, "dead": 0, "ticks": 0}
     base.update(extra)
     return base
+
+
+def _inbox_messages(repo_root: Path, seat: str) -> list[dict]:
+    """This seat's inbox messages, or [] when the store cannot be read (never raises)."""
+    path = repo_root / "src" / "aipass" / seat.lstrip("@") / ".ai_mail.local" / "inbox.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("[watchdog.wire] inbox unreadable at %s: %s", path, exc)
+        return []
+    messages = data.get("messages") if isinstance(data, dict) else None
+    return [m for m in messages if isinstance(m, dict)] if isinstance(messages, list) else []
+
+
+def _agents_without_mail(repo_root: Path, seat: str, agents: set[str]) -> set[str]:
+    """Of ``agents`` (bare names), those with no unread mail to read yet: the agent's own reply, or
+    @ai_mail's 'Dispatch complete: @agent' notice. An unreadable inbox leaves every agent pending,
+    so the wire waits out the grace and wakes flagged rather than hang."""
+    if not agents:
+        return set()
+    pending = set(agents)
+    for message in _inbox_messages(repo_root, seat):
+        if str(message.get("status")) != "new":
+            continue
+        sender = str(message.get("from") or "").lstrip("@").lower()
+        subject = str(message.get("subject") or "").lower()
+        for agent in list(pending):
+            if sender == agent or (agent in subject and "complete" in subject):
+                pending.discard(agent)
+    return pending
+
+
+def _dispatch_sources(records: list[dict]) -> set[str]:
+    """The bare agent names of the dispatch completions in ``records``."""
+    return {
+        str(r.get("source") or "").lstrip("@").lower()
+        for r in records
+        if str(r.get("kind")) == "dispatch" and r.get("source")
+    }
+
+
+def _mail_gated_exit(root: Path, seat: str, agents: set[str], grace_started: float | None, now: float):
+    """Decide a completed dispatch's exit against its mail. Returns (result_or_None, grace_started):
+    a result dict to exit (clean, or flagged completed_no_mail past the grace), else None to keep
+    polling with the possibly-started grace clock. The caller fills session/counts into the result."""
+    pending = _agents_without_mail(root, seat, agents)
+    if not pending:
+        return {"state": "completed"}, grace_started
+    if grace_started is None:
+        _stdout_event(f"COMPLETION SEEN — awaiting mail from @{', @'.join(sorted(pending))}")
+        return None, now
+    if now - grace_started >= COMPLETION_MAIL_GRACE_SECONDS:
+        _stdout_event(
+            f"COMPLETED_NO_MAIL @{', @'.join(sorted(pending))} "
+            "[woke without the completion mail — ask the agent for its report and why none]"
+        )
+        logger.warning("[watchdog.wire] completed_no_mail pending=%s", sorted(pending))
+        return {"state": "completed_no_mail", "pending": sorted(pending)}, grace_started
+    return None, grace_started
 
 
 def _dead_cursor_file(repo_root: Path, seat: str) -> Path:
@@ -398,6 +460,8 @@ def arm_wire(
     delivered = 0
     ticks = 0
     last_heartbeat = 0.0
+    completed_agents: set[str] = set()
+    grace_started: float | None = None
     try:
         _touch_heartbeat()
         last_heartbeat = time.monotonic()
@@ -455,16 +519,23 @@ def arm_wire(
                 _stdout_event(_feed.format_feed_event(record))
             if fresh:
                 delivered += len(fresh)
+                completed_agents |= _dispatch_sources(fresh)
                 logger.info("[watchdog.wire] delivered %s completions", len(fresh))
 
-            if once and (delivered or dead):
+            # A death wakes at once (no mail owed); a completed dispatch waits for its mail first.
+            outcome = None
+            if once and dead:
+                outcome = {"state": "completed"}
+            elif once and delivered:
+                outcome, grace_started = _mail_gated_exit(root, seat, completed_agents, grace_started, now)
+            if outcome is not None:
                 return _result(
-                    "completed",
                     session=session_name,
                     replayed=replayed,
                     delivered=replayed + delivered,
                     dead=dead,
                     ticks=ticks,
+                    **outcome,
                 )
             if max_ticks is not None and ticks >= max_ticks:
                 return _result(

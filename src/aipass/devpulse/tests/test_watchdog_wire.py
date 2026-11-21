@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_wire.py
 # Description: Tests for the watchdog wire handler (DPLAN-0317 r4 — report, filter, deliver)
-# Version: 2.4.1
+# Version: 2.5.0
 # Created: 2026-08-19
-# Modified: 2026-11-14
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/watchdog/wire.py: arm_wire delivering THIS seat's dispatch completions."""
@@ -325,6 +325,44 @@ def test_live_follow_delivers_an_appended_completion(tmp_path, capsys, monkeypat
 
     assert result["delivered"] == 1
     assert "@flow" in capsys.readouterr().out
+
+
+def _plant_inbox(root: Path, messages: list[dict]) -> None:
+    """Write devpulse's inbox store the wire reads to gate a completion on its mail."""
+    box = root / "src" / "aipass" / "devpulse" / ".ai_mail.local"
+    box.mkdir(parents=True, exist_ok=True)
+    (box / "inbox.json").write_text(json.dumps({"messages": messages}), encoding="utf-8")
+
+
+def test_once_holds_for_the_completion_mail_then_wakes(tmp_path, capsys, monkeypatch):
+    """A live completion exits clean once the agent's mail is readable in the inbox."""
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    _seed_cursor(root)
+    _plant_inbox(root, [{"from": "@flow", "subject": "done", "status": "new"}])
+
+    monkeypatch.setattr(wire, "_sleep", lambda _s: _write_feed(root, [_completion("flow", "d1")]))
+    result = wire.arm_wire(repo_root=root, storage_path=store, once=True, wire_poll=0)
+
+    assert result["state"] == "completed"
+
+
+def test_once_wakes_flagged_when_no_mail_lands(tmp_path, capsys, monkeypatch):
+    """A completion with no mail within the grace wakes flagged, naming the silent agent to ask."""
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    _seed_cursor(root)
+    _plant_inbox(root, [])  # no completion mail from @flow
+    monkeypatch.setattr(wire, "COMPLETION_MAIL_GRACE_SECONDS", 0)
+
+    monkeypatch.setattr(wire, "_sleep", lambda _s: _write_feed(root, [_completion("flow", "d1")]))
+    result = wire.arm_wire(repo_root=root, storage_path=store, once=True, wire_poll=0)
+
+    assert result["state"] == "completed_no_mail"
+    assert result["pending"] == ["flow"]
+    assert "COMPLETED_NO_MAIL" in capsys.readouterr().out
 
 
 def test_the_wire_leaves_no_process_running(tmp_path, monkeypatch):
