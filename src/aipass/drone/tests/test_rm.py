@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rm.py
 # Description: drone rm: containment, carve-outs, the sibling fence and the admin crossing
-# Version: 1.5.1
+# Version: 1.6.0
 # Created: 2026-06-02
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/rm.py and the rm_handler containment it drives."""
@@ -403,9 +403,7 @@ class TestCarveouts:
         """build/ is not a carve-out."""
         build = project_dir / "build"
         build.mkdir()
-        resolved = build.resolve()
-        blocked, _reason, _exemption = check_carveouts(resolved, project_dir.resolve())
-        assert blocked is False
+        assert rm_handler.check_protected_dirs(build.resolve()) == (False, "")
 
     def test_refuse_sibling_branch(self, project_with_branches, monkeypatch):
         """From drone CWD, deleting src/aipass/api must be refused."""
@@ -609,7 +607,7 @@ class TestContainedCitizens:
     def test_a_symlink_to_a_citizen_is_not_contained(self, at_drone):
         """rmtree unlinks the link and never touches what it points at."""
         api = at_drone / "src" / "aipass" / "api"
-        junk = at_drone / "junk"
+        junk = at_drone / "src" / "aipass" / "drone" / "junk"
         junk.mkdir()
         (junk / "api_link").symlink_to(api, target_is_directory=True)
         ((_path, ok, message),) = safe_delete([str(junk)])
@@ -696,7 +694,7 @@ class TestASymlinkIsJudgedWhereItLives:
     def test_a_link_to_the_whole_fleet_is_only_a_link(self, aipass_dir, monkeypatch):
         """rm unlinks; the contains-a-citizen walk must not follow the link into the fleet."""
         monkeypatch.chdir(aipass_dir / "drone")
-        scratch = aipass_dir.parent.parent / "scratch"
+        scratch = aipass_dir / "drone" / "scratch"
         scratch.mkdir()
         link = scratch / "fleet_link"
         link.symlink_to(aipass_dir, target_is_directory=True)
@@ -708,7 +706,7 @@ class TestASymlinkIsJudgedWhereItLives:
     def test_a_link_to_a_citizen_is_not_itself_a_citizen(self, aipass_dir, monkeypatch):
         """The branch-root walk must not read the link's own name as a branch."""
         monkeypatch.chdir(aipass_dir / "drone")
-        scratch = aipass_dir.parent.parent / "scratch"
+        scratch = aipass_dir / "drone" / "scratch"
         scratch.mkdir()
         link = scratch / "api_link"
         link.symlink_to(aipass_dir / "api", target_is_directory=True)
@@ -795,8 +793,10 @@ class TestCarveoutIntegration:
 class TestEdgeCases:
     @pytest.mark.usefixtures("_patch_roots")
     def test_relative_path_resolved_from_cwd(self, project_dir, monkeypatch):
-        monkeypatch.chdir(project_dir)
-        target = project_dir / "relative_target"
+        seat = project_dir / "src" / "me"
+        (seat / ".trinity").mkdir(parents=True)
+        monkeypatch.chdir(seat)
+        target = seat / "relative_target"
         target.mkdir()
         results = safe_delete(["relative_target"])
         assert results[0][1] is True
@@ -931,9 +931,9 @@ class TestTheVerifiedAdminIsNotRefusedByLocation:
         assert (other_project / "logs" / ".archive").exists() is False
         assert (other_project / ".archive" / "logs" / "run.log").read_text(encoding="utf-8") == "logs/run.log"
         (record,) = rm_ledger(tmp_path)
-        assert (record["outcome"], record["exemption"]) == ("moved", "elsewhere")
+        assert (record["outcome"], record["exemption"]) == ("moved", "elsewhere+admin")
 
-    def test_the_admin_crosses_into_a_citizen_there_and_both_exemptions_are_recorded(
+    def test_the_admin_crosses_into_a_citizen_there_and_both_fences_are_recorded(
         self, other_project, monkeypatch, tmp_path
     ):
         rail_answers(monkeypatch, True)
@@ -985,7 +985,7 @@ class TestTheVerifiedAdminIsNotRefusedByLocation:
 
         assert ok is True, message
         assert (other_project / ".archive" / ".ai_mail.local" / "x.json").is_file()
-        assert rm_ledger(tmp_path)[0]["exemption"] == "elsewhere+dot"
+        assert rm_ledger(tmp_path)[0]["exemption"] == "elsewhere+admin+dot"
 
     def test_an_empty_dot_git_folder_does_not_make_a_project(self, other_project, monkeypatch):
         """A sandbox mounts an empty .git in each writable root: that is no repository."""
@@ -1021,3 +1021,41 @@ class TestTheVerifiedAdminIsNotRefusedByLocation:
         assert ok is False
         assert refusal in message
         assert target.read_text(encoding="utf-8") == "stays"
+
+
+class TestACitizenMovesOnlyInsideItsOwnBranch:
+    """Off the admin seat, a project path in no branch is refused like a sibling's: the own-branch-only rule."""
+
+    @pytest.mark.parametrize("relative", [("README.md",), ("src", "stray.txt")])
+    def test_a_repo_root_file_and_a_file_under_src_are_refused_and_stay(
+        self, at_drone_beside_api, project_with_branches, relative
+    ):
+        """Mutant: the branch fence removed — @drone moves the repo README into the root's .archive."""
+        target = project_with_branches.joinpath(*relative)
+        target.write_text("stays", encoding="utf-8")
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is False
+        assert "outside your own branch drone/" in message
+        assert "mail @devpulse the path and why" in message
+        assert target.read_text(encoding="utf-8") == "stays"
+
+    def test_the_admin_seat_still_moves_a_repo_root_file(self, at_drone_beside_api, project_with_branches, monkeypatch):
+        """Mutant: the fence asks no rail — the admin seat is refused the repo root."""
+        rail_answers(monkeypatch, True)
+        target = project_with_branches / "README.md"
+        target.write_text("root", encoding="utf-8")
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is True, message
+        assert (project_with_branches / ".archive" / "README.md").read_text(encoding="utf-8") == "root"
+
+    def test_the_own_branch_root_refusal_names_spawn_and_a_carveout_names_the_next_step(self, at_drone_beside_api):
+        own = at_drone_beside_api.parent / "drone"
+
+        ((_, _, root_message), (_, _, carveout_message)) = safe_delete([str(own), str(own / ".trinity")])
+
+        assert "retired through @spawn" in root_message
+        assert "Protected directory" in carveout_message and "mail @devpulse the path and why" in carveout_message

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_no_cwd_sweep.py
 # Description: Every location-inference site survives a deleted working directory
-# Version: 1.0.7
+# Version: 1.0.8
 # Created: 2026-08-31
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/router_handler.py caller_cwd and every site that infers a location from the cwd."""
@@ -123,8 +123,9 @@ class TestTheDeleteLaneSurvives:
         assert blocked is True
         assert "sibling branch somebranch/" in reason
 
-    def test_an_absolute_path_still_deletes(self, no_cwd, home_root):
+    def test_an_absolute_path_still_deletes_for_the_admin_seat(self, no_cwd, home_root, monkeypatch):
         """The recovery command. It names its target absolutely and needs no cwd."""
+        drone_conftest.rail_answers(monkeypatch, True)
         target = home_root / "scratch"
         target.mkdir()
 
@@ -132,6 +133,18 @@ class TestTheDeleteLaneSurvives:
 
         assert results[0][1] is True, results
         assert not target.exists()
+
+    def test_a_citizen_with_no_cwd_has_no_branch_and_is_refused(self, no_cwd, home_root, monkeypatch):
+        """No cwd, no seat: a project path in no branch of the caller's stays."""
+        drone_conftest.rail_answers(monkeypatch, False)
+        target = home_root / "scratch"
+        target.mkdir()
+
+        ((_path, ok, message),) = rm_handler.safe_delete([str(target)])
+
+        assert ok is False
+        assert "in no branch of yours" in message
+        assert target.is_dir()
 
     def test_a_relative_path_is_refused_cleanly_not_crashed(self, no_cwd, home_root):
         """A relative path is meaningless without a cwd — a refusal, not a traceback."""

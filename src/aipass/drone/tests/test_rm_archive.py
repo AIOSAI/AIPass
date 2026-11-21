@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rm_archive.py
 # Description: drone rm: the in-tree move to .archive, the name clash, the log line, the rm module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-11-15
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/rm_handler.py's move to .archive and apps/modules/rm.py."""
@@ -29,9 +29,11 @@ from .conftest import logged_lines, rail_answers, rm_ledger
 
 @pytest.fixture()
 def in_project(project_dir, monkeypatch):
-    """Stand in the fake project, so it is the tree drone rm archives inside."""
-    monkeypatch.chdir(project_dir)
-    return project_dir
+    """Stand in a citizen's seat in the fake project: off the admin seat, drone rm moves only inside its own branch."""
+    seat = project_dir / "src" / "aipass" / "me"
+    (seat / ".trinity").mkdir(parents=True)
+    monkeypatch.chdir(seat)
+    return seat
 
 
 class TestAnInTreeTargetMovesToTheLocalArchive:

@@ -58,7 +58,7 @@ reached the logs either way.
 A record carries: `timestamp`, `lane`, `outcome`, `caller`, `cwd`, `requested` (what was typed),
 `path` (resolved), `reason`, `kind`, `size_bytes`, `entry_count`, `measured`. A move's record has
 outcome `moved` and one key more, `moved_to`, the path it now lives at; the admin seat's crossing
-of the sibling guard adds `exemption: "admin"`, its `--dot` lift `exemption: "dot"`, and both
+of the sibling guard or the own-branch rule adds `exemption: "admin"`, its `--dot` lift `exemption: "dot"`, and both
 together `exemption: "admin+dot"`; a move in another project leads with `elsewhere`. A stale-mode record
 carries two more, `mode` and `age` (as typed), and its prax line names both; a plain delete's
 record keeps exactly the twelve, byte for byte.
@@ -136,10 +136,17 @@ Safe because nothing above a branch carries `.trinity/` — not the project root
 `src/aipass/` — so the outermost hit inside the project *is* the citizen. The walk stops at the
 project boundary.
 
+### Off the admin seat, only the caller's own branch
+
+A project path that sits in no branch, the repo root, `src/` and every file outside a `.trinity`
+tree, belongs to no citizen, so for a citizen it is refused like a sibling's, with the same next
+step: mail @devpulse the path and why. With no cwd there is no branch to own, and every project
+path is refused. The temp dir is unchanged, and stale mode keeps its own fence (below).
+
 ### The admin seat crosses it
 
-The verified admin seat, and only it, works inside every branch: for it the sibling guard does not
-apply, and the target moves into the `.archive` beside it, in that branch. The record carries
+The verified admin seat, and only it, works inside every branch and on the files in no branch: for
+it neither the sibling guard nor the own-branch rule applies, and the target moves into the `.archive` beside it, in that branch. The record carries
 `exemption: "admin"` beside the caller, and the result line says the fence was crossed.
 
 - **Verified on @ai_mail's rail**, the one the hooks gates use: `repo_door.admin_verdict()` stamps
