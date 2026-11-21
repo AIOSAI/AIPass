@@ -58,7 +58,7 @@ matches`). The patterns, in gitignore syntax:
 | `.secrets/` | any directory named `.secrets`, at any depth |
 | `*.key`, `*.pem` | private keys and certificates |
 | `.env`, `.env.*` | environment files |
-| `**/*_json/tokens_data.json`, `**/*_json/tokens_config.json` | the host API's token store |
+| `**/*_json/tokens_data.json`, `**/*_json/tokens_config.json` | the host API's operation counters (not its tokens, which sit under `.secrets/`), held back anyway |
 
 **Why it is not in `.backupignore`.** `.backupignore` decides what the local
 stores keep, and the local snapshot should keep these files: a backup that cannot

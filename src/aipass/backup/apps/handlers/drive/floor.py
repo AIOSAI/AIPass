@@ -23,7 +23,7 @@ NEVER_LEAVES_MACHINE: tuple[str, ...] = (
     "*.pem",  # certificates and keys
     ".env",  # environment files
     ".env.*",
-    "**/*_json/tokens_data.json",  # the host API's token store
+    "**/*_json/tokens_data.json",  # api's operation counters, not tokens (those sit in .secrets/); held anyway
     "**/*_json/tokens_config.json",
 )
 

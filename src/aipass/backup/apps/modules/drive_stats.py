@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drive_stats.py
 # Description: Drive stats module — shows file tracker statistics and the Drive account quota
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-04-17
-# Modified: 2026-10-24
+# Modified: 2026-11-21
 # =============================================
 
 """Drive Stats Module — displays tracker statistics for a project and the Drive account quota."""
@@ -119,8 +119,11 @@ def handle_command(command: str, args: list) -> bool:
         print_help()
         return True
 
-    project_root = str(resolve_caller_path(args[0]))
-    run_drive_stats(project_root)
+    project_root = resolve_caller_path(args[0])
+    if not project_root.is_dir():
+        cli_error(f"Project path is not a directory: {project_root}")
+        return True
+    run_drive_stats(str(project_root))
     return True
 
 

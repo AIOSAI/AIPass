@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drive_check.py
 # Description: Drive check module — verifies Google Drive connectivity via @api
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-17
-# Modified: 2026-10-17
+# Modified: 2026-11-21
 # =============================================
 
 """Drive Check Module — tests Drive auth through @api gateway."""
@@ -24,7 +24,7 @@ def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: Phase 4 -- auth test via @api gateway")
+    console.print("  Nothing checked: drive_check run tests the Drive connection", markup=False)
     console.print("  Handlers: drive/client, drive/test")
 
 
