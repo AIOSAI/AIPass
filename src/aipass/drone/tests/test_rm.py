@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rm.py
 # Description: drone rm: containment, carve-outs, the sibling fence and the admin crossing
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-06-02
-# Modified: 2026-11-18
+# Modified: 2026-11-20
 # =============================================
 
 """Tests for apps/modules/rm.py and the rm_handler containment it drives."""
@@ -41,6 +41,12 @@ CARVEOUTS = (".agents", ".aipass", ".codex", ".git", ".trinity")
 #: A mode-0 folder only stops a caller the kernel holds to permissions: not as root.
 _PERMISSIONS_DO_NOT_BIND = os.geteuid() == 0
 _PERMISSIONS_REASON = "needs file permissions that bind the caller"
+
+
+@pytest.fixture(autouse=True)
+def _a_citizen_seat(monkeypatch):
+    """The verified-admin rail says no unless a test says yes: run from the admin seat, the real rail says yes."""
+    rail_answers(monkeypatch, False)
 
 
 @pytest.fixture()
@@ -733,6 +739,20 @@ class TestASymlinkIsJudgedWhereItLives:
         ((_path, ok, message),) = safe_delete([str(link / "keep.txt")])
         assert ok is False
         assert "outside allowed roots" in message
+        assert (outside / "keep.txt").exists()
+
+    def test_the_admin_seat_meets_the_home_fence_there_not_the_roots(self, project_dir, tmp_path_factory, monkeypatch):
+        """Mutant: the home fence dropped — the admin lane looks for a project above the temp dir instead."""
+        rail_answers(monkeypatch, True)
+        outside = tmp_path_factory.mktemp("outside")
+        (outside / "keep.txt").write_text("keep", encoding="utf-8")
+        link = project_dir.resolve() / "out_link"
+        link.symlink_to(outside, target_is_directory=True)
+        monkeypatch.setenv("HOME", str(project_dir.resolve()))
+        monkeypatch.setattr(rm_handler, "get_allowed_roots", lambda: [project_dir.resolve()])
+        ((_path, ok, message),) = safe_delete([str(link / "keep.txt")])
+        assert ok is False
+        assert "outside the owner's home" in message
         assert (outside / "keep.txt").exists()
 
 
