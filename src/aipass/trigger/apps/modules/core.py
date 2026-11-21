@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Trigger event bus for AIPass system-wide event handling
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-02-03
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -206,7 +206,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command == "fire":
-        if not args:
+        if not args or not args[0].strip():
             error("Usage: drone @trigger fire <event> [key=value ...]")
             return True
         event_name = args[0]

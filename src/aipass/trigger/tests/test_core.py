@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_core.py
 # Description: Unit tests for trigger event bus core module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/core.py, the Trigger event bus."""
@@ -21,6 +21,7 @@ import pytest
 from unittest.mock import MagicMock, call
 
 import aipass.trigger as trigger_door
+from aipass.cli import display
 from aipass.trigger import Trigger as DoorTrigger, trigger as door_bus
 from aipass.trigger.apps.handlers import failure_report, medic_state
 from aipass.trigger.apps.handlers.events import error_detected, registry, runaway_handler
@@ -641,6 +642,18 @@ def _fire_value(trigger_cls, monkeypatch, token):
     assert core.handle_command("fire", ["typing_probe", f"value={token}"]) is True
     assert probe.call_count == 1
     return probe.call_args.kwargs["value"]
+
+
+@pytest.mark.parametrize("name", ["", "   "])
+def test_fire_refuses_an_empty_event_name(trigger_cls, monkeypatch, name):
+    """`fire ""` is a usage error: nothing fires and the command fails."""
+    fire = MagicMock()
+    monkeypatch.setattr(trigger_cls, "fire", fire)
+
+    assert core.handle_command("fire", [name, "branch=api"]) is True
+
+    fire.assert_not_called()
+    assert display.command_failed() is True
 
 
 @pytest.mark.parametrize(
