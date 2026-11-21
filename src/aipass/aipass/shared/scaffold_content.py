@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: scaffold_content.py
 # Description: Shared template content generators for project scaffolding
-# Version: 1.6.2
+# Version: 1.6.3
 # Created: 2026-04-22
-# Modified: 2026-11-14
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -298,6 +298,8 @@ def gitignore() -> str:
         "PPLAN-*\n"
         "APLAN-*\n"
         "TDPLAN-*\n"
+        "NPLAN-*\n"
+        "CPLAN-*\n"
         "\n"
         "# Secrets\n"
         ".env\n"
