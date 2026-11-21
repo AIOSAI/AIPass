@@ -80,7 +80,6 @@ half-read schedule never erases its jobs' history.
 
 Every refused file or job is also told to the user, with its reason: `drone @daemon queue` lists
 it as a **Refused, not scheduled** warning (and `--json` under `refused`), and each tick prints it.
-| `rotation` | `time: "HH:MM"` | Daily window — but wakes the next citizen on the fleet roster, not the owner. See [docs/rounds.md](rounds.md). |
 
 ### Optional schedule fields
 

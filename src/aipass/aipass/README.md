@@ -124,7 +124,7 @@ Depth lives in [docs/](docs/), one page per command group:
 | Page | What it covers |
 |---|---|
 | [init_and_install.md](docs/init_and_install.md) | Every entry form of `install` and `init`, including the ones no help page names |
-| [scaffold_update.md](docs/scaffold_update.md) | The update ritual, the manifest hash rule, seeds, `.updateignore` |
+| [scaffold_update.md](docs/scaffold_update.md) | The update ritual, the manifest hash rule, `.updateignore` |
 | [doctor.md](docs/doctor.md) | The seven groups, the flags, the provider wiring door, what it refuses |
 | [trust_and_projects.md](docs/trust_and_projects.md) | The enrolled hash, and `new` / `adopt` |
 | [baud_phone_face.md](docs/baud_phone_face.md) | Fetch, verify, unpack, swap, point — and every refusal |
@@ -160,7 +160,7 @@ branch imports `shared/`.
 
 ---
 
-**Last Updated:** 2026-11-17
+**Last Updated:** 2026-11-21
 
 ---
 

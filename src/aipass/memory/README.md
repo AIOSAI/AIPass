@@ -87,7 +87,7 @@ grouped one directory per concern: `json/` (the fleet's json shim, the write gat
 closed shape), `rollover/` (the extractor, the normalizer, the todo roll), `templates/` (the trinity
 push and the gold templates), `tracking/` (line counts and the `*_meta` state tabs), `monitor/`
 (branch discovery and the watcher), `vector/` and `storage/` (embedding and ChromaDB, each in its own
-subprocess), plus `archive/`, `intake/`, `schema/`, `search/` and `governance/`.
+subprocess), plus `intake/`, `schema/`, `search/` and `governance/`.
 
 The full directory tree lives in this branch's own prompt (`.aipass/aipass_local_prompt.md`) — one
 place, so it cannot disagree with itself.

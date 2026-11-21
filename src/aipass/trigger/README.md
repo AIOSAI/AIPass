@@ -30,7 +30,7 @@ drone @trigger fire error_detected branch=api error_type=ImportError
   tracked error with a fingerprint.
 - **Dispatches the fault to its owner** through a pipeline of sequential gates — medic
   enabled, branch not muted, second occurrence, not the manager, a registered citizen, the
-  circuit breaker closed, backoff elapsed — then emails the branch and wakes it.
+  backoff elapsed, circuit breaker closed — then emails the branch and wakes it.
 - **Escalates what stays broken.** A signature still repeating after its owner was told, or
   while a branch is muted, becomes one digest email to the operator. Warnings have no
   dispatch path at all, so repetition is the only signal they have.

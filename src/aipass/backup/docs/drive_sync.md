@@ -122,8 +122,8 @@ and runs as `drone @backup <lane> <root>`, with `--quiet` for all but
 - **A job** carries `job`, `project`, `lane`, `state` and `started_at`; once it
   ends, also `finished_at`, `exit`, `summary` (the tail of the lane's output,
   verbatim, at most 600 characters) and `error`. `state` is `running`, `done`
-  (exit 0), `stopped` (exit 130) or `failed` (any other exit, the 30-minute
-  timeout, or a routing error mid-run, whose sentence is in `error`). Jobs live in
+  (exit 0), `stopped` (exit 130) or `failed` (any other exit, the snapshot
+  lane's 30-minute or the `all` lane's 24-hour limit, or a routing error mid-run, whose sentence is in `error`). Jobs live in
   the server's memory: a finished one is kept an hour, and a restart forgets all.
 - **Four error codes.** **400 `verb_refused`**: no project or an unknown one, a
   lane outside the three, or that lane already running for that project

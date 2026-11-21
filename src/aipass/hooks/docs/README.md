@@ -14,7 +14,7 @@ shelf is committed — write it as if it ships.
 | [wiring.md](wiring.md) | The two-tier hook model, every event and its wiring shape, entry names vs handler filenames, and what a new handler needs in provider settings |
 | [engine.md](engine.md) | Dispatch, promote (source is not live until promoted), gates fail closed while injectors skip, the merged output document, dynamic handler import, and the import-time working-directory rule |
 | [project_config.md](project_config.md) | Which config runs (the AIPass root, ignored branch configs, external projects behind trust, never "no hooks"), the project template, the retired watchdog, and the release notice |
-| [git_gate.md](git_gate.md) | Raw git and gh refused for every seat (the admin seat included), the drone twins, the protected files, the rm gate (every delete is the admin seat's), and the settings backup |
+| [git_gate.md](git_gate.md) | Raw git and gh refused for every seat (the admin seat included), the drone twins, the protected files, the rm gate (raw `rm` refused for every seat, `drone rm` moves to `.archive/`, other delete lanes are the admin seat's), and the settings backup |
 | [edit_gate.md](edit_gate.md) | The branch and project fences, the direction table, and the verified admin-seat exemption |
 | [bash_writes.md](bash_writes.md) | The scripted lane: which write targets a shell command can be seen to name, what it deliberately misses, and backslash-separated path spellings |
 | [trinity_memory_gate.md](trinity_memory_gate.md) | Memory writes: the shell refusal, the tripwire, and how a write is judged on what it authors |
@@ -24,6 +24,10 @@ shelf is committed — write it as if it ships.
 | [sandbox.md](sandbox.md) | The kernel filesystem boundary: policy generation, what is writable per role, and the launch seam |
 | [boot_shim.md](boot_shim.md) | The one script in this branch that writes outside the repo |
 | [cadence_investigation.md](cadence_investigation.md) | The per-turn injection counter: session keying, the execution model, and the dedup |
+| [opencode.md](opencode.md) | The OpenCode plugin and how its events map to the hooks |
+| [settings_gate.md](settings_gate.md) | No AI changes provider settings alone: Claude asks the owner, Codex and headless are denied |
+| [comments.md](comments.md) | The comment budget: the metric, the over-budget answer, the `comments` verb |
+| [provider_parity.md](provider_parity.md) | `parity` compares both CLIs hook by hook; `smoke` runs one live turn per provider |
 
 The live inventory of modules and commands is not written down here — it is `drone @hooks` and
 `drone @hooks --help`, generated from code. The directory tree lives in the branch prompt

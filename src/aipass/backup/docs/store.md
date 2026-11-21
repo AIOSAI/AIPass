@@ -30,7 +30,7 @@ failed copy leaves the map as it was. When a lane last ran is read from
 
 **Shared namespace:** `.backup/` is NOT exclusive to @backup. Other writers use it too:
 - **@backup** — the snapshot store at a registered project root
-- **@flow** — closed plans archived to `<repo-root>/.backup/processed_plans/` for vectorization by @memory
+- **@flow** — closed plans archived to their own project's `.backup/processed_plans/` (the repo root's only when no project register is found) for vectorization by @memory
 
 The root `.gitignore` covers them all with a single `.backup/` entry.
 

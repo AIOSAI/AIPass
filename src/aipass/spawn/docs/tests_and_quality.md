@@ -56,7 +56,7 @@ comments. One number, one method, produced live.
 | `test_registry_credential.py` | Credential mint asymmetry: a missing registry mints, an unreadable one never does |
 | `test_json_durability.py` | Torn-write durability — atomic writes across every JSON and text path |
 | `test_birth_receipt.py` | The birth receipt lane, the seed-vs-gold drift pins, the newborn budget contract, and that retirement carries the memories |
-| `test_passport_seeds.py` | Passport seeds — the tracked identity that ships with the repository |
+| `test_passport_seeds.py` | Passport vaults — export-vault and minting from a vault |
 | `test_template_import_guard.py` | The template's fence before any mint: foreign and outside seats refused by name, kin allowed, the newborn's empty package door lazy and refusing, a dead cwd survived; `support_template_import_guard.py` holds its worlds (never collected) |
 | `test_handlers_fence.py` | Spawn's own handlers fence, a fresh interpreter per case; `support_fence.py` is its probe (never collected) |
 | `test_conftest_fixtures.py` | Pins that this branch's own mocking fixtures reach the code they claim to mock |

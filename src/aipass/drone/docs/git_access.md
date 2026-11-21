@@ -92,7 +92,7 @@ read from the caller's own environment is something every seat can set, so a swi
 let any seat prefix one variable and commit. The admin seat's way across projects is the session
 fence's `admin_verdict()` and the `--repo` door, both verified on the caller rail.
 
-**Which verbs refuse outside AIPass:** `pr`, `close-pr`, `smart-sync`, `fix` —
+**Which verbs refuse outside AIPass:** `pr`, `close-pr`, `smart-sync`, `fix`, `ci-cure` —
 they assume our PR conventions, our lock or our events, so against an arbitrary repo they would
 half-run and leave a mess. Every other owner verb runs for the project's manager from its own seat;
 `auth.external_owner_verbs()` is the list, and both the refusal and `drone @git --help` print it.

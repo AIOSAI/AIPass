@@ -38,7 +38,7 @@ every spelling: a broken logger is a failure the caller hears, never a silent su
 - **Watches for runaway logs** — growth rates per file, sustained-threshold alarms, and an
   event on the trigger bus when one goes off.
 - **Audits log files** — health summaries and oversized-file reports (writers rotate their own
-  files; nothing truncates a live one), and a weekly sweep of stale ones run by the daemon.
+  files; nothing truncates a live one), and a weekly stale-temp sweep defined as a daemon job (shipped disabled).
 - **Builds the branch dashboards** — the `DASHBOARD.local.json` every agent reads at its
   greeting, refreshed from the central files, plus the write-through API other services call
   to update their own section.
@@ -113,7 +113,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/monitor.md](docs/monitor.md) | Mission Control: the threads, multi-CLI session reading, the commons feed |
 | [docs/dashboard.md](docs/dashboard.md) | Refresh, template push and diff, and the write-through API services call |
 | [docs/dashboard_caps.md](docs/dashboard_caps.md) | The subject cap and whole-file budget every dashboard writer reads, including writers outside prax |
-| [docs/log_audit.md](docs/log_audit.md) | Health summaries, growth rates, the stale-log sweep, and the weekly sweep the daemon runs |
+| [docs/log_audit.md](docs/log_audit.md) | Health summaries, growth rates, the stale-log sweep, and the weekly sweep job the daemon can run |
 | [docs/discovery.md](docs/discovery.md) | The scheduled scan behind the module registry, and the watcher's own events |
 | [docs/json_service.md](docs/json_service.md) | The config/data/log triplet every branch writes through, and its test seam |
 | [docs/architecture.md](docs/architecture.md) | How a command reaches a handler: router, unknown-argument gate, exit seam, help behaviour |
@@ -128,8 +128,8 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 - `aipass.cli` — console output, headers, success and error formatting.
 - `watchdog` — filesystem events for Mission Control and the discovery watcher, with a
   polling fallback when inotify watches run out. It is not on the logging path.
-- `aipass.trigger` — optional event firing. Every import site is guarded, so prax runs
-  without it, and the logging path does not touch it at all.
+- `aipass.trigger` — event firing. The logging path never touches it; the monitor and
+  log-health modules import it at call time.
 - Python stdlib: `pathlib`, `logging`, `threading`, `argparse`, `importlib`.
 - **@drone is not an import.** Prax never imports drone; it parses the `[CALLER:BRANCH]`
   marker drone writes into its own log lines, and reads `AIPASS_CALLER_CWD` from the
@@ -148,7 +148,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ---
 
-**Last Updated:** 2026-11-15
+**Last Updated:** 2026-11-21
 
 ---
 [← Back to AIPass](../../../README.md)

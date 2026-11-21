@@ -72,7 +72,7 @@ per-delivery boundary check.
 
 - **The fleet is read through @memory's door.** `get_fleet_branches()` in
   `handlers/registry/read.py` takes its rows from
-  `door_registry_scope.fleet_branches(name_from="registry")`: core, then residents,
+  `from aipass.memory import fleet_branches` (called with `name_from="registry"`): core, then residents,
   then externals, each with an absolute path and a `residency`. A project takes
   part by being declared; its own registry makes its citizens real, and no seat
   here keeps a census of its own. The same rows feed `contacts`, the interactive

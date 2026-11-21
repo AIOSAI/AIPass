@@ -130,8 +130,9 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 - **aipass.cli** — console output, refusal formatting and exit-code state
 - **aipass.drone** — `is_registry_filename`, the one registry name check, and
   `resolve_aipass_home`, the AIPass home every home reader here takes; no home is a refusal
-- **aipass.memory** (optional) — meta tabs at create, through its `door_tab_renderer`; the
-  import is guarded and degrades to empty when it is unavailable
+- **aipass.memory** — meta tabs at create, through memory's package door
+  (`from aipass.memory import render_all_meta_tabs`); memory ships in this package, so a
+  failed import raises
 
 ### Provides To
 
@@ -143,7 +144,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ---
 
-**Last Updated:** 2026-10-24
+**Last Updated:** 2026-11-21
 
 ---
 [← Back to AIPass](../../../README.md)

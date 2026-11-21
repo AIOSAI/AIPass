@@ -35,7 +35,7 @@ exact shape.
 ## Why this is allowed to import prax
 
 `apps/modules/` cannot import `aipass.prax`: prax depends on cli, so the import
-is circular, and the ban is bypassed in `.sentry/bypass.json`.
+is circular. No bypass is in effect: the bypass list in `.sentry/bypass.json` is empty.
 
 `handlers/json/json_handler.py` is the exception, and it is not a loophole:
 prax's `__init__` is lazy (PEP 562), so `from aipass.prax import json_handler`

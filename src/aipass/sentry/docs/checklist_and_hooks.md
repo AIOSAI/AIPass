@@ -37,7 +37,7 @@ and does not mirror that branch's roster: a copy of someone else's registry rots
 directory does not. Read `src/aipass/hooks/apps/handlers/`, or ask @hooks.
 
 The event handlers sit in category directories under that root (`prompt/`, `lifecycle/`,
-`security/`, `notification/`); `bridges/`, `config/`, `json/` and `cli/` beside them are
+`security/`, `notification/`, `parity/`); `bridges/`, `config/`, `json/` and `cli/` beside them are
 infrastructure rather than event handlers.
 
 ---

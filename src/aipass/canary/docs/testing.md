@@ -32,8 +32,10 @@ under the repo-root config, the same suite is all errors.
 
 ## What continuous integration actually runs
 
-No workflow names this branch. The fleet is tested in one process from the repo
-root: `ci.yml` across Python 3.10 to 3.13 on Linux.
+No workflow names this branch. `ci.yml` runs lint alone, on Python 3.13 on Linux.
+The fleet is tested in one process from the repo root, locally and on the
+daemon's schedule, with the command below; its pytest matrix sits in
+`ci.yml(full_disabled)`, which Actions does not read.
 
 ```bash
 pytest -v --tb=short --rootdir=. --ignore=tests/e2e -n auto --dist loadscope --timeout 300 --timeout-method thread --max-worker-restart 0
@@ -55,7 +57,7 @@ once, parametrised across every branch in the fleet, by the standards branch's
 own contract test, where the shim is one file.
 
 New test files need permission by policy, and a hook gate refuses them across
-the fleet. `agent_test_writing` is off and `allow` holds `sentry` alone; this
+the fleet. `agent_test_writing` is off and `allow` holds `sentry` (and a branch whose split leg is in flight); this
 branch is not on it, so the gate refuses a new test file here as it does
 anywhere else. Read it live with `drone @hooks testwrite`; never route around
 it. The route to a new test is a mail to the orchestration branch naming the

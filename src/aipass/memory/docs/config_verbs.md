@@ -204,7 +204,7 @@ enforcement that does not happen. `auto_compact_cap` appears only where one is s
 `config_loader`, not synthesized in the module, so the payload cannot drift from what the writer did.
 
 *Note: the `count: 25` payloads above show the success shape. At the shipped defaults a real
-`config set @memory sessions 25` is refused (25 is over the sessions ceiling of 16) and answers with
+`config set @memory sessions 25` is refused (25 is over the sessions ceiling of 26) and answers with
 the `ok: false` shape.*
 
 ---

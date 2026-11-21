@@ -22,7 +22,7 @@ Five modules, each a door another seat or the owner walks through.
 
 **Compass** is the rated decision store: what we decided and how it turned out, rated good, bad, impressive or interesting. @memory holds what happened; compass holds what was chosen. A gitignored SQLite/FTS5 store, queried at forks.
 
-**Admin grant** is the admin seat: a signed privilege block on this branch's birth certificate that lets it dispatch any agent in any directory. Verified on every use, the key outside every repo, the ceremony run by the owner.
+**Admin grant** is the admin seat: a signed privilege block on this branch's birth certificate that lets it dispatch any agent in any directory. Verified on every use, the key outside every repo, the ceremony run by the owner. While the hook engine cannot run, the admin seat may still run @hooks' safe mode (`diagnose`, `park`, `rollback`), the one recovery command the bridge lets through; it deletes, commits and pushes nothing.
 
 **Release notify** is the merge train's last step: one mail to every project manager and one commons thread per version.
 
@@ -126,7 +126,7 @@ Git operations for the whole project, dispatch orchestration, watchdog reports, 
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-11-21
 
 ---
 

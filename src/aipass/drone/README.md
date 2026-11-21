@@ -129,7 +129,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-11-21
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -36,7 +36,7 @@ The pattern in all three: **the oracle reads the effect, through the real seam, 
 | sole `is True` on a command router — **a rule, [`router_assert`](../apps/handlers/aipass_standards/router_assert.md)** | every router returns `True`; the test passes if the command did nothing | — |
 | `console.print.called` | a function printing one blank line passes | — |
 | existence / `isinstance` / key-presence | restates the return type | — |
-| substring of a prose constant | the word was typed into the constant by the author | `tests/test_aipass_standards.py:364` — `assert "quarantine" not in text`, vacuously green forever |
+| substring of a prose constant | the word was typed into the constant by the author | `tests/test_aipass_standards.py:332` — `assert "quarantine" not in text`, vacuously green forever |
 
 ## Declaring a justified pass
 

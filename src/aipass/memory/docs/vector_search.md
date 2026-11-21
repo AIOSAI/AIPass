@@ -15,8 +15,8 @@ what counts as a match. The verbs themselves are in `drone @memory --help`.
 All ML operations (fastembed, chromadb) run via subprocess. The main process never imports these
 libraries. `handlers/storage/lane.py` owns the lane: `memory_python()` resolves the interpreter (env var
 `AIPASS_MEMORY_PYTHON` → `memory/.venv/bin/python` → `sys.executable`) and `run_json()` sends the
-JSON request on stdin and reads the JSON reply on stdout. Another branch reaches both, and
-`CHROMA_SUBPROCESS_SCRIPT`, through `apps/modules/door_subprocess_lane.py`.
+JSON request on stdin and reads the JSON reply on stdout. `CHROMA_SUBPROCESS_SCRIPT` sits beside it in
+the same file. The package door does not carry the lane or the script path.
 
 **Who says what when it fails.** The child (`chroma_subprocess.py`) logs nothing: every failure it
 sees coming is named in its JSON reply, including an embed run that left no JSON

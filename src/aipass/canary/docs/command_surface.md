@@ -61,7 +61,7 @@ A module that raises inside `handle_command` is misreported. `route_command`
 catches the exception, logs it through the shared logger and answers `False`, so
 `main()` prints `Unknown command: <cmd>` and exits 1 for a command that exists.
 This branch reports defects rather than repairing them quietly. No live verb
-takes that path: each of the five modules turns its handler's errors, unreadable
+takes that path: each of the four modules turns its handler's errors, unreadable
 files included, into a refusal that exits 2.
 
 [<- Back to the branch README](../README.md)
