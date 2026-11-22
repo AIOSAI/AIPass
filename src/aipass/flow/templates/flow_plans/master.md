@@ -495,13 +495,14 @@ Track issues here as encountered. Don't fix during build - log + continue.
   - [ ] `BRANCH.local.json` - full session log
   - [ ] `BRANCH.observations.json` - patterns learned
 - [ ] README.md updated (status, architecture, API - if build changed capabilities)
+- [ ] `docs/` pages updated (every page that describes what this build changed, in present tense)
 - [ ] Artifacts reviewed (devpulse manages cleanup)
 - [ ] Final email > @devpulse:
   ```bash
   drone @ai_mail email @devpulse "{plan_number} MASTER COMPLETE" "Full build summary: phases completed, deliverables, remaining issues (if any)"
   ```
 
-**Completion Order:** Memories -> README -> Email (README before email - don't report complete stale docs)
+**Completion Order:** Memories -> README and docs -> Email (both before the email - don't report complete with stale docs)
 
 **Note:** Devpulse will perform its own Sentry audit for visibility into work.
 

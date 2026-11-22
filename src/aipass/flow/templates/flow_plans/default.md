@@ -238,12 +238,13 @@ drone @ai_mail email @devpulse "Production stopped: {plan_number}" "Issue: [desc
   - [ ] `BRANCH.local.json` - session/work log
   - [ ] `BRANCH.observations.json` - patterns learned (if any)
 - [ ] README.md updated (if build changed status/capabilities)
+- [ ] `docs/` pages updated (every page that describes what this build changed, in present tense)
 - [ ] Status email > @devpulse:
   ```bash
   drone @ai_mail email @devpulse "{plan_number} Complete" "Summary of what was done, any issues, outcomes"
   ```
 
-**Completion Order:** Memories -> README -> Email (README before email - don't report complete with stale docs)
+**Completion Order:** Memories -> README and docs -> Email (both before the email - don't report complete with stale docs)
 
 ### Definition of Done
 [What specifically defines complete for this plan?]
