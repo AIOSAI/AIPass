@@ -1,18 +1,19 @@
 # =================== META ====================
 # Name: test_checkers_batch8.py
-# Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
-# Version: 1.2.3
+# Description: Tests: handlers, log_handler, log_level, log_structure, lowercase_name, meta, naming, permission_flags
+# Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
-"""Tests for apps/handlers/aipass_standards/handlers_check.py and six sibling checkers (batch 8)."""
+"""Tests for apps/handlers/aipass_standards/handlers_check.py and seven sibling checkers (batch 8)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that the seven checker modules under test parse and import
 # sentry: no-test-needed(shared) — is_bypassed's own matching rules; tests/test_bypass.py
 # sentry: no-test-needed(stdlib) — ast.parse's parsing; the checkers only walk the tree it returns
 
+import json
 from pathlib import Path
 from typing import List
 
@@ -32,7 +33,7 @@ from aipass.sentry.apps.handlers.aipass_standards.log_level_check import (
     check_command_routing_level,
     check_error_not_user_input,
 )
-from aipass.sentry.apps.handlers.aipass_standards import log_structure_check
+from aipass.sentry.apps.handlers.aipass_standards import log_structure_check, lowercase_name_check
 from aipass.sentry.apps.handlers.aipass_standards.log_structure_check import check_branch_info
 from aipass.sentry.apps.handlers.aipass_standards.meta_check import (
     check_meta_placement,
@@ -1175,3 +1176,152 @@ def test_constant_naming_reads_code_after_a_docstring_holding_the_other_delimite
     result = check_constant_naming("'''\n\"\"\"\n'''\nlower_x = 1\n")
     assert result is not None
     assert result["message"] == "Non-UPPER_CASE constants: lower_x (line 4)"
+
+
+# ---- lowercase_name: the system speaks lowercase -------------------------------------------
+
+
+def _citizen(tmp_path: Path, row_name: str = "alpha", row_path: str = "src/alpha", **fields: str) -> Path:
+    """A project holding one registered branch, every stored name lowercase unless a field says otherwise."""
+    project = tmp_path / "proj"
+    branch = project / "src" / "alpha"
+    for folder in ("apps", ".trinity", "artifacts"):
+        (branch / folder).mkdir(parents=True)
+    registry = {"metadata": {"name": "PROJ"}, "branches": [{"name": row_name, "path": row_path}]}
+    (project / "PROJ_REGISTRY.json").write_text(json.dumps(registry, indent=2), encoding="utf-8")
+    passport = {"branch_info": {"branch_name": fields.get("passport", "alpha")}}
+    (branch / ".trinity" / "passport.json").write_text(json.dumps(passport, indent=2), encoding="utf-8")
+    certificate = {"name": "ALPHA Birth Certificate", "owner": fields.get("certificate", "alpha")}
+    (branch / "artifacts" / "birth_certificate.json").write_text(json.dumps(certificate, indent=2), encoding="utf-8")
+    dashboard = {"branch": fields.get("dashboard", "alpha")}
+    (branch / "DASHBOARD.local.json").write_text(json.dumps(dashboard, indent=2), encoding="utf-8")
+    (branch / "apps" / "alpha.py").write_text(fields.get("code", "VALUE = 1\n"), encoding="utf-8")
+    return branch
+
+
+def _messages(result: dict) -> str:
+    """Every failing check's message, one per line."""
+    return "\n".join(check["message"] for check in result["checks"] if not check["passed"])
+
+
+class TestLowercaseNameRegistryAndData:
+    def test_a_branch_storing_every_name_in_lowercase_passes_with_100(self, tmp_path):
+        result = lowercase_name_check.check_branch(str(_citizen(tmp_path)))
+        assert (result["passed"], result["score"], _messages(result)) == (True, 100, "")
+
+    def test_a_capital_registry_row_fails_naming_the_row_and_the_cure(self, tmp_path):
+        result = lowercase_name_check.check_branch(str(_citizen(tmp_path, row_name="ALPHA")))
+        assert (result["passed"], result["score"]) == (False, 0)
+        assert "PROJ_REGISTRY.json:7 row 'ALPHA': name is not lowercase" in _messages(result)
+        assert "sync-registry <registry> --lowercase" in _messages(result)
+
+    def test_an_absolute_registry_path_fails_and_the_project_name_is_never_read(self, tmp_path):
+        branch = tmp_path / "proj" / "src" / "alpha"
+        result = lowercase_name_check.check_branch(str(_citizen(tmp_path, row_path=str(branch))))
+        assert "path " + str(branch) + " is absolute" in _messages(result)
+        assert "PROJ" not in _messages(result).replace("PROJ_REGISTRY", "")
+
+    @pytest.mark.parametrize(
+        "field, where, cure",
+        [
+            ("passport", ".trinity/passport.json:3 branch_name 'Alpha'", "branch_name"),
+            ("certificate", "artifacts/birth_certificate.json:3 owner 'Alpha'", "mail @spawn"),
+            ("dashboard", "DASHBOARD.local.json:2 branch 'Alpha'", "dashboard refresh"),
+        ],
+    )
+    def test_a_capital_stored_name_field_fails_naming_its_file_line_and_cure(self, tmp_path, field, where, cure):
+        result = lowercase_name_check.check_branch(str(_citizen(tmp_path, **{field: "Alpha"})))
+        assert result["passed"] is False
+        assert where in _messages(result) and cure in _messages(result)
+
+    @pytest.mark.parametrize(
+        "rel, failing",
+        [
+            ("../../PROJ_REGISTRY.json", "PROJ_REGISTRY.json does not parse"),
+            ("DASHBOARD.local.json", "DASHBOARD.local.json: DASHBOARD.local.json does not parse"),
+        ],
+    )
+    def test_a_file_that_does_not_parse_fails_instead_of_reading_as_empty(self, tmp_path, rel, failing):
+        branch = _citizen(tmp_path, row_name="ALPHA", dashboard="ALPHA")
+        (branch / rel).write_text('{"name": "ALPHA"', encoding="utf-8")
+        result = lowercase_name_check.check_branch(str(branch))
+        assert result["passed"] is False and failing in _messages(result)
+
+    def test_markdown_is_never_opened_though_it_spells_every_name_in_capitals(self, tmp_path, monkeypatch):
+        branch = _citizen(tmp_path)
+        for rel in ("README.md", "templates/citizen/README.md", ".trinity/notes.md", "apps/notes.md"):
+            (branch / rel).parent.mkdir(parents=True, exist_ok=True)
+            (branch / rel).write_text("# ALPHA {{BRANCHNAME}}\n", encoding="utf-8")
+        opened: List[str] = []
+        real_read_text = lowercase_name_check.read_text
+        monkeypatch.setattr(
+            lowercase_name_check, "read_text", lambda path, **kw: opened.append(str(path)) or real_read_text(path, **kw)
+        )
+
+        result = lowercase_name_check.check_branch(str(branch))
+
+        assert result["passed"] is True
+        assert opened and not [path for path in opened if path.endswith(".md")]
+
+
+class TestLowercaseNameTemplates:
+    @pytest.mark.parametrize(
+        "rel, text, failing",
+        [
+            ("templates/citizen/passport.json", '{"name": "{{BRANCHNAME}}"}', "templates/citizen/passport.json:1"),
+            ("templates/citizen/apps/{{BRANCHNAME}}.py", "X = 1\n", "templates/citizen/apps/{{BRANCHNAME}}.py:1"),
+            ("templates/citizen/passport.json", '{"name": "{{BRANCH}}"}', ""),
+            ("templates/citizen/README.md", "# {{BRANCHNAME}}\n", ""),
+            ("templates/.archive/old.json", '{"name": "{{BRANCHNAME}}"}', ""),
+        ],
+    )
+    def test_the_capital_token_fails_only_in_a_live_non_markdown_template_file(self, tmp_path, rel, text, failing):
+        branch = _citizen(tmp_path)
+        (branch / rel).parent.mkdir(parents=True, exist_ok=True)
+        (branch / rel).write_text(text, encoding="utf-8")
+        messages = _messages(lowercase_name_check.check_branch(str(branch)))
+        assert (failing in messages and "{{BRANCH}}" in messages) if failing else messages == ""
+
+
+class TestLowercaseNameCode:
+    @pytest.mark.parametrize(
+        "code, line",
+        [
+            ("def f(branch):\n    return {'branch': branch.upper()}\n", 2),
+            ("def f(branch_dir, store):\n    name = branch_dir.name.upper()\n    store[name] = 1\n", 3),
+            ("def f(sender, feed):\n    s = sender.upper()\n    title = f'{s} ->'\n    feed['title'] = title\n", 4),
+            ("from pathlib import Path\ndef f(branch):\n    return Path('x') / f'{branch.title()}.json'\n", 3),
+            ("EVENT = {\n    'from_name': 'ALPHA',\n}\n", 2),
+            ("from pathlib import Path\nFILE = Path('x') / 'ALPHA.central.json'\n", 2),
+        ],
+    )
+    def test_an_agent_name_stored_in_capitals_fails_at_its_line(self, tmp_path, code, line):
+        module = _citizen(tmp_path, code=code) / "apps" / "alpha.py"
+        result = lowercase_name_check.check_module(str(module))
+        assert (result["passed"], result["score"]) == (False, 0)
+        assert f"alpha.py:{line} " in _messages(result)
+        assert lowercase_name_check.check_branch(str(module.parents[1]))["passed"] is False
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "def f(branch, console):\n    console.print(f'{branch.upper()}')\n",
+            "def f(branch, logger):\n    logger.info('%s', {'b': branch.upper()})\n",
+            "def f(branch, console):\n    label = branch.upper()\n    console.print(label)\n",
+            "def f(branch):\n    return {'branch': branch.lower()}\n",
+            "LEVELS = {'level': 'ERROR', 'kind': 'ALPHA'}\n",
+            "def f(name):\n    return {'name': name.upper()}\n",
+            "def f(branch):\n    name = branch.upper()\n    return name\ndef g(store, name):\n    store[name] = 1\n",
+            "def f(branch, store, lookup):\n    store['flow'] = lookup(branch.upper())\n",
+        ],
+    )
+    def test_a_screen_a_log_or_a_name_it_cannot_prove_passes(self, tmp_path, code):
+        module = _citizen(tmp_path, code=code) / "apps" / "alpha.py"
+        assert _messages(lowercase_name_check.check_module(str(module))) == ""
+
+    def test_a_lines_bypass_row_waives_that_one_site_and_no_other(self, tmp_path):
+        code = "def f(branch):\n    a = {'b': branch.upper()}\n    return a, {'c': branch.upper()}\n"
+        module = _citizen(tmp_path, code=code) / "apps" / "alpha.py"
+        rule = {"standard": "lowercase_name", "file": "src/alpha/apps/alpha.py", "lines": [2], "reason": "screen"}
+        messages = _messages(lowercase_name_check.check_module(str(module), bypass_rules=[rule]))
+        assert "alpha.py:3 " in messages and "alpha.py:2 " not in messages
