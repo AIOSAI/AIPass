@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane.py
 # Description: tests for the audit-tests runner, its target resolution and the verb
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-08-29
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/audit_tests.py, apps/handlers/audit_tests/runner.py and the pytest pack it drives."""
@@ -390,17 +390,17 @@ class TestFleetForm:
 
 
 class TestBranchNameResolution:
-    """The registry spells some branches uppercase and everyone types lowercase."""
+    """An older registry spells some branches uppercase; the target's name is lowercase either way."""
 
     def test_an_exact_name_resolves(self, tmp_path):
         resolved = target_module.resolve("@CANARY", {"CANARY": tmp_path / "canary"})
-        assert resolved.name == "CANARY"
+        assert resolved.name == "canary"
 
     def test_a_lowercase_argument_resolves_to_the_canonical_spelling(self, tmp_path):
         # The CANONICAL name: two spellings of one branch must never produce two artifacts.
         resolved = target_module.resolve("@canary", {"CANARY": tmp_path / "canary"})
-        assert resolved.name == "CANARY"
-        assert resolved.artifact_name() == "audit_tests_CANARY"
+        assert resolved.name == "canary"
+        assert resolved.artifact_name() == "audit_tests_canary"
 
     def test_an_exact_match_wins_over_a_case_insensitive_one(self):
         resolved = target_module.resolve("@canary", {"CANARY": Path("/a"), "canary": Path("/b")})
