@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_pusher.py
 # Description: Dashboard Template Push Handler
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-02-25
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -114,7 +114,8 @@ def _update_spawn_template(
     if not changed:
         return
 
-    spawn_data["branch"] = "{{BRANCHNAME}}"
+    # Spawn's citizen template stores the lowercase token in data files; the capital one is for markdown.
+    spawn_data["branch"] = "{{BRANCH}}"
     spawn_data["last_updated"] = "{{DATE}}"
     for section in spawn_data.get("sections", {}).values():
         if isinstance(section, dict) and "last_updated" in section:
@@ -180,10 +181,11 @@ def _push_one(
     branch_actions: List[str] = []
 
     if not dashboard_path.exists():
-        new_dashboard = _replace_placeholders(template, branch_name)
+        # The system stores names lowercase; branch_name stays the screen label.
+        new_dashboard = _replace_placeholders(template, branch_name.lower())
         if _safe_write_dashboard(dashboard_path, new_dashboard, branch_name, dry_run, result):
             result["branches_created"] += 1
-            updated_list.append(branch_name)
+            updated_list.append(branch_name.lower())
             result["changes"].append({"branch": branch_name, "actions": ["created from template"]})
         return
 
@@ -207,7 +209,7 @@ def _push_one(
         if not _safe_write_dashboard(dashboard_path, data, branch_name, dry_run, result):
             return
         result["branches_updated"] += 1
-        updated_list.append(branch_name)
+        updated_list.append(branch_name.lower())
         result["changes"].append({"branch": branch_name, "actions": branch_actions})
 
 

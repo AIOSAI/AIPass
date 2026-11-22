@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations.py
 # Description: Unit tests for dashboard operations handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for the dashboard file and its budget: apps/handlers/dashboard/operations.py."""
@@ -392,7 +392,7 @@ class TestCreateFreshDashboard:
             branch_dir.mkdir()
             result = ops.create_fresh_dashboard(branch_dir)
 
-            assert result["branch"] == "MYBRANCH"
+            assert result["branch"] == "mybranch"
             assert "last_updated" in result
             assert result["last_updated"] != ""
             assert "_warning" in result
@@ -430,7 +430,7 @@ class TestCreateFreshDashboard:
             branch_dir.mkdir()
             result = ops.create_fresh_dashboard(branch_dir)
 
-            assert result["branch"] == "FLOW"
+            assert result["branch"] == "flow"
             assert result["last_updated"] != ""
             assert result["sections"]["ai_mail"]["new"] == 0
         finally:
@@ -452,7 +452,7 @@ class TestCreateFreshDashboard:
             result = ops.create_fresh_dashboard(branch_dir)
 
             # Should still return a valid hardcoded dashboard
-            assert result["branch"] == "BROKEN"
+            assert result["branch"] == "broken"
             assert "sections" in result
             assert "_warning" in result
         finally:

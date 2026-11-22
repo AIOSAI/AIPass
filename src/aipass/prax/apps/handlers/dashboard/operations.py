@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: operations.py
 # Description: Dashboard Operations Handler
-# Version: 0.6.1
+# Version: 0.7.0
 # Created: 2026-02-25
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Dashboard Operations Handler"""
@@ -101,7 +101,7 @@ def create_fresh_dashboard(branch_path: Path) -> Dict:
         try:
             template = json.loads(template_file.read_text())
             now = datetime.now().isoformat()
-            dashboard = json.loads(json.dumps(template).replace("{{BRANCHNAME}}", branch_path.name.upper()))
+            dashboard = json.loads(json.dumps(template).replace("{{BRANCHNAME}}", branch_path.name.lower()))
             dashboard["last_updated"] = now
             return dashboard
         except (json.JSONDecodeError, OSError) as e:
@@ -114,7 +114,7 @@ def create_fresh_dashboard(branch_path: Path) -> Dict:
             " This file is 100% automated and will be overwritten."
             " Services update their own sections."
         ),
-        "branch": branch_path.name.upper(),
+        "branch": branch_path.name.lower(),
         "last_updated": now,
         "quick_status": {"action_required": False},
         "sections": {
