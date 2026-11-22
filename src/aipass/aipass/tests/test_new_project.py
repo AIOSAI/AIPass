@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-07-17
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -30,6 +30,7 @@ from aipass.aipass.apps.handlers.init.bootstrap import init_project, is_projects
 from aipass.aipass.apps.handlers.new_project import (
     create_project,
     find_host_root,
+    project_path,
 )
 from aipass.aipass.apps.handlers.new_project.adopt import adopt_project
 from aipass.aipass.shared import scaffold_content as sc
@@ -90,6 +91,25 @@ def test_validate_name_rejects_leading_digit(tmp_path, monkeypatch):
 def test_validate_name_rejects_special_chars(tmp_path, monkeypatch):
     """Mutant: the pattern's anchor `*$"` -> `*"` -> red."""
     assert "Must start with a letter" in _name_answer(tmp_path, monkeypatch, "my app!")
+
+
+def test_validate_name_rejects_a_trailing_newline(tmp_path, monkeypatch):
+    """re.match with `$` accepts 'abc\\n'; a terminal caller has no API fullmatch in front of it."""
+    assert "Must start with a letter" in _name_answer(tmp_path, monkeypatch, "abc\n")
+
+
+@pytest.mark.parametrize("name", ["../escape", "../projects2", ".", "a/../.."])
+def test_a_name_that_leaves_projects_is_refused_before_any_directory(tmp_path, name):
+    """The name rule stops these first at the door, so the containment check is called directly."""
+    host = tmp_path / "host"
+    host.mkdir()
+    with pytest.raises(ValueError, match="leaves"):
+        project_path(host, name)
+    assert not any(host.iterdir())
+
+
+def test_project_path_is_the_named_folder_directly_in_projects(tmp_path):
+    assert project_path(tmp_path, "alpha") == tmp_path / "projects" / "alpha"
 
 
 def _built(host_env, monkeypatch, name: str, template: str = "empty") -> dict:

@@ -18,6 +18,7 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **aipass: a new project's folder is proven inside `projects/`, and its name rule matches the whole name** (2026-11-21). `create_project` builds the folder through `project_path`, which normalises the joined path and refuses one that is not directly under `projects/`, in the form code scanners recognise. The name rule used `re.match` with `$`, which let a name ending in a newline through from a terminal; it is now a full match.
 - **devpulse: the watchdog wire reads the seat's inbox where the seat lives** (2026-11-21). The wire built the inbox path under `src/aipass/<seat>`, so the owner seat of another project never saw its completion mail: each wire waited out the 120-second grace and woke flagged `COMPLETED_NO_MAIL` with the reply already in the inbox. The folder now comes from the seat's own registry row.
 
 ## [2026-11-21] — v2.8.41: a chaos round against the fleet and its cures, the watchdog waits for the mail, the docs catch up with the code
