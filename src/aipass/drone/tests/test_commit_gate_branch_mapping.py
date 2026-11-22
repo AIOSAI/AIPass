@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_commit_gate_branch_mapping.py
-# Description: Commit gate maps changed files to real citizens, never template trees; --all lints what exists
-# Version: 1.2.0
+# Description: Commit gate maps changed files to real citizens; --all lints what exists; named paths under an ignore
+# Version: 1.3.0
 # Created: 2026-08-13
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
-"""Tests for apps/handlers/git/commit_handler.py's commit --all gates: the branch a changed file maps to, and lint."""
+"""Tests for apps/handlers/git/commit_handler.py: the --all gates (branch mapping, lint) and named paths under an ignore."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(stdlib) — pathlib's own parent walk and is_relative_to
@@ -198,3 +198,82 @@ class TestTheLintGateNeverPassesUnrun:
             pytest.skip(f"no ruff at {beside}")
 
         assert commit_handler.find_ruff(tmp_path) == str(beside)
+
+
+@pytest.fixture()
+def ignored_artifacts(external_repo: Path) -> Path:
+    """external_repo with artifacts/ ignored and artifacts/cert.json tracked from before the ignore."""
+    (external_repo / "artifacts").mkdir()
+    (external_repo / "artifacts" / "cert.json").write_text("{}\n", encoding="utf-8")
+    _git(external_repo, "add", "artifacts/cert.json")
+    (external_repo / ".gitignore").write_text("artifacts/\n", encoding="utf-8")
+    _git(external_repo, "add", ".gitignore")
+    _git(external_repo, "commit", "-qm", "track cert, then ignore artifacts")
+    return external_repo
+
+
+def _committed(repo: Path) -> list[str]:
+    return sorted(_git(repo, "show", "--name-only", "--format=", "HEAD").splitlines())
+
+
+class TestNamedPathsUnderAnIgnoredFolder:
+    """A named path git already tracks commits whatever the ignore says; an untracked one under it stays refused."""
+
+    def test_a_tracked_file_under_an_ignored_folder_commits(self, ignored_artifacts: Path) -> None:
+        """Mutant: every named path goes through git add — git refuses the ignored folder and nothing lands."""
+        (ignored_artifacts / "artifacts" / "cert.json").write_text('{"v": 2}\n', encoding="utf-8")
+
+        result = commit_changes("chore(pkg): cert", files=["artifacts/cert.json"], repo_root=ignored_artifacts)
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert _committed(ignored_artifacts) == ["artifacts/cert.json"]
+        assert _git(ignored_artifacts, "status", "--porcelain") == ""
+
+    def test_an_untracked_file_under_an_ignored_folder_is_refused(self, ignored_artifacts: Path) -> None:
+        """Mutant: untracked paths skip git add too, or add is forced — an ignored file lands in history."""
+        (ignored_artifacts / "artifacts" / "new.json").write_text("{}\n", encoding="utf-8")
+
+        result = commit_changes("chore(pkg): new", files=["artifacts/new.json"], repo_root=ignored_artifacts)
+
+        assert result["exit_code"] == 1
+        assert "Failed to stage" in result["stderr"] and "ignored" in result["stderr"]
+        assert _git(ignored_artifacts, "log", "-1", "--format=%s") == "track cert, then ignore artifacts"
+
+    def test_a_mixed_commit_lands_the_tracked_ignored_file_and_the_new_one(self, ignored_artifacts: Path) -> None:
+        """Mutant: the new file skips git add with the tracked one — commit --only drops an untracked path."""
+        (ignored_artifacts / "artifacts" / "cert.json").write_text('{"v": 3}\n', encoding="utf-8")
+        (ignored_artifacts / "src" / "pkg" / "new.py").write_text("y = 1\n", encoding="utf-8")
+
+        result = commit_changes(
+            "chore(pkg): both", files=["artifacts/cert.json", "src/pkg/new.py"], repo_root=ignored_artifacts
+        )
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert _committed(ignored_artifacts) == ["artifacts/cert.json", "src/pkg/new.py"]
+
+    def test_a_tracked_file_with_no_change_is_nothing_to_commit(self, ignored_artifacts: Path) -> None:
+        """Mutant: the pre-check reads the index — an unchanged tracked file under the ignore fails to stage instead."""
+        result = commit_changes("chore(pkg): none", files=["artifacts/cert.json"], repo_root=ignored_artifacts)
+
+        assert result == {"stdout": "", "stderr": "Nothing to commit: no changes staged", "exit_code": 1}
+
+    def test_a_deleted_tracked_file_commits_its_deletion(self, ignored_artifacts: Path) -> None:
+        """Control: a tracked path gone from disk is still in the index, skips git add, and commits as a deletion."""
+        (ignored_artifacts / "src" / "pkg" / "core.py").unlink()
+
+        result = commit_changes("chore(pkg): drop core", files=["src/pkg/core.py"], repo_root=ignored_artifacts)
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert _git(ignored_artifacts, "show", "--name-status", "--format=", "HEAD") == "D\tsrc/pkg/core.py"
+
+    def test_a_path_outside_the_repo_is_refused_before_anything_is_staged(
+        self, ignored_artifacts: Path, tmp_path: Path
+    ) -> None:
+        """Control: ls-files refuses the outside path with the same 'Failed to stage' the add gave."""
+        outside = tmp_path / "elsewhere.txt"
+        outside.write_text("x\n", encoding="utf-8")
+
+        result = commit_changes("chore(pkg): out", files=[str(outside)], repo_root=ignored_artifacts)
+
+        assert result["exit_code"] == 1
+        assert result["stderr"].startswith("Failed to stage:") and "outside repository" in result["stderr"]

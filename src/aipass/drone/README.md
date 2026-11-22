@@ -102,7 +102,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/caller_identity.md](docs/caller_identity.md) | Who a routed command is attributed to, why provenance travels with the name, and what each log level means |
 | [docs/subprocess_timeouts.md](docs/subprocess_timeouts.md) | The deadline ladder: the default, the idle grace, the ceiling, and why output extends life |
 | [docs/git_access.md](docs/git_access.md) | The three tiers, how owner and ci-cure are earned per repo, the session fence, the upstream issue lane, the two refusal species, the dev branch model, the plugins |
-| [docs/git_interface.md](docs/git_interface.md) | What each verb does: scoping, the `--json` machine surface, remote redaction, the commit subject cap, the pre-commit lane, tag lanes, gh passthrough |
+| [docs/git_interface.md](docs/git_interface.md) | What each verb does: scoping, the `--json` machine surface, remote redaction, the commit subject cap, commit with paths, the pre-commit lane, tag lanes, gh passthrough |
 | [docs/external_repo_door.md](docs/external_repo_door.md) | `--repo <path>`: the admin-seat door into a repository that is not AIPass, and its ledger |
 | [docs/rm_and_the_record.md](docs/rm_and_the_record.md) | The delete record, the sibling-branch guard, the contains-a-citizen fence, dot names, and stale mode |
 | [docs/broker.md](docs/broker.md) | The broker removal lane, its one decision with drone rm, and its server-side path verification |

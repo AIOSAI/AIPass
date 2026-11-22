@@ -19,9 +19,8 @@ noise. `show` sits at global tier because reading history is not a write, and it
 past. Auditing a deletion means reading what was deleted, and the present-tense verbs cannot.
 
 Both the ref and the optional path are refused before any argv is built if git would read them as a
-flag (empty, or a leading `-`) — the same guard the tag lanes use. `--stat` is the one flag `show`
-takes: in any slot, it adds git's summary of the files the commit changed. Any other flag-shaped
-token still reaches that guard and is refused.
+flag (empty, or a leading `-`) — the same guard the tag lanes use. `--stat`, in any slot, is the
+one flag `show` takes (git's per-file summary); any other flag-shaped token is refused.
 
 ---
 
@@ -103,6 +102,14 @@ refusal like any other outcome.
 Pinned by `TestCommitSubjectCap` in `tests/test_git_access_handlers.py` (including the boundary: a
 subject exactly at the cap commits).
 
+## Commit with paths
+
+`commit "<message>" <path ...>` commits exactly those paths (`git commit --only`); other staged work
+stays staged. A path the index holds, a deleted one included, skips `git add`, so a tracked file
+under an ignored folder commits; a new path is added, so an ignored new one is refused. Nothing is
+forced. The nothing-to-commit check reads them against `HEAD`. Pinned by
+`TestNamedPathsUnderAnIgnoredFolder` in `tests/test_commit_gate_branch_mapping.py`.
+
 ---
 
 ## `untrack` — out of the index, never off the disk
@@ -114,9 +121,8 @@ is done for it, and a directory is refused unless `--recursive` is given, becaus
 untrack a whole tree. Refusals do not stop the accepted paths, and any refusal makes the exit 1.
 
 The verb never touches the working tree and never commits. Its last line names the next step:
-`drone @git commit "<message>"` with **no paths**. Commit with paths runs `git add` on them, which
-stages a still-present file straight back into the index, or fails outright on one that is now
-ignored. No PR lock is taken, because `commit` takes none; the operation log records each run as
+`drone @git commit "<message>"` with **no paths**. Commit with paths runs `git add` on a path the index no
+longer holds, which stages it straight back, or fails on one now ignored. No PR lock is taken, because `commit` takes none; the operation log records each run as
 every verb's does, and there is no separate owner-verb ledger to write. `untrack` and `tracked` also
 run through the external-repo door (`--repo <path>`, admin seat, paths repo-relative, every use in
 its ledger; see [external_repo_door.md](external_repo_door.md)). Pinned by `TestUntrack` in
@@ -294,17 +300,15 @@ match.
 label already there is reported present, exit 0, and nothing is sent. `--color` takes six hex
 digits, with or without `#`.
 
-**`alerts dismiss`** requires `--comment`, which goes to GitHub with the reason, so every
-dismissal says why there; a missing or blank comment is refused by name, as is one over GitHub's
-280 characters. `--reason` takes `false_positive`, `wont_fix` or `used_in_tests`, sent in GitHub's
-words. Only an open alert is dismissed: its state is the alert's own, or, for an alert that lives
-on a pull request ref only (GitHub leaves the top-level state null there), its latest instance's.
-A fixed or dismissed alert is refused by name, and one with no state anywhere is refused as
-unreadable. **`alerts reopen <n>`** puts a dismissed alert back to open, read the same way; an
-open or fixed alert, an unknown number and an unreadable state are each refused by name. `alerts list` prints number, rule id, severity, state and
-`file:line`, one row each. `--pr <n>` reads pull request n's alerts, asking GitHub for the ref
-`refs/pull/<n>/merge`: an alert a pull request raises lives on that ref only, so the default
-branch's list never shows it. `--pr` takes one positive number and refuses anything else by name.
+**`alerts dismiss`** requires `--comment`, sent to GitHub with the reason, so every dismissal says
+why; a missing, blank or over-280-character comment is refused by name. `--reason` takes
+`false_positive`, `wont_fix` or `used_in_tests`, sent in GitHub's words. An alert's state is its
+own, or its latest instance's when GitHub leaves the top level null (an alert on a pull request ref
+only). Only an open alert is dismissed, and **`alerts reopen <n>`** reopens only a dismissed one;
+any other state, an unknown number or no readable state is refused by name. `alerts list` prints
+number, rule id, severity, state and `file:line`, one row each. `--pr <n>` (a positive number) reads
+pull request n's alerts from the ref `refs/pull/<n>/merge`, which the default branch's list never
+shows.
 
 Every write subcommand writes one line to AIPass's own `.ai_central/git_gh_writes.jsonl`, a no-op
 included: caller, verb, repo, OWNER/NAME, outcome (`written` or `unchanged`), and the verb's own

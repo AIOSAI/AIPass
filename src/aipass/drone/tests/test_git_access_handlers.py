@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_handlers.py
 # Description: Tests for the git door handlers — diff, log, show, commit, checkout, PR routing and help
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/git/commit_handler.py and the diff, log, show and checkout handlers beside it."""
@@ -524,19 +524,21 @@ class TestCommitChanges:
 
     def test_named_files_commit_alone(self, repo_dir: Path) -> None:
         """`commit "msg" a.py` commits only a.py; what another agent staged does not ride along."""
+        mock_listed = MagicMock(returncode=0, stdout="", stderr="")
         mock_add = MagicMock(returncode=0, stderr="")
         mock_diff = MagicMock(returncode=1, stdout="", stderr="")
         mock_commit = MagicMock(returncode=0, stdout="[dev abc] scoped", stderr="")
 
         with patch(
             "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
-            side_effect=[mock_add, mock_diff, mock_commit],
+            side_effect=[mock_listed, mock_add, mock_diff, mock_commit],
         ) as mock_run:
             result = commit_changes("scoped", files=["a.py"])
 
         assert result["exit_code"] == 0
-        assert mock_run.call_args_list[2].args[0] == ["git", "commit", "-m", "scoped", "--only", "--", "a.py"]
-        assert mock_run.call_args_list[1].args[0][-2:] == ["--", "a.py"]
+        assert mock_run.call_args_list[1].args[0] == ["git", "add", "--", "a.py"]
+        assert mock_run.call_args_list[3].args[0] == ["git", "commit", "-m", "scoped", "--only", "--", "a.py"]
+        assert mock_run.call_args_list[2].args[0][-2:] == ["--", "a.py"]
 
 
 class TestCommitSubjectCap:

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.14.1
+# Version: 1.14.2
 # Created: 2026-10-04
 # Modified: 2026-11-22
 # =============================================
@@ -332,7 +332,8 @@ def page(command: str | None = None) -> str:
             "git commit <message> [--all | file1 file2 ...] — Commit changes [owner]\n"
             "  Options:\n"
             "    --all          Stage all repo changes (git add -A) before committing.\n"
-            "    file1 file2    Stage only these files before committing.\n"
+            "    file1 file2    Commit only these paths. A tracked one goes as it is,\n"
+            "                   even under an ignored folder; a new one is staged first.\n"
             "  With no flag or files, commits whatever is already staged.\n"
             f"  The subject (line 1) is refused over {commit_handler.SUBJECT_CAP} chars: keep it under\n"
             "  about 80 in type(scope): what form, blank line, then the why in the body.\n"
