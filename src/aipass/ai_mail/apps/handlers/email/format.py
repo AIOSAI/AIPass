@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: format.py
 # Description: Email Formatting Handler
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2025-11-15
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -33,7 +33,7 @@ def lookup_branch_alias(branch_name: str) -> Optional[str]:
     try:
         registry = json.loads(REGISTRY_PATH.read_text())
         for branch in registry.get("branches", []):
-            if branch.get("name") == branch_name:
+            if str(branch.get("name", "")).lower() == branch_name.lower():
                 alias = branch.get("alias", "")
                 return alias if alias else None
         return None

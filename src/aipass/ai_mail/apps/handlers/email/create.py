@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: create.py
 # Description: Email File Creation Handler
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2025-11-15
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -54,7 +54,7 @@ def create_email_file(
     email_data = {
         "id": str(uuid.uuid4())[:8],
         "from": user_info["email_address"],
-        "from_name": user_info["display_name"],
+        "from_name": user_info["display_name"].lower(),
         "to": to_branch,
         "subject": subject,
         "message": message_with_footer,

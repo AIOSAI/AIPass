@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_error_dispatch.py
 # Description: Tests for email error dispatch handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/email/error_dispatch.py."""
@@ -37,7 +37,7 @@ def test_build_error_report_basic_structure(monkeypatch):
 
     assert isinstance(result, dict)
     assert result["from"] == "@ai_mail"
-    assert result["from_name"] == "AI_MAIL"
+    assert result["from_name"] == "ai_mail"
     assert result["to"] == "@drone"
     assert result["auto_execute"] is False
     assert result["priority"] == "normal"

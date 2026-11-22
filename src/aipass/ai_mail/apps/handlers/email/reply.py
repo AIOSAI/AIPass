@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: reply.py
 # Description: Email Reply Handler
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2025-11-30
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -76,7 +76,7 @@ def send_reply(from_branch_path: Path, original_email: Dict, reply_message: str)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     reply_email_data = {
         "from": sender_info.get("email", "@unknown"),
-        "from_name": sender_info.get("name", "Unknown"),
+        "from_name": sender_info.get("name", "unknown").lower(),
         "to": reply_destination,
         "subject": reply_subject,
         "message": reply_message,

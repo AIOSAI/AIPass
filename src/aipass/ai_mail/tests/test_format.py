@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_format.py
 # Description: Tests for email formatting handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/email/format.py -- lookup, preview, header, list item."""
@@ -40,6 +40,7 @@ def registry_file(tmp_path, monkeypatch):
             {"name": "VERA", "alias": "Vera"},
             {"name": "NO_ALIAS", "alias": ""},
             {"name": "NULL_ALIAS"},
+            {"name": "drone", "alias": "Drone"},
         ]
     }
     reg_path = tmp_path / "AIPASS_REGISTRY.json"
@@ -55,6 +56,12 @@ def test_lookup_branch_alias_returns_alias(registry_file):
     """Returns alias when branch has a non-empty alias."""
     result = mod.lookup_branch_alias("TEAM_1")
     assert result == "Team Alpha"
+
+
+def test_lookup_branch_alias_folds_case_on_a_mixed_and_a_lowercase_registry(registry_file):
+    """Old mail stores capitals, new mail lowercase; registry rows are both tonight."""
+    assert mod.lookup_branch_alias("vera") == "Vera"
+    assert mod.lookup_branch_alias("DRONE") == "Drone"
 
 
 def test_lookup_branch_alias_empty_alias_returns_none(registry_file):

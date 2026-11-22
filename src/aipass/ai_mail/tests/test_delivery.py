@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_delivery.py
 # Description: Tests for email delivery handler
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-29
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py."""
@@ -309,7 +309,7 @@ def test_deliver_happy_path(tmp_path, repo_root, noop_inbox_lock):
     msg = inbox["messages"][0]
     assert msg["subject"] == "Test subject"
     assert msg["from"] == "@sender"
-    assert msg["from_name"] == "Sender"
+    assert msg["from_name"] == "sender"
     assert msg["status"] == "new"
     assert msg["message"] == "Test body"
     assert "id" in msg
@@ -1064,3 +1064,28 @@ def test_an_upsert_update_stamps_the_kind_on_a_message_stored_before_kinds(baud_
 
     [message] = json.loads(inbox_file.read_text(encoding="utf-8"))["messages"]
     assert (message["id"], message["kind"]) == ("old1", "medic")
+
+
+# ---- The system speaks lowercase: from_name is stored lowercase on both lanes ----
+
+
+def test_a_capital_from_name_is_stored_lowercase_on_the_branch_lane(tmp_path, repo_root, noop_inbox_lock):
+    branches = _setup_branch(tmp_path)
+
+    with patch.object(delivery_mod, "get_all_branches", return_value=branches):
+        success, error = deliver_email_to_branch("@target", _make_email_data(sender_name="TRIGGER"))
+
+    assert success is True, error
+    inbox = json.loads((Path(branches[0]["path"]) / ".ai_mail.local" / "inbox.json").read_text(encoding="utf-8"))
+    assert inbox["messages"][0]["from_name"] == "trigger"
+
+
+def test_a_capital_from_name_is_stored_lowercase_on_the_inbox_file_lane(tmp_path, noop_inbox_lock):
+    inbox_file = tmp_path / "target" / ".ai_mail.local" / "inbox.json"
+    inbox_file.parent.mkdir(parents=True)
+    inbox_file.write_text(json.dumps(_empty_inbox()), encoding="utf-8")
+
+    success, err, _rid = delivery_mod.deliver_to_inbox_file(inbox_file, {**_DELIVERED, "from_name": "AI_MAIL"})
+
+    assert success is True, err
+    assert json.loads(inbox_file.read_text(encoding="utf-8"))["messages"][0]["from_name"] == "ai_mail"

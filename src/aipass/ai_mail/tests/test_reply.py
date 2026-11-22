@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_reply.py
 # Description: Tests for email reply handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-25
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/email/reply.py."""
@@ -164,6 +164,7 @@ def test_send_reply_happy_path(tmp_path):
     with open(sent_files[0], "r", encoding="utf-8") as f:
         sent_data = json.load(f)
     assert sent_data["from"] == "@trigger"
+    assert sent_data["from_name"] == "trigger"
     assert sent_data["to"] == "@devpulse"
     assert sent_data["subject"].startswith("RE:")
     assert sent_data["message"] == "Thanks!"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detection.py
 # Description: Branch Auto-Detection Handler
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2025-11-18
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -66,7 +66,7 @@ def _get_contact_info(branch_name: str) -> Optional[Dict]:
             return None
 
     return {
-        "name": name_key.upper(),
+        "name": name_key,
         "email": "@" + name_key,
         "path": str(branch_path),
         "project": contact.get("project", ""),

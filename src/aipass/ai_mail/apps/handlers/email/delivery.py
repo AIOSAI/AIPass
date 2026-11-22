@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.6.1
+# Version: 3.6.2
 # Created: 2025-12-02
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -514,7 +514,7 @@ def deliver_email_to_branch(
                     "id": str(uuid.uuid4())[:8],
                     "timestamp": email_data["timestamp"],
                     "from": email_data["from"],
-                    "from_name": email_data["from_name"],
+                    "from_name": email_data["from_name"].lower(),
                     "subject": email_data["subject"],
                     "message": email_data["message"],
                     "status": "new",
@@ -619,6 +619,8 @@ def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str
             reply_id = str(uuid.uuid4())[:8]
             email_data = dict(email_data)
             email_data["kind"] = kind
+            if "from_name" in email_data:
+                email_data["from_name"] = str(email_data["from_name"]).lower()
             # sent_id is stamped in both lanes, so tracing never depends on which lane delivered.
             if email_data.get("id"):
                 email_data.setdefault("sent_id", email_data["id"])

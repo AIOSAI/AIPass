@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_dispatch.py
 # Description: Email Error Dispatch Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -34,7 +34,7 @@ def build_error_report(to_branch: str, subject: str, error_msg: str) -> Dict[str
 
     return {
         "from": "@ai_mail",
-        "from_name": "AI_MAIL",
+        "from_name": "ai_mail",
         "to": "@drone",
         "subject": f"[ERROR] Send failed to {to_branch}: {error_msg[:50]}",
         "message": error_body,

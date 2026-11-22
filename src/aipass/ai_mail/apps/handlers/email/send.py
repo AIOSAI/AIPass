@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: send.py
 # Description: Email Send Handler
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-08
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -71,7 +71,7 @@ def resolve_sender_info(
                 "explicit_from:registry",
             )
         else:
-            branch_name = from_branch.lstrip("@").upper()
+            branch_name = from_branch.lstrip("@").lower()
             return _log_resolved_sender(
                 {
                     "email_address": email_addr,

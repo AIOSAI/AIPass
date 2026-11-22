@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_send_identity.py
 # Description: Tests for sender identity detection chain
-# Version: 1.2.3
+# Version: 1.2.4
 # Created: 2026-03-10
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/users/branch_detection.py and the sender identity chain in apps/handlers/email/send.py."""
@@ -484,7 +484,7 @@ class TestResolveSenderInfo:
             get_current_user_fn=lambda: {"email_address": "@ai_mail"},
         )
         assert result["email_address"] == "@mystery"
-        assert result["display_name"] == "MYSTERY"
+        assert result["display_name"] == "mystery"
 
     def test_from_branch_at_only_is_degenerate(self, tmp_path):
         """from_branch="@" (just @ symbol) should produce degenerate but not crash."""
@@ -892,9 +892,10 @@ class TestGetContactInfo:
         inbox = branch_root / ".ai_mail.local" / "inbox.json"
         register_contact("alive", "AIPass", str(inbox))
 
-        result = self._caller_named(monkeypatch, tmp_path, "alive")
+        result = self._caller_named(monkeypatch, tmp_path, "ALIVE")
 
         assert result is not None
+        assert result["name"] == "alive"
         assert result["email"] == "@alive"
         assert result["path"] == str(branch_root)
 

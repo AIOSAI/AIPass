@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stop.py
 # Description: End a running dispatch from outside: the stop verb's handler, and the live-monitor test close uses
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-11-01
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -92,7 +92,7 @@ def _mail_dispatcher(entry: dict, email: str, by: str, when: str) -> Tuple[bool,
     sender = str(entry.get("sender") or "")
     email_data = {
         "from": "@ai_mail",
-        "from_name": "AI_MAIL",
+        "from_name": "ai_mail",
         "to": sender,
         "subject": f"Dispatch stopped: {email} (by {by})",
         "message": (
