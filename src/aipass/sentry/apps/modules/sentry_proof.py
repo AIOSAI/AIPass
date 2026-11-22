@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: sentry_proof.py
 # Description: Self-proof orchestrator — discovers and runs proof packs
-# Version: 1.0.3
+# Version: 1.0.5
 # Created: 2026-03-22
 # Modified: 2026-11-22
 # =============================================
 
-"""Sentry Proof — Self-check orchestrator for standards pack integrity.
+"""sentry proof — Self-check orchestrator for standards pack integrity.
 
 A proof handler's contract: scan(pack_dir: Path) -> dict with keys passed, issues, summary.
 """
@@ -274,7 +274,7 @@ def print_introspection() -> None:
 def print_help() -> None:
     """Print help information."""
     console.print()
-    console.print("[bold cyan]Sentry Proof Module[/bold cyan]")
+    console.print("[bold cyan]sentry proof Module[/bold cyan]")
     console.print("Self-check orchestrator — verifies standards pack integrity")
     console.print()
 

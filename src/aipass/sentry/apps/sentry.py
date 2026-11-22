@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: sentry.py
 # Description: SENTRY - Standards Platform for AIPass
-# Version: 2.0.6
+# Version: 2.0.7
 # Created: 2026-03-05
 # Modified: 2026-11-22
 # =============================================
@@ -141,7 +141,7 @@ def print_help() -> None:
 
     console.print("[bold cyan]What is sentry?[/bold cyan]")
     console.print()
-    console.print("Sentry is the [bold]AIPass Standards Platform[/bold] — it:")
+    console.print("sentry is the [bold]AIPass Standards Platform[/bold] — it:")
     console.print("  [cyan]•[/cyan] Provides [green]queryable code standards[/green] via content modules")
     console.print("  [cyan]•[/cyan] Runs automated checkers that score files 0-100 per standard")
     console.print("  [cyan]•[/cyan] Audits all branches with a single command")

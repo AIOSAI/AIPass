@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_sentry_proof.py
 # Description: Unit tests for the sentry_proof module
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-03-24
 # Modified: 2026-11-22
 # =============================================
@@ -144,7 +144,7 @@ def test_print_help_runs(capsys):
     result = sentry_proof.print_help()
     printed = capsys.readouterr().out
     assert result is None
-    assert "Sentry Proof Module" in printed, f"help never named the module: {printed!r}"
+    assert "sentry proof Module" in printed, f"help never named the module: {printed!r}"
     assert "scan(pack_dir: Path) -> dict" in printed, f"help never showed the handler signature: {printed!r}"
 
 
