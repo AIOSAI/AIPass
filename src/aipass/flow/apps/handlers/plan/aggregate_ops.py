@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aggregate_ops.py
 # Description: Central Plans Aggregation Implementation Handler
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-03-08
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -214,7 +214,7 @@ def _resolve_total_closed(branch_name: str, *, upstream_total: Any, healed_count
 
 
 def load_central(central_file: Path) -> Dict[str, Any]:
-    """Load PLANS.central.json"""
+    """Load plans.central.json"""
     empty_structure = {
         "generated_at": "",
         "active_plans": [],
@@ -236,7 +236,7 @@ def load_central(central_file: Path) -> Dict[str, Any]:
 
 
 def save_central(central_file: Path, central_dir: Path, central_data: Dict[str, Any]) -> bool:
-    """Save PLANS.central.json"""
+    """Save plans.central.json"""
     try:
         central_dir.mkdir(parents=True, exist_ok=True)
 
@@ -270,7 +270,7 @@ def aggregate_central_impl(
         branches = central_data.get("branches", {})
 
         if not branches:
-            logger.info(f"[{MODULE_NAME}] No branches found in PLANS.central.json")
+            logger.info(f"[{MODULE_NAME}] No branches found in plans.central.json")
             return True
 
         all_active = []

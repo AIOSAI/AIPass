@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: push_central.py
 # Description: Push to Plans Central Handler
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2025-11-21
 # Modified: 2026-11-22
 # =============================================
@@ -39,7 +39,7 @@ def _find_repo_root() -> Path:
 
 _REPO_ROOT = _find_repo_root()
 AI_CENTRAL_DIR = _REPO_ROOT / ".ai_central"
-CENTRAL_FILE = AI_CENTRAL_DIR / "PLANS.central.json"
+CENTRAL_FILE = AI_CENTRAL_DIR / "plans.central.json"
 
 
 def _get_all_registry_files() -> List[str]:
@@ -141,7 +141,15 @@ def _extract_plans_by_branch(registry: Dict[str, Any]) -> Dict[str, Dict[str, An
 
 
 def _load_central() -> Dict[str, Any]:
-    """Load existing PLANS.central.json"""
+    """Load existing plans.central.json"""
+    # shortcut: one-time rename of the pre-lowercase file name, remove at 3.0
+    legacy = CENTRAL_FILE.with_name("PLANS.central.json")
+    if legacy.exists() and not CENTRAL_FILE.exists():
+        legacy.rename(CENTRAL_FILE)
+        logger.info("[push_central] Renamed %s to %s", legacy, CENTRAL_FILE)
+    elif legacy.exists():
+        logger.warning("[push_central] Both %s and %s exist; left both", legacy, CENTRAL_FILE)
+
     if not CENTRAL_FILE.exists():
         return {
             "generated_at": "",
@@ -153,7 +161,7 @@ def _load_central() -> Dict[str, Any]:
         with open(CENTRAL_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as exc:
-        logger.warning("Failed to load PLANS.central.json '%s': %s", CENTRAL_FILE, exc)
+        logger.warning("Failed to load plans.central.json '%s': %s", CENTRAL_FILE, exc)
         return {
             "generated_at": "",
             "branches": {},
@@ -176,7 +184,7 @@ def _calculate_global_statistics(central_data: Dict[str, Any]) -> Dict[str, int]
 
 
 def push_to_plans_central() -> bool:
-    """Push plan data for ALL branches to .ai_central/PLANS.central.json"""
+    """Push plan data for ALL branches to .ai_central/plans.central.json"""
     try:
         with registry_lock():
             AI_CENTRAL_DIR.mkdir(parents=True, exist_ok=True)

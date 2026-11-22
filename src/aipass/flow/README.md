@@ -140,7 +140,7 @@ status` reports registry health, `drone @flow list all` counts the plans, and
 
 - Every branch — plan creation, tracking, closure and archival.
 - `aipass.devpulse` — plan status for the system dashboards.
-- Central reporting — `PLANS.central.json`, carrying a per-branch section for
+- Central reporting — `plans.central.json`, carrying a per-branch section for
   every branch that holds plans. Its `statistics.total_closed` is a real count
   of everything a branch has ever closed, not the size of the
   `recently_closed` window beside it; the two coincide only on branches with
@@ -148,6 +148,6 @@ status` reports registry health, `drone @flow list all` counts the plans, and
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-11-22
 
 [← Back to AIPass](../../../README.md)

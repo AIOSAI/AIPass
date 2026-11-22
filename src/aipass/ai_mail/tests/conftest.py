@@ -1,19 +1,16 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
-# Version: 1.9.1
+# Version: 1.9.2
 # Created: 2026-03-05
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # Category: ai_mail/tests
 # CHANGELOG (Max 5 entries):
+#   - v1.9.2 (2026-11-22): sandboxed_central names the lowercase ai_mail.central.json
 #   - v1.9.1 (2026-11-15): main_argv stderr is dispatch_stderr.out; monitor_wake_stubbed drops log_wake_result
 #   - v1.9.0 (2026-10-23): sandboxed_central answers get_all_branches from the sandbox registry; daemon_* fixtures go
 #   - v1.7.2 (2026-10-10): temp_test_dir, sample_test_data removed - spawn template leftovers no live test requests
 #   - v1.7.1 (2026-10-08): monitor_wake_stubbed patches the public doors wake_sender, log_wake_result
-#   - v1.7.0 (2026-10-08): wake_log_operation_suppressed, repo_root - test_wake.py's own
-#     fixtures, shared by its split siblings; monitor_json_silenced, monitor_logger_silenced,
-#     monitor_wake_stubbed, main_argv - the same for test_dispatch_monitor.py
-#   - v1.5.1 (2026-09-29): sandboxed_central docstring names the live caller, not a retired name
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
 # =============================================
@@ -172,7 +169,7 @@ def sandboxed_central(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(registry_read, "_fleet_cache", {})
     monkeypatch.setattr(registry_read, "fleet_branches", lambda **_: [])
     monkeypatch.setattr(central_writer, "AI_CENTRAL_DIR", central / ".ai_central")
-    monkeypatch.setattr(central_writer, "CENTRAL_FILE", central / ".ai_central" / "AI_MAIL.central.json")
+    monkeypatch.setattr(central_writer, "CENTRAL_FILE", central / ".ai_central" / "ai_mail.central.json")
 
 
 class _BusRecorder:

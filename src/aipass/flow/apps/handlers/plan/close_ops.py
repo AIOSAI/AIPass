@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: close_ops.py
 # Description: Plan Closure Implementation Handler
-# Version: 1.9.0
+# Version: 1.9.1
 # Created: 2026-03-08
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -115,13 +115,13 @@ def _refresh_dashboards(
     push_flow_to_branch_dashboard: Any,
     messages: List[Dict[str, Any]],
 ) -> None:
-    """Refresh flow's dashboard, PLANS.central.json and each location's branch dashboard. Never raises."""
+    """Refresh flow's dashboard, plans.central.json and each location's branch dashboard. Never raises."""
     try:
         # None is "flow has no dashboard", not a failure.
         if update_dashboard_local() is False:
             logger.warning(f"[{MODULE_NAME}] Failed to update DASHBOARD.local.json")
         if not push_to_plans_central():
-            logger.warning(f"[{MODULE_NAME}] Failed to update PLANS.central.json")
+            logger.warning(f"[{MODULE_NAME}] Failed to update plans.central.json")
 
         for location in dict.fromkeys(loc for loc in locations if loc):
             if push_flow_to_branch_dashboard(Path(location)) is False:

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.6.2
+# Version: 3.6.3
 # Created: 2025-12-02
 # Modified: 2026-11-22
 # =============================================
@@ -716,8 +716,8 @@ def _emit_notification_event(
         logger.info("[delivery] feed line rate-limited for %s (%s): %s", recipient, kind, subject)
         return
 
-    sender_name = sender.replace("@", "").upper()
-    recipient_name = recipient.replace("@", "").upper()
+    sender_name = sender.replace("@", "").lower()
+    recipient_name = recipient.replace("@", "").lower()
     title = f"{sender_name} -> {recipient_name}"
     body = subject
     if message:

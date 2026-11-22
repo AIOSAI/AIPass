@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_central_writer.py
 # Description: Tests for the central writer handler
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-04-05
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/central_writer.py."""
@@ -33,7 +33,7 @@ def _import_central_writer(monkeypatch, tmp_path):
     """
     monkeypatch.setattr(central_writer, "json_handler", sys.modules["aipass.memory.apps.handlers.json"].json_handler)
     monkeypatch.setattr(central_writer, "_MEMORY_ROOT", tmp_path)
-    monkeypatch.setattr(central_writer, "CENTRAL_FILE", tmp_path / "central" / "MEMORY.central.json")
+    monkeypatch.setattr(central_writer, "CENTRAL_FILE", tmp_path / "central" / "memory.central.json")
     monkeypatch.setattr(central_writer, "CHROMA_DB_PATH", tmp_path / ".chroma")
 
     return central_writer
@@ -141,7 +141,7 @@ class TestReadCentralFile:
             "stats": {"total_vectors": 42},
             "extra_field": "preserved",
         }
-        (central_dir / "MEMORY.central.json").write_text(json.dumps(data), encoding="utf-8")
+        (central_dir / "memory.central.json").write_text(json.dumps(data), encoding="utf-8")
 
         result = cw.read_central_file()
 
@@ -154,10 +154,22 @@ class TestReadCentralFile:
         central_dir = tmp_path / "central"
         central_dir.mkdir(parents=True)
 
-        (central_dir / "MEMORY.central.json").write_text("{{bad json", encoding="utf-8")
+        (central_dir / "memory.central.json").write_text("{{bad json", encoding="utf-8")
 
         with pytest.raises(Exception, match="Failed to read central file"):
             cw.read_central_file()
+
+    def test_the_legacy_capital_file_is_renamed_and_read(self, monkeypatch, tmp_path):
+        """An install's pre-lowercase file is renamed, not left beside the new one."""
+        cw = _import_central_writer(monkeypatch, tmp_path)
+        central_dir = tmp_path / "central"
+        central_dir.mkdir(parents=True)
+        (central_dir / "MEMORY.central.json").write_text('{"stats": {"total_vectors": 9}}', encoding="utf-8")
+
+        result = cw.read_central_file()
+
+        assert result["stats"]["total_vectors"] == 9
+        assert [p.name for p in central_dir.iterdir()] == ["memory.central.json"]
 
 
 class TestWriteCentralFile:
@@ -171,7 +183,7 @@ class TestWriteCentralFile:
 
         cw.write_central_file(data)
 
-        central_file = tmp_path / "central" / "MEMORY.central.json"
+        central_file = tmp_path / "central" / "memory.central.json"
         assert central_file.exists()
 
         written = json.loads(central_file.read_text(encoding="utf-8"))
@@ -193,7 +205,7 @@ class TestWriteCentralFile:
         monkeypatch.setattr(cw.os, "replace", replace_after_a_rival_lands)
         cw.write_central_file({"writer": "first"})
 
-        central_file = tmp_path / "central" / "MEMORY.central.json"
+        central_file = tmp_path / "central" / "memory.central.json"
         assert json.loads(central_file.read_text(encoding="utf-8")) == {"writer": "first"}
         assert list(central_file.parent.iterdir()) == [central_file], "a racing write left its temp file"
 
@@ -203,7 +215,7 @@ class TestWriteCentralFile:
         central_dir = tmp_path / "central"
         central_dir.mkdir(parents=True)
 
-        central_file = central_dir / "MEMORY.central.json"
+        central_file = central_dir / "memory.central.json"
         central_file.write_text('{"old": true}', encoding="utf-8")
 
         cw.write_central_file({"new": True})
@@ -246,7 +258,7 @@ class TestUpdateCentral:
         assert "stats" in result
         assert "total_vectors" in result["stats"]
 
-        central_file = tmp_path / "central" / "MEMORY.central.json"
+        central_file = tmp_path / "central" / "memory.central.json"
         assert central_file.exists()
 
     def test_success_non_verbose(self, monkeypatch, tmp_path):
@@ -271,13 +283,13 @@ class TestUpdateCentral:
             "_note": "placeholder - not yet populated",
             "stats": {"total_vectors": 0},
         }
-        (central_dir / "MEMORY.central.json").write_text(json.dumps(old_data), encoding="utf-8")
+        (central_dir / "memory.central.json").write_text(json.dumps(old_data), encoding="utf-8")
 
         result = cw.update_central()
 
         assert result["success"] is True
 
-        written = json.loads((central_dir / "MEMORY.central.json").read_text(encoding="utf-8"))
+        written = json.loads((central_dir / "memory.central.json").read_text(encoding="utf-8"))
         assert "_note" not in written
 
     def test_preserves_extra_fields(self, monkeypatch, tmp_path):
@@ -292,13 +304,13 @@ class TestUpdateCentral:
             "custom_field": "keep_me",
             "stats": {"total_vectors": 0},
         }
-        (central_dir / "MEMORY.central.json").write_text(json.dumps(old_data), encoding="utf-8")
+        (central_dir / "memory.central.json").write_text(json.dumps(old_data), encoding="utf-8")
 
         result = cw.update_central()
 
         assert result["success"] is True
 
-        written = json.loads((central_dir / "MEMORY.central.json").read_text(encoding="utf-8"))
+        written = json.loads((central_dir / "memory.central.json").read_text(encoding="utf-8"))
         assert written["custom_field"] == "keep_me"
 
     def test_failure_returns_error(self, monkeypatch, tmp_path):

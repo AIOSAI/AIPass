@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_aggregate_ops.py
 # Description: Tests for aggregate_ops -- registry, central file, and aggregation helpers
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-29
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/plan/aggregate_ops.py."""
@@ -325,7 +325,7 @@ class TestLoadCentral:
             "branches": {},
             "global_statistics": {"total_active": 1, "total_closed": 0, "branches_reporting": 0},
         }
-        central = tmp_path / "PLANS.central.json"
+        central = tmp_path / "plans.central.json"
         central.write_text(json.dumps(data), encoding="utf-8")
         result = load_central(central)
         assert result["active_plans"] == data["active_plans"]
@@ -339,7 +339,7 @@ class TestLoadCentral:
 
     def test_returns_empty_structure_on_corrupt_file(self, tmp_path):
         load_central = _import("load_central")
-        central = tmp_path / "PLANS.central.json"
+        central = tmp_path / "plans.central.json"
         central.write_text("{{invalid", encoding="utf-8")
         result = load_central(central)
         assert result["active_plans"] == []
@@ -350,7 +350,7 @@ class TestSaveCentral:
     def test_saves_valid_json(self, tmp_path):
         save_central = _import("save_central")
         central_dir = tmp_path / ".ai_central"
-        central_file = central_dir / "PLANS.central.json"
+        central_file = central_dir / "plans.central.json"
         data = {"active_plans": [], "branches": {}}
         result = save_central(central_file, central_dir, data)
         assert result is True
@@ -361,7 +361,7 @@ class TestSaveCentral:
     def test_creates_directory_if_needed(self, tmp_path):
         save_central = _import("save_central")
         central_dir = tmp_path / "deep" / "nested" / ".ai_central"
-        central_file = central_dir / "PLANS.central.json"
+        central_file = central_dir / "plans.central.json"
         result = save_central(central_file, central_dir, {"test": True})
         assert result is True
         assert central_dir.exists()
@@ -372,7 +372,7 @@ class TestSaveCentral:
         blocker = tmp_path / "blocker"
         blocker.write_text("I am a file", encoding="utf-8")
         bad_dir = blocker / "subdir"
-        bad_file = bad_dir / "PLANS.central.json"
+        bad_file = bad_dir / "plans.central.json"
         result = save_central(bad_file, bad_dir, {})
         assert result is False
 
@@ -387,7 +387,7 @@ class TestAggregateCentralImpl:
         aggregate_central_impl = _import("aggregate_central_impl")
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
-        central_file = central_dir / "PLANS.central.json"
+        central_file = central_dir / "plans.central.json"
         data = {
             "generated_at": "",
             "active_plans": [],
@@ -416,7 +416,7 @@ class TestAggregateCentralImpl:
 
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
-        central_file = central_dir / "PLANS.central.json"
+        central_file = central_dir / "plans.central.json"
         data = {
             "generated_at": "",
             "active_plans": [],
@@ -458,7 +458,7 @@ class TestAggregateCentralImpl:
 
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
-        central_file = central_dir / "PLANS.central.json"
+        central_file = central_dir / "plans.central.json"
 
         closed_plans = [
             {"plan_id": f"FPLAN-{i:04d}", "status": "closed", "closed": f"2026-03-{i:02d}"} for i in range(1, 8)
@@ -492,7 +492,7 @@ class TestAggregateCentralImpl:
 
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
-        central_file = central_dir / "PLANS.central.json"
+        central_file = central_dir / "plans.central.json"
         data = {
             "generated_at": "",
             "active_plans": [],
@@ -518,7 +518,7 @@ class TestAggregateCentralImpl:
         with patch(f"{_MOD}.load_central", side_effect=RuntimeError("boom")):
             result = aggregate_central_impl(
                 heal=True,
-                central_file=tmp_path / "PLANS.central.json",
+                central_file=tmp_path / "plans.central.json",
                 central_dir=tmp_path,
             )
         assert result is False
@@ -531,7 +531,7 @@ class TestAggregateCentralImpl:
         aggregate_central_impl = _import("aggregate_central_impl")
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
-        central_file = central_dir / "PLANS.central.json"
+        central_file = central_dir / "plans.central.json"
         data = {
             "generated_at": "",
             "active_plans": [],
@@ -565,7 +565,7 @@ class TestTotalClosedIsNotTruncated:
         """A branch push_central already measured honestly, capped to `window`."""
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir(exist_ok=True)
-        central_file = central_dir / "PLANS.central.json"
+        central_file = central_dir / "plans.central.json"
         closed = [
             {"plan_id": f"FPLAN-{n:04d}", "subject": f"Closed {n}", "closed": f"2026-08-{n:02d}T09:00:00+00:00"}
             for n in range(1, window + 1)

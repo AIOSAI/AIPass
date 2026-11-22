@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: purge.py
 # Description: Sent/Deleted Auto-Purge Handler
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-02-04
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -162,7 +162,7 @@ def _vectorize_emails(emails: List[Dict[str, Any]], folder_type: str) -> Dict[st
         # two callers' models in one collection would be silently unsearchable.
         input_data = {
             "operation": "vectorize_and_store",
-            "branch": "AI_MAIL",
+            "branch": "ai_mail",
             "memory_type": f"email_{folder_type}",
             "texts": texts,
             "metadatas": metadatas,

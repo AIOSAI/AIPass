@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_push_central.py
 # Description: Tests for push_central handler -- push to Plans Central
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-05-12
 # Modified: 2026-11-22
 # =============================================
@@ -49,7 +49,7 @@ def _push(tmp_path, registries=None, plan_types=None, central=None):
         raw = data if isinstance(data, (str, bytes)) else json.dumps(data)
         (flow_json / name).write_bytes(raw.encode("utf-8") if isinstance(raw, str) else raw)
     ai_central = tmp_path / ".ai_central"
-    central_file = ai_central / "PLANS.central.json"
+    central_file = ai_central / "plans.central.json"
     if central is not None:
         ai_central.mkdir()
         central_file.write_bytes(central if isinstance(central, bytes) else json.dumps(central).encode("utf-8"))
@@ -102,7 +102,7 @@ class TestFindRepoRoot:
         """
         root = repo_root.find_repo_root()
         assert mod.AI_CENTRAL_DIR == root / ".ai_central"
-        assert mod.CENTRAL_FILE == root / ".ai_central" / "PLANS.central.json"
+        assert mod.CENTRAL_FILE == root / ".ai_central" / "plans.central.json"
 
     def test_returns_dir_containing_registry(self, tmp_path):
         """Returns the directory containing AIPASS_REGISTRY.json."""
@@ -559,7 +559,7 @@ class TestLoadCentral:
     """Tests for _load_central."""
 
     def test_returns_empty_structure_when_file_missing(self, tmp_path, mock_logger):
-        """A missing PLANS.central.json is started from the empty structure — silently.
+        """A missing plans.central.json is started from the empty structure — silently.
 
         Mutant: `if not CENTRAL_FILE.exists():` -> `if False:` reddens this.
         """
@@ -572,7 +572,7 @@ class TestLoadCentral:
         assert written["global_statistics"] == {"total_active": 0, "total_closed": 0, "branches_reporting": 0}
 
     def test_loads_existing_central_file(self, tmp_path):
-        """An existing PLANS.central.json is loaded, and what the push does not own survives.
+        """An existing plans.central.json is loaded, and what the push does not own survives.
 
         Mutant: `return json.load(f)` -> `return {}` reddens this.
         """
@@ -590,8 +590,20 @@ class TestLoadCentral:
         assert written["generated_at"] != "2026-04-20T00:00:00Z"
         assert written["branches"] == {}
 
+    def test_the_legacy_capital_file_is_renamed_and_loaded(self, tmp_path):
+        """An install's pre-lowercase file is renamed, not left beside the new one."""
+        legacy = tmp_path / ".ai_central" / "PLANS.central.json"
+        legacy.parent.mkdir()
+        legacy.write_text(json.dumps({"active_plans": ["kept by aggregate"]}), encoding="utf-8")
+
+        result, written = _push(tmp_path)
+
+        assert result is True
+        assert written["active_plans"] == ["kept by aggregate"]
+        assert [p.name for p in legacy.parent.iterdir()] == ["plans.central.json"]
+
     def test_returns_empty_structure_on_corrupt_json(self, tmp_path):
-        """A corrupt PLANS.central.json is replaced, not fatal."""
+        """A corrupt plans.central.json is replaced, not fatal."""
         result, written = _push(tmp_path, central=b"not valid json!!!")
 
         assert result is True
@@ -656,7 +668,7 @@ class TestPushToPlansCentral:
 
     def test_an_aggregation_that_failed_is_no_push(self, tmp_path, mock_json_handler):
         """aggregate_central_impl answers False and never raises; the push must report failure."""
-        central_file = tmp_path / ".ai_central" / "PLANS.central.json"
+        central_file = tmp_path / ".ai_central" / "plans.central.json"
         with (
             patch.object(mod, "AI_CENTRAL_DIR", central_file.parent),
             patch.object(mod, "CENTRAL_FILE", central_file),
@@ -681,7 +693,7 @@ class TestPushToPlansCentral:
 
     def test_success_returns_true(self, tmp_path, mock_json_handler):
         """Returns True on successful push."""
-        central_file = tmp_path / "PLANS.central.json"
+        central_file = tmp_path / "plans.central.json"
         ai_central = tmp_path / ".ai_central"
 
         mock_registry = {"plans": {}, "next_number": 1}
@@ -718,8 +730,8 @@ class TestPushToPlansCentral:
         assert pushed[0].args[1]["active_plans"] == 1
 
     def test_writes_central_file(self, tmp_path):
-        """Writes PLANS.central.json with correct structure."""
-        central_file = tmp_path / "PLANS.central.json"
+        """Writes plans.central.json with correct structure."""
+        central_file = tmp_path / "plans.central.json"
         ai_central = tmp_path / ".ai_central"
 
         mock_registry = {"plans": {}, "next_number": 1}
@@ -749,7 +761,7 @@ class TestPushToPlansCentral:
 
     def test_writes_multiple_branches(self, tmp_path):
         """Writes per-branch sections from registry data."""
-        central_file = tmp_path / "PLANS.central.json"
+        central_file = tmp_path / "plans.central.json"
         ai_central = tmp_path / ".ai_central"
 
         mock_registry = {"plans": {}, "next_number": 1}
@@ -794,7 +806,7 @@ class TestPushToPlansCentral:
     def test_creates_ai_central_dir(self, tmp_path):
         """Creates .ai_central directory if it does not exist."""
         ai_central = tmp_path / "new_ai_central"
-        central_file = ai_central / "PLANS.central.json"
+        central_file = ai_central / "plans.central.json"
 
         mock_registry = {"plans": {}, "next_number": 1}
         mock_central = {
@@ -828,7 +840,7 @@ class TestPushToPlansCentral:
 
     def test_branch_section_has_correct_statistics(self, tmp_path):
         """Branch section statistics reflect actual plan counts."""
-        central_file = tmp_path / "PLANS.central.json"
+        central_file = tmp_path / "plans.central.json"
         ai_central = tmp_path / ".ai_central"
 
         mock_registry = {"plans": {}, "next_number": 4}
@@ -870,7 +882,7 @@ class TestPushToPlansCentral:
 
     def test_global_statistics_updated(self, tmp_path):
         """Global statistics are recalculated from all branch sections."""
-        central_file = tmp_path / "PLANS.central.json"
+        central_file = tmp_path / "plans.central.json"
         ai_central = tmp_path / ".ai_central"
 
         mock_registry = {"plans": {}, "next_number": 1}
@@ -916,7 +928,7 @@ class TestPushToPlansCentral:
 
     def test_log_operation_contains_expected_fields(self, tmp_path, mock_json_handler):
         """Log operation includes active_plans and branches_reporting."""
-        central_file = tmp_path / "PLANS.central.json"
+        central_file = tmp_path / "plans.central.json"
         ai_central = tmp_path / ".ai_central"
 
         mock_registry = {"plans": {}, "next_number": 1}
@@ -953,8 +965,8 @@ class TestPushToPlansCentral:
         assert "branches_reporting" in log_data
 
     def test_non_flow_branch_plans_in_central(self, tmp_path):
-        """Regression: non-flow branch plans must appear in PLANS.central.json."""
-        central_file = tmp_path / "PLANS.central.json"
+        """Regression: non-flow branch plans must appear in plans.central.json."""
+        central_file = tmp_path / "plans.central.json"
         ai_central = tmp_path / ".ai_central"
 
         mock_registry = {

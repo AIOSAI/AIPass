@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aggregate_central.py
 # Description: Aggregate Central Plans Module
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2025-11-30
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -63,7 +63,7 @@ def _find_repo_root() -> Path:
 
 _REPO_ROOT = _find_repo_root()
 AI_CENTRAL_DIR = _REPO_ROOT / ".ai_central"
-CENTRAL_FILE = AI_CENTRAL_DIR / "PLANS.central.json"
+CENTRAL_FILE = AI_CENTRAL_DIR / "plans.central.json"
 
 
 def aggregate_central(heal: bool = True) -> bool:

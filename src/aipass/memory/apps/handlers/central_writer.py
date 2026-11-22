@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: central_writer.py
 # Description: Central File Writer Handler
-# Version: 0.4.1
+# Version: 0.5.0
 # Created: 2025-11-27
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """
 Central File Writer Handler
 
-MEMORY.central.json is memory's API output; dashboards read it.
+memory.central.json is memory's API output; dashboards read it.
 """
 
 import os
@@ -33,7 +33,7 @@ def _find_repo_root() -> Path:
     return repo_root.find_repo_root(caller="central_writer")
 
 
-CENTRAL_FILE = _find_repo_root() / ".ai_central" / "MEMORY.central.json"
+CENTRAL_FILE = _find_repo_root() / ".ai_central" / "memory.central.json"
 CHROMA_DB_PATH = _MEMORY_ROOT / ".chroma"
 
 
@@ -69,6 +69,16 @@ def collect_stats() -> Dict[str, Any]:
 def read_central_file() -> Dict[str, Any]:
     """Read current central file contents"""
     try:
+        # shortcut: one-time rename of the pre-lowercase file name, remove at 3.0
+        name, folder = CENTRAL_FILE.name, CENTRAL_FILE.parent
+        siblings = folder.iterdir() if folder.is_dir() else ()
+        legacy = next((p for p in siblings if p.name != name and p.name.lower() == name), None)
+        if legacy and not CENTRAL_FILE.exists():
+            legacy.rename(CENTRAL_FILE)
+            logger.info(f"[central_writer] Renamed {legacy} to {CENTRAL_FILE}")
+        elif legacy:
+            logger.warning(f"[central_writer] Both {legacy} and {CENTRAL_FILE} exist; left both")
+
         if not CENTRAL_FILE.exists():
             return {"service": "memory", "last_updated": "", "stats": {"total_vectors": 0}}
 

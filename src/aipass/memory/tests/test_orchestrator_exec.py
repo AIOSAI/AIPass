@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_orchestrator_exec.py
 # Description: Tests for the orchestrator execute_rollover pipeline
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-04-26
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # Category: memory/tests
 # =============================================
 
@@ -79,7 +79,7 @@ def _import_orchestrator(monkeypatch):
     monkeypatch.setattr(orchestrator, "logger", MagicMock())
     monkeypatch.setattr(orchestrator, "json_handler", MagicMock(log_operation=MagicMock(return_value=True)))
     # The post-rollover chain imports these at call time; unpatched, a test that
-    # reaches success_count > 0 wrote the live .ai_central/MEMORY.central.json.
+    # reaches success_count > 0 wrote the live .ai_central/memory.central.json.
     monkeypatch.setattr(_CENTRAL_UPDATE, MagicMock(return_value={"success": True}))
     monkeypatch.setattr(_POOL_PROCESS, MagicMock(return_value={"files_processed": 0}))
 

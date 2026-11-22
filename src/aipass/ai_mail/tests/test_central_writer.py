@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_central_writer.py
 # Description: Tests for central_writer -- branch inbox aggregation and central file writing
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-04-03
 # Modified: 2026-11-22
 # =============================================
@@ -283,7 +283,7 @@ def test_aggregate_branch_stats_skips_malformed_inbox(tmp_path, monkeypatch):
 def test_write_central_file_creates_file(tmp_path, monkeypatch):
     """Creates the central file with correct JSON content."""
     central_dir = tmp_path / ".ai_central"
-    central_file = central_dir / "AI_MAIL.central.json"
+    central_file = central_dir / "ai_mail.central.json"
 
     monkeypatch.setattr(mod, "AI_CENTRAL_DIR", central_dir)
     monkeypatch.setattr(mod, "CENTRAL_FILE", central_file)
@@ -304,7 +304,7 @@ def test_write_central_file_creates_file(tmp_path, monkeypatch):
 def test_write_central_file_creates_directory(tmp_path, monkeypatch):
     """Creates the AI_CENTRAL directory if it doesn't exist."""
     central_dir = tmp_path / "new_dir" / ".ai_central"
-    central_file = central_dir / "AI_MAIL.central.json"
+    central_file = central_dir / "ai_mail.central.json"
 
     monkeypatch.setattr(mod, "AI_CENTRAL_DIR", central_dir)
     monkeypatch.setattr(mod, "CENTRAL_FILE", central_file)
@@ -319,7 +319,7 @@ def test_write_central_file_overwrites_existing(tmp_path, monkeypatch):
     """Overwrites an existing central file with new data."""
     central_dir = tmp_path / ".ai_central"
     central_dir.mkdir(parents=True)
-    central_file = central_dir / "AI_MAIL.central.json"
+    central_file = central_dir / "ai_mail.central.json"
     central_file.write_text(json.dumps({"old": "data"}), encoding="utf-8")
 
     monkeypatch.setattr(mod, "AI_CENTRAL_DIR", central_dir)
@@ -331,6 +331,22 @@ def test_write_central_file_overwrites_existing(tmp_path, monkeypatch):
     written = json.loads(central_file.read_text(encoding="utf-8"))
     assert written == new_data
     assert "old" not in written
+
+
+def test_write_central_file_renames_the_legacy_capital_file(tmp_path, monkeypatch):
+    """An install's pre-lowercase file is renamed, not left beside the new one."""
+    central_dir = tmp_path / ".ai_central"
+    central_dir.mkdir(parents=True)
+    legacy = central_dir / "AI_MAIL.central.json"
+    legacy.write_text("{}", encoding="utf-8")
+    central_file = central_dir / "ai_mail.central.json"
+
+    monkeypatch.setattr(mod, "AI_CENTRAL_DIR", central_dir)
+    monkeypatch.setattr(mod, "CENTRAL_FILE", central_file)
+
+    mod.write_central_file({"service": "ai_mail"})
+
+    assert sorted(p.name for p in central_dir.iterdir()) == ["ai_mail.central.json"]
 
 
 def test_find_all_inbox_files_includes_an_external_citizens_inbox(tmp_path, monkeypatch):
