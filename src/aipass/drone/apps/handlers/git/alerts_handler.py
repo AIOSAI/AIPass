@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: alerts_handler.py
-# Description: alerts list | dismiss: a repo's code-scanning alerts through gh api
-# Version: 1.2.0
+# Description: alerts list | dismiss | reopen: a repo's code-scanning alerts through gh api
+# Version: 1.3.0
 # Created: 2026-10-19
 # Modified: 2026-11-21
 # =============================================
 
-"""``drone @git alerts list | dismiss``: the code-scanning alerts of the repo the command stands in.
+"""``drone @git alerts list | dismiss | reopen``: the code-scanning alerts of the repo the command stands in.
 
 dismiss always carries its reason and comment to GitHub, so every dismissal there says why.
 """
@@ -30,9 +30,10 @@ _MAX_PAGES = 10
 
 USAGE = (
     "Usage: drone @git alerts list [--state open|dismissed|all] [--pr <n>] [--json] | "
-    "alerts dismiss <number> --reason false_positive|wont_fix|used_in_tests --comment 'text'  [--repo <path>]"
+    "alerts dismiss <number> --reason false_positive|wont_fix|used_in_tests --comment 'text' | "
+    "alerts reopen <number>  [--repo <path>]"
 )
-REFUSE_SUB = "'alerts {sub}' is not served. Alerts: list, dismiss."
+REFUSE_SUB = "'alerts {sub}' is not served. Alerts: list, dismiss, reopen."
 REFUSE_STATE = "alerts list --state takes open, dismissed or all; '{state}' is not one."
 REFUSE_LIST_ARGS = "alerts list takes only --state, --pr and --json."
 REFUSE_PR = "alerts list --pr takes one pull request number; '{pr}' is not one."
@@ -45,6 +46,15 @@ REFUSE_NOT_OPEN = "alerts dismiss refused: alert #{number} on github.com/{slug} 
 REFUSE_NO_STATE = (
     "alerts dismiss refused: GitHub gave no state for alert #{number} on github.com/{slug}, "
     "so it cannot be checked as open."
+)
+REFUSE_REOPEN_NUMBER = "alerts reopen needs one alert number: drone @git alerts reopen <number>"
+REFUSE_REOPEN_NO_ALERT = "alerts reopen refused: github.com/{slug} has no code-scanning alert #{number}."
+REFUSE_NOT_DISMISSED = (
+    "alerts reopen refused: alert #{number} on github.com/{slug} is {state}, not dismissed; nothing to reopen."
+)
+REFUSE_REOPEN_NO_STATE = (
+    "alerts reopen refused: GitHub gave no state for alert #{number} on github.com/{slug}, "
+    "so it cannot be checked as dismissed."
 )
 
 
@@ -105,6 +115,22 @@ def _list(args: list[str], slug: str, as_json: bool) -> dict:
     return gh_chores.answer("\n".join(lines))
 
 
+def _read_alert(path: str, verb: str, no_alert: str, no_state: str, number: str, slug: str) -> tuple[dict, str]:
+    """The alert at *path* and its state; raise ChoreRefusal (*no_alert*, *no_state*) when either is missing."""
+    try:
+        alert = gh_chores.gh_json(["api", path], verb=verb, slug=slug)
+    except ChoreRefusal as refusal:
+        if gh_chores.is_not_found(refusal):
+            raise ChoreRefusal(no_alert.format(slug=slug, number=number)) from refusal
+        raise
+    alert = alert if isinstance(alert, dict) else {}
+    # An alert on a pull request ref only has a null top-level state; its instance carries it.
+    state = alert.get("state") or (alert.get("most_recent_instance") or {}).get("state")
+    if not state:
+        raise ChoreRefusal(no_state.format(number=number, slug=slug))
+    return alert, state
+
+
 def _dismiss(args: list[str], repo_root: Path, slug: str, caller: str) -> dict:
     """``alerts dismiss``: an open alert becomes dismissed, with its reason and comment."""
     numbers, values = gh_chores.parse_flags(args, ("--reason", "--comment"), "alerts dismiss")
@@ -120,17 +146,7 @@ def _dismiss(args: list[str], repo_root: Path, slug: str, caller: str) -> dict:
     if len(comment) > COMMENT_CAP:
         raise ChoreRefusal(REFUSE_LONG_COMMENT.format(length=len(comment), cap=COMMENT_CAP))
     path = f"repos/{slug}/code-scanning/alerts/{number}"
-    try:
-        alert = gh_chores.gh_json(["api", path], verb="alerts dismiss", slug=slug)
-    except ChoreRefusal as refusal:
-        if gh_chores.is_not_found(refusal):
-            raise ChoreRefusal(REFUSE_NO_ALERT.format(slug=slug, number=number)) from refusal
-        raise
-    alert = alert if isinstance(alert, dict) else {}
-    # An alert on a pull request ref only has a null top-level state; its instance carries it.
-    state = alert.get("state") or (alert.get("most_recent_instance") or {}).get("state")
-    if not state:
-        raise ChoreRefusal(REFUSE_NO_STATE.format(number=number, slug=slug))
+    alert, state = _read_alert(path, "alerts dismiss", REFUSE_NO_ALERT, REFUSE_NO_STATE, number, slug)
     if state != "open":
         raise ChoreRefusal(REFUSE_NOT_OPEN.format(number=number, slug=slug, state=state))
     gh_chores.gh(
@@ -161,16 +177,41 @@ def _dismiss(args: list[str], repo_root: Path, slug: str, caller: str) -> dict:
     return gh_chores.answer(f"Dismissed alert #{number} ({rule}) on github.com/{slug} as {reason}: {comment}")
 
 
+def _reopen(args: list[str], repo_root: Path, slug: str, caller: str) -> dict:
+    """``alerts reopen``: a dismissed alert goes back to open."""
+    numbers, _ = gh_chores.parse_flags(args, (), "alerts reopen")
+    if len(numbers) != 1 or not numbers[0].isdigit():
+        raise ChoreRefusal(REFUSE_REOPEN_NUMBER)
+    number = numbers[0]
+    path = f"repos/{slug}/code-scanning/alerts/{number}"
+    alert, state = _read_alert(path, "alerts reopen", REFUSE_REOPEN_NO_ALERT, REFUSE_REOPEN_NO_STATE, number, slug)
+    if state != "dismissed":
+        raise ChoreRefusal(REFUSE_NOT_DISMISSED.format(number=number, slug=slug, state=state))
+    gh_chores.gh(["api", "-X", "PATCH", path, "-f", "state=open"], verb="alerts reopen", slug=slug)
+    rule = _row(alert)["rule"]
+    gh_chores.record_write(
+        caller=caller,
+        verb="alerts reopen",
+        repo_root=repo_root,
+        slug=slug,
+        outcome=gh_chores.OUTCOME_WRITTEN,
+        details={"number": int(number), "rule": rule},
+    )
+    return gh_chores.answer(f"Reopened alert #{number} ({rule}) on github.com/{slug}.")
+
+
 def alerts_command(args: list[str], repo_root: Path, caller: str) -> dict:
-    """``alerts list [--state S] [--pr n] [--json] | dismiss <n> --reason R --comment 'text'``, as a routing result."""
+    """``alerts list [--state S] [--pr n] [--json] | dismiss <n> --reason R --comment 'text' | reopen <n>``."""
     as_json = wants_json(args)
     args = strip_json_flag(args)
     try:
-        if not args or args[0] not in ("list", "dismiss"):
+        if not args or args[0] not in ("list", "dismiss", "reopen"):
             raise ChoreRefusal(REFUSE_SUB.format(sub=args[0]) if args else USAGE)
         slug = gh_chores.repo_slug(repo_root, f"alerts {args[0]}")
         if args[0] == "list":
             return _list(args[1:], slug, as_json)
+        if args[0] == "reopen":
+            return _reopen(args[1:], repo_root, slug, caller)
         return _dismiss(args[1:], repo_root, slug, caller)
     except ChoreRefusal as refusal:
         if as_json:

@@ -280,6 +280,7 @@ own repo. `--repo <path>` is the external-repo door, admin seat only. The reads 
 | `label create <name> [--color hex] [--description text]` | owner | `gh label create` |
 | `alerts list [--state open\|dismissed\|all] [--pr <n>] [--json]` | global | `gh api repos/OWNER/NAME/code-scanning/alerts[?ref=refs/pull/<n>/merge]` |
 | `alerts dismiss <n> --reason R --comment 'text'` | owner | `gh api -X PATCH .../code-scanning/alerts/<n>` |
+| `alerts reopen <n>` | owner | `gh api -X PATCH .../code-scanning/alerts/<n> -f state=open` |
 
 **`release edit`** rewrites a published release's notes with the CHANGELOG.md block for its tag,
 by publish.yml's rule: the block whose `## [` header carries the tag between non-version
@@ -299,14 +300,16 @@ dismissal says why there; a missing or blank comment is refused by name, as is o
 words. Only an open alert is dismissed: its state is the alert's own, or, for an alert that lives
 on a pull request ref only (GitHub leaves the top-level state null there), its latest instance's.
 A fixed or dismissed alert is refused by name, and one with no state anywhere is refused as
-unreadable. `alerts list` prints number, rule id, severity, state and
+unreadable. **`alerts reopen <n>`** puts a dismissed alert back to open, read the same way; an
+open or fixed alert, an unknown number and an unreadable state are each refused by name. `alerts list` prints number, rule id, severity, state and
 `file:line`, one row each. `--pr <n>` reads pull request n's alerts, asking GitHub for the ref
 `refs/pull/<n>/merge`: an alert a pull request raises lives on that ref only, so the default
 branch's list never shows it. `--pr` takes one positive number and refuses anything else by name.
 
 Every write subcommand writes one line to AIPass's own `.ai_central/git_gh_writes.jsonl`, a no-op
 included: caller, verb, repo, OWNER/NAME, outcome (`written` or `unchanged`), and the verb's own
-fields (tag and both lengths; label, color and description; number, rule, reason and comment).
+fields (tag and both lengths; label, color and description; number, rule, reason and comment for
+a dismissal, number and rule for a reopen).
 Through the door the door's own ledger records the use as well. Pinned by `TestReleaseEdit` and
 `TestChoresThroughTheDoor` in `tests/test_git_access_gh_door.py`, `TestLabel` and `TestAlerts` in
 `tests/test_git_module.py`.

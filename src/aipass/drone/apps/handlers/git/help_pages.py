@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.13.3
+# Version: 1.14.0
 # Created: 2026-10-04
 # Modified: 2026-11-21
 # =============================================
@@ -268,6 +268,8 @@ def page(command: str | None = None) -> str:
             "    --comment 'text' — Dismiss an open alert [owner]\n"
             "  The comment is required and goes to GitHub with the reason; the ledger row\n"
             f"  carries number, reason and comment. GitHub takes {alerts_handler.COMMENT_CAP} comment characters.\n"
+            "git alerts reopen <number> — Put a dismissed alert back to open [owner]\n"
+            "  Only a dismissed alert reopens; the ledger row carries number and rule.\n"
             "  Through gh api /repos/OWNER/NAME/code-scanning/alerts; the repo is the one you\n"
             "  stand in, --repo <path> the admin door. Refused, exactly as printed:\n"
             + _printed(
@@ -282,6 +284,10 @@ def page(command: str | None = None) -> str:
                 alerts_handler.REFUSE_NO_ALERT.format(slug="<owner/name>", number="<n>"),
                 alerts_handler.REFUSE_NOT_OPEN.format(number="<n>", slug="<owner/name>", state="<state>"),
                 alerts_handler.REFUSE_NO_STATE.format(number="<n>", slug="<owner/name>"),
+                alerts_handler.REFUSE_REOPEN_NUMBER,
+                alerts_handler.REFUSE_REOPEN_NO_ALERT.format(slug="<owner/name>", number="<n>"),
+                alerts_handler.REFUSE_NOT_DISMISSED.format(number="<n>", slug="<owner/name>", state="<state>"),
+                alerts_handler.REFUSE_REOPEN_NO_STATE.format(number="<n>", slug="<owner/name>"),
             )
             + _CHORE_REFUSALS
             + "  Example: drone @git alerts dismiss 12 --reason false_positive --comment 'why'\n"
@@ -458,6 +464,7 @@ def page(command: str | None = None) -> str:
         "  release edit <tag>     Rewrite a release's notes with its CHANGELOG.md block\n"
         "  label create <name>    Create a repo label; one already there is reported present\n"
         "  alerts dismiss <n> --reason R --comment 'text'  Dismiss a code-scanning alert\n"
+        "  alerts reopen <n>      Put a dismissed code-scanning alert back to open\n"
         "  remote set <name> <url>  Add or re-point a remote at a github.com repo (https or ssh)\n"
         "  A gh subcommand in neither list is refused, never passed to gh.\n"
         "CI cure (the one citizen whose registry entry carries ci_cure: true):\n"
@@ -493,7 +500,7 @@ def page(command: str | None = None) -> str:
         "  gh label list|create       drone @git label list | label create <name>\n"
         "  gh pr create (another repo)  drone @git pr <title> --repo <path>\n"
         "  gh pr merge <n> --merge      drone @git merge <n> --repo <path> --confirm\n"
-        "  gh api .../code-scanning/alerts  drone @git alerts list | alerts dismiss <n>\n"
+        "  gh api .../code-scanning/alerts  drone @git alerts list | dismiss <n> | reopen <n>\n"
         "  Paths are read against your directory first, then the repo root.\n"
         "  No twin yet: git diff <range> -- <path> (use show <sha>). Ask @drone.\n"
         "\n" + repo_door.help_block() + "\n"

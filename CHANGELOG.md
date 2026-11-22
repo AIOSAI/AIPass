@@ -14,6 +14,7 @@ PyPI version — not the changelog header.
 ### Added
 
 - **drone: `drone @git alerts list --pr <n>`** (2026-11-21). Lists the code-scanning alerts of a pull request's merge ref, the ones the required check counts, and `alerts dismiss` accepts an alert that is open on a pull request only.
+- **drone: `drone @git alerts reopen <number>`** (2026-11-21). Puts a dismissed code-scanning alert back to open, for the owner tier, with a ledger row. An alert that is open or fixed, an unknown number and an unreadable state are each refused by name.
 
 ### Fixed
 

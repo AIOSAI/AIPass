@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.15.1
+# Version: 1.15.2
 # Created: 2026-03-30
 # Modified: 2026-11-21
 # =============================================
@@ -115,7 +115,7 @@ GH_SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
 CHORE_SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
     "release": {"read": ("list",), "write": ("edit",)},
     "label": {"read": ("list",), "write": ("create",)},
-    "alerts": {"read": ("list",), "write": ("dismiss",)},
+    "alerts": {"read": ("list",), "write": ("dismiss", "reopen")},
 }
 
 

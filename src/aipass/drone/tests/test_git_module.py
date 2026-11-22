@@ -1346,6 +1346,7 @@ class TestLabel:
 
 
 _ALERTS = f"api repos/{_SLUG}/code-scanning/alerts?per_page=100&page=1"
+_ALERT_PATH = f"repos/{_SLUG}/code-scanning/alerts/12"
 _ALERT_12 = {
     "number": 12,
     "state": "open",
@@ -1355,7 +1356,7 @@ _ALERT_12 = {
 
 
 class TestAlerts:
-    """alerts list reads code-scanning alerts; alerts dismiss closes an open one with its reason and comment."""
+    """alerts list reads code-scanning alerts; dismiss closes an open one with its reason and comment; reopen undoes it."""
 
     def test_list_prints_number_rule_severity_state_and_place_one_row_each(self, builder_seat: Path) -> None:
         """Mutant: the state query dropped — dismissed alerts are listed as if open."""
@@ -1416,12 +1417,11 @@ class TestAlerts:
     ) -> None:
         """Mutant: the flag's word sent as is — GitHub refuses dismissed_reason=false_positive."""
         calls: list = []
-        path = f"repos/{_SLUG}/code-scanning/alerts/12"
         patch_call = (
-            f"api -X PATCH {path} -f state=dismissed -f dismissed_reason=false positive "
+            f"api -X PATCH {_ALERT_PATH} -f state=dismissed -f dismissed_reason=false positive "
             "-f dismissed_comment=token_id is an id, not a secret"
         )
-        answers = {f"api {path}": _ALERT_12, patch_call: {}}
+        answers = {f"api {_ALERT_PATH}": _ALERT_12, patch_call: {}}
 
         result = _chore(
             "alerts",
@@ -1463,67 +1463,85 @@ class TestAlerts:
         assert result == {"stdout": "", "stderr": refusal, "exit_code": 1}
         assert calls == []
 
-    def test_an_alert_that_is_not_open_is_refused_and_nothing_is_patched(self, aipass_github: Path) -> None:
-        calls: list = []
-        dismissed = {**_ALERT_12, "state": "dismissed"}
-
-        result = _chore(
-            "alerts",
-            ["dismiss", "12", "--reason", "wont_fix", "--comment", "x"],
-            {f"api repos/{_SLUG}/code-scanning/alerts/12": dismissed},
-            calls,
-        )
-
-        assert result["stderr"] == alerts_handler.REFUSE_NOT_OPEN.format(number="12", slug=_SLUG, state="dismissed")
-        assert [argv[1] for argv, _ in calls] == [f"repos/{_SLUG}/code-scanning/alerts/12"]
-
     def test_a_pull_request_only_alert_open_on_its_instance_is_dismissed(self, aipass_github: Path) -> None:
         """Mutant: the instance state unread — GitHub's null top-level state refuses every PR-only alert."""
         calls: list = []
-        path = f"repos/{_SLUG}/code-scanning/alerts/12"
         pr_only = {**_ALERT_12, "state": None, "most_recent_instance": {"ref": "refs/heads/dev", "state": "open"}}
-        patch_call = f"api -X PATCH {path} -f state=dismissed -f dismissed_reason=won't fix -f dismissed_comment=x"
-
-        result = _chore(
-            "alerts",
-            ["dismiss", "12", "--reason", "wont_fix", "--comment", "x"],
-            {f"api {path}": pr_only, patch_call: {}},
-            calls,
+        patch_call = (
+            f"api -X PATCH {_ALERT_PATH} -f state=dismissed -f dismissed_reason=won't fix -f dismissed_comment=x"
         )
+        answers = {f"api {_ALERT_PATH}": pr_only, patch_call: {}}
+
+        result = _chore("alerts", ["dismiss", "12", "--reason", "wont_fix", "--comment", "x"], answers, calls)
 
         assert result["exit_code"] == 0, result
         assert " ".join(calls[-1][0]) == patch_call
 
     @pytest.mark.parametrize(
-        ("instance", "refusal"),
+        ("state", "instance", "refusal"),
         [
-            ({"state": "fixed"}, alerts_handler.REFUSE_NOT_OPEN.format(number="12", slug=_SLUG, state="fixed")),
-            ({}, alerts_handler.REFUSE_NO_STATE.format(number="12", slug=_SLUG)),
+            ("dismissed", {}, alerts_handler.REFUSE_NOT_OPEN.format(number="12", slug=_SLUG, state="dismissed")),
+            (None, {"state": "fixed"}, alerts_handler.REFUSE_NOT_OPEN.format(number="12", slug=_SLUG, state="fixed")),
+            (None, {}, alerts_handler.REFUSE_NO_STATE.format(number="12", slug=_SLUG)),
         ],
     )
-    def test_a_fixed_or_unreadable_state_is_refused_in_words_and_nothing_is_patched(
-        self, aipass_github: Path, instance: dict, refusal: str
+    def test_an_alert_not_open_or_unreadable_is_refused_in_words_and_nothing_is_patched(
+        self, aipass_github: Path, state: str | None, instance: dict, refusal: str
     ) -> None:
         """Mutant: any null state let through — a fixed alert is dismissed, or 'None' is printed."""
         calls: list = []
-        alert = {**_ALERT_12, "state": None, "most_recent_instance": instance}
+        alert = {**_ALERT_12, "state": state, "most_recent_instance": instance}
 
         result = _chore(
-            "alerts",
-            ["dismiss", "12", "--reason", "wont_fix", "--comment", "x"],
-            {f"api repos/{_SLUG}/code-scanning/alerts/12": alert},
-            calls,
+            "alerts", ["dismiss", "12", "--reason", "wont_fix", "--comment", "x"], {f"api {_ALERT_PATH}": alert}, calls
         )
 
         assert result == {"stdout": "", "stderr": refusal, "exit_code": 1}
         assert "None" not in result["stderr"]
-        assert [argv[1] for argv, _ in calls] == [f"repos/{_SLUG}/code-scanning/alerts/12"]
+        assert [argv[1] for argv, _ in calls] == [_ALERT_PATH]
 
-    def test_dismiss_from_a_seat_that_owns_nothing_is_refused_before_gh(self, builder_seat: Path) -> None:
-        """Mutant: dismiss left out of the write list — the global tier dismisses alerts."""
+    @pytest.mark.parametrize("args", [["dismiss", "12", "--reason", "wont_fix", "--comment", "x"], ["reopen", "12"]])
+    def test_a_write_from_a_seat_that_owns_nothing_is_refused_before_gh(self, builder_seat: Path, args: list) -> None:
+        """Mutant: dismiss or reopen left out of the write list — the global tier writes alerts."""
         calls: list = []
 
-        result = _chore("alerts", ["dismiss", "12", "--reason", "wont_fix", "--comment", "x"], {}, calls)
+        result = _chore("alerts", args, {}, calls)
 
         assert result["exit_code"] == 1 and "sentry" in result["stderr"]
         assert calls == []
+
+    def test_reopen_puts_a_dismissed_alert_back_to_open_and_records_it(
+        self, aipass_github: Path, tmp_path: Path
+    ) -> None:
+        """Mutant: the PATCH sends state=dismissed — GitHub keeps the alert closed."""
+        calls: list = []
+        patch_call = f"api -X PATCH {_ALERT_PATH} -f state=open"
+        answers = {f"api {_ALERT_PATH}": {**_ALERT_12, "state": "dismissed"}, patch_call: {}}
+
+        result = _chore("alerts", ["reopen", "12"], answers, calls)
+
+        assert result["stdout"] == f"Reopened alert #12 ({_ALERT_12['rule']['id']}) on github.com/{_SLUG}.", result
+        assert " ".join(calls[-1][0]) == patch_call
+        assert [(row["verb"], row["number"]) for row in chore_ledger(tmp_path)] == [("alerts reopen", 12)]
+
+    @pytest.mark.parametrize(
+        ("number", "state", "refusal"),
+        [
+            ("12", "open", alerts_handler.REFUSE_NOT_DISMISSED.format(number="12", slug=_SLUG, state="open")),
+            ("12", "fixed", alerts_handler.REFUSE_NOT_DISMISSED.format(number="12", slug=_SLUG, state="fixed")),
+            ("12", None, alerts_handler.REFUSE_REOPEN_NO_STATE.format(number="12", slug=_SLUG)),
+            ("99", None, alerts_handler.REFUSE_REOPEN_NO_ALERT.format(number="99", slug=_SLUG)),
+            ("twelve", None, alerts_handler.REFUSE_REOPEN_NUMBER),
+        ],
+    )
+    def test_reopen_refuses_in_words_anything_but_one_dismissed_alert(
+        self, aipass_github: Path, number: str, state: str | None, refusal: str
+    ) -> None:
+        """Mutant: the dismissed check removed — an open or fixed alert is PATCHed back to open."""
+        calls: list = []
+        alert = {**_ALERT_12, "state": None, "most_recent_instance": {"state": state}}
+
+        result = _chore("alerts", ["reopen", number], {f"api {_ALERT_PATH}": alert}, calls)
+
+        assert result == {"stdout": "", "stderr": refusal, "exit_code": 1}
+        assert not [argv for argv, _ in calls if "PATCH" in argv]
