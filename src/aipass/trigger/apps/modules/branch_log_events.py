@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: branch_log_events.py
 # Description: Branch log events module for log watcher public API
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-02-02
 # Modified: 2026-11-22
 # =============================================
@@ -108,7 +108,7 @@ def print_help() -> None:
     console.rule("MONITORING")
     console.print()
     console.print("  [dim]Path:[/dim]   every declared citizen's logs/*.log (memory's door, re-read every 300s)")
-    console.print("  [dim]Format:[/dim] Prax log format (timestamp | module | LEVEL | message)")
+    console.print("  [dim]Format:[/dim] prax log format (timestamp | module | LEVEL | message)")
     console.print()
     console.rule("EVENTS FIRED")
     console.print()

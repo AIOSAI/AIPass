@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic.py
 # Description: Medic toggle module for auto-healing error dispatch control
-# Version: 1.14.0
+# Version: 1.14.1
 # Created: 2026-02-12
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -162,11 +162,11 @@ def print_help() -> None:
     console.print()
     console.rule("HOW IT WORKS")
     console.print()
-    console.print("  Trigger watches branch logs  ->  fires error_detected event")
+    console.print("  trigger watches branch logs  ->  fires error_detected event")
     console.print("  ->  handler checks medic_enabled  ->  checks branch mute list")
     console.print("  ->  dispatches fix-it email to affected branch (or suppresses)")
     console.print()
-    console.print("  Prax rate tracker  ->  fires runaway_log_detected event")
+    console.print("  prax rate tracker  ->  fires runaway_log_detected event")
     console.print("  ->  handler checks per-file cooldown  ->  checks VOLUME mute list")
     console.print("  ->  dispatches runaway alert (CRITICAL bypasses the mute)")
     console.print()
