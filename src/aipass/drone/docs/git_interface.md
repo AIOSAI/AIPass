@@ -278,7 +278,7 @@ own repo. `--repo <path>` is the external-repo door, admin seat only. The reads 
 | `release edit <tag>` | owner | `gh release edit <tag> --notes-file -` |
 | `label list [--json]` | global | `gh label list --json name,color,description` |
 | `label create <name> [--color hex] [--description text]` | owner | `gh label create` |
-| `alerts list [--state open\|dismissed\|all] [--json]` | global | `gh api repos/OWNER/NAME/code-scanning/alerts` |
+| `alerts list [--state open\|dismissed\|all] [--pr <n>] [--json]` | global | `gh api repos/OWNER/NAME/code-scanning/alerts[?ref=refs/pull/<n>/merge]` |
 | `alerts dismiss <n> --reason R --comment 'text'` | owner | `gh api -X PATCH .../code-scanning/alerts/<n>` |
 
 **`release edit`** rewrites a published release's notes with the CHANGELOG.md block for its tag,
@@ -296,14 +296,20 @@ digits, with or without `#`.
 **`alerts dismiss`** requires `--comment`, which goes to GitHub with the reason, so every
 dismissal says why there; a missing or blank comment is refused by name, as is one over GitHub's
 280 characters. `--reason` takes `false_positive`, `wont_fix` or `used_in_tests`, sent in GitHub's
-words. Only an open alert is dismissed. `alerts list` prints number, rule id, severity, state and
-`file:line`, one row each.
+words. Only an open alert is dismissed: its state is the alert's own, or, for an alert that lives
+on a pull request ref only (GitHub leaves the top-level state null there), its latest instance's.
+A fixed or dismissed alert is refused by name, and one with no state anywhere is refused as
+unreadable. `alerts list` prints number, rule id, severity, state and
+`file:line`, one row each. `--pr <n>` reads pull request n's alerts, asking GitHub for the ref
+`refs/pull/<n>/merge`: an alert a pull request raises lives on that ref only, so the default
+branch's list never shows it. `--pr` takes one positive number and refuses anything else by name.
 
 Every write subcommand writes one line to AIPass's own `.ai_central/git_gh_writes.jsonl`, a no-op
 included: caller, verb, repo, OWNER/NAME, outcome (`written` or `unchanged`), and the verb's own
 fields (tag and both lengths; label, color and description; number, rule, reason and comment).
-Through the door the door's own ledger records the use as well. Pinned by `TestReleaseEdit`,
-`TestLabel`, `TestAlerts` and `TestChoresThroughTheDoor` in `tests/test_git_access_gh_door.py`.
+Through the door the door's own ledger records the use as well. Pinned by `TestReleaseEdit` and
+`TestChoresThroughTheDoor` in `tests/test_git_access_gh_door.py`, `TestLabel` and `TestAlerts` in
+`tests/test_git_module.py`.
 
 ---
 

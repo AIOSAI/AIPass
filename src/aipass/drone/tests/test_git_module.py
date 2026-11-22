@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
 # Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack, release
-# Version: 1.6.1
+# Version: 1.6.2
 # Created: 2026-04-21
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/git_module.py: command routing, help, the auth gate and the verbs it fronts."""
@@ -1380,6 +1380,37 @@ class TestAlerts:
             }
         ]
 
+    def test_list_pr_reads_the_pull_requests_merge_ref_beside_state_and_json(self, builder_seat: Path) -> None:
+        """Mutant: the ref query dropped — the default branch's alerts answer for the pull request."""
+        calls: list = []
+        ref = "&ref=refs/pull/828/merge"
+
+        result = _chore("alerts", ["list", "--pr", "828"], {f"{_ALERTS}&state=open{ref}": [_ALERT_12]}, calls)
+        everything = _chore("alerts", ["list", "--state", "all", "--json", "--pr=828"], {f"{_ALERTS}{ref}": []}, [])
+
+        assert result["stdout"] == "#12  py/clear-text-logging-sensitive-data  high  open  src/aipass/api/apps/x.py:40"
+        assert [argv[1] for argv, _ in calls] == [f"{_ALERTS}&state=open{ref}".removeprefix("api ")]
+        assert {key: json.loads(everything["stdout"])[key] for key in ("pr", "alerts")} == {"pr": 828, "alerts": []}
+
+    def test_list_refuses_an_unknown_flag_naming_the_flags_it_takes(self, builder_seat: Path) -> None:
+        """Mutant: the generic refusal alone — the caller is not told --pr exists."""
+        result = _chore("alerts", ["list", "--bogus"], {}, [])
+
+        assert result["exit_code"] == 1
+        assert result["stderr"].endswith(alerts_handler.REFUSE_LIST_ARGS) and "--bogus" in result["stderr"]
+
+    @pytest.mark.parametrize("value", ["0", "-3", "abc", "8.2", "#828"])
+    def test_list_pr_that_is_not_a_positive_number_is_refused_by_name_before_gh(
+        self, builder_seat: Path, value: str
+    ) -> None:
+        """Mutant: the --pr check removed — gh is asked for refs/pull/abc/merge."""
+        calls: list = []
+
+        result = _chore("alerts", ["list", f"--pr={value}"], {}, calls)
+
+        assert result == {"stdout": "", "stderr": alerts_handler.REFUSE_PR.format(pr=value), "exit_code": 1}
+        assert calls == []
+
     def test_dismiss_sends_the_reason_in_githubs_words_with_the_comment_and_records_both(
         self, aipass_github: Path, tmp_path: Path
     ) -> None:
@@ -1444,6 +1475,48 @@ class TestAlerts:
         )
 
         assert result["stderr"] == alerts_handler.REFUSE_NOT_OPEN.format(number="12", slug=_SLUG, state="dismissed")
+        assert [argv[1] for argv, _ in calls] == [f"repos/{_SLUG}/code-scanning/alerts/12"]
+
+    def test_a_pull_request_only_alert_open_on_its_instance_is_dismissed(self, aipass_github: Path) -> None:
+        """Mutant: the instance state unread — GitHub's null top-level state refuses every PR-only alert."""
+        calls: list = []
+        path = f"repos/{_SLUG}/code-scanning/alerts/12"
+        pr_only = {**_ALERT_12, "state": None, "most_recent_instance": {"ref": "refs/heads/dev", "state": "open"}}
+        patch_call = f"api -X PATCH {path} -f state=dismissed -f dismissed_reason=won't fix -f dismissed_comment=x"
+
+        result = _chore(
+            "alerts",
+            ["dismiss", "12", "--reason", "wont_fix", "--comment", "x"],
+            {f"api {path}": pr_only, patch_call: {}},
+            calls,
+        )
+
+        assert result["exit_code"] == 0, result
+        assert " ".join(calls[-1][0]) == patch_call
+
+    @pytest.mark.parametrize(
+        ("instance", "refusal"),
+        [
+            ({"state": "fixed"}, alerts_handler.REFUSE_NOT_OPEN.format(number="12", slug=_SLUG, state="fixed")),
+            ({}, alerts_handler.REFUSE_NO_STATE.format(number="12", slug=_SLUG)),
+        ],
+    )
+    def test_a_fixed_or_unreadable_state_is_refused_in_words_and_nothing_is_patched(
+        self, aipass_github: Path, instance: dict, refusal: str
+    ) -> None:
+        """Mutant: any null state let through — a fixed alert is dismissed, or 'None' is printed."""
+        calls: list = []
+        alert = {**_ALERT_12, "state": None, "most_recent_instance": instance}
+
+        result = _chore(
+            "alerts",
+            ["dismiss", "12", "--reason", "wont_fix", "--comment", "x"],
+            {f"api repos/{_SLUG}/code-scanning/alerts/12": alert},
+            calls,
+        )
+
+        assert result == {"stdout": "", "stderr": refusal, "exit_code": 1}
+        assert "None" not in result["stderr"]
         assert [argv[1] for argv, _ in calls] == [f"repos/{_SLUG}/code-scanning/alerts/12"]
 
     def test_dismiss_from_a_seat_that_owns_nothing_is_refused_before_gh(self, builder_seat: Path) -> None:

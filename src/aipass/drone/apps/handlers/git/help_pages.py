@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.13.1
+# Version: 1.13.3
 # Created: 2026-10-04
 # Modified: 2026-11-21
 # =============================================
@@ -261,8 +261,9 @@ def page(command: str | None = None) -> str:
         )
     if command == "alerts":
         return (
-            "git alerts list [--state open|dismissed|all] [--json] — Code-scanning alerts [global]\n"
+            "git alerts list [--state open|dismissed|all] [--pr <n>] [--json] — Code-scanning alerts [global]\n"
             "  One row each: number, rule id, severity, state, file:line. Default state: open.\n"
+            "  --pr <n> reads pull request n's alerts (its merge ref), which the default branch never shows.\n"
             "git alerts dismiss <number> --reason false_positive|wont_fix|used_in_tests\n"
             "    --comment 'text' — Dismiss an open alert [owner]\n"
             "  The comment is required and goes to GitHub with the reason; the ledger row\n"
@@ -273,12 +274,14 @@ def page(command: str | None = None) -> str:
                 alerts_handler.REFUSE_SUB.format(sub="<sub>"),
                 alerts_handler.REFUSE_STATE.format(state="<state>"),
                 alerts_handler.REFUSE_LIST_ARGS,
+                alerts_handler.REFUSE_PR.format(pr="<n>"),
                 alerts_handler.REFUSE_NUMBER,
                 alerts_handler.REFUSE_REASON.format(reason="<reason>"),
                 alerts_handler.REFUSE_NO_COMMENT,
                 alerts_handler.REFUSE_LONG_COMMENT.format(length="<n>", cap=alerts_handler.COMMENT_CAP),
                 alerts_handler.REFUSE_NO_ALERT.format(slug="<owner/name>", number="<n>"),
                 alerts_handler.REFUSE_NOT_OPEN.format(number="<n>", slug="<owner/name>", state="<state>"),
+                alerts_handler.REFUSE_NO_STATE.format(number="<n>", slug="<owner/name>"),
             )
             + _CHORE_REFUSALS
             + "  Example: drone @git alerts dismiss 12 --reason false_positive --comment 'why'\n"
@@ -425,7 +428,7 @@ def page(command: str | None = None) -> str:
         "  workflow list|view     gh workflow reads\n"
         "  release list           Published releases and their notes (release --help)\n"
         "  label list             The repo's GitHub labels (label --help)\n"
-        "  alerts list [--state S]  The repo's code-scanning alerts (alerts --help)\n"
+        "  alerts list [--state S] [--pr N]  The repo's code-scanning alerts (alerts --help)\n"
         "  issue create|comment --repo AIOSAI/AIPass --body 'text'\n"
         "                         File upstream from any seat; the body is signed\n"
         "                         with your seat and project\n"

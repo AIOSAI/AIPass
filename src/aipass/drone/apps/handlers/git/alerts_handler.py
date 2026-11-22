@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: alerts_handler.py
 # Description: alerts list | dismiss: a repo's code-scanning alerts through gh api
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-10-19
-# Modified: 2026-10-19
+# Modified: 2026-11-21
 # =============================================
 
 """``drone @git alerts list | dismiss``: the code-scanning alerts of the repo the command stands in.
@@ -29,18 +29,23 @@ _PAGE_SIZE = 100
 _MAX_PAGES = 10
 
 USAGE = (
-    "Usage: drone @git alerts list [--state open|dismissed|all] [--json] | "
+    "Usage: drone @git alerts list [--state open|dismissed|all] [--pr <n>] [--json] | "
     "alerts dismiss <number> --reason false_positive|wont_fix|used_in_tests --comment 'text'  [--repo <path>]"
 )
 REFUSE_SUB = "'alerts {sub}' is not served. Alerts: list, dismiss."
 REFUSE_STATE = "alerts list --state takes open, dismissed or all; '{state}' is not one."
-REFUSE_LIST_ARGS = "alerts list takes only --state and --json."
+REFUSE_LIST_ARGS = "alerts list takes only --state, --pr and --json."
+REFUSE_PR = "alerts list --pr takes one pull request number; '{pr}' is not one."
 REFUSE_NUMBER = "alerts dismiss needs one alert number: drone @git alerts dismiss <number> --reason R --comment 'text'"
 REFUSE_REASON = "alerts dismiss --reason takes false_positive, wont_fix or used_in_tests; '{reason}' is not one."
 REFUSE_NO_COMMENT = "alerts dismiss refused: --comment is required. A dismissal says why: --comment 'text'."
 REFUSE_LONG_COMMENT = "alerts dismiss refused: --comment is {length} characters; GitHub takes at most {cap}."
 REFUSE_NO_ALERT = "alerts dismiss refused: github.com/{slug} has no code-scanning alert #{number}."
 REFUSE_NOT_OPEN = "alerts dismiss refused: alert #{number} on github.com/{slug} is {state}, not open."
+REFUSE_NO_STATE = (
+    "alerts dismiss refused: GitHub gave no state for alert #{number} on github.com/{slug}, "
+    "so it cannot be checked as open."
+)
 
 
 def _row(alert: dict) -> dict:
@@ -58,14 +63,23 @@ def _row(alert: dict) -> dict:
 
 
 def _list(args: list[str], slug: str, as_json: bool) -> dict:
-    """``alerts list``: one row per alert, newest first as GitHub orders them."""
-    positionals, values = gh_chores.parse_flags(args, ("--state",), "alerts list")
+    """``alerts list``: one row per alert, newest first as GitHub orders them; ``--pr n`` reads that pull request."""
+    try:
+        positionals, values = gh_chores.parse_flags(args, ("--state", "--pr"), "alerts list")
+    except ChoreRefusal as refusal:
+        raise ChoreRefusal(f"{str(refusal).rstrip('.')}. {REFUSE_LIST_ARGS}") from refusal
     if positionals:
         raise ChoreRefusal(REFUSE_LIST_ARGS)
     state = values.get("--state", "open")
     if state not in STATES:
         raise ChoreRefusal(REFUSE_STATE.format(state=state))
+    pr = values.get("--pr")
+    if pr is not None and not (pr.isascii() and pr.isdigit() and int(pr) > 0):
+        raise ChoreRefusal(REFUSE_PR.format(pr=pr))
+    pr_number = int(pr) if pr is not None else None
     query = "" if state == "all" else f"&state={state}"
+    # A pull request's alerts live on its merge ref only; the default branch never shows them.
+    query += f"&ref=refs/pull/{pr}/merge" if pr else ""
     rows: list[dict] = []
     for page in range(1, _MAX_PAGES + 1):
         path = f"repos/{slug}/code-scanning/alerts?per_page={_PAGE_SIZE}&page={page}{query}"
@@ -76,11 +90,14 @@ def _list(args: list[str], slug: str, as_json: bool) -> dict:
         rows += [_row(alert) for alert in batch]
         if len(batch) < _PAGE_SIZE:
             break
-    json_handler.log_operation("git_alerts_list", {"github": slug, "state": state, "count": len(rows)})
+    json_handler.log_operation("git_alerts_list", {"github": slug, "state": state, "pr": pr_number, "count": len(rows)})
     if as_json:
-        return gh_chores.json_answer({"ok": True, "github": slug, "state": state, "count": len(rows), "alerts": rows})
+        return gh_chores.json_answer(
+            {"ok": True, "github": slug, "state": state, "pr": pr_number, "count": len(rows), "alerts": rows}
+        )
     if not rows:
-        return gh_chores.answer(f"No {'' if state == 'all' else state + ' '}code-scanning alerts on github.com/{slug}.")
+        where = f"pull request #{pr} on github.com/{slug}" if pr else f"github.com/{slug}"
+        return gh_chores.answer(f"No {'' if state == 'all' else state + ' '}code-scanning alerts on {where}.")
     lines = [
         f"#{row['number']}  {row['rule']}  {row['severity']}  {row['state']}  {row['path']}:{row['line']}"
         for row in rows
@@ -109,8 +126,12 @@ def _dismiss(args: list[str], repo_root: Path, slug: str, caller: str) -> dict:
         if gh_chores.is_not_found(refusal):
             raise ChoreRefusal(REFUSE_NO_ALERT.format(slug=slug, number=number)) from refusal
         raise
-    if not isinstance(alert, dict) or alert.get("state") != "open":
-        state = alert.get("state") if isinstance(alert, dict) else None
+    alert = alert if isinstance(alert, dict) else {}
+    # An alert on a pull request ref only has a null top-level state; its instance carries it.
+    state = alert.get("state") or (alert.get("most_recent_instance") or {}).get("state")
+    if not state:
+        raise ChoreRefusal(REFUSE_NO_STATE.format(number=number, slug=slug))
+    if state != "open":
         raise ChoreRefusal(REFUSE_NOT_OPEN.format(number=number, slug=slug, state=state))
     gh_chores.gh(
         [
@@ -141,7 +162,7 @@ def _dismiss(args: list[str], repo_root: Path, slug: str, caller: str) -> dict:
 
 
 def alerts_command(args: list[str], repo_root: Path, caller: str) -> dict:
-    """``alerts list [--state S] [--json] | alerts dismiss <n> --reason R --comment 'text'``, as a routing result."""
+    """``alerts list [--state S] [--pr n] [--json] | dismiss <n> --reason R --comment 'text'``, as a routing result."""
     as_json = wants_json(args)
     args = strip_json_flag(args)
     try:
