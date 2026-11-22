@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: activity_collector.py
 # Description: Branch Activity Data Collector
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2026-01-30
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -38,8 +38,12 @@ def _repo_root() -> Path:
 
 
 def get_branch_paths() -> List[Dict[str, str]]:
-    """Every citizen in @memory's fleet (core, residents, externals): registry name and absolute path."""
-    return [{"name": b["name"], "path": str(b["path"])} for b in fleet_branches(_repo_root(), name_from="registry")]
+    """Every citizen in @memory's fleet (core, residents, externals): lowercase registry name and absolute path.
+
+    Lowercase whatever the row holds: every report and lookup is keyed by this name, and the system speaks lowercase.
+    """
+    rows = fleet_branches(_repo_root(), name_from="registry")
+    return [{"name": b["name"].lower(), "path": str(b["path"])} for b in rows]
 
 
 def _get_file_mtime(file_path: Path) -> Optional[datetime]:

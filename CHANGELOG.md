@@ -37,6 +37,7 @@ PyPI version — not the changelog header.
 
 - **spawn: the system stores an agent's name in lowercase** (2026-11-22). Every row spawn writes (`create`, adopt, `add_to_registry`, `sync-registry --fix`, `--rebuild`, `repair --rename`) holds the name in lowercase, and `normalize_branch_name` defaults to lowercase. In the citizen template the capital name token stays in markdown only; the Python files, the dashboard and the birth certificate take the lowercase one. Rows already in a registry are not rewritten by this change. Documents may still write a name with capitals: they are prose, not read by the runtime.
 - **ai_mail: a message's `from_name` is stored in lowercase** (2026-11-22). Every writer (send, reply, delivery into a mailbox, the stop and error mails, the unknown-sender fallback) stores it in lowercase, whatever the caller hands in. The alias lookup folds case, so mail stored earlier with a capital name still matches. Stored mail is not rewritten.
+- **daemon: activity reports name a branch in lowercase** (2026-11-22). The report's keys were the raw registry row name, capitals for some rows. `get_branch_paths()` lowercases the name once, so the activity, red-flag, memory-health and `--json` keys are lowercase on any registry. `branch-health` still resolves a name typed in any case.
 
 ## [2026-11-21] — v2.8.41: a chaos round against the fleet and its cures, the watchdog waits for the mail, the docs catch up with the code
 
