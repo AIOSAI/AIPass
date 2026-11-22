@@ -137,10 +137,10 @@ The boring stuff works. One human and these agents built it, and use it every da
 - **Mail and dispatch.** Agents send each other tasks and results, and wake whoever they are waiting on, on Claude Code, on Codex (`--provider codex`) or on OpenCode (`--provider opencode`).
 - **Plans that carry context.** Work is written down as a plan, so whoever picks it up knows why it exists and where it stands.
 - **Gates.** Hooks decide which agent may [edit which files](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/edit_gate.md). Git goes through [one door](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/git_gate.md). Raw deletes are refused. [Provider settings](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/settings_gate.md) (`~/.claude/settings.json`, `~/.codex/`) change only with the owner's yes.
-- **Works in your own repos.** A project that holds an agent calls the fleet right away. For the fleet to send work to it, declare it once with `drone @memory roots add <path>`.
+- **Works in your own repos.** A project that holds an agent calls the fleet right away. For the fleet to send work to it, declare it once with `drone @memory roots add <path>` (on a new install, `drone @memory roots init` first).
 - **Standards audits.** AIPass's own 18 agents are audited against [one written standard](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/sentry/docs/aipass_standards.md); `drone @sentry audit` runs the same checks on yours.
 - **Logs and backups.** Every agent logs to its own place, and runaway logs are caught. Local snapshots you can restore from, with optional Google Drive sync.
-- **The daemon.** `drone @daemon install-timer` starts a scheduler for recurring jobs, and each agent owns its own schedule.
+- **The daemon.** `drone @daemon install-timer`, run from devpulse's folder, starts a scheduler for recurring jobs, and each agent owns its own schedule. The timer wakes the whole fleet, so only the admin seat installs or removes it.
 - **Everything local.** Memory and mail are files on your machine. Nothing leaves it except what the CLI you run (Claude Code, or Codex or OpenCode when a seat runs on it) sends to its own provider, unless you turn on an outside API or Drive sync with your own keys. The phone face serves on your own tailnet, and the first memory search downloads its small embedding model once.
 
 ## What install changes
@@ -163,7 +163,7 @@ The installer writes a layer outside the project. Remove all of it to erase AIPa
 - `git config --global pull.rebase true`, set only if install also set your identity.
 - Only if a `codex` binary was on PATH at install: the AIPass Codex hooks are merged into `~/.codex/hooks.json` (`$CODEX_HOME/hooks.json` when set) from `.claude/provider_manifest.json`, your own rows kept, and four pins (`memories`, `collaboration_modes`, `include_collaboration_mode_instructions`, `tools.experimental_request_user_input.enabled`, all `false`) are set in `~/.codex/config.toml` one line each, every other line kept, after a backup and with a receipt. Run `codex` once and choose 'Trust all and continue', or a headless run skips the hooks.
 - Only if an `opencode` binary was on PATH (or in `~/.opencode/bin`) at install: the AIPass plugin is copied to `~/.config/opencode/plugins/aipass.ts`, after a backup and with a receipt. It runs the same hooks and gates on OpenCode.
-- Only if you ran `drone @daemon install-timer`: a systemd user timer, with its `daemon-tick.log` under `~/.aipass/`, removed by `drone @daemon uninstall-timer`.
+- Only if you ran `drone @daemon install-timer`: a systemd user timer, with its `daemon-tick.log` under `~/.aipass/`, removed by `drone @daemon uninstall-timer` from the same folder.
 - Unless you pass `--no-baud`, `aipass install` sets up the host API (the `./aipass install` clone route skips this step): its bind, token and pairings as keyring entries (pairing codes are stored as hashes once one is minted), its write lock and pairing receipts under `~/.secrets/aipass/`, and the `aipass-host-api.service` user unit under `~/.config/systemd/user/` (`systemctl --user disable --now aipass-host-api.service` removes it from boot).
 - Linux with no Python 3.10+ stops the install and says so; nothing is installed to provide one.
 
@@ -317,7 +317,7 @@ Use spawn's delete command to cleanly archive and deregister:
 drone @spawn delete @agent_name --retire   # asks for confirmation; --yes skips it
 ```
 
-This copies the agent's directory to `.archive/deleted_branches/` (minus `.venv`, `.git`, caches), removes it from the registry, then deletes the original. The fleet's own core agents (spawn, drone, devpulse, the registry owner) refuse deletion. Every agent you create is registered, and a plain `delete` refuses it too: `--retire` is the door, and the archived copy of its passport records that it was retired.
+This copies the agent's directory to `.archive/deleted_branches/` (minus `.venv`, `.git`, caches), removes it from the registry, then deletes the original. The fleet's own core agents (spawn, drone, devpulse, the registry owner) refuse deletion. Every agent you create is registered, and a plain `delete` refuses it too: `--retire` is the door, and the archived copy of its passport records that it was retired. A real delete or retire runs for the verified admin seat only, and every other caller is refused: [admin setup](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/aipass/docs/admin_setup.md) describes that lane.
 
 </details>
 
