@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Log File Monitor
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-23
 # Modified: 2026-11-22
 # =============================================
@@ -107,7 +107,7 @@ class LogFileWatcher(FileSystemEventHandler):
         except Exception as e:
             logger.info(f"Error reading log file {file_path}: {e}")
 
-    _HOOK_PATTERN = re.compile(r"\[HOOKS\]\s+(\w+)\s+(\w+)")
+    _HOOK_PATTERN = re.compile(r"\[HOOKS\]\s+(\w+)\s+(\w+)", re.IGNORECASE)
 
     def _extract_hook_info(self, log_line: str) -> Optional[Dict[str, str]]:
         """Extract hook event info from structured [HOOKS] log lines.
@@ -203,7 +203,7 @@ class LogFileWatcher(FileSystemEventHandler):
                 command = " ".join(args)
                 return {"command": f"drone {command}", "caller": None, "target": self._extract_target_from_cmd(command)}
 
-        if "[FLOW]" in log_line or "FLOW_PLAN]" in log_line:
+        if "[flow]" in log_line.lower() or "flow_plan]" in log_line.lower():
             result = self._match_flow_command(log_line)
             if result:
                 return result
@@ -259,8 +259,8 @@ class LogFileWatcher(FileSystemEventHandler):
 
         # Routing carries the caller; it must match before the generic Executing match below.
         # Format: "Routing @flow [CALLER:PRAX] → create ['.', 'Subject']"
-        if "Routing @" in log_line and "[CALLER:" in log_line:
-            caller_match = re.search(r"\[CALLER:(\w+)\]", log_line)
+        if "Routing @" in log_line and "[caller:" in log_line.lower():
+            caller_match = re.search(r"\[CALLER:(\w+)\]", log_line, re.IGNORECASE)
             caller = caller_match.group(1).lower() if caller_match else None
 
             route_match = re.search(r"Routing\s+@(\w+).*?→\s*(\S+)\s*(.*)", log_line)
@@ -279,10 +279,12 @@ class LogFileWatcher(FileSystemEventHandler):
 
     def _match_executing_command(self, log_line: str) -> Optional[Dict[str, Optional[str]]]:
         """Match 'Executing command' log lines and extract caller/target info."""
-        caller_match = re.search(r"\[CALLER:(\w+)\]", log_line)
+        caller_match = re.search(r"\[CALLER:(\w+)\]", log_line, re.IGNORECASE)
         caller = caller_match.group(1).lower() if caller_match else None
 
-        cmd_match = re.search(r"Executing(?:\s+activated)?\s+command(?:\s*\[CALLER:\w+\])?:\s*(.+)", log_line)
+        cmd_match = re.search(
+            r"Executing(?:\s+activated)?\s+command(?:\s*\[CALLER:\w+\])?:\s*(.+)", log_line, re.IGNORECASE
+        )
         if not cmd_match:
             return None
 

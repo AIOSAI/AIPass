@@ -131,8 +131,8 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 - `aipass.trigger` — event firing. The logging path never touches it; the monitor and
   log-health modules import it at call time.
 - Python stdlib: `pathlib`, `logging`, `threading`, `argparse`, `importlib`.
-- **@drone is not an import.** Prax never imports drone; it parses the `[CALLER:BRANCH]`
-  marker drone writes into its own log lines, and reads `AIPASS_CALLER_CWD` from the
+- **@drone is not an import.** Prax never imports drone; it parses the `[CALLER:<branch>]`
+  marker drone writes into its own log lines (in either case), and reads `AIPASS_CALLER_CWD` from the
   environment. The coupling is a text format, not a dependency.
 - The json service imports stdlib only, on purpose: a fresh interpreter can reach
   `json_handler` without loading a third-party package.

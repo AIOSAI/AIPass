@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_commons_feed.py
 # Description: Tests for the commons live feed handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-21
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/monitoring/commons_feed.py."""
@@ -310,6 +310,14 @@ class TestFeedState:
         state = feed.FeedState()
         state.room_filter = {"dev"}
         assert state.visible({"room_name": "dev"}) is True
+        assert state.visible({"room_name": "general"}) is False
+
+    def test_room_filter_ignores_case(self):
+        """Mutant: dropping either .lower() (the typed room or the event's room) hides the match."""
+        state = feed.FeedState()
+        feed._handle_feed_cmd("filter", ["Dev"], state)
+        assert state.visible({"room_name": "dev"}) is True
+        assert state.visible({"room_name": "DEV"}) is True
         assert state.visible({"room_name": "general"}) is False
 
 

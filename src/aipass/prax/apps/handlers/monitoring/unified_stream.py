@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: unified_stream.py
 # Description: Unified Display Handler
-# Version: 0.6.0
+# Version: 0.7.0
 # Created: 2025-11-23
 # Modified: 2026-11-22
 # =============================================
@@ -54,7 +54,12 @@ BRANCH_COLORS = {
     "security": "red",
     "trigger": "bright_red",
     "speakeasy": "bright_white",
-    "the_commons": "bright_green",
+    "commons": "bright_green",
+    "canary": "bright_white",
+    "daemon": "blue",
+    "hooks": "bright_blue",
+    "skills": "bright_magenta",
+    "spawn": "green",
     "assistant": "bright_yellow",
     "aipass": "bold white",  # All internal AIPass agent sessions
     "aipl": "bright_blue",  # AIPL external project

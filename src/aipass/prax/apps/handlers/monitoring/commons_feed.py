@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: commons_feed.py
 # Description: Commons Live Social Feed (read-only monitor view)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-07-21
 # Modified: 2026-11-22
 # =============================================
@@ -290,7 +290,7 @@ class FeedState:
         """Whether the active room filter allows this event to display."""
         if not self.room_filter:
             return True
-        return event_room(event) in self.room_filter
+        return event_room(event).lower() in self.room_filter
 
 
 def _feed_help_text() -> str:
@@ -328,7 +328,7 @@ def _handle_feed_cmd(cmd: str, cmd_args: List[str], state: FeedState) -> None:
             state.room_filter = None
             warning("Filter cleared — showing all rooms")
             return
-        rooms = {room.strip() for token in cmd_args for room in token.split(",") if room.strip()}
+        rooms = {room.strip().lower() for token in cmd_args for room in token.split(",") if room.strip()}
         state.room_filter = rooms
         warning(f"Filtering to rooms: {', '.join(sorted(rooms))}")
         return

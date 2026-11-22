@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_log_watcher.py
 # Description: Tests for log file monitoring handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-04-03
 # Modified: 2026-11-22
 # =============================================
@@ -147,6 +147,21 @@ class TestExtractCommandInfo:
         result = watcher._extract_command_info(line)
         assert result == {"command": "flow create plan", "caller": None, "target": None}
 
+    def test_flow_tag_in_lowercase_gives_the_same_event(self):
+        """Mutant: the flow match back to a case-sensitive "[FLOW]" drops the lowercase line."""
+        mod = _import_log_watcher()
+        watcher, _ = _make_watcher(mod)
+        assert watcher._extract_command_info("[flow] Creating new flow plan") == {
+            "command": "flow create plan",
+            "caller": None,
+            "target": None,
+        }
+        assert watcher._extract_command_info("[flow_plan] Closing FPLAN-0164") == {
+            "command": "flow close plan 0164",
+            "caller": None,
+            "target": None,
+        }
+
     def test_flow_closing_plan(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
@@ -212,6 +227,15 @@ class TestExtractCommandInfo:
         watcher, _ = _make_watcher(mod)
         line = "Routing @flow [CALLER:PRAX] \u2192 create ['.', 'Subject']"
         result = watcher._extract_command_info(line)
+        assert result is not None
+        assert result["caller"] == "prax"
+        assert result["target"] == "flow"
+
+    def test_caller_tag_in_lowercase_gives_the_same_routing(self):
+        """Mutant: the "[CALLER:" gate or its regex back to case-sensitive loses the caller."""
+        mod = _import_log_watcher()
+        watcher, _ = _make_watcher(mod)
+        result = watcher._extract_command_info("Routing @flow [caller:prax] \u2192 create ['.', 'Subject']")
         assert result is not None
         assert result["caller"] == "prax"
         assert result["target"] == "flow"
@@ -718,6 +742,16 @@ class TestMatchExecutingCommand:
         assert result["caller"] == "drone"
         assert result["target"] == "prax"
 
+    def test_lowercase_caller_tag_gives_the_same_result(self):
+        """Mutant: the command regex back to case-sensitive leaves "[caller:x]:" unmatched -> None."""
+        mod = _import_log_watcher()
+        watcher, _ = _make_watcher(mod)
+        line = "Executing command [caller:drone]: /path/to/aipass/sentry/apps/audit.py @prax"
+        result = watcher._match_executing_command(line)
+        assert result is not None
+        assert result["caller"] == "drone"
+        assert result["target"] == "prax"
+
     def test_without_caller(self):
         """Should work without CALLER tag."""
         mod = _import_log_watcher()
@@ -908,6 +942,14 @@ class TestExtractHookInfo:
         assert result["name"] == "cadence"
         assert result["action"] == "skipped"
         assert result["loader"] == "branch"
+
+    def test_lowercase_hooks_tag_gives_the_same_event(self):
+        """Mutant: _HOOK_PATTERN without re.IGNORECASE drops a "[hooks]" line."""
+        mod = _import_log_watcher()
+        watcher, _ = _make_watcher(mod)
+        line = "cadence fired loader=global turn=35 period=5 offset=0 session=abc12345"
+        assert watcher._extract_hook_info(f"[hooks] {line}") == watcher._extract_hook_info(f"[HOOKS] {line}")
+        assert watcher._extract_hook_info(f"[hooks] {line}")["action"] == "fired"
 
     def test_non_hook_line_returns_none(self):
         """Non-hook log lines should return None."""
