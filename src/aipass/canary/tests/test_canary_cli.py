@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_canary_cli.py
 # Description: Tests for canary's entry point routing, help and introspection
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-22
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/canary.py, the entry point: routing, help and introspection."""
@@ -56,8 +56,7 @@ def test_print_introspection_renders_identity_and_help_pointer(capsys):
     canary_entry.print_introspection()
 
     out = capsys.readouterr().out
-    assert "CANARY" in out
-    assert "Permanent Test Citizen" in out
+    assert "canary - Permanent Test Citizen" in out
     assert "--help" in out
 
 
@@ -108,8 +107,7 @@ def test_version_flag_prints_version(monkeypatch, capsys, flag):
     assert _run(monkeypatch, [flag]) == 0
 
     out = capsys.readouterr().out
-    assert "CANARY" in out
-    assert canary_entry.__version__ in out
+    assert f"canary v{canary_entry.__version__}" in out
 
 
 def test_route_command_returns_true_for_known_command(stub_module):

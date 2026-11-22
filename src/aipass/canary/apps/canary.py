@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: canary.py
 # Description: Entry point CLI for drone @canary — permanent test citizen
-# Version: 2.7.0
+# Version: 2.7.1
 # Created: 2026-08-20
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
-"""CANARY Branch - Main Orchestrator
+"""canary Branch - Main Orchestrator
 
 Reference: docs/command_surface.md.
 """
@@ -24,7 +24,7 @@ os.environ.setdefault("AIPASS_BRANCH_NAME", "canary")
 from aipass.cli import console, error, reset_command_state, resolve_exit
 from aipass.prax import logger
 
-__version__ = "2.7.0"
+__version__ = "2.7.1"
 
 MODULES_DIR = Path(__file__).parent / "modules"
 
@@ -50,7 +50,7 @@ def discover_modules() -> List[Any]:
             if hasattr(module, "handle_command"):
                 modules.append(module)
         except Exception as e:
-            logger.error("[CANARY] Failed to load module %s: %s", module_name, e)
+            logger.error("[canary] Failed to load module %s: %s", module_name, e)
 
     return modules
 
@@ -67,7 +67,7 @@ def print_introspection() -> None:
     modules = discover_modules()
 
     console.print()
-    console.print("[bold cyan]CANARY - Permanent Test Citizen[/bold cyan]")
+    console.print("[bold cyan]canary - Permanent Test Citizen[/bold cyan]")
     console.print()
     console.print("[dim]Spawned, dispatched, resumed and broken so the working fleet never is[/dim]")
     console.print()
@@ -88,9 +88,9 @@ def print_introspection() -> None:
 
 
 def print_help() -> None:
-    """Rich-formatted top-level help for CANARY."""
+    """Rich-formatted top-level help for canary."""
     console.print()
-    console.print("[bold cyan]CANARY - Permanent Test Citizen[/bold cyan]")
+    console.print("[bold cyan]canary - Permanent Test Citizen[/bold cyan]")
     console.print()
     console.print("[dim]Spawned, dispatched, resumed and broken so the working fleet never is[/dim]")
     console.print()
@@ -148,7 +148,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
             if module.handle_command(command, args):
                 return True
         except Exception as e:
-            logger.error("[CANARY] Module %s error: %s", module.__name__, e)
+            logger.error("[canary] Module %s error: %s", module.__name__, e)
     return False
 
 
@@ -179,7 +179,7 @@ def main() -> int:
         return 0
 
     if args[0] in ("--version", "-V"):
-        console.print(f"CANARY v{__version__}")
+        console.print(f"canary v{__version__}")
         return 0
 
     command = args[0]
@@ -202,5 +202,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as exc:
-        logger.error("[CANARY] Unhandled error in main: %s", exc)
+        logger.error("[canary] Unhandled error in main: %s", exc)
         sys.exit(1)
