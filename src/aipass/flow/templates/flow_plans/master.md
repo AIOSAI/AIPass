@@ -492,8 +492,8 @@ Track issues here as encountered. Don't fix during build - log + continue.
 - [ ] Issues Log reviewed - High/Med issues addressed
 - [ ] Full branch audit: `drone @sentry audit aipass @branch`
 - [ ] Branch memories updated:
-  - [ ] `BRANCH.local.json` - full session log
-  - [ ] `BRANCH.observations.json` - patterns learned
+  - [ ] `.trinity/local.json` - full session log
+  - [ ] `.trinity/observations.json` - patterns learned
 - [ ] README.md updated (status, architecture, API - if build changed capabilities)
 - [ ] `docs/` pages updated (every page that describes what this build changed, in present tense)
 - [ ] Artifacts reviewed (devpulse manages cleanup)

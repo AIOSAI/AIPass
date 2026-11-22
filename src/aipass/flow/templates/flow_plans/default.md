@@ -235,8 +235,8 @@ drone @ai_mail email @devpulse "Production stopped: {plan_number}" "Issue: [desc
 - [ ] Agent output reviewed + verified
 - [ ] Sentry checklist on ! code: `drone @sentry checklist <file>`
 - [ ] Branch memories updated:
-  - [ ] `BRANCH.local.json` - session/work log
-  - [ ] `BRANCH.observations.json` - patterns learned (if any)
+  - [ ] `.trinity/local.json` - session/work log
+  - [ ] `.trinity/observations.json` - patterns learned (if any)
 - [ ] README.md updated (if build changed status/capabilities)
 - [ ] `docs/` pages updated (every page that describes what this build changed, in present tense)
 - [ ] Status email > @devpulse:
