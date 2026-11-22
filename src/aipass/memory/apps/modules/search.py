@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: search.py
 # Description: Search Orchestration Module
-# Version: 0.7.1
+# Version: 0.7.2
 # Created: 2025-11-27
 # Modified: 2026-11-22
 # =============================================
@@ -140,7 +140,7 @@ def show_search_results(
 ) -> bool:
     """Execute semantic search via handler and display results with Rich."""
     console.print()
-    console.print(Panel.fit("[bold cyan]Memory - Semantic Search[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+    console.print(Panel.fit("[bold cyan]memory - Semantic Search[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     console.print(f"[cyan]Query:[/cyan] {query}")

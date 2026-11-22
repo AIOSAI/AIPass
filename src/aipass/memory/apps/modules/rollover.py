@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rollover.py
 # Description: Rollover Orchestration Module
-# Version: 0.11.0
+# Version: 0.11.1
 # Created: 2025-11-16
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -311,7 +311,7 @@ def run_rollover(branch: str | None = None) -> bool:
     Returns the vector rollover's outcome only; the todo roll never changes it.
     """
     console.print()
-    console.print(Panel.fit("[bold cyan]Memory - Rollover Execution[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+    console.print(Panel.fit("[bold cyan]memory - Rollover Execution[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     _todo_report(todo_report.roll_pad(branch))
@@ -437,7 +437,7 @@ def _normalize_rolled(rolled: List[str]) -> None:
 def process_plans_command() -> None:
     """Process pending plan files into vector storage in one embed + store call."""
     console.print()
-    console.print(Panel.fit("[bold cyan]Memory - Process Plans[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+    console.print(Panel.fit("[bold cyan]memory - Process Plans[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     console.print("[cyan]Processing plan files into vector storage...[/cyan]")
@@ -493,7 +493,7 @@ def push_defaults(json_mode: bool = False) -> None:
 
     if not ctx.on:
         console.print()
-        console.print(Panel.fit("[bold cyan]Memory - Push Defaults[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+        console.print(Panel.fit("[bold cyan]memory - Push Defaults[/bold cyan]", border_style="cyan", box=box.ROUNDED))
         console.print()
 
         console.print("[cyan]Overwriting all per_branch limits with defaults...[/cyan]")
@@ -518,7 +518,7 @@ def push_defaults(json_mode: bool = False) -> None:
 def show_status() -> None:
     """Show rollover statistics for all branches."""
     console.print()
-    console.print(Panel.fit("[bold cyan]Memory - Rollover Status[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+    console.print(Panel.fit("[bold cyan]memory - Rollover Status[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     stats_result = detector.get_rollover_stats()
@@ -571,7 +571,7 @@ def show_status() -> None:
 def check_triggers(branch: str | None = None) -> None:
     """Check which branches need rollover (without executing), then ONE branch's todo pad."""
     console.print()
-    console.print(Panel.fit("[bold cyan]Memory - Rollover Check[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+    console.print(Panel.fit("[bold cyan]memory - Rollover Check[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     _check_fleet_triggers()

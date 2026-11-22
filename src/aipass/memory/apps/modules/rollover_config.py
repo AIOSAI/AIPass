@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rollover_config.py
 # Description: The `config` verb surface over rollover limits - get / set / set-default
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-09-15
-# Modified: 2026-11-20
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -225,7 +225,7 @@ def handle_config_get(args: List[str], ctx: _Json) -> None:
     if not ctx.on:
         console.print()
         console.print(
-            Panel.fit("[bold cyan]Memory - Rollover Limits[/bold cyan]", border_style="cyan", box=box.ROUNDED)
+            Panel.fit("[bold cyan]memory - Rollover Limits[/bold cyan]", border_style="cyan", box=box.ROUNDED)
         )
         console.print()
 

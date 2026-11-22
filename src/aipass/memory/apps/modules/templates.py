@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: templates.py
 # Description: Gold-source template lane — spawn scaffold propagation, receipt status, and the bump site
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-02-14
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Template Lane
@@ -118,7 +118,7 @@ def _run_spawn_push(dry_run: bool) -> None:
     console.print()
     mode = "DRY RUN" if dry_run else "PUSH"
     console.print(
-        Panel.fit(f"[bold cyan]Memory - Spawn Templates · {mode}[/bold cyan]", border_style="cyan", box=box.ROUNDED)
+        Panel.fit(f"[bold cyan]memory - Spawn Templates · {mode}[/bold cyan]", border_style="cyan", box=box.ROUNDED)
     )
     console.print()
 
@@ -165,7 +165,7 @@ def _show_status() -> None:
     """Report which branches carry the current template version."""
     console.print()
     console.print(
-        Panel.fit("[bold cyan]Memory - Template Version Status[/bold cyan]", border_style="cyan", box=box.ROUNDED)
+        Panel.fit("[bold cyan]memory - Template Version Status[/bold cyan]", border_style="cyan", box=box.ROUNDED)
     )
     console.print()
 
@@ -233,7 +233,7 @@ def _run_bump(confirm: bool) -> None:
     console.print()
     mode = "EXECUTE" if confirm else "DRY RUN"
     console.print(
-        Panel.fit(f"[bold cyan]Memory - Template Bump · {mode}[/bold cyan]", border_style="cyan", box=box.ROUNDED)
+        Panel.fit(f"[bold cyan]memory - Template Bump · {mode}[/bold cyan]", border_style="cyan", box=box.ROUNDED)
     )
     console.print()
 

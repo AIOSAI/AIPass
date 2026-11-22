@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watch.py
 # Description: Memory Watcher Module
-# Version: 0.2.0
+# Version: 0.2.1
 # Created: 2026-08-13
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -77,7 +77,7 @@ def _start_session() -> None:
     signal.signal(signal.SIGINT, signal_handler)
 
     console.print()
-    console.print(Panel.fit("[bold cyan]Memory - Watch Mode[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+    console.print(Panel.fit("[bold cyan]memory - Watch Mode[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     result = start_watching()

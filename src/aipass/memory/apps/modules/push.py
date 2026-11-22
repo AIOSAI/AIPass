@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: push.py
 # Description: The trinity push lane — dry-run reporting and gated execution
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-27
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Trinity Push Module
@@ -107,7 +107,7 @@ def _run_push(branch, dry_run: bool) -> None:
     mode = "DRY RUN" if dry_run else "PUSH"
     console.print()
     console.print(
-        Panel.fit(f"[bold cyan]Memory - Trinity {mode} · {label}[/bold cyan]", border_style="cyan", box=box.ROUNDED)
+        Panel.fit(f"[bold cyan]memory - Trinity {mode} · {label}[/bold cyan]", border_style="cyan", box=box.ROUNDED)
     )
     console.print()
 

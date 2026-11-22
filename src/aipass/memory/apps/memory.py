@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: memory.py
 # Description: Entry point CLI for drone @memory
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-03-08
 # Modified: 2026-11-22
 # =============================================
@@ -31,7 +31,7 @@ _PACKAGE_BASE = "aipass.memory.apps.modules"
 def print_introspection():
     """Display discovered modules and status"""
     console.print()
-    console.print("[bold cyan]Memory - Central Memory Archive System[/bold cyan]")
+    console.print("[bold cyan]memory - Central Memory Archive System[/bold cyan]")
     console.print()
     console.print("[dim]Manages memory rollover and archival across AIPass branches[/dim]")
     console.print()
@@ -59,7 +59,7 @@ def print_help():
     console.print()
     console.print(
         Panel.fit(
-            "[bold cyan]Memory - Central Memory Archive System[/bold cyan]\n"
+            "[bold cyan]memory - Central Memory Archive System[/bold cyan]\n"
             "[dim]Vector search, memory rollover, and fragmented memory for AIPass[/dim]",
             border_style="cyan",
             box=box.ROUNDED,
