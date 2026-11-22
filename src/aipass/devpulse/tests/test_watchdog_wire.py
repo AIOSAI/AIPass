@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_watchdog_wire.py
 # Description: Tests for the watchdog wire handler (DPLAN-0317 r4 — report, filter, deliver)
-# Version: 2.5.0
+# Version: 2.5.1
 # Created: 2026-08-19
 # Modified: 2026-11-21
 # =============================================
@@ -328,8 +328,9 @@ def test_live_follow_delivers_an_appended_completion(tmp_path, capsys, monkeypat
 
 
 def _plant_inbox(root: Path, messages: list[dict]) -> None:
-    """Write devpulse's inbox store the wire reads to gate a completion on its mail."""
-    box = root / "src" / "aipass" / "devpulse" / ".ai_mail.local"
+    """Write the seat's inbox store where its registry row says it lives (here the root itself, not
+    a folder under src/aipass: a seat of another project has none there)."""
+    box = root / ".ai_mail.local"
     box.mkdir(parents=True, exist_ok=True)
     (box / "inbox.json").write_text(json.dumps({"messages": messages}), encoding="utf-8")
 

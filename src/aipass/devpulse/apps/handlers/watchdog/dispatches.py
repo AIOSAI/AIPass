@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatches.py
 # Description: Watchdog seat attribution — which completions are THIS seat's, and what is still out
-# Version: 2.2.1
+# Version: 2.3.0
 # Created: 2026-08-22
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """Watchdog seat attribution — whose dispatch was that, and what is still out."""
@@ -20,6 +20,7 @@ from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.devpulse.apps.handlers.owner.guard import owner_address
 from aipass import ai_mail as _ai_mail
 from aipass.ai_mail import CODEX, read_pointer
+from aipass.spawn import find_registry, get_owner
 
 
 class RegisterUnavailable(RuntimeError):
@@ -38,6 +39,19 @@ def seat_email(repo_root: Path | None = None) -> str:
             "Run: aipass doctor --fix"
         )
     return _normalise(address)
+
+
+def seat_dir(repo_root: Path | None = None) -> Path | None:
+    """The seat's branch folder, in whichever project it lives: the sealed owner's registry ``path``
+    (a relative one is against its registry's folder), from seat_email's start. None when the row has none."""
+    caller_cwd = os.environ.get("AIPASS_CALLER_CWD")
+    start = Path(caller_cwd) if caller_cwd else repo_root
+    registry = find_registry(start_path=start)
+    entry = get_owner(start_path=start)
+    raw = entry.get("path") if isinstance(entry, dict) else None
+    if not raw or registry is None:
+        return None
+    return Path(registry).parent / str(raw)
 
 
 def seat_session_id(branch_path: Path | None = None) -> str | None:

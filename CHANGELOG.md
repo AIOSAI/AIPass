@@ -9,6 +9,16 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **drone: `drone @git alerts list --pr <n>`** (2026-11-21). Lists the code-scanning alerts of a pull request's merge ref, the ones the required check counts, and `alerts dismiss` accepts an alert that is open on a pull request only.
+
+### Fixed
+
+- **devpulse: the watchdog wire reads the seat's inbox where the seat lives** (2026-11-21). The wire built the inbox path under `src/aipass/<seat>`, so the owner seat of another project never saw its completion mail: each wire waited out the 120-second grace and woke flagged `COMPLETED_NO_MAIL` with the reply already in the inbox. The folder now comes from the seat's own registry row.
+
 ## [2026-11-21] — v2.8.41: a chaos round against the fleet and its cures, the watchdog waits for the mail, the docs catch up with the code
 
 Ten chaos-test lanes abused every branch's commands, gates and stores in throwaway network-less containers built from dev. Each finding was replayed, cured by its owner, and replayed again in a fresh container.
