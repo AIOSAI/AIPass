@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: watchdog.py
 # Description: Watchdog Module — directed wake system for devpulse
-# Version: 2.3.0
+# Version: 2.3.1
 # Created: 2026-04-14
 # Modified: 2026-11-21
 # =============================================
@@ -217,7 +217,9 @@ def handle_command(command: str, args: List[str]) -> bool:
 def _handle_timer(sub_args: List[str]) -> bool:
     """Route ``watchdog timer`` subcommands through the timer handler.
 
-    False when the duration is refused; every served path returns True.
+    Every served path returns True; a refused duration is already handled, so
+    error() carries the non-zero exit — returning False would read as "not my
+    command" and add a spurious "Unknown command".
     """
     if not sub_args:
         console.print(_TIMER_HELP_TEXT)
@@ -261,8 +263,9 @@ def _handle_timer(sub_args: List[str]) -> bool:
     except ValueError as exc:
         logger.warning("[watchdog] invalid timer duration %r: %s", action, exc)
         error(f"Invalid duration: {action} ({exc})")
-        return False
-    presenter.print_timer_result(result)
+        result = None
+    if result is not None:
+        presenter.print_timer_result(result)
     return True
 
 

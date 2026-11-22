@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: score.py
 # Description: the v5 shadow score - one checker pack over the fleet, scoring and never gating
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-02
-# Modified: 2026-11-14
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -23,7 +23,7 @@ from aipass.prax import logger
 from aipass.sentry.apps.handlers.audit import discovery
 from aipass.sentry.apps.handlers.audit.artifact import write_audit_artifact
 from aipass.sentry.apps.handlers.audit.branch_audit import audit_branch_incremental
-from aipass.sentry.apps.handlers.bypass.bypass_handler import load_bypass_rules
+from aipass.sentry.apps.handlers.bypass.bypass_handler import bypass_file_problem, load_bypass_rules
 from aipass.sentry.apps.handlers.json import json_handler
 
 MODULE_NAME = "shadow_cycle.score"
@@ -57,6 +57,15 @@ def run(
 
     ``on_branch`` gets each result as it lands: a handler never prints, it hands the line back."""
     resolved = pack_path(pack_name)
+
+    damaged = {b["name"]: bypass_file_problem(b["path"]) for b in branches}
+    damaged = {name: problem for name, problem in damaged.items() if problem}
+    if damaged:
+        raise ValueError(
+            "bypass file damaged, so the shadow score would read unwaived: "
+            + "; ".join(f"{name}: {problem}" for name, problem in damaged.items())
+        )
+
     results: List[Dict] = []
 
     for branch in branches:

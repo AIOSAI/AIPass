@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake_helpers.py
 # Description: Tests for the wake's small parts - dispatch status, the grant read, pid lock and branch resolution
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's helpers and pid_lock.py: status, locks, pids, resolve_branch."""
@@ -274,8 +274,10 @@ def test_read_session_type_unreadable_environ(monkeypatch, tmp_path):
     """
     _linux_claude_in(monkeypatch, tmp_path, tmp_path, b"")
 
-    def _no_environ(*args, **kwargs):
-        raise OSError("no such file")
+    def _no_environ(path, *args, **kwargs):
+        if "/proc/123/environ" in str(path):
+            raise OSError("no such file")
+        return _REAL_OPEN(path, *args, **kwargs)
 
     monkeypatch.setattr("builtins.open", _no_environ)
     assert branch_occupant(tmp_path) == "claude"
@@ -292,6 +294,24 @@ def test_get_pid_cwd_linux_oserror(monkeypatch, tmp_path):
     """Linux: a cwd that cannot be read is no session in the branch."""
     _linux_claude_in(monkeypatch, tmp_path, tmp_path, b"PATH=/usr/bin\x00")
     monkeypatch.setattr(os, "readlink", lambda p: (_ for _ in ()).throw(OSError("no proc")))
+    assert branch_occupant(tmp_path) is None
+
+
+def test_branch_occupant_skips_a_zombie(monkeypatch, tmp_path):
+    """A zombie whose cwd and interactive environ would otherwise read occupied is explicitly not an occupant."""
+    _processes(monkeypatch, 123)
+    monkeypatch.setattr(os, "readlink", lambda p: str(tmp_path.resolve()) if p == "/proc/123/cwd" else "")
+    status_file = tmp_path / "status"
+    status_file.write_text("Name:\tclaude\nState:\tZ (zombie)\n", encoding="utf-8")
+    environ_file = tmp_path / "environ"
+    environ_file.write_bytes(b"PATH=/usr/bin\x00")
+    monkeypatch.setattr(
+        "builtins.open",
+        _fake_open_factory(
+            str(status_file),
+            {"/proc/123/status": str(status_file), "/proc/123/environ": str(environ_file)},
+        ),
+    )
     assert branch_occupant(tmp_path) is None
 
 

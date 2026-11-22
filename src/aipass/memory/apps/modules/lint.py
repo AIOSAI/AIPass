@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: lint.py
 # Description: Lint module — CLI routing for entry limit auditing
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-06-13
 # Modified: 2026-11-21
 # =============================================
@@ -244,6 +244,11 @@ def _flag_line(violation: dict[str, Any]) -> str:
     field = violation.get("field", "?")
     reason = violation.get("reason", "")
 
+    if reason in FILE_DAMAGE:
+        return (
+            f"    [red]![/red] {violation.get('file', '')} [dim]({violation.get('entry_type', '')})[/dim] "
+            f"[red]{escape(violation.get('detail', ''))}[/red]"
+        )
     if reason == "file_over_budget":
         return (
             f"    [red]![/red] {violation.get('file', '')} [dim](whole file)[/dim] "
@@ -347,6 +352,10 @@ def _display_field_results(result: dict[str, Any], branch_filter: str | None) ->
         f"{result.get('total_fields', 0)} field measurement(s)[/dim]"
     )
     console.print()
+
+    damaged = sum(1 for v in violations if v.get("reason") in FILE_DAMAGE)
+    if damaged:
+        error(f"{damaged} damaged file(s) - nothing in them can be judged until repaired")
 
     json_handler.log_operation(
         "lint_fields_display",

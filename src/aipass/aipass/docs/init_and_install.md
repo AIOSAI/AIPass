@@ -96,7 +96,7 @@ Code: [`apps/modules/install.py`](../apps/modules/install.py).
 
 ## `aipass init` — project scaffold and update
 
-Bare `init` prints usage.
+Bare `init` scaffolds the current directory, the default `init [target]` names.
 
 | Form | What it does |
 |---|---|

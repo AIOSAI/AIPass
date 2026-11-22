@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_host_lifetime.py
 # Description: Tests for a serve that outlives the shell that started it
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-08-20
 # Modified: 2026-11-21
 # =============================================
@@ -229,6 +229,15 @@ class TestFindingTheRunningServer:
 
         assert record is not None
         assert record["port"] == 8790
+
+    def test_a_live_pid_the_os_reused_is_not_our_server(self, runtime: Path) -> None:
+        """A reboot leaves a record; the OS later hands that number to an unrelated live process."""
+        host_lifetime.record_path().write_text(
+            json.dumps({"pid": os.getpid(), "start_ticks": "0", "host": "127.0.0.1", "port": 8790}),
+            encoding="utf-8",
+        )
+
+        assert host_lifetime.running() is None
 
     @pytest.mark.parametrize("unreadable", ["{ not json", "[]"])
     def test_an_unreadable_record_is_unknown_not_no_server(self, runtime: Path, unreadable: str) -> None:

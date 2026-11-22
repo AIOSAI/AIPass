@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_init_flow.py
 # Description: Tests for aipass init — scaffold, update, agent routes
-# Version: 2.2.0
+# Version: 2.2.1
 # Created: 2026-04-16
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/init_flow.py and the handlers it drives."""
@@ -43,12 +43,13 @@ class TestHandleCommand:
         assert handle_command("doctor", []) is False
         assert handle_command("profile", ["set", "name", "X"]) is False
 
-    def test_no_args_shows_help(self) -> None:
-        """'init' with no args calls print_help (not introspection banner)."""
-        with patch("aipass.aipass.apps.modules.init_flow.print_help") as mock_help:
-            result = handle_command("init", [])
-        assert result is True
-        mock_help.assert_called_once()
+    def test_no_args_scaffolds_cwd(self) -> None:
+        """'init' with no args scaffolds the current folder — the usage line's default."""
+        with patch("aipass.aipass.apps.modules.init_flow._handle_init_scaffold", return_value=0) as mock_scaffold:
+            with pytest.raises(SystemExit) as exc_info:
+                handle_command("init", [])
+        assert exc_info.value.code == 0
+        mock_scaffold.assert_called_once_with([])
 
     def test_info_flag_calls_introspection(self) -> None:
         """--info flag calls print_introspection."""

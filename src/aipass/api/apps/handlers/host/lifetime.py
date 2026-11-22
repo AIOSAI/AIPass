@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: lifetime.py
 # Description: Host API Lifetime Handler — a serve that outlives the shell that started it
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-08-19
 # Modified: 2026-11-21
 # =============================================
@@ -177,6 +177,15 @@ def _alive(pid: int) -> bool:
     return stat_file.read_text(encoding="utf-8").rsplit(")", 1)[-1].split()[0] != "Z"
 
 
+def _start_ticks(pid: int) -> Optional[str]:
+    """A process's start time in clock ticks since boot: the field that tells our pid from a reused number."""
+    stat_file = Path(f"/proc/{pid}/stat")
+    if not stat_file.exists():
+        return None
+    after_comm = stat_file.read_text(encoding="utf-8").rsplit(")", 1)[-1].split()
+    return after_comm[19] if len(after_comm) > 19 else None
+
+
 def running() -> Optional[Dict[str, Any]]:
     """The live server's record, whoever started it."""
     # Supervisor first: a running unit IS the server, and writes no record file.
@@ -211,7 +220,14 @@ def running() -> Optional[Dict[str, Any]]:
         raise LifetimeError(f"The serve record at {record_file} is not a record: {type(record).__name__}")
 
     # A stale record (a reboot leaves one) is no server, not a fault.
-    if not _alive(int(record.get("pid") or 0)):
+    pid = int(record.get("pid") or 0)
+    if not _alive(pid):
+        return None
+
+    # A live pid whose start time differs from the record's is a number the OS reused for something else.
+    recorded_ticks = record.get("start_ticks")
+    # shortcut: a record written before start_ticks existed cannot be verified; upgrade is automatic on next serve.
+    if recorded_ticks is not None and _start_ticks(pid) != recorded_ticks:
         return None
 
     record["owner"] = OWNER_DETACHED
@@ -264,6 +280,7 @@ def serve_detached(host: Optional[str] = None, port: Optional[int] = None) -> Di
 
     record = {
         "pid": child.pid,
+        "start_ticks": _start_ticks(child.pid),
         "host": bind_host,
         "port": bind_port,
         "log": str(log_path()),

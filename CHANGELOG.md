@@ -20,6 +20,12 @@ PyPI version — not the changelog header.
 
 - **aipass: a new project's folder is proven inside `projects/`, and its name rule matches the whole name** (2026-11-21). `create_project` builds the folder through `project_path`, which normalises the joined path and refuses one that is not directly under `projects/`, in the form code scanners recognise. The name rule used `re.match` with `$`, which let a name ending in a newline through from a terminal; it is now a full match.
 - **devpulse: the watchdog wire reads the seat's inbox where the seat lives** (2026-11-21). The wire built the inbox path under `src/aipass/<seat>`, so the owner seat of another project never saw its completion mail: each wire waited out the 120-second grace and woke flagged `COMPLETED_NO_MAIL` with the reply already in the inbox. The folder now comes from the seat's own registry row.
+- **aipass: bare `aipass init` scaffolds the current folder** (2026-11-21). It printed usage while its own usage line and both scaffold handlers named the current folder as the default target.
+- **api: a pid the OS has reused is not read as the host server** (2026-11-21). `serve_detached` records the server's start time, and `running()` answers nothing when a live pid's start time differs from the record. A record written before this carries no start time and is checked for liveness only until the next `serve`.
+- **ai_mail: a zombie is never a branch's occupant, and a dead monitor no longer warns on every read** (2026-11-21). `branch_occupant` refuses a zombie by its process state, where it was skipped only because its cwd could not be read. A vanished monitor pid is logged at debug in `check_pid_alive`; the stale-lock warning stays.
+- **sentry: a damaged bypass file fails the checklist and the shadow score** (2026-11-21). Both read it as no rules. The checklist now answers one error naming the file, and the shadow score refuses to publish, as the audit lane does.
+- **memory: `lint fields` reports an unreadable `.trinity` file and fails** (2026-11-21). It skipped the file with a log line.
+- **devpulse: a refused `watchdog timer` duration prints its error only** (2026-11-21). The router read the handler's answer as "not my command" and added "Unknown command".
 
 ## [2026-11-21] — v2.8.41: a chaos round against the fleet and its cures, the watchdog waits for the mail, the docs catch up with the code
 

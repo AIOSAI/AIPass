@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: checklist.py
 # Description: Per-File Standards Checklist Module
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-15
-# Modified: 2026-11-14
+# Modified: 2026-11-21
 # =============================================
 
 """Per-File Standards Checklist Module
@@ -23,6 +23,7 @@ from aipass.cli import error
 from aipass.sentry.apps.handlers.audit.branch_audit import discover_checkers
 
 from aipass.sentry.apps.handlers.bypass.bypass_handler import (
+    bypass_file_problem,
     get_branch_from_path,
     load_bypass_rules,
     registry_notes,
@@ -118,6 +119,10 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
     if not checkers:
         return [{"standard": "(error)", "passed": False, "detail": "No checkers discovered"}]
 
+    if branch_path is not None:
+        problem = bypass_file_problem(str(branch_path))
+        if problem:
+            return [{"standard": "(error)", "passed": False, "detail": f"{problem}, so no waiver was applied"}]
     bypass_rules = load_bypass_rules(str(branch_path)) if branch_path is not None else []
 
     results = []

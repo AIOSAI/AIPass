@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 2.7.0
+# Version: 2.7.1
 # Description: Tests for hook engine dispatch logic: the dispatcher core; contracts and safeguards in two siblings
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/engine.py: the dispatcher core and the hook dispatch it drives."""
@@ -899,10 +899,12 @@ class TestEngineJsonlFollowsPraxsStateRoot:
     """engine.jsonl lives in branch_state_root("hooks")/logs: on a wheel that is the home folder, never the package."""
 
     def test_the_log_file_is_the_state_roots_logs_folder(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(prax, "branch_state_root", lambda branch: tmp_path / "state" / branch)
+        fake_root = MagicMock(side_effect=lambda branch: tmp_path / "state" / branch)
+        monkeypatch.setattr(prax, "branch_state_root", fake_root)
         try:
             importlib.reload(diagnostics)
             assert diagnostics.LOG_FILE == tmp_path / "state" / "hooks" / "logs" / "engine.jsonl"
+            fake_root.assert_called_with("hooks")
         finally:
             monkeypatch.undo()
             importlib.reload(diagnostics)

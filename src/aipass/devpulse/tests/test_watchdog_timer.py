@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_timer.py
 # Description: Tests for the watchdog timer handler + router integration
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-14
-# Modified: 2026-11-14
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/watchdog/timer.py and the watchdog timer command that drives it."""
@@ -383,7 +383,7 @@ def test_router_timer_help(_bypass_caller_guard, capsys):
 
 
 def test_router_timer_invalid_duration(_bypass_caller_guard, capsys, monkeypatch):
-    """Invalid duration from wake_in surfaces as a clean error via the router."""
+    """Invalid duration is handled (True) with a clean error — never a second 'Unknown command'."""
 
     def wake_in(duration):
         raise ValueError(f"bad duration: {duration}")
@@ -391,7 +391,7 @@ def test_router_timer_invalid_duration(_bypass_caller_guard, capsys, monkeypatch
     monkeypatch.setattr(timer_handler, "wake_in", wake_in)
     result = wd_mod.handle_command("watchdog", ["timer", "notaduration"])
 
-    assert result is False
+    assert result is True
     captured = capsys.readouterr()
     combined = captured.out + captured.err
     assert "invalid" in combined.lower()

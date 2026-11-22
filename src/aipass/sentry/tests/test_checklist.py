@@ -3,7 +3,7 @@
 # Description: Unit tests for the checklist module
 # Version: 1.4.1
 # Created: 2026-03-24
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/checklist.py."""
@@ -255,6 +255,29 @@ def test_run_checklist_normal_file_still_audited(tmp_path, monkeypatch):
         detail = r.get("detail", "")
         assert "throwaway" not in detail.lower()
         assert "prototype" not in detail.lower()
+
+
+def test_run_checklist_damaged_bypass_file_fails_loudly(tmp_path, monkeypatch):
+    """A damaged .sentry/bypass.json is named and fails, never read as no waivers (as the audit lane does)."""
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+    monkeypatch.setattr(checklist, "get_branch_from_path", lambda file_path: {"path": str(tmp_path)})
+    row = SimpleNamespace(AUDIT_SCOPE="all_files", check_module=lambda path, bypass_rules=None: {"passed": True})
+    monkeypatch.setattr(checklist, "discover_checkers", lambda pack_path=None: {"row": row})
+
+    def _never(branch_path):
+        pytest.fail("damaged file must not be loaded")
+
+    monkeypatch.setattr(checklist, "load_bypass_rules", _never)
+
+    sentry_dir = tmp_path / ".sentry"
+    sentry_dir.mkdir()
+    (sentry_dir / "bypass.json").write_text("{not json", encoding="utf-8")
+    f = tmp_path / "real_code.py"
+    f.write_text("x = 1\n", encoding="utf-8")
+
+    results = checklist.run_checklist(str(f))
+    assert [(r["standard"], r["passed"]) for r in results] == [("(error)", False)]
+    assert str(sentry_dir / "bypass.json") in results[0]["detail"]
 
 
 def test_print_introspection_runs(capsys):

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-08-27
 # Modified: 2026-11-21
 # =============================================
@@ -1539,7 +1539,8 @@ class TestEntryRulesReadTheConfig:
     def test_the_global_fallback_is_cached_not_re_read_per_entry(self, monkeypatch):
         """734 entries must not be 734 config reads; the push path never touches it.
 
-        Clears the private cache: a public reset for this test alone would be a test door.
+        Empties the cache at the module edge, restored after the test: a public reset for
+        this test alone would be a test door.
         """
         reads = []
         real_load = entry_limits.load_entry_limits
@@ -1549,7 +1550,7 @@ class TestEntryRulesReadTheConfig:
             return real_load(*args, **kwargs)
 
         monkeypatch.setattr(entry_limits, "load_entry_limits", counting_load)
-        tp._RULES_CACHE.clear()
+        monkeypatch.setattr(tp, "_RULES_CACHE", {})
         sections = ("sessions", "key_learnings", "todos", "observations")
         answers = [tp.entry_rules(section) for section in sections * 2]
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: init_flow.py
 # Description: aipass init — project scaffold, scaffold update, first agent
-# Version: 2.2.0
+# Version: 2.2.1
 # Created: 2026-04-16
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -337,9 +337,9 @@ def handle_command(command: str, args: list[str]) -> bool:
     if command != COMMAND:
         return False
 
+    # No target means cwd, the default the usage line and the scaffold handler both name.
     if not args:
-        print_help()
-        return True
+        sys.exit(_handle_init_scaffold(args))
 
     if wants_help(args):
         print_help()

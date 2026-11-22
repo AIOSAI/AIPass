@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pid_lock.py
 # Description: Process liveness, branch occupancy and the dispatch lock
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-10-04
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -170,6 +170,8 @@ def branch_occupant(branch_path: Path) -> Optional[str]:
                 continue
             pid_str = fields[0]
             cli = fields[1] if len(fields) > 1 else "agent"
+            if _is_zombie_linux(int(pid_str)):
+                continue
             cwd = _get_pid_cwd(pid_str)
             if cwd is None or str(Path(cwd).resolve()) != resolved:
                 continue
@@ -205,7 +207,7 @@ def check_pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
     except ProcessLookupError as exc:
-        logger.warning("[wake] PID %s not found: %s", pid, exc)
+        logger.debug("[wake] PID %s not found: %s", pid, exc)
         return False
     except PermissionError as exc:
         logger.warning("[wake] PID %s permission denied: %s", pid, exc)
