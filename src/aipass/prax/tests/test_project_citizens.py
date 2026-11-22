@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_project_citizens.py
 # Description: projects/* citizens resolve by registry and passport, not path shape
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-14
-# Modified: 2026-11-08
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py."""
@@ -74,13 +74,13 @@ class TestProjectCitizensAreKnown:
     def test_project_citizen_is_a_known_branch(self, tmp_path, monkeypatch):
         repo = _build_repo(tmp_path, projects={"baud": [BAUD_ENTRY]})
         detector = _detector_for(repo, monkeypatch)
-        assert "BAUD" in detector.known_branches
+        assert "baud" in detector.known_branches
 
     def test_main_registry_branches_still_known(self, tmp_path, monkeypatch):
         """The sweep must add, never replace."""
         repo = _build_repo(tmp_path, projects={"baud": [BAUD_ENTRY]})
         detector = _detector_for(repo, monkeypatch)
-        assert "PRAX" in detector.known_branches
+        assert "prax" in detector.known_branches
 
     def test_every_project_registry_is_swept(self, tmp_path, monkeypatch):
         repo = _build_repo(
@@ -91,7 +91,7 @@ class TestProjectCitizensAreKnown:
             },
         )
         detector = _detector_for(repo, monkeypatch)
-        assert {"BAUD", "EARMARK"} <= detector.known_branches
+        assert {"baud", "earmark"} <= detector.known_branches
 
     def test_scope_no_longer_calls_a_project_citizen_unknown(self, tmp_path, monkeypatch):
         """The exact live symptom: the launch-time typo warning fired on a real citizen."""
@@ -103,7 +103,7 @@ class TestProjectCitizensAreKnown:
         """Widening the known set must not silence the typo warning."""
         repo = _build_repo(tmp_path, projects={"baud": [BAUD_ENTRY]})
         detector = _detector_for(repo, monkeypatch)
-        assert BranchScope(["BAUUD"]).unknown_names(set(detector.known_branches)) == ["BAUUD"]
+        assert BranchScope(["BAUUD"]).unknown_names(set(detector.known_branches)) == ["bauud"]
 
 
 class TestProjectCitizenFilesAreNotMisattributed:
@@ -122,7 +122,7 @@ class TestProjectCitizenFilesAreNotMisattributed:
         target = repo / "projects" / "baud" / "src" / "baud" / "baud" / "apps" / "baud.py"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("", encoding="utf-8")
-        assert detector.detect_from_path(str(target)) == "BAUD"
+        assert detector.detect_from_path(str(target)) == "baud"
 
 
 class TestPathsResolveAgainstTheirRegistry:
@@ -141,13 +141,13 @@ class TestPathsResolveAgainstTheirRegistry:
     def test_relative_project_path_resolves_against_project_dir(self, tmp_path, monkeypatch):
         repo = _build_repo(tmp_path, projects={"baud": [BAUD_ENTRY]})
         detector = _detector_for(repo, monkeypatch)
-        assert detector.branch_map.get(str(repo / "projects" / "baud" / "src" / "baud" / "baud")) == "BAUD"
+        assert detector.branch_map.get(str(repo / "projects" / "baud" / "src" / "baud" / "baud")) == "baud"
 
     def test_absolute_paths_are_left_alone(self, tmp_path, monkeypatch):
         absolute = tmp_path / "somewhere" / "prax"
         repo = _build_repo(tmp_path, main_branches=[{"name": "PRAX", "path": str(absolute), "status": "active"}])
         detector = _detector_for(repo, monkeypatch)
-        assert detector.branch_map.get(str(absolute)) == "PRAX"
+        assert detector.branch_map.get(str(absolute)) == "prax"
 
 
 class TestMainRegistryWinsCollisions:
@@ -158,7 +158,7 @@ class TestMainRegistryWinsCollisions:
         impostor = {"name": "PRAX", "path": "src/fake/prax", "status": "active"}
         repo = _build_repo(tmp_path, main_branches=[real], projects={"rogue": [impostor]})
         detector = _detector_for(repo, monkeypatch)
-        assert detector.branch_map.get(str(repo / "src" / "aipass" / "prax")) == "PRAX"
+        assert detector.branch_map.get(str(repo / "src" / "aipass" / "prax")) == "prax"
         assert str(repo / "projects" / "rogue" / "src" / "fake" / "prax") not in detector.branch_map
 
 
@@ -175,7 +175,7 @@ class TestPassportResolution:
         target = repo / "projects" / "orphan" / "src" / "orphan" / "orphan" / "apps" / "thing.py"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("", encoding="utf-8")
-        assert detector.detect_from_path(str(target)) == "ORPHAN"
+        assert detector.detect_from_path(str(target)) == "orphan"
 
     def test_passport_does_not_override_a_registered_path(self, tmp_path, monkeypatch):
         """Registry entries are the declaration of record; passports fill gaps."""
@@ -184,7 +184,7 @@ class TestPassportResolution:
         target = repo / "projects" / "baud" / "src" / "baud" / "baud" / "apps" / "x.py"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("", encoding="utf-8")
-        assert detector.detect_from_path(str(target)) == "BAUD"
+        assert detector.detect_from_path(str(target)) == "baud"
 
 
 class TestSweepIsFaultTolerant:
@@ -194,7 +194,7 @@ class TestSweepIsFaultTolerant:
         """speakeasy ships branches: [] — a real shape in the live tree."""
         repo = _build_repo(tmp_path, projects={"speakeasy": [], "baud": [BAUD_ENTRY]})
         detector = _detector_for(repo, monkeypatch)
-        assert "BAUD" in detector.known_branches
+        assert "baud" in detector.known_branches
 
     def test_malformed_registry_does_not_stop_the_sweep(self, tmp_path, monkeypatch):
         repo = _build_repo(tmp_path, projects={"baud": [BAUD_ENTRY]})
@@ -202,18 +202,18 @@ class TestSweepIsFaultTolerant:
         bad.parent.mkdir(parents=True, exist_ok=True)
         bad.write_text("{not json", encoding="utf-8")
         detector = _detector_for(repo, monkeypatch)
-        assert "BAUD" in detector.known_branches
+        assert "baud" in detector.known_branches
 
     def test_missing_projects_dir_is_not_an_error(self, tmp_path, monkeypatch):
         repo = _build_repo(tmp_path)
         detector = _detector_for(repo, monkeypatch)
-        assert "PRAX" in detector.known_branches
+        assert "prax" in detector.known_branches
 
     @pytest.mark.parametrize("entry", [{"path": "src/x/x"}, {"name": "X"}, {}, {"name": "", "path": ""}])
     def test_incomplete_entries_are_skipped(self, tmp_path, monkeypatch, entry):
         repo = _build_repo(tmp_path, projects={"baud": [entry, BAUD_ENTRY]})
         detector = _detector_for(repo, monkeypatch)
-        assert "BAUD" in detector.known_branches
+        assert "baud" in detector.known_branches
 
 
 class TestDeclaredRootsLabelTheMonitor:
@@ -221,13 +221,13 @@ class TestDeclaredRootsLabelTheMonitor:
 
     def test_a_file_under_the_external_is_labelled_by_its_row(self, fleet, monkeypatch):
         detector = _detector_for(fleet.root, monkeypatch)
-        assert detector.detect_from_path(str(fleet.grow / "apps" / "x.py")) == "GROW"
+        assert detector.detect_from_path(str(fleet.grow / "apps" / "x.py")) == "grow"
 
     def test_a_transcript_folder_encoding_a_cwd_inside_the_external_is_labelled(self, fleet, monkeypatch):
         detector = _detector_for(fleet.root, monkeypatch)
         folder = re.sub(r"[^A-Za-z0-9]", "-", str(fleet.grow / "apps"))
         transcript = fleet.root.parent / ".claude" / "projects" / folder / "session.jsonl"
-        assert detector.detect_from_path(str(transcript)) == "GROW"
+        assert detector.detect_from_path(str(transcript)) == "grow"
 
     def test_an_undeclared_sibling_with_a_passport_is_not_labelled(self, fleet, monkeypatch):
         detector = _detector_for(fleet.root, monkeypatch)

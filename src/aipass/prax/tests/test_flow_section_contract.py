@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_flow_section_contract.py
 # Description: sections.flow has two writers — both must build the same shape
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-16
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/dashboard/refresh.py."""
@@ -59,7 +59,7 @@ FLOW_CONTRACT_KEYS = {"managed_by", "active_plans", "open_recent", "recently_clo
 
 
 def _plan(plan_id: str, branch: str, created: str, subject: str = "A plan") -> dict:
-    """An open-plan row shaped the way PLANS.central.json carries it."""
+    """An open-plan row shaped the way plans.central.json carries it."""
     return {
         "plan_id": plan_id,
         "subject": subject,
@@ -76,7 +76,7 @@ def _recent(days_ago: float = 1) -> str:
 
 
 def _closed(plan_id: str, branch: str, closed: str = "", subject: str = "Done") -> dict:
-    """A closed-plan row shaped the way PLANS.central.json carries it."""
+    """A closed-plan row shaped the way plans.central.json carries it."""
     return {
         "plan_id": plan_id,
         "subject": subject,
@@ -122,23 +122,23 @@ class TestFiveKeyContract:
 
     def test_section_carries_every_contract_key(self):
         """open_recent and total_plans must be present alongside the older keys."""
-        section = _flow_section(_centrals(active=[_plan("FPLAN-0001", "prax", "2026-08-10")]), "PRAX")
+        section = _flow_section(_centrals(active=[_plan("FPLAN-0001", "prax", "2026-08-10")]), "prax")
 
         assert FLOW_CONTRACT_KEYS <= set(section), f"missing: {FLOW_CONTRACT_KEYS - set(section)}"
 
     def test_section_invents_no_key_outside_the_contract(self):
         """New keys are a deliberate act, not a drift — last_updated excepted."""
-        section = _flow_section(_centrals(), "PRAX")
+        section = _flow_section(_centrals(), "prax")
 
         assert set(section) - FLOW_CONTRACT_KEYS == {"last_updated"}
 
     def test_managed_by_still_names_flow(self):
         """prax builds the block; @flow owns it."""
-        assert _flow_section(_centrals(), "PRAX")["managed_by"] == "flow"
+        assert _flow_section(_centrals(), "prax")["managed_by"] == "flow"
 
     def test_empty_central_still_matches_the_contract(self):
         """The no-plans path is a shape too — it used to return three keys."""
-        section = _flow_section({}, "PRAX")
+        section = _flow_section({}, "prax")
 
         assert FLOW_CONTRACT_KEYS <= set(section)
         assert section["active_plans"] == 0
@@ -151,7 +151,7 @@ class TestActivePlansCount:
 
     def test_active_plans_is_an_int_count(self):
         centrals = _centrals(active=[_plan(f"FPLAN-000{i}", "prax", f"2026-08-1{i}") for i in range(1, 4)])
-        section = _flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "prax")
 
         assert section["active_plans"] == 3
         assert isinstance(section["active_plans"], int)
@@ -167,7 +167,7 @@ class TestActivePlansCount:
                 }
             },
         )
-        section = _flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "prax")
 
         assert section["active_plans"] == 1
 
@@ -178,7 +178,7 @@ class TestOpenRecent:
     def test_entry_shape_matches_flow(self):
         """flow publishes {plan_id, subject, created} — nothing more."""
         centrals = _centrals(active=[_plan("FPLAN-0001", "prax", "2026-08-10T09:00:00+00:00", "Log rotation")])
-        entry = _flow_section(centrals, "PRAX")["open_recent"][0]
+        entry = _flow_section(centrals, "prax")["open_recent"][0]
 
         assert entry == {
             "plan_id": "FPLAN-0001",
@@ -194,14 +194,14 @@ class TestOpenRecent:
                 _plan("FPLAN-0002", "prax", "2026-08-02T00:00:00+00:00"),
             ]
         )
-        section = _flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "prax")
 
         assert [e["plan_id"] for e in section["open_recent"]] == ["FPLAN-0003", "FPLAN-0002", "FPLAN-0001"]
 
     def test_capped_at_five_while_the_count_tells_the_truth(self):
         """The window is bounded; active_plans is what stops 5 rows reading as all."""
         centrals = _centrals(active=[_plan(f"FPLAN-{i:04d}", "prax", f"2026-08-{i:02d}") for i in range(1, 23)])
-        section = _flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "prax")
 
         assert len(section["open_recent"]) == 5
         assert section["active_plans"] == 22
@@ -211,7 +211,7 @@ class TestOpenRecent:
         undated = _plan("FPLAN-0099", "prax", "")
         undated.pop("created")
         centrals = _centrals(active=[undated, _plan("FPLAN-0001", "prax", "2026-08-01T00:00:00+00:00")])
-        section = _flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "prax")
 
         assert [e["plan_id"] for e in section["open_recent"]] == ["FPLAN-0001", "FPLAN-0099"]
         assert section["open_recent"][-1]["created"] == ""
@@ -219,7 +219,7 @@ class TestOpenRecent:
     def test_no_unbounded_list_ships_anywhere_in_the_section(self):
         """No list in the section exceeds five rows, on prax's writer too."""
         centrals = _centrals(active=[_plan(f"FPLAN-{i:04d}", "prax", f"2026-08-{i:02d}") for i in range(1, 23)])
-        section = _flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "prax")
 
         oversized = [k for k, v in section.items() if isinstance(v, list) and len(v) > 5]
         assert oversized == [], f"unbounded list still published: {oversized}"
@@ -231,7 +231,7 @@ class TestSubjectCap:
     def test_an_essay_subject_is_cut_to_the_cap_in_open_recent(self):
         essay = "FPLAN-0593 " + "startup floor fleet-wide " * 20
         centrals = _centrals(active=[_plan("FPLAN-0593", "prax", "2026-09-15T09:00:00+00:00", essay)])
-        subject = _flow_section(centrals, "PRAX")["open_recent"][0]["subject"]
+        subject = _flow_section(centrals, "prax")["open_recent"][0]["subject"]
 
         assert len(essay) > 400, "the row this pins is an essay, not a subject"
         assert len(subject) <= 120
@@ -241,7 +241,7 @@ class TestSubjectCap:
     def test_an_essay_subject_is_cut_to_the_cap_in_recently_closed(self):
         essay = "DPLAN-0339 follow-up: " + "trigger imported inside the fire sites " * 10
         centrals = _centrals(closed=[_closed("FPLAN-0555", "prax", subject=essay)])
-        subject = _flow_section(centrals, "PRAX")["recently_closed"][0]["subject"]
+        subject = _flow_section(centrals, "prax")["recently_closed"][0]["subject"]
 
         assert len(subject) <= 120
         assert subject.endswith("...")
@@ -252,7 +252,7 @@ class TestSubjectCap:
             active=[_plan("FPLAN-0001", "prax", "2026-08-10T09:00:00+00:00", "Log rotation")],
             closed=[_closed("FPLAN-0002", "prax", subject="Done")],
         )
-        section = _flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "prax")
 
         assert section["open_recent"][0]["subject"] == "Log rotation"
         assert section["recently_closed"][0]["subject"] == "Done"
@@ -277,7 +277,7 @@ class TestRecentlyClosed:
                 }
             },
         )
-        section = _flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "prax")
 
         assert [e["id"] for e in section["recently_closed"]] == ["FPLAN-0378"]
         assert all(e["subject"] == "Mine" for e in section["recently_closed"])
@@ -286,13 +286,13 @@ class TestRecentlyClosed:
         """flow publishes {id, subject, closed}; prax used to write {plan_id, subject}."""
         closed_at = _recent()
         centrals = _centrals(closed=[_closed("FPLAN-0378", "prax", closed_at, "Log rotation")])
-        entry = _flow_section(centrals, "PRAX")["recently_closed"][0]
+        entry = _flow_section(centrals, "prax")["recently_closed"][0]
 
         assert entry == {"id": "FPLAN-0378", "subject": "Log rotation", "closed": closed_at}
 
     def test_newest_first_and_capped_at_five(self):
         centrals = _centrals(closed=[_closed(f"FPLAN-{i:04d}", "prax", _recent(i * 0.5)) for i in range(1, 9)])
-        section = _flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "prax")
 
         assert len(section["recently_closed"]) == 5
         assert [e["id"] for e in section["recently_closed"]][0] == "FPLAN-0001"
@@ -308,7 +308,7 @@ class TestClosedWindow:
                 _closed("FPLAN-0212", "prax", _recent(95), "Back in May"),
             ]
         )
-        section = _flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "prax")
 
         assert [e["id"] for e in section["recently_closed"]] == ["FPLAN-0428"]
 
@@ -321,7 +321,7 @@ class TestClosedWindow:
                 _closed("FPLAN-0002", "prax", _recent(7.1), "Just outside"),
             ]
         )
-        section = _flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "prax")
 
         assert [e["id"] for e in section["recently_closed"]] == ["FPLAN-0001"]
 
@@ -330,12 +330,12 @@ class TestClosedWindow:
         centrals = _centrals(closed=[_closed("FPLAN-0001", "prax", closed="x")])
         centrals["plans"]["branches"]["prax"]["recently_closed"][0]["closed"] = ""
 
-        assert _flow_section(centrals, "PRAX")["recently_closed"] == []
+        assert _flow_section(centrals, "prax")["recently_closed"] == []
 
     def test_an_unparseable_timestamp_ships_anyway(self):
         """flow includes it rather than letting a plan vanish on a bad field."""
         centrals = _centrals(closed=[_closed("FPLAN-0001", "prax", "last tuesday")])
-        section = _flow_section(centrals, "PRAX")
+        section = _flow_section(centrals, "prax")
 
         assert [e["id"] for e in section["recently_closed"]] == ["FPLAN-0001"]
 
@@ -345,13 +345,13 @@ class TestTotalPlansPreserved:
 
     def test_flows_value_survives_a_prax_refresh(self):
         """A prax refresh must not clobber flow's total_plans."""
-        section = _flow_section(_centrals(), "PRAX", existing={"total_plans": 30})
+        section = _flow_section(_centrals(), "prax", existing={"total_plans": 30})
 
         assert section["total_plans"] == 30
 
     def test_absent_existing_section_reports_zero_not_a_guess(self):
         """No prior value and no honest source: 0, never a derived number."""
-        assert _flow_section(_centrals(), "PRAX")["total_plans"] == 0
+        assert _flow_section(_centrals(), "prax")["total_plans"] == 0
 
     def test_truncated_central_statistic_is_never_used_as_the_total(self):
         """branches.<name>.statistics.total_closed is capped at 5 by construction."""
@@ -361,7 +361,7 @@ class TestTotalPlansPreserved:
         )
         centrals["plans"]["branches"]["prax"]["statistics"]["total_closed"] = 5
 
-        section = _flow_section(centrals, "PRAX", existing={"total_plans": 105})
+        section = _flow_section(centrals, "prax", existing={"total_plans": 105})
 
         # 1 active + 5 "total_closed" would be 6. The real total is 105.
         assert section["total_plans"] == 105

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discover.py
 # Description: PRAX Discover Command
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-12
-# Modified: 2026-10-24
+# Modified: 2026-11-22
 # =============================================
 
 """PRAX Discover Module
@@ -27,7 +27,7 @@ MAX_NAMES_SHOWN = 10
 def print_help():
     """Display module help and connected handlers"""
     console.print()
-    console.print("[bold cyan]PRAX Discover Commands:[/bold cyan]")
+    console.print("[bold cyan]prax Discover Commands:[/bold cyan]")
     console.print("  [white]discover run[/white]        Scan the ecosystem and rewrite the module registry")
     console.print("  [white]discover[/white]            Show what this module is and what it connects to")
     console.print("  [white]discover help[/white]       Show this help")

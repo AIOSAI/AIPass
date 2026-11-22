@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_operations_template.py
 # Description: Unit tests for the dashboard template lane
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-10-08
 # Modified: 2026-11-22
 # =============================================
@@ -234,7 +234,7 @@ class TestDiffDashboardTemplate:
 
         result = mod.diff_dashboard_template(branch_name="FLOW")
         assert len(result["branches"]) == 1
-        assert result["branches"][0]["branch"] == "FLOW"
+        assert result["branches"][0]["branch"] == "flow"
 
 
 # =============================================

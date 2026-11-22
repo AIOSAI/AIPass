@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commons_feed.py
 # Description: Commons Live Social Feed (read-only monitor view)
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-07-21
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -435,7 +435,7 @@ def run_commons_feed(args: List[str]) -> bool:
     room_moods = _load_room_moods(conn)
 
     console.print()
-    header("PRAX Mission Control - Commons Live Feed")
+    header("prax Mission Control - Commons Live Feed")
     console.print()
     console.print("[green]Live — read-only feed of The Commons (posts, comments, votes, reactions)[/green]")
     is_tty = sys.stdin.isatty()

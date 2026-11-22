@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: logger.py
 # Description: PRAX Public API
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2025-11-15
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -138,7 +138,7 @@ def print_introspection():
 
     console.print()
     console.print("[bold cyan]logger Module[/bold cyan]")
-    console.print("Public API for PRAX system-wide logging with auto-routing")
+    console.print("Public API for prax system-wide logging with auto-routing")
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print()

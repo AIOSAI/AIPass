@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_status.py
 # Description: Unit tests for PRAX status module
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/status.py."""
@@ -44,8 +44,8 @@ def test_every_help_spelling_prints_help_and_runs_nothing(status_world, capsys, 
     assert status_module.handle_command("status", [flag]) is True
 
     out = capsys.readouterr().out
-    assert "PRAX Status Commands:" in out
-    assert "PRAX System Status" not in out
+    assert "prax Status Commands:" in out
+    assert "prax System Status" not in out
 
 
 def test_handle_command_no_args_shows_system_status(status_world, capsys):
@@ -53,7 +53,7 @@ def test_handle_command_no_args_shows_system_status(status_world, capsys):
     assert status_module.handle_command("status", []) is True
 
     out = capsys.readouterr().out
-    assert "PRAX System Status" in out
+    assert "prax System Status" in out
     assert "  Total Modules:   7" in out.splitlines()
 
 
@@ -64,7 +64,7 @@ def test_handle_command_unknown_sub_argument_is_refused(status_world, capsys):
 
     assert refusal.value.verb == "status"
     assert refusal.value.token == "bogus"
-    assert "PRAX System Status" not in capsys.readouterr().out, "the refused command still ran"
+    assert "prax System Status" not in capsys.readouterr().out, "the refused command still ran"
 
 
 def test_handle_command_wrong_command(status_world, capsys):

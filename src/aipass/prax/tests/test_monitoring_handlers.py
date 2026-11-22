@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitoring_handlers.py
 # Description: Unit tests for monitoring handler modules
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-04-25
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py, the detector and its branch registry."""
@@ -221,7 +221,7 @@ class TestDetectFromLog:
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
         result = detector.detect_from_log("custom_report_20260101.log")
-        assert result == "CUSTOM"
+        assert result == "custom"
 
     def test_unknown_log_no_underscore(self):
         """Should return UNKNOWN for unrecognizable log names."""
@@ -340,7 +340,7 @@ class TestRegisterBranch:
 
             detector._register_branch({"name": "DRONE", "path": "/some/drone"})
 
-        assert "DRONE" in detector.known_branches
+        assert "drone" in detector.known_branches
         assert "/resolved/path" in detector.branch_map
         assert "/resolved/path/" in detector.branch_map
 
@@ -390,8 +390,8 @@ class TestLoadRegistry:
 
         detector._load_registry()
 
-        assert detector.known_branches == {"PRAX", "FLOW"}
-        assert detector.branch_map[str((tmp_path / "prax").resolve())] == "PRAX"
+        assert detector.known_branches == {"prax", "flow"}
+        assert detector.branch_map[str((tmp_path / "prax").resolve())] == "prax"
 
     def test_a_missing_registry_labels_nothing_rather_than_a_built_in_list(self, tmp_path):
         mod = _import_branch_detector()

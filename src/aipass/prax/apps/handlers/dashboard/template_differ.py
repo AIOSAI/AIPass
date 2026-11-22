@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_differ.py
 # Description: Dashboard Template Diff Handler
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-02-25
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -136,13 +136,13 @@ def diff_dashboard_template(branch_name: Optional[str] = None) -> Dict[str, Any]
         return {"error": f"Invalid registry JSON: {e}", "branches": [], "summary": {}}
 
     if branch_name:
-        target = branch_name.upper()
-        branches = [b for b in branches if b["name"].upper() == target]
+        target = branch_name.lower()
+        branches = [b for b in branches if b["name"].lower() == target]
         if not branches:
             return {"error": f"Branch '{target}' not found in registry", "branches": [], "summary": {}}
 
     for branch in branches:
-        bname = branch["name"].upper()
+        bname = branch["name"].lower()
         bpath = branch["path"]
 
         if not bpath.exists():

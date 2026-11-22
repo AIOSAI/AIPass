@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Log File Monitor
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2025-11-23
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """PRAX Log Watcher - Event Queue Integration"""
@@ -183,7 +183,7 @@ class LogFileWatcher(FileSystemEventHandler):
             match = re.search(r"(?:FPLAN|PLAN)[- ]?(\d+)", log_line)
             plan_id = match.group(1) if match else ""
             return {"command": f"flow open plan {plan_id}".strip(), "caller": None, "target": None}
-        if "Loaded module:" in log_line and not self.last_command_per_branch.get("FLOW", "").startswith("FLOW:flow"):
+        if "Loaded module:" in log_line and not self.last_command_per_branch.get("flow", "").startswith("flow:flow"):
             return {"command": "flow command", "caller": None, "target": None}
         return None
 
@@ -211,8 +211,8 @@ class LogFileWatcher(FileSystemEventHandler):
         if "[sentry]" in log_line.lower() and "audit" in log_line.lower():
             match = re.search(r"Auditing\s+(\w+)", log_line)
             if match:
-                target = match.group(1).upper()
-                return {"command": f"sentry audit @{target.lower()}", "caller": None, "target": target}
+                target = match.group(1).lower()
+                return {"command": f"sentry audit @{target}", "caller": None, "target": target}
 
         if "standards_checklist" in log_line.lower() and "Running" in log_line:
             match = re.search(r"Running\s+(\w+)\s+standard\s+check\s+on\s+(.+)", log_line)
@@ -222,7 +222,7 @@ class LogFileWatcher(FileSystemEventHandler):
         if "[ai_mail]" in log_line.lower():
             if "Sending" in log_line:
                 target_match = re.search(r"to\s+@?(\w+)", log_line, re.IGNORECASE)
-                target = target_match.group(1).upper() if target_match else None
+                target = target_match.group(1).lower() if target_match else None
                 return {"command": "ai_mail send", "caller": None, "target": target}
             elif "inbox" in log_line.lower():
                 return {"command": "ai_mail inbox", "caller": None, "target": None}
@@ -250,7 +250,7 @@ class LogFileWatcher(FileSystemEventHandler):
         if "[spawn]" in log_line.lower():
             if "Creating" in log_line and "branch" in log_line.lower():
                 match = re.search(r"Creating\s+(?:branch\s+)?(\w+)", log_line)
-                target = match.group(1).upper() if match else None
+                target = match.group(1).lower() if match else None
                 return {"command": "spawn create branch", "caller": None, "target": target}
 
         if "[trigger]" in log_line.lower():
@@ -261,11 +261,11 @@ class LogFileWatcher(FileSystemEventHandler):
         # Format: "Routing @flow [CALLER:PRAX] → create ['.', 'Subject']"
         if "Routing @" in log_line and "[CALLER:" in log_line:
             caller_match = re.search(r"\[CALLER:(\w+)\]", log_line)
-            caller = caller_match.group(1) if caller_match else None
+            caller = caller_match.group(1).lower() if caller_match else None
 
             route_match = re.search(r"Routing\s+@(\w+).*?→\s*(\S+)\s*(.*)", log_line)
             if route_match:
-                target = route_match.group(1).upper()
+                target = route_match.group(1).lower()
                 cmd_name = route_match.group(2)
                 cmd_args = route_match.group(3).strip()
                 display_cmd = f"drone @{route_match.group(1)} {cmd_name} {cmd_args}".strip()
@@ -280,7 +280,7 @@ class LogFileWatcher(FileSystemEventHandler):
     def _match_executing_command(self, log_line: str) -> Optional[Dict[str, Optional[str]]]:
         """Match 'Executing command' log lines and extract caller/target info."""
         caller_match = re.search(r"\[CALLER:(\w+)\]", log_line)
-        caller = caller_match.group(1) if caller_match else None
+        caller = caller_match.group(1).lower() if caller_match else None
 
         cmd_match = re.search(r"Executing(?:\s+activated)?\s+command(?:\s*\[CALLER:\w+\])?:\s*(.+)", log_line)
         if not cmd_match:
@@ -299,10 +299,10 @@ class LogFileWatcher(FileSystemEventHandler):
         """Extract target branch from a command string."""
         target_match = re.search(r"@(\w+)", cmd)
         if target_match:
-            return target_match.group(1).upper()
+            return target_match.group(1).lower()
         path_match = re.search(r"/aipass/(\w+)", cmd)
         if path_match:
-            return path_match.group(1).upper()
+            return path_match.group(1).lower()
         return None
 
     def _emit_command_separator(self, branch: str, command_info) -> None:
@@ -455,7 +455,7 @@ if __name__ == "__main__":
     import time
     from aipass.cli import console
 
-    console.print("[bold cyan]PRAX Log Watcher Test[/bold cyan]")
+    console.print("[bold cyan]prax Log Watcher Test[/bold cyan]")
     console.print()
     console.print(f"Monitoring: {get_system_logs_dir()}")
     console.print("Press Ctrl+C to stop")

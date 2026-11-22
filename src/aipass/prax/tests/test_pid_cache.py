@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_pid_cache.py
 # Description: Tests for the PID cache handler
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-07-10
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/monitoring/pid_cache.py"""
@@ -68,7 +68,7 @@ class TestParseLockPid:
         ):
             mod.parse_lock_pid(entry, new_cache, tmp_path)
 
-        assert new_cache.get("FLOW") == 12345
+        assert new_cache.get("flow") == 12345
 
     def test_lock_file_with_zero_pid(self, tmp_path):
         """Lock file with pid=0 skips entry."""
@@ -195,17 +195,17 @@ class TestGetPidForBranch:
         """Returns PID when branch is in cache."""
         mod = _import_pid_cache()
         with mod._pid_cache_lock:
-            mod._pid_cache["FLOW"] = 42
+            mod._pid_cache["flow"] = 42
 
         with patch.object(mod, "refresh"):
             result = mod.get_pid_for_branch("flow")
         assert result == 42
 
     def test_strips_agent_suffix(self):
-        """Branch name ending in ' AGENT' is stripped before lookup."""
+        """Branch name ending in ' agent' is stripped before lookup."""
         mod = _import_pid_cache()
         with mod._pid_cache_lock:
-            mod._pid_cache["FLOW"] = 42
+            mod._pid_cache["flow"] = 42
 
         with patch.object(mod, "refresh"):
             result = mod.get_pid_for_branch("flow agent")
@@ -248,4 +248,4 @@ class TestDefaultRoot:
             ),
         ):
             mod.refresh()
-        assert mod._pid_cache == {"FLOW": 12345}
+        assert mod._pid_cache == {"flow": 12345}

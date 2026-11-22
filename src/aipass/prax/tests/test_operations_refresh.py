@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations_refresh.py
 # Description: Unit tests for the dashboard refresh and section writes
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-11-08
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for the refresh and section writes: apps/handlers/dashboard/refresh.py and status.py."""
@@ -47,7 +47,7 @@ class TestRefreshAllDashboards:
             mod,
             "create_fresh_dashboard",
             lambda bp: {
-                "branch": bp.name.upper(),
+                "branch": bp.name.lower(),
                 "sections": {},
                 "quick_status": {},
             },
@@ -92,7 +92,7 @@ class TestRefreshAllDashboards:
             if bp.name == "bad":
                 raise RuntimeError("simulated failure")
             return {
-                "branch": bp.name.upper(),
+                "branch": bp.name.lower(),
                 "sections": {},
                 "quick_status": {},
             }
@@ -119,7 +119,7 @@ class TestRefreshSingleDashboard:
             mod,
             "create_fresh_dashboard",
             lambda bp: {
-                "branch": bp.name.upper(),
+                "branch": bp.name.lower(),
                 "sections": {},
                 "quick_status": {},
             },
@@ -127,7 +127,7 @@ class TestRefreshSingleDashboard:
 
         result = mod.refresh_single_dashboard(branch_dir)
         assert result["status"] == "success"
-        assert result["branch"] == "FLOW"
+        assert result["branch"] == "flow"
 
     def test_returns_error_on_exception(self, tmp_path, monkeypatch):
         """Exception during refresh returns status 'error' with message."""
@@ -145,13 +145,13 @@ class TestRefreshSingleDashboard:
 
         result = mod.refresh_single_dashboard(branch_dir)
         assert result["status"] == "error"
-        assert result["branch"] == "FAILING"
+        assert result["branch"] == "failing"
         assert "boom" in result["error"]
 
     def test_a_branch_with_no_mail_central_row_gets_its_own_inbox_count(self, tmp_path, monkeypatch):
         """The mail count is the branch's own inbox, so a branch the central never lists is not stamped 0.
 
-        An external project's branch has no row in AIPass's AI_MAIL.central.json
+        An external project's branch has no row in AIPass's ai_mail.central.json
         (18 core rows, measured 2026-09-11), and its project has no mail central
         at all. The central here lists only FLOW.
         """
@@ -165,7 +165,7 @@ class TestRefreshSingleDashboard:
 
         monkeypatch.setattr(mod, "read_all_centrals", lambda: {"ai_mail": {"branch_stats": {"FLOW": {"unread": 9}}}})
         monkeypatch.setattr(
-            mod, "create_fresh_dashboard", lambda bp: {"branch": bp.name.upper(), "sections": {}, "quick_status": {}}
+            mod, "create_fresh_dashboard", lambda bp: {"branch": bp.name.lower(), "sections": {}, "quick_status": {}}
         )
         saved: dict = {}
         monkeypatch.setattr(mod, "save_dashboard", lambda bp, data: saved.update(data))

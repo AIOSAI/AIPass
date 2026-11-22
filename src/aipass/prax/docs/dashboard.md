@@ -46,7 +46,7 @@ never reads a cwd. Called without one, it is core-only.
 
 **Mail counts come from the branch's own inbox, never from the ai_mail central.**
 `calculate_quick_status` counts `<branch>/.ai_mail.local/inbox.json`. The
-refresh also builds an `ai_mail` section from `AI_MAIL.central.json`, but
+refresh also builds an `ai_mail` section from `ai_mail.central.json`, but
 nothing reads it and it is popped before save. So a branch with no central row,
 which is every external branch today, still gets its true count. Pinned in
 `tests/test_operations.py`: a central listing only FLOW, a branch inbox with 3

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_audit.py
 # Description: PRAX Log Audit Command
-# Version: 0.3.0
+# Version: 0.4.0
 # Created: 2026-02-26
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """PRAX Log Audit Module: reports oversized logs and sweeps stale ones; never truncates (writers rotate themselves)."""
@@ -21,7 +21,7 @@ from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument, refuse
 def print_introspection():
     """Display module introspection - shows connected handlers"""
     console.print()
-    console.print("[bold cyan]PRAX Log Audit Module[/bold cyan]")
+    console.print("[bold cyan]prax Log Audit Module[/bold cyan]")
     console.print()
     console.print("[yellow]Purpose:[/yellow]")
     console.print("  Report oversized logs and sweep stale ones")
@@ -40,7 +40,7 @@ def print_introspection():
 def print_help():
     """Drone-compliant help output"""
     console.print()
-    console.print("[bold cyan]PRAX Log Audit[/bold cyan]")
+    console.print("[bold cyan]prax Log Audit[/bold cyan]")
     console.print()
 
     console.print("[yellow]Purpose:[/yellow]")

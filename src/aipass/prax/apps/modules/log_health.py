@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_health.py
 # Description: PRAX Log Health Command — rate overview
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-07-14
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -23,7 +23,7 @@ from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument, refuse
 def print_introspection():
     """Display module introspection."""
     console.print()
-    console.print("[bold cyan]PRAX Log Health Module[/bold cyan]")
+    console.print("[bold cyan]prax Log Health Module[/bold cyan]")
     console.print()
     console.print("[yellow]Purpose:[/yellow]")
     console.print("  Show log file growth rates and detect runaway logs")
@@ -40,7 +40,7 @@ def print_introspection():
 def print_help():
     """Drone-compliant help output."""
     console.print()
-    console.print("[bold cyan]PRAX Log Health[/bold cyan]")
+    console.print("[bold cyan]prax Log Health[/bold cyan]")
     console.print()
     console.print("[yellow]Purpose:[/yellow]")
     console.print("  Monitor log file growth rates across system_logs/")

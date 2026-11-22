@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: filesystem_handler.py
 # Description: FileSystem Event Handler
-# Version: 0.3.1
+# Version: 0.4.0
 # Created: 2026-03-08
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """PRAX Filesystem Event Handler"""
@@ -166,11 +166,11 @@ class MonitoringFileHandler(FileSystemEventHandler):
         if "aipass" in parts:
             idx = parts.index("aipass")
             if idx + 1 < len(parts):
-                return parts[idx + 1].upper()
+                return parts[idx + 1].lower()
         if "src" in parts:
             idx = parts.index("src")
             if idx + 1 < len(parts):
-                return parts[idx + 1].upper()
+                return parts[idx + 1].lower()
         return None
 
     def _read_codex_cwd(self, file_path) -> Optional[str]:

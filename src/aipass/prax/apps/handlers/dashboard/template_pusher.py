@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: template_pusher.py
 # Description: Dashboard Template Push Handler
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-02-25
 # Modified: 2026-11-22
 # =============================================
@@ -257,7 +257,7 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
     repo_root = _find_repo_root()
 
     for branch in branches:
-        branch_name = branch["name"].upper()
+        branch_name = branch["name"].lower()
         branch_path = branch["path"]
         result["branches_scanned"] += 1
 

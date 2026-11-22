@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: refresh.py
 # Description: Dashboard Refresh Handler
-# Version: 0.8.1
+# Version: 0.9.0
 # Created: 2026-02-25
-# Modified: 2026-11-08
+# Modified: 2026-11-22
 # =============================================
 
 """Dashboard Refresh Handler
@@ -56,7 +56,7 @@ RECENTLY_CLOSED_LIMIT = 5
 # Same window as @flow's _filter_branch_plans, or a refresh republishes closures it aged out.
 CLOSED_WINDOW_DAYS = 7
 
-# No honest source in PLANS.central.json (its per-branch totals are capped at 5): carry @flow's value.
+# No honest source in plans.central.json (its per-branch totals are capped at 5): carry @flow's value.
 FLOW_KEYS_PRAX_CANNOT_SOURCE = ("total_plans",)
 
 
@@ -141,7 +141,7 @@ def _build_recently_closed(closed_rows: List[Dict]) -> List[Dict]:
 
 
 def _extract_flow_section(centrals: Dict, branch_name: str, existing: "Dict | None" = None) -> Dict:
-    """Build the flow section from PLANS.central.json in @flow's five-key shape."""
+    """Build the flow section from plans.central.json in @flow's five-key shape."""
     carried = {key: (existing or {}).get(key, 0) for key in FLOW_KEYS_PRAX_CANNOT_SOURCE}
 
     plans_data = centrals.get("plans")
@@ -238,7 +238,7 @@ def _merge_over_disk(existing: "Dict | None", computed: Dict) -> Dict:
 
 def _refresh_branch(branch_path: Path, centrals: Dict) -> None:
     """Rebuild one branch's dashboard: one read and one write under the dashboard lock."""
-    branch_name = branch_path.name.upper()
+    branch_name = branch_path.name.lower()
     with dashboard_lock(branch_path):
         existing = _read_existing_dashboard(branch_path)
         old_sections = _existing_sections(existing)
@@ -263,7 +263,7 @@ def _refresh_branch(branch_path: Path, centrals: Dict) -> None:
         save_dashboard(branch_path, dashboard)
 
     # Outside the lock: the plugin's write_section takes it again.
-    if branch_name == "DEVPULSE":
+    if branch_name == "devpulse":
         _run_devpulse_plugin(branch_path)
 
 
@@ -292,7 +292,7 @@ def refresh_all_dashboards() -> Dict:
         return {"status": "error", "branches_updated": 0, "branches_failed": 0, "errors": [str(e)]}
 
     for branch_path in branch_paths:
-        branch_name = branch_path.name.upper()
+        branch_name = branch_path.name.lower()
 
         try:
             _refresh_branch(branch_path, centrals)
@@ -331,7 +331,7 @@ def refresh_all_dashboards() -> Dict:
 def refresh_single_dashboard(branch_path: Path) -> Dict:
     """Refresh a single branch's dashboard."""
     centrals = read_all_centrals()
-    branch_name = branch_path.name.upper()
+    branch_name = branch_path.name.lower()
 
     try:
         _refresh_branch(branch_path, centrals)

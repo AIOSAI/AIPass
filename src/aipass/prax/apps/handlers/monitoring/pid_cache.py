@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pid_cache.py
 # Description: PID cache for branch-to-agent mapping
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-07-10
-# Modified: 2026-11-08
+# Modified: 2026-11-22
 # =============================================
 
 """PID cache — maps branch names to active agent PIDs from dispatch lock files.
@@ -42,7 +42,7 @@ def parse_lock_pid(branch_entry: dict, new_cache: dict[str, int], repo_root: Pat
         pid = lock_data.get("pid", 0)
         if not pid or not Path(f"/proc/{pid}").exists():
             return
-        name = branch_entry.get("name", "").upper()
+        name = branch_entry.get("name", "").lower()
         if name:
             new_cache[name] = pid
     except (ValueError, OSError) as e:
@@ -79,8 +79,8 @@ def refresh(repo_root: Optional[Path] = None) -> None:
 def get_pid_for_branch(branch: str) -> Optional[int]:
     """Look up PID for a branch from the cache."""
     refresh()
-    base = branch.upper()
-    if base.endswith(" AGENT"):
+    base = branch.lower()
+    if base.endswith(" agent"):
         base = base[:-6]
     with _pid_cache_lock:
         return _pid_cache.get(base)

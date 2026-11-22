@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dashboard.py
 # Description: Dashboard Section Utilities
-# Version: 0.6.0
+# Version: 0.7.0
 # Created: 2026-02-25
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Dashboard Section Utilities
@@ -92,7 +92,7 @@ def print_help():
     console.print("  drone @prax dashboard push-template             # push to all branches")
     console.print("  drone @prax dashboard push-template --dry-run   # preview changes")
     console.print("  drone @prax dashboard diff-template             # diff all branches")
-    console.print("  drone @prax dashboard diff-template --branch FLOW  # diff single branch")
+    console.print("  drone @prax dashboard diff-template --branch flow  # diff single branch")
     console.print("  drone @prax dashboard template-status           # version info")
     console.print()
 
@@ -189,7 +189,7 @@ def _handle_refresh(args: List[str]) -> None:
             logger.warning("Branch path not found: %s", e)
             error(str(e))
             return
-        console.print(f"[dim]Refreshing {branch_path.name.upper()} dashboard...[/dim]")
+        console.print(f"[dim]Refreshing {branch_path.name.lower()} dashboard...[/dim]")
         result = refresh_single_dashboard(branch_path)
         if result["status"] == "success":
             console.print(f"[green]Refreshed {result['branch']}[/green]")
@@ -206,7 +206,7 @@ def _handle_refresh(args: List[str]) -> None:
         error(f"{cwd} is not inside a registered branch. Name it: drone @prax dashboard refresh @branch")
         return
 
-    console.print(f"[dim]Refreshing {branch_path.name.upper()} dashboard...[/dim]")
+    console.print(f"[dim]Refreshing {branch_path.name.lower()} dashboard...[/dim]")
     result = refresh_single_dashboard(branch_path)
     if result["status"] == "success":
         console.print(f"[green]Refreshed {result['branch']}[/green]")

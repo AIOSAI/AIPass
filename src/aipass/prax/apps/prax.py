@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: prax.py
 # Description: Entry point CLI for drone @prax — logging, monitoring, dashboard
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-10-24
+# Modified: 2026-11-22
 # =============================================
 
 """PRAX Branch - Main Orchestrator"""
@@ -58,7 +58,7 @@ def discover_command_modules() -> List[Callable]:
 def print_introspection():
     """Display discovered modules (main entry point - modules only, no handlers)"""
     console.print()
-    console.print("[bold cyan]PRAX - System-Wide Logging Infrastructure[/bold cyan]")
+    console.print("[bold cyan]prax - System-Wide Logging Infrastructure[/bold cyan]")
     console.print()
     console.print("[dim]Unified logging system for AIPass ecosystem[/dim]")
     console.print()
@@ -86,7 +86,7 @@ def print_introspection():
 def print_help():
     """Rich-formatted top-level help for PRAX"""
     console.print()
-    console.print("[bold cyan]PRAX - System-Wide Logging Infrastructure[/bold cyan]")
+    console.print("[bold cyan]prax - System-Wide Logging Infrastructure[/bold cyan]")
     console.print()
     console.print("[dim]Unified logging system for AIPass ecosystem[/dim]")
     console.print()
@@ -97,7 +97,7 @@ def print_help():
 
     console.print("[yellow]Commands:[/yellow]")
     console.print("  [cyan]monitor[/cyan]     Mission Control - unified real-time monitoring")
-    console.print("  [cyan]status[/cyan]      Show PRAX system status")
+    console.print("  [cyan]status[/cyan]      Show prax system status")
     console.print("  [cyan]log-audit[/cyan]   Audit log file sizes and health")
     console.print("  [cyan]log-health[/cyan]  Log growth rates (scan / snapshot)")
     console.print("  [cyan]dashboard[/cyan]   System dashboard")
@@ -155,7 +155,7 @@ def main() -> int:
 def _run() -> int:
     """Parse the command line and route it. Refusals are raised, never returned."""
     parser = argparse.ArgumentParser(
-        description="PRAX - System-Wide Logging Infrastructure",
+        description="prax - System-Wide Logging Infrastructure",
         add_help=False,  # We route --help to modules when a command is given
     )
 
@@ -164,7 +164,7 @@ def _run() -> int:
     parser.add_argument("args", nargs="*", help="Arguments for the command")
 
     parser.add_argument("--help", "-h", action="store_true", dest="show_help", help="Show help information")
-    parser.add_argument("--version", "-V", action="version", version="PRAX v2.4.0")
+    parser.add_argument("--version", "-V", action="version", version="prax v2.4.0")
 
     parsed_args, remaining = parser.parse_known_args()
 

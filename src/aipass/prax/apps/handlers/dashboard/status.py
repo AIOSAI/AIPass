@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: Dashboard Status Calculation Handler
-# Version: 0.6.0
+# Version: 0.7.0
 # Created: 2026-02-25
-# Modified: 2026-11-08
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -161,12 +161,12 @@ def get_branch_paths() -> List[Path]:
 
 def resolve_branch_path(branch_ref: str) -> Path:
     """Resolve @branch reference to filesystem path; the first row by that name wins (core rows come first)."""
-    name = branch_ref.lstrip("@").upper()
+    name = branch_ref.lstrip("@").lower()
 
     if not AIPASS_REGISTRY.exists():
         raise FileNotFoundError("AIPASS_REGISTRY.json not found")
 
-    rows = [row for row in fleet_rows(AIPASS_REGISTRY.parent) if row["name"].upper() == name]
+    rows = [row for row in fleet_rows(AIPASS_REGISTRY.parent) if row["name"].lower() == name]
     if not rows:
         raise FileNotFoundError(f"Branch '{name}' not found in registry (memory's fleet: core, residents, roots)")
     path = rows[0]["path"]

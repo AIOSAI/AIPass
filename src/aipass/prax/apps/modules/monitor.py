@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitor.py
 # Description: Unified Monitoring Module
-# Version: 0.5.3
+# Version: 0.6.0
 # Created: 2025-11-23
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """PRAX Monitor Module - Mission Control for Autonomous Branches."""
@@ -57,7 +57,7 @@ def print_introspection():
         ("6. branch_scope.py", "BranchScope, parse_scope() - Launch-time branch scoping"),
     ]
     console.print()
-    console.print("[bold cyan]PRAX Monitor Module[/bold cyan]")
+    console.print("[bold cyan]prax Monitor Module[/bold cyan]")
     console.print()
     console.print("[yellow]Purpose:[/yellow]")
     console.print("  Mission Control for autonomous branch monitoring")
@@ -78,7 +78,7 @@ def print_introspection():
 def print_help():
     """Drone-compliant help output - command syntax and examples."""
     console.print()
-    console.print("[bold cyan]PRAX Monitor - Unified Branch Monitoring[/bold cyan]")
+    console.print("[bold cyan]prax Monitor - Unified Branch Monitoring[/bold cyan]")
     _cmds = [
         ("drone @prax monitor", "Show module introspection"),
         ("drone @prax monitor run", "Start monitoring all branches"),
@@ -227,7 +227,7 @@ def _run_monitor(args: List[str]) -> bool:
     _is_tty = sys.stdin.isatty()
 
     console.print()
-    header("PRAX Mission Control - Unified Monitoring")
+    header("prax Mission Control - Unified Monitoring")
     console.print()
     console.print(f"[green]{_mode_line(scope)}[/green]")
     if scope.is_scoped:
@@ -404,7 +404,7 @@ def _emit_watcher_event(level: str, message: str) -> None:
         MonitoringEvent(
             priority=priority,
             event_type="log",
-            branch="PRAX",
+            branch="prax",
             action=level,
             level=level,
             timestamp=datetime.now(),
@@ -680,7 +680,7 @@ if __name__ == "__main__":
         print_help()
         sys.exit(0)
 
-    parser = argparse.ArgumentParser(description="PRAX Unified Monitoring - Mission Control", add_help=False)
+    parser = argparse.ArgumentParser(description="prax Unified Monitoring - Mission Control", add_help=False)
     parser.add_argument("--help", action="store_true", help="Show help message")
     parser.add_argument("--introspect", action="store_true", help="Show module introspection")
     parser.add_argument("tokens", nargs="*", help="Optional 'run' subcommand and/or branches (comma-separated)")

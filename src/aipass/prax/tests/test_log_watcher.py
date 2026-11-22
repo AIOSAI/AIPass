@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_log_watcher.py
 # Description: Tests for log file monitoring handler
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-04-03
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/monitoring/log_watcher.py."""
@@ -137,7 +137,7 @@ class TestExtractCommandInfo:
         assert result == {
             "command": "drone dispatch @devpulse Subject, with a comma",
             "caller": None,
-            "target": "DEVPULSE",
+            "target": "devpulse",
         }
 
     def test_flow_creating_plan(self):
@@ -168,7 +168,7 @@ class TestExtractCommandInfo:
         result = watcher._extract_command_info(line)
         assert result is not None
         assert "sentry audit" in result["command"]
-        assert result["target"] == "PRAX"
+        assert result["target"] == "prax"
 
     def test_ai_mail_send(self):
         mod = _import_log_watcher()
@@ -177,7 +177,7 @@ class TestExtractCommandInfo:
         result = watcher._extract_command_info(line)
         assert result is not None
         assert "ai_mail send" in result["command"]
-        assert result["target"] == "FLOW"
+        assert result["target"] == "flow"
 
     def test_ai_mail_inbox(self):
         mod = _import_log_watcher()
@@ -213,8 +213,8 @@ class TestExtractCommandInfo:
         line = "Routing @flow [CALLER:PRAX] \u2192 create ['.', 'Subject']"
         result = watcher._extract_command_info(line)
         assert result is not None
-        assert result["caller"] == "PRAX"
-        assert result["target"] == "FLOW"
+        assert result["caller"] == "prax"
+        assert result["target"] == "flow"
 
     def test_executing_command_with_caller(self):
         mod = _import_log_watcher()
@@ -222,7 +222,7 @@ class TestExtractCommandInfo:
         line = "Executing command [CALLER:SENTRY]: /path/to/aipass/prax/apps/status.py audit @prax"
         result = watcher._extract_command_info(line)
         assert result is not None
-        assert result["caller"] == "SENTRY"
+        assert result["caller"] == "sentry"
 
     def test_non_command_line_returns_none(self):
         mod = _import_log_watcher()
@@ -245,7 +245,7 @@ class TestExtractCommandInfo:
         result = watcher._extract_command_info(line)
         assert result is not None
         assert "spawn create branch" in result["command"]
-        assert result["target"] == "NEWMOD"
+        assert result["target"] == "newmod"
 
     def test_trigger_fired(self):
         mod = _import_log_watcher()
@@ -632,7 +632,7 @@ class TestMatchFlowCommand:
         """Should suppress duplicate 'Loaded module' commands."""
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
-        watcher.last_command_per_branch["FLOW"] = "FLOW:flow command"
+        watcher.last_command_per_branch["flow"] = "flow:flow command"
 
         result = watcher._match_flow_command("Loaded module: flow_planner")
         assert result is None
@@ -695,7 +695,7 @@ class TestExtractCommandInfoAdditional:
         line = "Drone started with args: ['audit', '@prax']"
         result = watcher._extract_command_info(line)
         # The @prax in the args is the target, read as _extract_target_from_cmd reads it (prax, leg 4).
-        assert result == {"command": "drone audit @prax", "caller": None, "target": "PRAX"}
+        assert result == {"command": "drone audit @prax", "caller": None, "target": "prax"}
 
 
 class TestMatchExecutingCommand:
@@ -715,8 +715,8 @@ class TestMatchExecutingCommand:
         line = "Executing command [CALLER:DRONE]: /path/to/aipass/sentry/apps/audit.py @prax"
         result = watcher._match_executing_command(line)
         assert result is not None
-        assert result["caller"] == "DRONE"
-        assert result["target"] == "PRAX"
+        assert result["caller"] == "drone"
+        assert result["target"] == "prax"
 
     def test_without_caller(self):
         """Should work without CALLER tag."""
@@ -724,7 +724,7 @@ class TestMatchExecutingCommand:
         watcher, _ = _make_watcher(mod)
         line = "Executing command: /path/to/aipass/flow run"
         result = watcher._match_executing_command(line)
-        assert result == {"command": "@flow run", "caller": None, "target": "FLOW"}
+        assert result == {"command": "@flow run", "caller": None, "target": "flow"}
 
 
 class TestExtractTargetFromCmd:
@@ -734,14 +734,14 @@ class TestExtractTargetFromCmd:
         """Should extract target from @branch pattern."""
         mod = _import_log_watcher()
         result = mod.LogFileWatcher._extract_target_from_cmd("audit @prax")
-        assert result == "PRAX"
+        assert result == "prax"
 
     def test_extracts_path_target(self, tmp_path):
         """Should extract target from /aipass/branch pattern."""
         mod = _import_log_watcher()
         cmd_path = str(tmp_path / "aipass" / "sentry" / "run.py")
         result = mod.LogFileWatcher._extract_target_from_cmd(cmd_path)
-        assert result == "SENTRY"
+        assert result == "sentry"
 
     def test_returns_none_when_no_target(self):
         """Should return None when no target pattern matches."""

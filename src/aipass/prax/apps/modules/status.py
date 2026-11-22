@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: PRAX Status Command
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2025-11-15
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """PRAX Status Module"""
@@ -21,8 +21,8 @@ from aipass.prax.apps.handlers.cli.help_flags import wants_help
 def print_help():
     """Display module help and connected handlers"""
     console.print()
-    console.print("[bold cyan]PRAX Status Commands:[/bold cyan]")
-    console.print("  [white]status[/white]              Show PRAX system status")
+    console.print("[bold cyan]prax Status Commands:[/bold cyan]")
+    console.print("  [white]status[/white]              Show prax system status")
     console.print("  [white]status help[/white]         Show this help")
     console.print()
 
@@ -61,7 +61,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     status = get_system_status()
 
     console.print()
-    console.print("[bold cyan]PRAX System Status[/bold cyan]")
+    console.print("[bold cyan]prax System Status[/bold cyan]")
     console.print("=" * 60)
     total = status["total_modules"]
     console.print(f"  Total Modules:   {'unreadable (see the prax log)' if total is None else total}")
@@ -79,7 +79,7 @@ def print_introspection():
     """Display module introspection info."""
     console.print()
     console.print("status Module")
-    console.print("Implements the 'status' command to display PRAX system status dashboard")
+    console.print("Implements the 'status' command to display prax system status dashboard")
     console.print()
     console.print("Connected Handlers:")
     console.print("  modules/")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_central.py
 # Description: Tests for central file reader handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/central/reader.py."""
@@ -38,7 +38,7 @@ class TestReadAllCentrals:
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
         payload = {"status": "active"}
-        (central_dir / "AI_MAIL.central.json").write_text(json.dumps(payload), encoding="utf-8")
+        (central_dir / "ai_mail.central.json").write_text(json.dumps(payload), encoding="utf-8")
 
         result = reader.read_all_centrals()
         assert isinstance(result, dict)
@@ -61,7 +61,7 @@ class TestReadAllCentrals:
         central_dir.mkdir()
 
         payload = {"status": "active", "version": "1.0.0"}
-        (central_dir / "AI_MAIL.central.json").write_text(json.dumps(payload), encoding="utf-8")
+        (central_dir / "ai_mail.central.json").write_text(json.dumps(payload), encoding="utf-8")
 
         result = reader.read_all_centrals()
         assert "ai_mail" in result
@@ -102,7 +102,7 @@ class TestReadAllCentrals:
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
 
-        (central_dir / "BAD.central.json").write_text("{not valid json!!", encoding="utf-8")
+        (central_dir / "bad.central.json").write_text("{not valid json!!", encoding="utf-8")
 
         result = reader.read_all_centrals()
         assert "bad" not in result
@@ -114,8 +114,8 @@ class TestReadAllCentrals:
         central_dir.mkdir()
 
         good_data = {"healthy": True}
-        (central_dir / "GOOD.central.json").write_text(json.dumps(good_data), encoding="utf-8")
-        (central_dir / "BAD.central.json").write_text("<<<broken>>>", encoding="utf-8")
+        (central_dir / "good.central.json").write_text(json.dumps(good_data), encoding="utf-8")
+        (central_dir / "bad.central.json").write_text("<<<broken>>>", encoding="utf-8")
 
         result = reader.read_all_centrals()
         assert len(result) == 1
@@ -127,7 +127,7 @@ class TestReadAllCentrals:
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
 
-        (central_dir / "VALID.central.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+        (central_dir / "valid.central.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
         (central_dir / "notes.txt").write_text("just a note", encoding="utf-8")
         (central_dir / "config.json").write_text(json.dumps({"nope": True}), encoding="utf-8")
 
@@ -140,18 +140,18 @@ class TestReadAllCentrals:
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
 
-        (central_dir / "BROKEN.central.json").write_text("not json", encoding="utf-8")
+        (central_dir / "broken.central.json").write_text("not json", encoding="utf-8")
 
         reader.read_all_centrals()
         central_world.logger.warning.assert_called_once()
-        assert central_world.logger.warning.call_args.args[1] == "BROKEN.central.json"
+        assert central_world.logger.warning.call_args.args[1] == "broken.central.json"
 
     def test_calls_json_handler_log_operation(self, central_world, tmp_path):
         """Should log the operation via json_handler after reading."""
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
 
-        (central_dir / "SVC.central.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+        (central_dir / "svc.central.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
 
         reader.read_all_centrals()
         central_world.json_handler.log_operation.assert_called_once_with("central_data_read", {"services_found": 1})
@@ -161,7 +161,7 @@ class TestReadAllCentrals:
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
 
-        (central_dir / "EMPTY.central.json").write_text(json.dumps({}), encoding="utf-8")
+        (central_dir / "empty.central.json").write_text(json.dumps({}), encoding="utf-8")
 
         result = reader.read_all_centrals()
         assert "empty" in result
@@ -173,7 +173,7 @@ class TestReadAllCentrals:
         central_dir.mkdir()
 
         nested = {"level1": {"level2": {"items": [1, 2, 3], "flag": True}}}
-        (central_dir / "NESTED.central.json").write_text(json.dumps(nested), encoding="utf-8")
+        (central_dir / "nested.central.json").write_text(json.dumps(nested), encoding="utf-8")
 
         result = reader.read_all_centrals()
         assert result["nested"] == nested
