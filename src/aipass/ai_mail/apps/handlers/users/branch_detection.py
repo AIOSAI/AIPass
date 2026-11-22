@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: branch_detection.py
 # Description: Branch Auto-Detection Handler
-# Version: 1.4.3
+# Version: 1.4.4
 # Created: 2025-11-18
 # Modified: 2026-11-22
 # =============================================
@@ -346,7 +346,7 @@ if __name__ == "__main__":
     console.print()
     console.print("HANDLER CHARACTERISTICS:")
     console.print("  [green]+[/green] Independent - no module dependencies")
-    console.print("  [green]+[/green] Can import Prax (service provider)")
+    console.print("  [green]+[/green] Can import prax (service provider)")
     console.print("  [green]+[/green] Pure business logic")
     console.print("  [dim]-[/dim] CANNOT import parent modules")
     console.print()

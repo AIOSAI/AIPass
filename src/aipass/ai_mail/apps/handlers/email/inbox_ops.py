@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_ops.py
 # Description: Inbox Operations Handler
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2025-11-15
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -159,7 +159,7 @@ if __name__ == "__main__":
     console.print()
     console.print("HANDLER CHARACTERISTICS:")
     console.print("  [green]+[/green] Independent - no module dependencies")
-    console.print("  [green]+[/green] Can import Prax (service provider)")
+    console.print("  [green]+[/green] Can import prax (service provider)")
     console.print("  [green]+[/green] Pure business logic")
     console.print("  [dim]-[/dim] CANNOT import parent modules")
     console.print()
