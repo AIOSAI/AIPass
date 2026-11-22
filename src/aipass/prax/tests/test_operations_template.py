@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_operations_template.py
 # Description: Unit tests for the dashboard template lane
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-08
 # Modified: 2026-11-22
 # =============================================
@@ -45,7 +45,7 @@ class TestDiffDashboardTemplate:
         """Build a full dashboard template dict for diff tests."""
         return {
             "_warning": "AUTO-GENERATED",
-            "branch": "{{BRANCHNAME}}",
+            "branch": "{{BRANCH}}",
             "sections": {
                 "ai_mail": {
                     "managed_by": "ai_mail",
@@ -254,7 +254,7 @@ class TestPushDashboardTemplate:
         """Create template file, registry, and branch dirs for push tests."""
         template = {
             "_warning": "AUTO-GENERATED",
-            "branch": "{{BRANCHNAME}}",
+            "branch": "{{BRANCH}}",
             "sections": {
                 "ai_mail": {
                     "managed_by": "ai_mail",

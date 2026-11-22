@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dashboard_merge.py
 # Description: quick_status has many writers — none may delete another's key
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-13
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/dashboard/status.py, refresh.py, operations.py, template_pusher.py and template_differ.py."""
@@ -251,6 +251,15 @@ class TestPushTemplateIsNotAWreckingBall:
         quick = json.loads(spawn_template.read_text(encoding="utf-8"))["quick_status"]
         assert quick["todo_count"] == 0
         assert quick["new_mail"] == 0
+
+    def test_a_structural_update_stamps_spawn_template_with_the_lowercase_token(self, tmp_path, monkeypatch):
+        spawn_template = tmp_path / "src" / "aipass" / "spawn" / "templates" / "builder" / "DASHBOARD.local.json"
+        spawn_template.parent.mkdir(parents=True)
+        spawn_template.write_text(json.dumps({"branch": "x", "quick_status": {}, "sections": {}}), encoding="utf-8")
+
+        _push_world(tmp_path, monkeypatch, pusher, {}, None).push_dashboard_template(dry_run=False)
+
+        assert json.loads(spawn_template.read_text(encoding="utf-8"))["branch"] == "{{BRANCH}}"
 
     def test_a_template_section_the_constant_never_heard_of_is_advised(self, tmp_path, monkeypatch):
         """The differ advises from the loaded template, not a module-level copy of its sections."""

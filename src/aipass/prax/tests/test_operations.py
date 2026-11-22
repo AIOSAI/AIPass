@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_operations.py
 # Description: Unit tests for dashboard operations handler
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-03-24
 # Modified: 2026-11-22
 # =============================================
@@ -414,7 +414,7 @@ class TestCreateFreshDashboard:
 
         template_data = {
             "_warning": "AUTO-GENERATED",
-            "branch": "{{BRANCHNAME}}",
+            "branch": "{{BRANCH}}",
             "last_updated": "",
             "sections": {
                 "ai_mail": {"managed_by": "ai_mail", "new": 0},

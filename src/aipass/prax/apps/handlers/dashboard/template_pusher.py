@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: template_pusher.py
 # Description: Dashboard Template Push Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-02-25
 # Modified: 2026-11-22
 # =============================================
@@ -63,11 +63,11 @@ REQUIRED_SECTIONS = {
 
 
 def _replace_placeholders(template: dict, branch_name: str) -> dict:
-    """Recursively replace {{BRANCHNAME}} with branch_name in all string values."""
+    """Recursively replace {{BRANCH}} with branch_name in all string values."""
 
     def _walk(val: Any) -> Any:
         if isinstance(val, str):
-            return val.replace("{{BRANCHNAME}}", branch_name)
+            return val.replace("{{BRANCH}}", branch_name)
         elif isinstance(val, list):
             return [_walk(item) for item in val]
         elif isinstance(val, dict):

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: operations.py
 # Description: Dashboard Operations Handler
-# Version: 0.7.0
+# Version: 0.7.1
 # Created: 2026-02-25
 # Modified: 2026-11-22
 # =============================================
@@ -101,7 +101,7 @@ def create_fresh_dashboard(branch_path: Path) -> Dict:
         try:
             template = json.loads(template_file.read_text())
             now = datetime.now().isoformat()
-            dashboard = json.loads(json.dumps(template).replace("{{BRANCHNAME}}", branch_path.name.lower()))
+            dashboard = json.loads(json.dumps(template).replace("{{BRANCH}}", branch_path.name.lower()))
             dashboard["last_updated"] = now
             return dashboard
         except (json.JSONDecodeError, OSError) as e:
