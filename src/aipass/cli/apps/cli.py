@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: cli.py
 # Description: Entry point for drone @cli — sentry-compliant module discovery and routing
-# Version: 2.3.4
+# Version: 2.3.5
 # Created: 2026-03-08
 # Modified: 2026-11-22
 # =============================================
@@ -125,7 +125,7 @@ def print_help() -> None:
 
     console.print("[bold cyan]WHAT IS cli?[/bold cyan]")
     console.print()
-    console.print("cli is the [bold]Display & Templates Service[/bold] - like Prax for logging:")
+    console.print("cli is the [bold]Display & Templates Service[/bold] - like prax for logging:")
     console.print("  [green]\u2713[/green] Centralized display formatting (headers, tables, panels)")
     console.print("  [green]\u2713[/green] Reusable templates for common operations")
     console.print("  [green]\u2713[/green] Rich library integration for beautiful output")
