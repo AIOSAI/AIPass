@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_feedback_compose.py
 # Description: Tests for feedback compose — send, reply, ai_mail delivery
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-14
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/feedback/compose.py."""
@@ -15,6 +15,7 @@
 
 import json
 import re
+import sys
 from datetime import datetime
 from unittest.mock import patch
 
@@ -37,7 +38,8 @@ def door(monkeypatch):
         posted.append((inbox_file, dict(email_data)))
         return True, "", "fake-id"
 
-    monkeypatch.setattr(ai_mail, "post_to_inbox_file", fake)
+    # Patched at its home: undoing a setattr on the package door would pin the real function there for good.
+    monkeypatch.setattr(sys.modules[real.__module__], "post_to_inbox_file", fake)
     return posted
 
 
