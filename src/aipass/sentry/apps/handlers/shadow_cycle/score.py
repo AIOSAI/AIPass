@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: score.py
 # Description: the v5 shadow score - one checker pack over the fleet, scoring and never gating
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-02
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -125,7 +125,11 @@ def _below_attention(results: Sequence[Dict]) -> List[list]:
     """Branch and score for every branch under the attention line, worst first.
 
     `result["branch"]` is the registry ENTRY, not a name."""
-    low = [[result["branch"]["name"], result["average"]] for result in results if result["average"] < ATTENTION_BELOW]
+    low = [
+        [result["branch"]["name"].lower(), result["average"]]
+        for result in results
+        if result["average"] < ATTENTION_BELOW
+    ]
     return sorted(low, key=lambda pair: pair[1])
 
 

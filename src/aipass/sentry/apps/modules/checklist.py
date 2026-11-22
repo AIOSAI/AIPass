@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: checklist.py
 # Description: Per-File Standards Checklist Module
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-03-15
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Per-File Standards Checklist Module
@@ -198,12 +198,12 @@ def _audit_ignore_pattern(file_path: str, branch_path: Optional[Path]) -> Option
     """The audit ignore pattern that keeps this file out of the audit, or None (no branch, or not ignored)."""
     if branch_path is None:
         return None
-    try:
-        rel = Path(file_path).resolve().relative_to(branch_path.resolve())
-    except ValueError:
+    resolved, root = Path(file_path).resolve(), branch_path.resolve()
+    if not resolved.is_relative_to(root):
+        # Outside its branch root it cannot be on that branch's ignore list: not ignored is the true answer.
         logger.info("[checklist] %s is not under its branch root %s", file_path, branch_path)
         return None
-    return audit_ignore_match(rel.as_posix())
+    return audit_ignore_match(resolved.relative_to(root).as_posix())
 
 
 # The token scripts count findings by: plain ASCII, one per finding, never on a pass.

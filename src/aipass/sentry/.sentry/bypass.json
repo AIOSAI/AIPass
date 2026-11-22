@@ -344,12 +344,6 @@
       "reason": "Unparseable source is returned unblanked (docstring contract) and check_prax_logger fails it as 'Unparseable source', so nothing reads as passed."
     },
     {
-      "file": "apps/modules/checklist.py",
-      "standard": "logged_fallback",
-      "lines": [200],
-      "reason": "A file outside its branch root cannot be on that branch's audit ignore list, so None (not ignored) is the true answer, not a stand-in. The info line names both paths."
-    },
-    {
       "file": "apps/handlers/context_standards/startup_budget_check.py",
       "standard": "unused_function",
       "functions": [

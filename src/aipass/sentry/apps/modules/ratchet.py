@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ratchet.py
 # Description: the execution ratchet - pick one branch a week, probe it, record the point
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-10-12
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -102,8 +102,8 @@ def _parse_budget(rest: List[str]) -> int:
 
 
 def _branch_names() -> List[str]:
-    """Every citizen the audit-tests lane can resolve, as the registry spells it."""
-    return sorted(runner.branch_paths())
+    """Every citizen the audit-tests lane can resolve, by the lowercase name the series and archive store."""
+    return sorted(name.lower() for name in runner.branch_paths())
 
 
 def _pick() -> None:

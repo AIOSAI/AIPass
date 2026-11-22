@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_audit_artifact.py
 # Description: Completeness + join-key tests for audit/artifact.py
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-08-11
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/audit/artifact.py."""
@@ -196,7 +196,7 @@ def test_violations_carry_branch_relative_file_and_standard(tmp_path):
     # bypass.json rules are written as branch-relative POSIX paths.
     assert violation["file"] == "apps/modules/module_03.py"
     assert violation["standard"] == "cli"
-    assert violation["branch"] == "PRAX"
+    assert violation["branch"] == "prax"
     assert violation["abs_path"] == str(branch_root / "apps/modules/module_03.py")
 
 
@@ -234,7 +234,7 @@ def test_type_errors_carry_join_keys(tmp_path):
     row = doc["type_errors"][0]
     assert row["file"] == "apps/modules/typed.py"
     assert row["standard"] == "diagnostics"
-    assert row["branch"] == "PRAX"
+    assert row["branch"] == "prax"
 
 
 def test_metadata_block_is_well_formed(tmp_path):
@@ -252,7 +252,7 @@ def test_metadata_block_is_well_formed(tmp_path):
     assert meta["pack"] == "aipass"
     assert meta["scope"] == "single-branch"
     assert meta["target_branch"] == "PRAX"
-    assert meta["branches"] == ["PRAX"]
+    assert meta["branches"] == ["prax"]
     assert meta["branch_count"] == 1
     assert set(meta["totals"]) == {"violations", "failed_checks", "type_error_files", "type_errors"}
 
@@ -270,7 +270,7 @@ def test_branch_entries_carry_scores_and_counts(tmp_path):
     doc = _write_and_load(tmp_path, _make_results(branch_root))
     entry = doc["branches"][0]
 
-    assert entry["name"] == "PRAX"
+    assert entry["name"] == "prax"
     assert entry["average"] == 63
     assert entry["scores"]["cli"] == 50
     assert entry["files_checked"] == 14
@@ -294,9 +294,9 @@ def test_multiple_branches_all_appear(tmp_path):
 
     doc = _write_and_load(tmp_path, first + second)
 
-    assert doc["metadata"]["branches"] == ["PRAX", "FLOW"]
-    assert len([v for v in doc["violations"] if v["branch"] == "PRAX"]) == 6
-    assert len([v for v in doc["violations"] if v["branch"] == "FLOW"]) == 8
+    assert doc["metadata"]["branches"] == ["prax", "flow"]
+    assert len([v for v in doc["violations"] if v["branch"] == "prax"]) == 6
+    assert len([v for v in doc["violations"] if v["branch"] == "flow"]) == 8
 
 
 def test_write_failure_raises_rather_than_passing_silently(tmp_path):

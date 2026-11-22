@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: artifact.py
 # Description: Audit Artifact Handler
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-08-11
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -158,7 +158,7 @@ def _branch_entry(result: Dict[str, Any], violation_count: int) -> Dict[str, Any
     """Per-branch scores and context (the numbers, not the findings)."""
     branch = result.get("branch", {}) or {}
     return {
-        "name": branch.get("name", ""),
+        "name": branch.get("name", "").lower(),
         "path": branch.get("path", ""),
         "entry_file": branch.get("entry_file", ""),
         "average": result.get("average", 0),
@@ -194,7 +194,7 @@ def build_artifact(
 
     for result in audit_results:
         branch = result.get("branch", {}) or {}
-        branch_name = branch.get("name", "")
+        branch_name = branch.get("name", "").lower()
         branch_root = Path(branch.get("path", ".")).resolve()
 
         branch_violations = _collect_violations(result, branch_name, branch_root)
