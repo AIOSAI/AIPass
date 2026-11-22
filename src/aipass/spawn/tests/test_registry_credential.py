@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_registry_credential.py
 # Description: metadata.id — the project credential a new registry is born with
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-24
 # Modified: 2026-11-22
 # =============================================
@@ -14,6 +14,7 @@
 
 import json
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -548,3 +549,112 @@ class TestRebuildRegistry:
         reg.write_bytes(b"[]")
 
         assert "drone @spawn sync-registry --rebuild" in sync_registry_ops.sync_registry(registry_path=reg)["error"]
+
+
+FLAGGED = {"name": "FLOW", "path": "src/flow", "owner": True, "admin": True, "ci_cure": True, "registry_id": "cid-f"}
+
+
+def _mixed_registry(tmp_path, shape="list", extra=()):
+    """A project registry written before the lowercase rule: a flagged capital row, an absolute path, a dashed name."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    rows = [
+        {**FLAGGED, "unknown_key": {"kept": [1, "é"]}},
+        {"name": "my-agent", "path": str(project / "src" / "my-agent"), "email": "@my_agent", "profile": "library"},
+        {"name": "drone", "path": "src/drone", "registry_id": "cid-d"},
+        *extra,
+    ]
+    branches = rows if shape == "list" else {row["name"]: row for row in rows}
+    reg = project / "PROJ_REGISTRY.json"
+    metadata = {"id": "cred", "name": "PROJ", "last_updated": "2026-01-01"}
+    reg.write_text(json.dumps({"metadata": metadata, "branches": branches}, indent=2), encoding="utf-8")
+    return reg
+
+
+def _rows(reg):
+    """The registry's rows in stored order, list form or dict form."""
+    branches = json.loads(reg.read_text(encoding="utf-8"))["branches"]
+    return list(branches.values()) if isinstance(branches, dict) else branches
+
+
+class TestConvertRegistry:
+    """sync-registry --lowercase: one registry to lowercase names and relative paths, every other key kept."""
+
+    def test_a_preview_writes_nothing_and_names_each_change(self, tmp_path, capsys):
+        reg = _mixed_registry(tmp_path)
+        before = _tree(reg.parent)
+
+        assert handle_sync_registry([str(reg), "--lowercase"]) == 1
+
+        out = capsys.readouterr().out
+        assert _tree(reg.parent) == before
+        assert "FLOW -> flow" in out and "my-agent -> my_agent" in out
+        assert "-> src/my-agent" in out
+
+    @pytest.mark.parametrize("shape", ["list", "dict"])
+    def test_confirm_converts_a_mixed_registry_and_keeps_every_other_key(self, tmp_path, shape):
+        """Mutant: the convert drops or rewrites a key it does not own -> red."""
+        reg = _mixed_registry(tmp_path, shape)
+        original = _rows(reg)
+
+        assert handle_sync_registry([str(reg), "--lowercase", "--confirm"]) == 0
+
+        rows = _rows(reg)
+        assert [(r["name"], r["path"]) for r in rows] == [
+            ("flow", "src/flow"),
+            ("my_agent", "src/my-agent"),
+            ("drone", "src/drone"),
+        ]
+        for old, new in zip(original, rows):
+            assert {k: v for k, v in new.items() if k not in ("name", "path")} == {
+                k: v for k, v in old.items() if k not in ("name", "path")
+            }
+            assert list(new) == list(old)
+        document = json.loads(reg.read_text(encoding="utf-8"))
+        if shape == "dict":
+            assert list(document["branches"]) == ["flow", "my_agent", "drone"]
+        assert {k: v for k, v in document["metadata"].items() if k != "last_updated"} == {"id": "cred", "name": "PROJ"}
+
+    def test_the_copy_is_written_first_and_equals_the_original(self, tmp_path, capsys):
+        """Mutant: the copy taken after the convert, or not at all -> red."""
+        reg = _mixed_registry(tmp_path)
+        original = reg.read_bytes()
+
+        assert handle_sync_registry([str(reg), "--lowercase", "--confirm"]) == 0
+
+        [kept_line] = [line for line in capsys.readouterr().out.splitlines() if "Original kept at" in line]
+        copy = Path(kept_line.split("Original kept at", 1)[1].strip())
+        assert copy.parent == reg.parent and copy.name.startswith("PROJ_REGISTRY.json.pre-convert-")
+        assert copy.read_bytes() == original != reg.read_bytes()
+
+    def test_two_rows_folding_to_one_name_are_refused_naming_both(self, tmp_path, capsys):
+        """Mutant: the twin check dropped -> one row silently overwrites the other -> red."""
+        reg = _mixed_registry(tmp_path, extra=[{"name": "flow", "path": "src/flow2"}])
+        before = _tree(reg.parent)
+
+        assert handle_sync_registry([str(reg), "--lowercase", "--confirm"]) == 2
+
+        said = capsys.readouterr()
+        assert _tree(reg.parent) == before
+        assert "'FLOW' and 'flow'" in said.out + said.err
+
+    def test_a_path_outside_the_registry_folder_is_refused_naming_the_row(self, tmp_path, capsys):
+        reg = _mixed_registry(tmp_path, extra=[{"name": "STRAY", "path": str(tmp_path / "elsewhere" / "stray")}])
+        before = _tree(reg.parent)
+
+        assert handle_sync_registry([str(reg), "--lowercase", "--confirm"]) == 2
+
+        said = capsys.readouterr()
+        assert _tree(reg.parent) == before
+        assert "row 'STRAY'" in said.out + said.err
+
+    def test_a_second_run_is_a_no_op_that_says_so(self, tmp_path, capsys):
+        reg = _mixed_registry(tmp_path)
+        assert handle_sync_registry([str(reg), "--lowercase", "--confirm"]) == 0
+        capsys.readouterr()
+        before = _tree(reg.parent)
+
+        assert handle_sync_registry([str(reg), "--lowercase", "--confirm"]) == 0
+
+        assert _tree(reg.parent) == before
+        assert "already converted" in capsys.readouterr().out

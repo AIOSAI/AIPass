@@ -15,9 +15,11 @@ PyPI version — not the changelog header.
 
 - **drone: `drone @git alerts list --pr <n>`** (2026-11-21). Lists the code-scanning alerts of a pull request's merge ref, the ones the required check counts, and `alerts dismiss` accepts an alert that is open on a pull request only.
 - **drone: `drone @git alerts reopen <number>`** (2026-11-21). Puts a dismissed code-scanning alert back to open, for the owner tier, with a ledger row. An alert that is open or fixed, an unknown number and an unreadable state are each refused by name.
+- **spawn: `sync-registry --lowercase` converts a registry written before the lowercase rule** (2026-11-22). A preview by default: it lists each row whose name would become lowercase or whose full path would become relative, and writes nothing. With `--confirm` it first writes a byte copy beside the registry, then converts it, keeping row order and every other key. It refuses, writing nothing, when two rows fold to one name or a row's path sits outside the registry's folder. It takes a project folder or the registry file itself.
 
 ### Fixed
 
+- **spawn: a crashed `sync-registry --check` exits 2** (2026-11-22). It exited 1, the same code as "issues found", so a caller could not tell a broken check from a finding.
 - **aipass: a new project's folder is proven inside `projects/`, and its name rule matches the whole name** (2026-11-21). `create_project` builds the folder through `project_path`, which normalises the joined path and refuses one that is not directly under `projects/`, in the form code scanners recognise. The name rule used `re.match` with `$`, which let a name ending in a newline through from a terminal; it is now a full match.
 - **devpulse: the watchdog wire reads the seat's inbox where the seat lives** (2026-11-21). The wire built the inbox path under `src/aipass/<seat>`, so the owner seat of another project never saw its completion mail: each wire waited out the 120-second grace and woke flagged `COMPLETED_NO_MAIL` with the reply already in the inbox. The folder now comes from the seat's own registry row.
 - **aipass: bare `aipass init` scaffolds the current folder** (2026-11-21). It printed usage while its own usage line and both scaffold handlers named the current folder as the default target.

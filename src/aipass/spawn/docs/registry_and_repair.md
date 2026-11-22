@@ -72,6 +72,21 @@ reads such a registry by folding case on both sides. The duplicate guards in `cr
 for a name already present in the other case. Spawn's writers leave an existing capital row's
 name as they find it; only `repair --rename` rewrites a name, and it writes lowercase.
 
+Such a registry is converted with `drone @spawn sync-registry <registry-or-project> --lowercase`.
+The argument names the registry file itself or a folder to walk up from, so the fleet registry and
+each exterior project's are converted one at a time. Without `--confirm` it prints each row that
+would change (old name -> new name, old path -> new path) and writes nothing, exiting 1 when there
+is something to convert and 0 when there is not. With `--confirm` it copies the registry byte for
+byte to `<name>.pre-convert-<YYYYmmdd-HHMMSS>` beside it, prints that path, then writes the
+converted registry under `registry_lock` with an atomic replace. Each name becomes
+`normalize_branch_name(name)`, the dict-form key moving with it. Each absolute path becomes
+relative to the registry's folder. Every other key (`owner`, `admin`, `ci_cure`, `registry_id`,
+`email`, dates, keys spawn does not know) and the row order are kept, and `metadata` changes only
+in `last_updated`, the stamp every registry writer sets. It refuses, writing nothing and exiting 2,
+when two rows fold to one name (it names both; choosing which row lives is the operator's call),
+when a row's path is outside the registry's folder (it names the row), or when the file does not
+parse (that is `--rebuild`'s case). A second run finds nothing to convert and says so.
+
 ---
 
 ## Passport migration

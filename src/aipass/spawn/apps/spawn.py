@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.4.2
+# Version: 1.4.3
 # Created: 2026-03-05
 # Modified: 2026-11-22
 # =============================================
@@ -57,6 +57,10 @@ def print_help():
     )
     console.print(
         "  [green]sync-registry[/green] --rebuild       Rebuild a corrupt registry from passports "
+        "(preview; add --confirm)"
+    )
+    console.print(
+        "  [green]sync-registry[/green] --lowercase     Convert rows to lowercase names, relative paths "
         "(preview; add --confirm)"
     )
     console.print("  [green]regenerate-registry[/green] \\[class]   Regenerate template registry hashes (or --all)")

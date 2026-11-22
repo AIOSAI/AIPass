@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_registry.py
 # Description: Registry repair — thin CLI layer for registry synchronization
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-07
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Registry synchronization for branch lifecycle management.
@@ -15,6 +15,7 @@ from aipass.prax import logger
 
 from aipass.cli import console, err_console, error, warning
 
+from aipass.spawn.apps.handlers.convert_registry_ops import convert_registry
 from aipass.spawn.apps.handlers.registry import find_registry
 from aipass.spawn.apps.handlers.sync_registry_ops import (
     DAMAGED_STATE,
@@ -66,7 +67,7 @@ def handle_sync_registry(args: list[str]) -> int:
     if args and args[0] in ["--help", "-h"]:
         console.print(
             "[bold cyan]Usage:[/bold cyan] drone @spawn sync-registry "
-            "\\[project-path] [--fix|--check|--rebuild] [--json] [--dry-run] [--confirm]"
+            "\\[project-path] [--fix|--check|--rebuild|--lowercase] [--json] [--dry-run] [--confirm]"
         )
         console.print()
         console.print("  [green](no args)[/green]      Report mismatches between registry and filesystem")
@@ -78,6 +79,14 @@ def handle_sync_registry(args: list[str]) -> int:
         console.print(
             "  [green]--rebuild --confirm[/green] Move the corrupt file aside as <name>.corrupt-<stamp>, write the"
             " rebuilt one; admin and ci_cure are not restored (re-run grant-admin, grant-ci-cure)"
+        )
+        console.print(
+            "  [green]--lowercase[/green]    Preview converting rows to lowercase names and relative paths"
+            " (exit 0 nothing to convert, 1 rows to convert, 2 refused)"
+        )
+        console.print(
+            "  [green]--lowercase --confirm[/green] Copy the registry to <name>.pre-convert-<stamp>, then convert it;"
+            " project-path may name the registry file itself"
         )
         return 0
 
@@ -95,7 +104,8 @@ def handle_sync_registry(args: list[str]) -> int:
 
         from aipass.spawn.apps.handlers.registry import find_registry
 
-        registry_path = find_registry(start_path=Path(project_path))
+        named = Path(project_path)
+        registry_path = named if named.is_file() else find_registry(start_path=named)
         # A named project with no registry is an error; falling back to the cwd's would write the wrong project.
         if registry_path is None:
             error(f"No *_REGISTRY.json found at or above {project_path}")
@@ -105,6 +115,8 @@ def handle_sync_registry(args: list[str]) -> int:
         return _handle_check(registry_path, json_output="--json" in flags)
     if "--rebuild" in flags:
         return _handle_rebuild(registry_path, confirm="--confirm" in flags)
+    if "--lowercase" in flags:
+        return _handle_lowercase(registry_path, confirm="--confirm" in flags)
 
     fix = "--fix" in flags
     dry_run = "--dry-run" in flags
@@ -136,7 +148,7 @@ def handle_sync_registry(args: list[str]) -> int:
 
 
 def _handle_check(registry_path, json_output=False) -> int:
-    """Run owner/identity health check and report."""
+    """Run owner/identity health check and report. Exit 0 clean, 1 issues, 2 the check itself crashed."""
     import json as _json
 
     try:
@@ -144,7 +156,7 @@ def _handle_check(registry_path, json_output=False) -> int:
     except Exception as exc:
         logger.error(f"[sync-registry] Check error: {exc}")
         error(str(exc))
-        return 1
+        return 2
 
     if json_output:
         text = _json.dumps(result, indent=2, ensure_ascii=False)
@@ -206,6 +218,49 @@ def _handle_rebuild(registry_path, confirm=False) -> int:
         console.print("[dim]Preview - nothing written. Add --confirm to rebuild.[/dim]")
     console.print()
     return 0
+
+
+def _handle_lowercase(registry_path, confirm=False) -> int:
+    """Convert one registry to lowercase names and relative paths; a preview unless --confirm.
+
+    Exit 0: nothing to convert, or converted. 1: a preview with rows to convert. 2: refused or crashed."""
+    registry_path = registry_path or find_registry()
+    if registry_path is None:
+        error("No *_REGISTRY.json found above the current directory")
+        return 2
+    refusal = confirm and seat_refusal("sync-registry --lowercase --confirm", str(registry_path))
+    if refusal:
+        error(refusal)
+        return 2
+
+    try:
+        receipt = convert_registry(registry_path, confirm=confirm)
+    except Exception as exc:
+        logger.error(f"[sync-registry] Lowercase conversion error: {exc}")
+        error(str(exc))
+        return 2
+    if receipt["refused"]:
+        error(f"Registry conversion refused: {receipt['refused']}")
+        return 2
+
+    console.print()
+    if not receipt["changes"]:
+        console.print(f"{registry_path} is already converted - nothing to do.", markup=False)
+        console.print()
+        return 0
+    label = "Converted" if receipt["written"] else "Would convert"
+    console.print(f"{label} {len(receipt['changes'])} row(s) in {registry_path}", markup=False)
+    for change in receipt["changes"]:
+        console.print(
+            f"  {change['old_name']} -> {change['new_name']}    {change['old_path']} -> {change['new_path']}",
+            markup=False,
+        )
+    if receipt["copy"]:
+        console.print(f"  Original kept at {receipt['copy']}", markup=False)
+    else:
+        console.print("[dim]Preview - nothing written. Add --confirm to convert.[/dim]")
+    console.print()
+    return 0 if receipt["written"] else 1
 
 
 def _print_notes(notes) -> None:
