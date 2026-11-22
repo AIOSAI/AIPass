@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_templates.py
 # Description: The templates module — operation_start, operation_complete, routing, demo
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-03-24
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/templates.py — the operation output templates."""
@@ -223,7 +223,7 @@ class TestPrintIntrospectionOutput:
         with patch.object(templates, "CONSOLE", console):
             templates.print_introspection()
         output = get_output()
-        assert "CLI Templates Module" in output
+        assert "cli Templates Module" in output
 
     def test_introspection_lists_functions(self, plain_console):
         console, get_output = plain_console
@@ -252,7 +252,7 @@ class TestPrintHelpOutput:
         ):
             templates.print_help()
         output = get_output()
-        assert "CLI Templates Module" in output
+        assert "cli Templates Module" in output
 
     def test_help_contains_function_signatures(self, plain_console):
         console, get_output = plain_console

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_display.py
 # Description: The display module — messages, header, routing, demo, exit seam, escape, live colour
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-24
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/display.py — the render surface every branch imports."""
@@ -336,7 +336,7 @@ class TestPrintIntrospectionOutput:
         with patch.object(display, "CONSOLE", cons):
             display.print_introspection()
         output = get_output()
-        assert "CLI Display Module" in output
+        assert "cli Display Module" in output
 
     def test_print_introspection_lists_all_functions(self):
         cons, get_output = _make_capture_console()
@@ -364,7 +364,7 @@ class TestPrintHelpOutput:
         ):
             display.print_help()
         output = get_output()
-        assert "CLI Display Module" in output
+        assert "cli Display Module" in output
 
     def test_print_help_contains_what_is_section(self):
         cons, get_output = _make_capture_console()

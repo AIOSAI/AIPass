@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: templates.py
-# Description: CLI Templates Module — reusable operation output patterns
-# Version: 0.3.4
+# Description: cli Templates Module — reusable operation output patterns
+# Version: 0.3.5
 # Created: 2025-11-12
-# Modified: 2026-10-24
+# Modified: 2026-11-22
 # =============================================
 
 """
-CLI Templates Module - PUBLIC API
+cli Templates Module - PUBLIC API
 """
 
 from typing import List
@@ -21,7 +21,7 @@ from aipass.cli.apps.handlers.cli.help_flags import wants_help
 def print_introspection():
     """Display module info and connected handlers"""
     CONSOLE.print()
-    CONSOLE.print("[bold cyan]CLI Templates Module[/bold cyan]")
+    CONSOLE.print("[bold cyan]cli Templates Module[/bold cyan]")
     CONSOLE.print()
 
     CONSOLE.print("[yellow]Functions:[/yellow]")
@@ -39,7 +39,7 @@ def print_help():
     from aipass.cli.apps.modules.display import header
 
     CONSOLE.print()
-    header("CLI Templates Module - Reusable Operation Output Patterns")
+    header("cli Templates Module - Reusable Operation Output Patterns")
 
     CONSOLE.print("[bold cyan]What This Module Provides:[/bold cyan]")
     CONSOLE.print()
@@ -109,7 +109,7 @@ def run_demo():
     from aipass.cli.apps.modules.display import header
 
     CONSOLE.print()
-    header("CLI Templates Module - Demo")
+    header("cli Templates Module - Demo")
 
     CONSOLE.print("[bold]Operation templates with Rich formatting:[/bold]")
     CONSOLE.print()

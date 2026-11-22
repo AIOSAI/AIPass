@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: cli.py
 # Description: Entry point for drone @cli — sentry-compliant module discovery and routing
-# Version: 2.3.3
+# Version: 2.3.4
 # Created: 2026-03-08
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """
-CLI Branch - Universal Display/Output Service Provider
+cli Branch - Universal Display/Output Service Provider
 """
 
 import sys
@@ -23,7 +23,7 @@ from rich import box
 
 from aipass.cli.apps.modules.display import console, header, error, reset_command_state, resolve_exit
 
-VERSION = "2.3.3"
+VERSION = "2.3.4"
 CLI_ROOT = Path(__file__).parent
 MODULES_DIR = CLI_ROOT / "modules"
 
@@ -58,7 +58,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
             if module.handle_command(command, args):
                 return True
         except Exception as e:
-            logger.error(f"[CLI] Module error: {e}")
+            logger.error(f"[cli] Module error: {e}")
     return False
 
 
@@ -70,7 +70,7 @@ def print_introspection() -> None:
     service_modules = [m for m in modules if getattr(m, "__name__", "").split(".")[-1] in SERVICE_MODULES]
 
     console.print()
-    console.print("[bold cyan]CLI - Command Line Interface Branch[/bold cyan]")
+    console.print("[bold cyan]cli - Command Line Interface Branch[/bold cyan]")
     console.print(f"  Version: {VERSION}")
     console.print()
     console.print("[dim]Universal Display & Output Service Provider[/dim]")
@@ -108,7 +108,7 @@ def print_help() -> None:
     """
     console.print()
 
-    header("CLI - Display & Templates Service Provider")
+    header("cli - Display & Templates Service Provider")
 
     console.print("[dim]Universal display and output formatting for all AIPass branches[/dim]")
     console.print()
@@ -123,15 +123,15 @@ def print_help() -> None:
     console.print("\u2500" * 70)
     console.print()
 
-    console.print("[bold cyan]WHAT IS CLI?[/bold cyan]")
+    console.print("[bold cyan]WHAT IS cli?[/bold cyan]")
     console.print()
-    console.print("CLI is the [bold]Display & Templates Service[/bold] - like Prax for logging:")
+    console.print("cli is the [bold]Display & Templates Service[/bold] - like Prax for logging:")
     console.print("  [green]\u2713[/green] Centralized display formatting (headers, tables, panels)")
     console.print("  [green]\u2713[/green] Reusable templates for common operations")
     console.print("  [green]\u2713[/green] Rich library integration for beautiful output")
     console.print("  [green]\u2713[/green] Consistent styling across all AIPass branches")
     console.print()
-    console.print("Update CLI once \u2192 All branches instantly benefit from improvements")
+    console.print("Update cli once \u2192 All branches instantly benefit from improvements")
     console.print()
     console.print("\u2500" * 70)
     console.print()
@@ -180,7 +180,7 @@ def print_help() -> None:
     console.print("\u2500" * 70)
     console.print()
 
-    console.print("[bold cyan]HOW TO IMPORT CLI SERVICES:[/bold cyan]")
+    console.print("[bold cyan]HOW TO IMPORT cli SERVICES:[/bold cyan]")
     console.print()
 
     console.print("[yellow]Display functions:[/yellow]")
@@ -207,7 +207,7 @@ def print_help() -> None:
     console.print("[bold cyan]ARCHITECTURE:[/bold cyan]")
     console.print()
 
-    arch_text = """[bold]CLI Branch Structure:[/bold]
+    arch_text = """[bold]cli Branch Structure:[/bold]
 
 [green]\u2713[/green] apps/modules/       = PUBLIC API (what branches import)
   - display.py          Display functions (header, success, error, etc.)
@@ -230,7 +230,7 @@ def print_help() -> None:
 
 def show_version():
     """Print version."""
-    console.print(f"CLI v{VERSION}")
+    console.print(f"cli v{VERSION}")
 
 
 def main() -> int:
@@ -280,11 +280,11 @@ def run_cli() -> int:
     try:
         return main()
     except KeyboardInterrupt:
-        logger.warning("CLI interrupted by user")
+        logger.warning("cli interrupted by user")
         console.print("\n[yellow]Operation cancelled[/yellow]")
         return 130
     except Exception as e:
-        logger.error(f"CLI error: {e}", exc_info=True)
+        logger.error(f"cli error: {e}", exc_info=True)
         error(str(e))
         return 1
 

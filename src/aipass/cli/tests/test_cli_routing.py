@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for cli's entry point routing, help and introspection
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-09-03
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/cli.py — routing, help, introspection and the exit seam."""
@@ -70,7 +70,7 @@ def test_print_introspection_renders_identity_and_help_pointer(capsys):
     branch_entry.print_introspection()
 
     out = capsys.readouterr().out
-    assert "CLI" in out
+    assert "cli - Command Line Interface Branch" in out
     assert "Discovered Modules:" in out
     assert "--help" in out
 
@@ -145,7 +145,7 @@ def test_version_flag_prints_version(monkeypatch, capsys, flag):
     assert _run(monkeypatch, [flag]) == 0
 
     out = capsys.readouterr().out
-    assert "CLI" in out
+    assert "cli v" in out
     assert branch_entry.VERSION in out
 
 
