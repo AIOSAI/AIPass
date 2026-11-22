@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_api_entry.py
 # Description: Tests for api.py entry point CLI
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-05-12
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/api.py, the command door, and __init__.py, api's one import door."""
@@ -196,7 +196,7 @@ class TestPrintHelp:
         """Help output renders without raising."""
         print_help()
 
-        mock_header.assert_called_once_with("API Branch - API Operations")
+        mock_header.assert_called_once_with("api Branch - API Operations")
         assert mock_console.print.call_count >= 1
 
 
@@ -261,7 +261,7 @@ class TestMain:
             result = main()
 
         assert result == 0
-        mock_console.print.assert_called_once_with("API v1.0.0")
+        mock_console.print.assert_called_once_with("api v1.0.0")
 
     @patch(PATCH_JSON_HANDLER)
     @patch(PATCH_CONSOLE)
@@ -271,7 +271,7 @@ class TestMain:
             result = main()
 
         assert result == 0
-        mock_console.print.assert_called_once_with("API v1.0.0")
+        mock_console.print.assert_called_once_with("api v1.0.0")
 
     @patch(PATCH_JSON_HANDLER)
     @patch(PATCH_CONSOLE)
