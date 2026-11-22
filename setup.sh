@@ -341,7 +341,7 @@ for d in sorted(src_dir.iterdir()):
     if d.is_dir() and not d.name.startswith(("_", ".")):
         branches.append({
             "name": d.name,
-            "path": str(d),
+            "path": d.relative_to(repo_root).as_posix(),
             "profile": "library",
             "description": "",
             "email": f"@{d.name}",
