@@ -67,7 +67,7 @@ The table below carries every other row.
 | log_structure | all_files | production | Structured log message format |
 | log_visibility | all_files | production | Log output in key operations |
 | logged_fallback *(production only)* | all_files | production | `silent_catch`'s sibling: an `except` that does not raise and ENDS in `return` of a literal default (constant, empty container, or a string built from the exception) in a function whose success path can return the SAME value -- an equal literal (same type: `False` is not `0`) in a return outside every handler, or a name first bound to it. Logging never acquits. Sentinels pass (`None` beside dict returns, `-1` beside counts); raises, generators, `finally` returns, calls/params and assign-and-fall-through are not read. |
-| lowercase_name | branch_level | production | An agent name is stored in lowercase: the branch's registry row (name, relative path), the passport, certificate and dashboard name fields, `{{BRANCHNAME}}` in a non-markdown template, and code that stores a capitalised agent name in a dict, a subscript or a path. Screens, logs and markdown are not read. |
+| lowercase_name | branch_level | production | An agent name is lowercase wherever it runs: the branch's registry row (name, relative path), the passport, certificate and dashboard name fields, and code that forces an agent name to capitals or writes one in a literal (banners, `[tag]` log tags, help). Comments, docstrings and markdown are not read. |
 | meta | all_files | production | File header metadata block |
 | modules | all_files | production | Module structure and naming |
 | naming | all_files | everywhere | snake_case, column-0 constants |

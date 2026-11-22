@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: lowercase_name_check.py
 # Description: Lowercase Name Checker Handler - the system speaks lowercase
-# Version: 1.0.0
+# Version: 2.0.0
 # Created: 2026-11-22
 # Modified: 2026-11-22
 # =============================================
@@ -9,90 +9,60 @@
 """
 Lowercase Name Checker Handler
 
-An agent's name is stored in lowercase: registry rows, a branch's data files, the code that
-writes them, and spawn's non-markdown template files. Markdown is never opened.
+An agent's name is written in lowercase wherever the runtime reads or writes it: registry rows,
+a branch's data files, and every string its code stores, prints or logs. Markdown is never opened.
 
 Reference: lowercase_name.md
 """
 
 import ast
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from aipass.prax import logger
-from aipass.sentry.apps.handlers.aipass_standards.check_support import (
-    parse,
-    read_text,
-    result,
-    tail_name,
-)
-from aipass.sentry.apps.handlers.aipass_standards.skip_dirs import (
-    in_skipped_dir,
-    is_disabled_file,
-)
+from aipass.sentry.apps.handlers.aipass_standards.check_support import parse, read_text, result
+from aipass.sentry.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir, is_disabled_file
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.registry_scan import find_registry_upward
 
 APPLIES_TO = "production"
 AUDIT_SCOPE = "branch_level"
-BRANCH_INPUTS = (
-    ".trinity/passport.json",
-    "artifacts/birth_certificate.json",
-    "DASHBOARD.local.json",
-    "templates/*",
-)
+BRANCH_INPUTS = (".trinity/passport.json", "artifacts/birth_certificate.json", "DASHBOARD.local.json")
 
 STANDARD = "lowercase_name"
-REGISTRY_CURE = "drone @spawn sync-registry <registry> --lowercase"
+REGISTRY_CURE = "drone @spawn sync-registry REGISTRY --lowercase"
 
 #: (file, key path, the cure the finding names). A dashboard turns lowercase on its next refresh.
 DATA_FIELDS: Tuple[Tuple[str, Tuple[str, ...], str], ...] = (
-    (
-        ".trinity/passport.json",
-        ("branch_info", "branch_name"),
-        "the passport's owner rewrites branch_name",
-    ),
-    (
-        "artifacts/birth_certificate.json",
-        ("owner",),
-        "no verb rewrites a certificate yet: mail @spawn",
-    ),
-    ("DASHBOARD.local.json", ("branch",), "drone @prax dashboard refresh @<branch>"),
+    (".trinity/passport.json", ("branch_info", "branch_name"), REGISTRY_CURE),
+    ("artifacts/birth_certificate.json", ("owner",), REGISTRY_CURE),
+    ("DASHBOARD.local.json", ("branch",), "drone @prax dashboard refresh @BRANCH"),
 )
-
-#: spawn fills {{BRANCHNAME}} with the capital name and {{BRANCH}} with the lowercase one.
-CAPITAL_TOKENS = ("{{BRANCHNAME}}",)
-LOWER_TOKEN = "{{BRANCH}}"
-TEMPLATE_DIR = "templates"
-TEMPLATE_SKIP_PARTS = frozenset({".archive", "__pycache__", ".git"})
-MARKDOWN_SUFFIX = ".md"
 
 CODE_DIRS = ("apps", "shared")
 CAPITALISERS = frozenset({"upper", "title", "capitalize"})
-#: Calls whose result still spells their arguments; any other call is an unknown value.
-STRING_METHODS = CAPITALISERS | {"format", "join", "replace", "strip", "lstrip", "rstrip"}
-NAME_WORDS = ("branch", "agent", "citizen", "sender", "recipient", "owner")
-#: A dict value counts as a name field only under a key carrying one of these.
-FIELD_WORDS = NAME_WORDS + ("name", "from", "to", "by")
-#: Screens and logs are not storage: the owner has not ruled on them.
-DISPLAY_CALLS = frozenset(
-    {
-        "print",
-        "debug",
-        "info",
-        "warning",
-        "error",
-        "critical",
-        "exception",
-        "success",
-        "log_operation",
-        "add_row",
-    }
+NAME_WORDS = ("branch", "agent", "citizen", "sender", "recipient", "owner", "caller")
+
+#: A run of letters, digits and underscores: "AI_MAIL" is one token, "AIPASS_REGISTRY" is not "AIPASS".
+_TOKEN = re.compile(r"[A-Za-z0-9_]+")
+
+#: Agent names that are also common words ("PUBLIC API", "each CLI runs", "IN MEMORY", "OWN HOOKS")
+#: or the project's own name ("AIPASS root"). In capitals they count only where a name stands alone:
+#: a [TAG] or [TAG:sub], an @address, a :NAME] tag, an =NAME value, a whole literal or one
+#: wrapped in markup, or a banner opening ("CLI - ...", "[bold]AIPASS — ...", "API v2").
+COMMON_NOUN_NAMES = frozenset({"cli", "api", "flow", "hooks", "memory", "trigger", "aipass"})
+_NAME_POSITIONS = (
+    r"\[{t}[\]:]",
+    r"@{t}\b",
+    r":{t}\]",
+    r"={t}\b",
+    r"(?:^|\])\s*{t}\s*(?:\[|$)",
+    r"(?:^|\])\s*{t}\s+(?:[-—–]|v\d)",
 )
-PATH_CALLS = frozenset({"open", "Path", "joinpath", "with_name", "write_text"})
 
 
 def _check(name: str, passed: bool, message: str) -> Dict:
@@ -108,7 +78,7 @@ def _line_of(text: str, needle: str) -> int:
     return 0
 
 
-# ---- leg 1: the registry row -------------------------------------------------------------
+# ---- the registry row, and the roster it proves --------------------------------------------
 
 
 def _json(path: Path) -> Tuple[str, object]:
@@ -138,7 +108,7 @@ def _registry(branch_root: Path) -> Optional[Path]:
 
 
 def agent_names(branch_root: Path) -> Set[str]:
-    """Lowercase agent names this branch can prove: its own folder name and its registry's rows."""
+    """The roster, lowercase: the branch's own folder name and every row of its registry."""
     names = {branch_root.name.lower()}
     registry = _registry(branch_root)
     if registry is None:
@@ -174,7 +144,7 @@ def _registry_checks(branch_root: Path) -> List[Dict]:
     return checks
 
 
-# ---- leg 2: stored name fields in the branch's data files ----------------------------------
+# ---- stored name fields in the branch's data files ----------------------------------------
 
 
 def _data_checks(branch_root: Path) -> List[Dict]:
@@ -193,197 +163,109 @@ def _data_checks(branch_root: Path) -> List[Dict]:
             value = value.get(key) if isinstance(value, dict) else None
         if isinstance(value, str) and value != value.lower():
             line = _line_of(text, json.dumps(value))
-            checks.append(_check("stored_name", False, f"{rel}:{line} {keys[-1]} '{value}' is not lowercase - {cure}"))
-    return checks
-
-
-# ---- leg 5: capital tokens in non-markdown template files ----------------------------------
-
-
-def _template_files(branch_root: Path) -> Iterator[Path]:
-    """Every non-markdown file under the branch's templates/; markdown is never yielded, so never read."""
-    root = branch_root / TEMPLATE_DIR
-    if not root.is_dir():
-        return
-    for path in sorted(root.rglob("*")):
-        rel_parts = path.relative_to(root).parts
-        if path.suffix.lower() == MARKDOWN_SUFFIX or any(part in TEMPLATE_SKIP_PARTS for part in rel_parts):
-            continue
-        if path.is_file():
-            yield path
-
-
-def _template_checks(branch_root: Path) -> List[Dict]:
-    """A capital token in a template file's name or text fails."""
-    checks = []
-    for path in _template_files(branch_root):
-        rel = path.relative_to(branch_root).as_posix()
-        text = read_text(path, tag=STANDARD, errors="replace")
-        if text is None:
-            checks.append(_check("template_token", False, f"{rel} cannot be read - its tokens are not judged"))
-            continue
-        for token in CAPITAL_TOKENS:
-            line = _line_of(text, token) if token in text else (1 if token in rel else 0)
-            if line:
-                checks.append(
-                    _check(
-                        "template_token",
-                        False,
-                        f"{rel}:{line} holds {token}, filled in capitals - use {LOWER_TOKEN}",
-                    )
+            checks.append(
+                _check(
+                    "stored_name",
+                    False,
+                    f"{rel}:{line} {keys[-1]} '{value}' is not lowercase - {cure.replace('@BRANCH', '@' + branch_root.name.lower())}",
                 )
+            )
     return checks
 
 
-# ---- leg 3: code that capitalises an agent name on its way into storage --------------------
-
-
-def _is_text(node: Optional[ast.AST]) -> bool:
-    """Whether a node is a string literal."""
-    return isinstance(node, ast.Constant) and isinstance(node.value, str)
-
-
-def _words(node: ast.AST) -> Iterator[str]:
-    """Every identifier and string-subscript key an expression is built from, lowercased."""
-    for sub in ast.walk(node):
-        if isinstance(sub, ast.Name):
-            yield sub.id.lower()
-        elif isinstance(sub, ast.Attribute):
-            yield sub.attr.lower()
-        elif isinstance(sub, ast.Subscript) and _is_text(sub.slice):
-            yield sub.slice.value.lower()  # type: ignore[attr-defined]
+# ---- code: a name forced to capitals, or written in capitals -------------------------------
 
 
 def _names_an_agent(node: ast.AST) -> bool:
-    """Whether an expression is visibly an agent's name: one of its words carries a NAME_WORD."""
-    return any(word in token for token in _words(node) for word in NAME_WORDS)
-
-
-def _capitalises(node: ast.AST, tainted: Set[str]) -> bool:
-    """Whether an expression carries an agent name in capitals: a capitaliser call, or a tainted local."""
-    for sub in _value_nodes(node):
-        if isinstance(sub, ast.Name) and sub.id in tainted:
-            return True
-        if (
-            isinstance(sub, ast.Call)
-            and isinstance(sub.func, ast.Attribute)
-            and sub.func.attr in CAPITALISERS
-            and _names_an_agent(sub.func.value)
-        ):
+    """Whether an expression is visibly an agent's name: one of its identifiers or string keys carries a NAME_WORD."""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name):
+            word = sub.id
+        elif isinstance(sub, ast.Attribute):
+            word = sub.attr
+        elif isinstance(sub, ast.Subscript) and isinstance(sub.slice, ast.Constant):
+            word = str(sub.slice.value)
+        else:
+            continue
+        if any(name_word in word.lower() for name_word in NAME_WORDS):
             return True
     return False
 
 
-def _value_nodes(node: ast.AST) -> Iterator[ast.AST]:
-    """The nodes whose text survives into the value: a call's arguments do not, unless it is a string method."""
-    stack = [node]
-    while stack:
-        sub = stack.pop()
-        yield sub
-        if isinstance(sub, ast.Call):
-            through = isinstance(sub.func, ast.Attribute) and sub.func.attr in STRING_METHODS
-            stack.extend([sub.func, *sub.args] if through else [sub.func])
-        else:
-            stack.extend(ast.iter_child_nodes(sub))
+def _compared(tree: ast.AST) -> Set[int]:
+    """ids of comparison operands, and of a value whose local is read only as one: a case-fold shows nothing."""
+    comparisons = [node for node in ast.walk(tree) if isinstance(node, ast.Compare)]
+    operands = {id(operand) for node in comparisons for operand in [node.left, *node.comparators]}
+    folded = set()
+    for scope in ast.walk(tree):
+        if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        reads: Dict[str, List[bool]] = {}
+        for node in ast.walk(scope):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                reads.setdefault(node.id, []).append(id(node) in operands)
+        for node in ast.walk(scope):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                if all(reads.get(node.targets[0].id, [False])):
+                    folded.add(id(node.value))
+    return operands | folded
 
 
-def _capital_constant(node: Optional[ast.AST], names: Set[str], stem: bool = False) -> Optional[str]:
-    """A string literal spelling an agent's name in capitals (``stem``: its part before the first dot)."""
-    if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
-        return None
-    text = node.value.split(".")[0] if stem else node.value
-    return node.value if text.isupper() and text.lower() in names else None
-
-
-def _scope_nodes(scope: ast.AST) -> List[ast.AST]:
-    """Every node of one scope: a nested function is its own scope, so its locals never leak into this one."""
-    nodes: List[ast.AST] = []
-    stack = list(ast.iter_child_nodes(scope))
-    while stack:
-        node = stack.pop()
-        nodes.append(node)
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            stack.extend(ast.iter_child_nodes(node))
-    return nodes
-
-
-def _tainted(nodes: List[ast.AST]) -> Set[str]:
-    """Locals assigned a capitalised agent name in one scope, followed through re-assignment."""
-    assigns = [
-        node
-        for node in nodes
-        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
-    ]
-    tainted: Set[str] = set()
-    grew = True
-    while grew:
-        before = len(tainted)
-        tainted |= {
-            node.targets[0].id  # type: ignore[union-attr]
-            for node in assigns
-            if _capitalises(node.value, tainted)
-        }
-        grew = len(tainted) > before
-    return tainted
-
-
-def _display_lines(tree: ast.AST) -> Set[int]:
-    """Every line inside a screen or log call: what is printed or logged is not stored."""
-    lines: Set[int] = set()
+def _docstrings(tree: ast.AST) -> Set[int]:
+    """ids of the module, class and function docstrings: prose, never runtime output."""
+    ids: Set[int] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and tail_name(node.func) in DISPLAY_CALLS:
-            lines.update(getattr(sub, "lineno", 0) for sub in ast.walk(node))
-    return lines
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                ids.add(id(first.value))
+    return ids
 
 
-def _field_key(key: Optional[ast.AST]) -> bool:
-    """Whether a dict key is a string naming a name field (``from_name``, ``branch``, ...)."""
-    return _is_text(key) and any(word in key.value.lower() for word in FIELD_WORDS)  # type: ignore[union-attr]
+def _capital_names(text: str, names: Set[str]) -> Iterator[str]:
+    """Each roster name written in capitals in one string."""
+    for match in _TOKEN.finditer(text):
+        token = match.group()
+        if not token.isupper() or token.lower() not in names:
+            continue
+        if token.lower() in COMMON_NOUN_NAMES and not any(
+            re.search(position.format(t=re.escape(token)), text, re.MULTILINE) for position in _NAME_POSITIONS
+        ):
+            continue
+        yield token
 
 
-def _node_sinks(node: ast.AST) -> List[Tuple[ast.AST, Optional[ast.AST], str]]:
-    """(expression, its key or None, the kind of store) for each value this one node stores."""
-    if isinstance(node, ast.Dict):
-        stored: List[Tuple[ast.AST, Optional[ast.AST], str]] = [(k, None, "dict key") for k in node.keys if k]
-        return stored + [(value, key, "dict value") for key, value in zip(node.keys, node.values)]
-    if isinstance(node, ast.Assign):
-        stores = [target for target in node.targets if isinstance(target, ast.Subscript)]
-        return [pair for t in stores for pair in ((t.slice, None, "stored key"), (node.value, t.slice, "stored value"))]
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-        return [(node.left, None, "path"), (node.right, None, "path")]
-    if isinstance(node, ast.Call) and tail_name(node.func) in PATH_CALLS and node.args:
-        return [(node.args[0], None, "path")]
-    return []
-
-
-def _finding(expr: ast.AST, key: Optional[ast.AST], kind: str, tainted: Set[str], names: Set[str]) -> str:
-    """Why one stored expression fails, or ""."""
-    if _capitalises(expr, tainted):
-        return f"an agent name is capitalised into a {kind}"
-    constant = _capital_constant(expr, names, stem=kind == "path")
-    if constant and (kind not in ("dict value", "stored value") or _field_key(key)):
-        return f"'{constant}' is an agent name in capitals, stored as a {kind}"
-    return ""
+def _token_line(lines: List[str], node: ast.AST, token: str) -> int:
+    """The source line a literal's token sits on: a concatenated literal spans lines its value does not show."""
+    start = getattr(node, "lineno", 1)
+    for number in range(start, (getattr(node, "end_lineno", None) or start) + 1):
+        if number <= len(lines) and re.search(rf"\b{re.escape(token)}\b", lines[number - 1]):
+            return number
+    return start
 
 
 def code_findings(source: str, filename: str, names: Set[str]) -> List[Tuple[int, str]]:
-    """(line, message) for each agent name capitalised, or spelled in capitals, on its way into storage."""
+    """(line, message) for each agent name the code forces to capitals or writes in capitals."""
     tree = parse(source, filename, tag=STANDARD)
     if tree is None:
         return []
-    shown = _display_lines(tree)
-    scopes = [tree] + [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
-    found: Dict[int, str] = {}
-    for scope in scopes:
-        nodes = _scope_nodes(scope)
-        tainted = _tainted(nodes)
-        for expr, key, kind in (sink for node in nodes for sink in _node_sinks(node)):
-            line = getattr(expr, "lineno", 0)
-            if line and line not in shown and line not in found:
-                message = _finding(expr, key, kind, tainted, names)
-                if message:
-                    found[line] = message
-    return sorted(found.items())
+    compared, docstrings, lines = _compared(tree), _docstrings(tree), source.splitlines()
+    found: Dict[Tuple[int, str], str] = {}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in CAPITALISERS
+            and id(node) not in compared
+            and _names_an_agent(node.func.value)
+        ):
+            found[(node.lineno, node.func.attr)] = f"an agent name is forced to capitals with .{node.func.attr}()"
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings:
+            for token in _capital_names(node.value, names):
+                found[(_token_line(lines, node, token), token)] = (
+                    f"'{token}' is an agent name in capitals - write '{token.lower()}'"
+                )
+    return sorted((line, message) for (line, _), message in found.items())
 
 
 def branch_root_of(file_path: Path) -> Path:
@@ -394,13 +276,14 @@ def branch_root_of(file_path: Path) -> Path:
     return file_path.resolve().parent
 
 
-def _file_checks(path: Path, names: Set[str], bypass_rules: Optional[list]) -> List[Dict]:
-    """The code leg for one file; a row waives one line, and says why."""
+def _file_checks(path: Path, root: Path, names: Set[str], bypass_rules: Optional[list]) -> List[Dict]:
+    """The code leg for one file, each finding named by its branch-relative path and line."""
     source = read_text(path, tag=STANDARD)
     if source is None:
-        return []
+        return [_check("capitalised_name", False, f"{path.name} cannot be read - its code is not judged")]
+    rel = path.relative_to(root).as_posix() if path.is_relative_to(root) else path.name
     return [
-        _check("capitalised_name", False, f"{path.name}:{line} {message}")
+        _check("capitalised_name", False, f"{rel}:{line} {message}")
         for line, message in code_findings(source, str(path), names)
         if not is_bypassed(str(path), STANDARD, line=line, bypass_rules=bypass_rules)
     ]
@@ -424,27 +307,25 @@ def _code_files(branch_root: Path) -> List[Path]:
 def _verdict(checks: List[Dict], scope: str) -> Dict:
     """Pass or fail, nothing between: one finding fails the standard."""
     if not checks:
-        checks = [_check(STANDARD, True, f"every agent name stored in {scope} is lowercase")]
+        checks = [_check(STANDARD, True, f"every agent name {scope} writes is lowercase")]
     passed = all(check["passed"] for check in checks)
     return result(passed, checks, 100 if passed else 0, STANDARD)
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """The code leg over one file: what the checklist can judge as a file is written."""
-    path = Path(module_path)
-    return _verdict(_file_checks(path, agent_names(branch_root_of(path)), bypass_rules), path.name)
+    path = Path(module_path).resolve()
+    root = branch_root_of(path)
+    return _verdict(_file_checks(path, root, agent_names(root), bypass_rules), path.name)
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
-    """Every leg over one branch: its registry row, data files, template files and code."""
+    """Every leg over one branch: its registry row, its data files and its code."""
     root = Path(branch_path).resolve()
     names = agent_names(root)
-    checks = _registry_checks(root) + _data_checks(root) + _template_checks(root)
+    checks = _registry_checks(root) + _data_checks(root)
     for path in _code_files(root):
-        checks.extend(_file_checks(path, names, bypass_rules))
+        checks.extend(_file_checks(path, root, names, bypass_rules))
     verdict = _verdict(checks, root.name)
-    json_handler.log_operation(
-        STANDARD,
-        {"branch": root.name, "findings": 0 if verdict["passed"] else len(checks)},
-    )
+    json_handler.log_operation(STANDARD, {"branch": root.name, "findings": 0 if verdict["passed"] else len(checks)})
     return verdict

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: imports_content.py
 # Description: Import Standards Content Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-05
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -85,7 +85,7 @@ def get_imports_standards() -> str:
         "  • CLI services - import and use from any location",
         "",
         "[bold]Context-Dependent Services (PWD detection):[/bold]",
-        "  • [yellow]AI_MAIL[/yellow] - requires calling from branch directory",
+        "  • [yellow]ai_mail[/yellow] - requires calling from branch directory",
         "  • Uses PWD to detect sender identity (@sentry, @drone, etc.)",
         "  • Auto-generates config at [branch]/sentry_json/user_config.json",
         "",
@@ -98,7 +98,7 @@ def get_imports_standards() -> str:
         "  [dim]                cwd=str(branch_dir))  # Force correct working directory[/dim]",
         "  • Must use cwd= parameter for PWD detection to work",
         "",
-        "[yellow]KEY:[/yellow] AI_MAIL walks up from CWD to find .trinity/passport.json for branch identity",
+        "[yellow]KEY:[/yellow] ai_mail walks up from CWD to find .trinity/passport.json for branch identity",
         "",
         "[bold cyan]DEMONSTRATION:[/bold cyan]",
         "  [dim]src/aipass/sentry/apps/standards/aipass/modules/ (reference modules)[/dim]",

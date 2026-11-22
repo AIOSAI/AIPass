@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sentry_proof.py
 # Description: Self-proof orchestrator — discovers and runs proof packs
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-22
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Sentry Proof — Self-check orchestrator for standards pack integrity.
@@ -174,7 +174,7 @@ def _run_proof_pack(pack_name: str, pack_dir: Path) -> dict:
 def _display_proof_results(pack_name: str, results: dict) -> None:
     """Rich console output for proof pack results."""
     console.print()
-    header(f"SENTRY PROOF — {pack_name.upper()}")
+    header(f"sentry proof — {pack_name}")
     console.print()
 
     if results.get("error") and not results.get("results"):
@@ -237,7 +237,7 @@ def _show_proof_introspection() -> None:
     """Show available proof packs and example commands when proof is run with no args."""
     packs = _discover_proof_packs()
     console.print()
-    header("SENTRY PROOF")
+    header("sentry proof")
     console.print()
 
     if not packs:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: standards_audit.py
 # Description: Standards Audit Module
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-05
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -94,7 +94,7 @@ def _show_audit_introspection() -> None:
     """Show available packs and example commands when audit is run with no args."""
     packs = scoring_packs()
     console.print()
-    header("SENTRY AUDIT")
+    header("sentry audit")
     console.print()
 
     if not packs:
@@ -325,7 +325,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     # A private branch targeted from inside its own CWD must be discoverable.
     _include_private = specific_branch is not None and _is_branch_private(specific_branch)
     console.print()
-    header(f"{pack_name.upper()} BRANCH STANDARDS AUDIT")
+    header(f"{pack_name} branch standards audit")
     console.print()
 
     # Any suppression announces itself: an unlabelled --no-bypass run reads as a branch that got worse.

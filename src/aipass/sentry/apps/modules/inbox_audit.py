@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_audit.py
 # Description: Inbox ID validator — scans all inbox.json files for non-8-hex ids
-# Version: 1.1.4
+# Version: 1.1.5
 # Created: 2026-04-21
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """Inbox ID validator for the drone @sentry audit inbox-ids command.
@@ -96,7 +96,7 @@ def _run_inbox_id_scan() -> int:
     skipped = len(matched) - len(inbox_files)
 
     console.print()
-    header("SENTRY — Inbox ID Validator")
+    header("sentry — Inbox ID Validator")
     console.print(f"[dim]Scanning {len(inbox_files)} live inbox file(s) for non-8-hex message ids...[/dim]")
     if skipped:
         console.print(f"[dim]Skipped {skipped} archived/backed-up copy(ies) — not live mail.[/dim]")

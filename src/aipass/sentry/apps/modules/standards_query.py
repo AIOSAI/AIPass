@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: standards_query.py
 # Description: Standards Query Module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-09
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -105,7 +105,7 @@ def _show_pack_standards(pack_path: Path, pack_name: str) -> None:
     standards = _discover_standards(pack_path)
 
     console.print()
-    header(f"STANDARDS IN {pack_name.upper()}")
+    header(f"standards in {pack_name}")
     console.print()
 
     if not standards:

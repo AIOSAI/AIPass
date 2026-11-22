@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for sentry's entry point routing, help and introspection
-# Version: 1.0.6
+# Version: 1.0.7
 # Created: 2026-09-03
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/sentry.py, the entry point: routing, help and introspection."""
@@ -58,7 +58,7 @@ def test_print_introspection_renders_identity_and_help_pointer(capsys):
     branch_entry.print_introspection()
 
     out = capsys.readouterr().out
-    assert "SENTRY" in out
+    assert "sentry - Standards Platform" in out
     assert "Discovered Modules:" in out
     assert "--help" in out
 

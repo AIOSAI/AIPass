@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trigger_check.py
 # Description: Trigger Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-05
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -102,7 +102,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "passed": True,
             "checks": [{"name": "Bypassed", "passed": True, "message": bypass_msg}],
             "score": 100,
-            "standard": "TRIGGER",
+            "standard": "trigger",
         }
 
     if not path.exists():
@@ -110,7 +110,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "passed": False,
             "checks": [{"name": "File exists", "passed": False, "message": f"File not found: {module_path}"}],
             "score": 0,
-            "standard": "TRIGGER",
+            "standard": "trigger",
         }
 
     try:
@@ -123,7 +123,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "passed": False,
             "checks": [{"name": "File readable", "passed": False, "message": f"Error reading file: {e}"}],
             "score": 0,
-            "standard": "TRIGGER",
+            "standard": "trigger",
         }
 
     is_handler = is_trigger_handler(module_path)
@@ -169,7 +169,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "passed": True,
             "checks": [{"name": "Trigger check", "passed": True, "message": "No trigger patterns to check"}],
             "score": 100,
-            "standard": "TRIGGER",
+            "standard": "trigger",
         }
 
     passed_checks = sum(1 for check in checks if check["passed"])
@@ -178,7 +178,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     overall_passed = score >= 75
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "trigger"})
-    return {"passed": overall_passed, "checks": checks, "score": score, "standard": "TRIGGER"}
+    return {"passed": overall_passed, "checks": checks, "score": score, "standard": "trigger"}
 
 
 def check_no_logger_imports(

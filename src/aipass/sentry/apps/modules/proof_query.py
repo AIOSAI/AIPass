@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: proof_query.py
 # Description: Proof Query Module
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-22
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -118,7 +118,7 @@ def _list_pack_proofs(pack_name: str, pack_dir: Path) -> None:
     proofs = _discover_proof_content(pack_dir)
 
     console.print()
-    header(f"PROOFS IN {pack_name.upper()}")
+    header(f"proofs in {pack_name}")
     console.print()
 
     console.print(f"[yellow]Available Proofs:[/yellow] ({len(proofs)})")
