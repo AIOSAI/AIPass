@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_log_watcher.py
 # Description: Unit tests for the branch log watcher's parsing, detection and line pipeline
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-04-03
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py — parsing, detection and the line pipeline that fires events."""
@@ -81,7 +81,7 @@ class TestDetectBranchFromPath:
     def test_standard_branch_logs_path(self):
         """Detects branch from src/aipass/<branch>/logs/file.log pattern."""
         path = str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "flow_planner.log")
-        assert lw.detect_branch_from_path(path) == "FLOW"
+        assert lw.detect_branch_from_path(path) == "flow"
 
     def test_system_logs_mapped_file(self, monkeypatch):
         """Uses SYSTEM_LOGS_BRANCH_MAP for known filenames."""
@@ -92,12 +92,12 @@ class TestDetectBranchFromPath:
     def test_system_logs_prefix_match(self):
         """Matches prefix against known branch prefixes for system_logs files."""
         path = str(lw.SYSTEM_LOGS_DIR / "sentry_audit.log")
-        assert lw.detect_branch_from_path(path) == "SENTRY"
+        assert lw.detect_branch_from_path(path) == "sentry"
 
     def test_system_logs_exact_stem_match(self):
         """Matches when stem equals a known prefix exactly."""
         path = str(lw.SYSTEM_LOGS_DIR / "prax.log")
-        assert lw.detect_branch_from_path(path) == "PRAX"
+        assert lw.detect_branch_from_path(path) == "prax"
 
     def test_unknown_path_returns_unknown(self):
         """Returns UNKNOWN for paths that do not match any pattern."""
@@ -348,7 +348,7 @@ class TestDetectBranchFromPathEdgeCases:
     def test_multiple_aipass_segments(self):
         """First valid aipass/branch/logs/ match wins."""
         path = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "trigger" / "logs" / "inner.log")
-        assert lw.detect_branch_from_path(path) == "TRIGGER"
+        assert lw.detect_branch_from_path(path) == "trigger"
 
     def test_aipass_without_logs_subdir(self):
         """aipass/branch without /logs/ segment returns UNKNOWN."""
@@ -358,7 +358,7 @@ class TestDetectBranchFromPathEdgeCases:
     def test_system_logs_ai_mail_prefix(self):
         """Multi-word prefix (ai_mail) is matched correctly."""
         path = str(lw.SYSTEM_LOGS_DIR / "ai_mail_delivery.log")
-        assert lw.detect_branch_from_path(path) == "AI_MAIL"
+        assert lw.detect_branch_from_path(path) == "ai_mail"
 
 
 class TestParsePraxLogLineEdgeCases:
@@ -483,7 +483,7 @@ class TestProcessLogLineDeeper:
 
         fire.assert_called_once()
         call_kwargs = fire.call_args[1]
-        assert call_kwargs["branch"] == "FLOW"
+        assert call_kwargs["branch"] == "flow"
         assert call_kwargs["message"] == "DB connection lost"
         assert call_kwargs["registry_id"] == "reg123"
         assert call_kwargs["fingerprint"] == "fp456"
@@ -611,7 +611,7 @@ class TestProcessWarningLine:
         fire.assert_called_once()
         assert fire.call_args[0][0] == "warning_logged"
         kwargs = fire.call_args[1]
-        assert kwargs["branch"] == "FLOW"
+        assert kwargs["branch"] == "flow"
         assert kwargs["module_name"] == "watcher"
         assert kwargs["level"] == "WARNING"
         assert kwargs["message"] == "Queue depth at 91%"
@@ -903,7 +903,7 @@ class TestSystemLogTwinIsNotProcessedTwice:
             watcher.on_modified(cast(Any, SimpleNamespace(is_directory=False, src_path=str(path))))
 
         assert fire.call_count == 1
-        assert fire.call_args.kwargs["branch"] == "HOOKS"
+        assert fire.call_args.kwargs["branch"] == "hooks"
 
 
 class TestSystemLogAttributionComesFromTheLiveTree:
@@ -917,7 +917,7 @@ class TestSystemLogAttributionComesFromTheLiveTree:
         (tmp_path / "aipass" / "hooks").mkdir(parents=True)
         path = str(tmp_path / "system_logs" / "hooks_edit_gate.log")
 
-        assert lw.detect_branch_from_path(path) == "HOOKS"
+        assert lw.detect_branch_from_path(path) == "hooks"
 
     def test_non_citizen_still_reports_unknown(self, monkeypatch, tmp_path):
         """UNKNOWN keeps its meaning: nobody in the tree owns this log."""
@@ -932,7 +932,7 @@ class TestSystemLogAttributionComesFromTheLiveTree:
         _point_at_tree(lw, monkeypatch, tmp_path)
         path = str(tmp_path / "system_logs" / "sentry_audit.log")
 
-        assert lw.detect_branch_from_path(path) == "SENTRY"
+        assert lw.detect_branch_from_path(path) == "sentry"
 
 
 class TestLogPathClassification:
@@ -1004,7 +1004,7 @@ class TestTheFleetCensusComesFromMemorysDoor:
         log.write_text(f"{now} | captured_grow | ERROR | seed bed dry\n", encoding="utf-8")
         watcher.on_modified(SimpleNamespace(is_directory=False, src_path=str(log)))
 
-        assert fire.call_args.kwargs["branch"] == "GROW"
+        assert fire.call_args.kwargs["branch"] == "grow"
 
     def test_a_citizen_with_no_logs_dir_is_skipped_and_named_once(self, fleet, monkeypatch):
         monkeypatch.setattr(lw, "FLEET_TTL_SECONDS", 0.0)
@@ -1038,4 +1038,4 @@ class TestTheFleetCensusComesFromMemorysDoor:
         logs.mkdir(parents=True)
         monkeypatch.setattr(lw, "fleet_branches", lambda **kwargs: [{"path": logs.parent, "email": "@my_agent"}])
 
-        assert lw.detect_branch_from_path(str(logs / "agent.log")) == "MY_AGENT"
+        assert lw.detect_branch_from_path(str(logs / "agent.log")) == "my_agent"

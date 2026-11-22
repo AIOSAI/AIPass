@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_events.py
 # Description: Log events module for centralized log watcher public API
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-01-31
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -46,21 +46,21 @@ def start() -> bool:
     """Start the centralized log watcher — which declines, by design.
     system_logs/ has one owner (branch_log_events); the observer returns None, so this reports False.
     """
-    logger.info("[TRIGGER] Starting log watcher")
+    logger.info("[trigger] Starting log watcher")
     observer = start_log_watcher()
     if observer:
-        logger.info(f"[TRIGGER] Log watcher started, monitoring: {SYSTEM_LOGS_DIR}")
+        logger.info(f"[trigger] Log watcher started, monitoring: {SYSTEM_LOGS_DIR}")
         return True
     # INFO, not ERROR: the decline is design; an ERROR line would feed the watchers an escalation.
-    logger.info("[TRIGGER] Centralized observer not started — branch_log_events owns system_logs")
+    logger.info("[trigger] Centralized observer not started — branch_log_events owns system_logs")
     return False
 
 
 def stop() -> None:
     """Stop the centralized log watcher."""
-    logger.info("[TRIGGER] Stopping log watcher")
+    logger.info("[trigger] Stopping log watcher")
     stop_log_watcher()
-    logger.info("[TRIGGER] Log watcher stopped")
+    logger.info("[trigger] Log watcher stopped")
 
 
 def status() -> dict:

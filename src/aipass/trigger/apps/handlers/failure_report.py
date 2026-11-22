@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: failure_report.py
 # Description: The loud route for a failure its caller must survive: trail line, medic status row, one mail
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-11-15
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -61,7 +61,7 @@ def _tell(name: str, branch: str, event: str, exc: BaseException) -> None:
         first = True  # no status row to read, so the mail is the only word
     if not first:
         return
-    subject = f"[TRIGGER] {name} failing"
+    subject = f"[trigger] {name} failing"
     body = (
         f"{name} raised on {event} for branch '{branch}': {exc}\n\n"
         f"It keeps running and logs at most once per {int(LOG_INTERVAL_SECONDS)}s to {FAILURES_LOG.name}. "

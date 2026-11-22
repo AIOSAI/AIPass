@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_startup_handler.py
 # Description: Tests for startup event handler
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-04-25
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/events/startup.py and the error catch-up it runs."""
@@ -327,7 +327,7 @@ class TestCatchupNamesTheRegistryRow:
 
         errors = self._scan(mod, self._log(tmp_path))
 
-        assert reported and reported[0]["component"] == "HOOKS"
+        assert reported and reported[0]["component"] == "hooks"
         assert reported[0]["error_type"] == "ERROR", "the row's error_type is uppercase — match it, don't mint a twin"
         assert errors[0]["registry_id"] == "ab12cd34"
 
@@ -339,7 +339,7 @@ class TestCatchupNamesTheRegistryRow:
 
         errors = self._scan(mod, log)
 
-        assert [e["branch"] for e in errors] == ["AI_MAIL"]
+        assert [e["branch"] for e in errors] == ["ai_mail"]
 
     def test_the_lookup_uses_the_level_stored_rows_carry(self, tmp_path: Path) -> None:
         """Stored rows say error_type "ERROR"; a lower-cased lookup finds nothing and mints a twin."""
@@ -350,7 +350,7 @@ class TestCatchupNamesTheRegistryRow:
         fingerprint = error_registry.compute_fingerprint
         assert isinstance(fingerprint, MagicMock)
         level, _, component = fingerprint.call_args.args
-        assert (level, component) == ("ERROR", "HOOKS")
+        assert (level, component) == ("ERROR", "hooks")
 
     def test_the_payload_names_the_log_under_the_key_the_handler_reads(self, tmp_path: Path, monkeypatch) -> None:
         """handle_error_detected takes log_path; log_file lands in **kwargs and the
@@ -364,7 +364,7 @@ class TestCatchupNamesTheRegistryRow:
         errors = self._scan(mod, log)
 
         assert errors[0]["log_path"] == str(log)
-        assert errors[0]["branch"] == "HOOKS", "the branch is read off the file name, hooks_ops.log"
+        assert errors[0]["branch"] == "hooks", "the branch is read off the file name, hooks_ops.log"
         assert "log_file" not in errors[0], "two names for one fact is how the wrong one gets fired"
 
 

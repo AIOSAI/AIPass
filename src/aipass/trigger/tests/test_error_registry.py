@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_error_registry.py
 # Description: Unit tests for the error_registry handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-24
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/error_registry.py: the dedup engine, circuit breaker and backoff."""
@@ -64,6 +64,16 @@ def test_same_error_produces_same_fingerprint() -> None:
     fp2 = er.compute_fingerprint("ImportError", "no module named foo", "FLOW")
     assert fp1 == fp2
     assert len(fp1) == 40  # Full SHA1 hex digest
+
+
+def test_component_case_never_splits_a_fingerprint() -> None:
+    """A lowercase branch label lands on the row minted under its capital form, suppressions included."""
+    import hashlib
+
+    er = _import_registry()
+    minted = hashlib.sha1(b"ImportError:no module named foo:FLOW").hexdigest()
+    assert er.compute_fingerprint("ImportError", "no module named foo", "flow") == minted
+    assert er.compute_fingerprint("ImportError", "no module named foo", "FLOW") == minted
 
 
 def test_different_component_produces_different_fingerprint() -> None:

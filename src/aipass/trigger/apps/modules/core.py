@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Trigger event bus for AIPass system-wide event handling
-# Version: 1.6.1
+# Version: 1.6.2
 # Created: 2026-02-03
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -76,7 +76,7 @@ class Trigger:
         if event not in cls._alias_warned:
             cls._alias_warned.add(event)
             logger.warning(
-                f"[TRIGGER] Event '{event}' is deprecated and will be removed next release; "
+                f"[trigger] Event '{event}' is deprecated and will be removed next release; "
                 f"delivered as '{replacement}'. Update the fire site and any Trigger.on() registration."
             )
         return replacement
@@ -216,7 +216,7 @@ def handle_command(command: str, args: list) -> bool:
                 key, val_str = arg.split("=", 1)
                 data[key] = _coerce_value(val_str)
             else:
-                logger.warning(f"[TRIGGER] Ignoring unparseable arg: {arg}")
+                logger.warning(f"[trigger] Ignoring unparseable arg: {arg}")
         result = Trigger.fire(event_name, **data)
         ran, failed = result.get("ran", 0), result.get("failed", 0)
         if failed:
@@ -255,7 +255,7 @@ def handle_command(command: str, args: list) -> bool:
 def _print_help(console):
     """Display help for core trigger commands."""
     console.print()
-    console.print("[bold cyan]TRIGGER CORE - Event Bus[/bold cyan]")
+    console.print("[bold cyan]trigger core - Event Bus[/bold cyan]")
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
     console.print("  fire <event> \\[key=value ...]  Fire an event with optional data")

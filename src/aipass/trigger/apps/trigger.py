@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: trigger.py
 # Description: Entry point CLI for drone @trigger — event bus and error registry
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-08
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """
-TRIGGER Branch - Main Orchestrator
+trigger Branch - Main Orchestrator
 """
 
 import sys
@@ -32,7 +32,7 @@ def discover_modules() -> List[Any]:
     modules = []
 
     if not MODULES_DIR.exists():
-        logger.warning(f"[TRIGGER] Modules directory not found: {MODULES_DIR}")
+        logger.warning(f"[trigger] Modules directory not found: {MODULES_DIR}")
         return modules
 
     for file_path in MODULES_DIR.glob("*.py"):
@@ -45,7 +45,7 @@ def discover_modules() -> List[Any]:
         if hasattr(module, "handle_command"):
             modules.append(module)
         else:
-            logger.warning(f"[TRIGGER] {module_name} has no handle_command(), not routed")
+            logger.warning(f"[trigger] {module_name} has no handle_command(), not routed")
 
     return modules
 
@@ -57,7 +57,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
             if module.handle_command(command, args):
                 return True
         except Exception as e:
-            logger.error(f"[TRIGGER] Module {module.__name__} error: {e}")
+            logger.error(f"[trigger] Module {module.__name__} error: {e}")
 
     return False
 
@@ -65,7 +65,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 def print_introspection(modules: List[Any]):
     """Display discovered modules when run without arguments"""
     console.print()
-    console.print("[bold cyan]TRIGGER - Branch Management System[/bold cyan]")
+    console.print("[bold cyan]trigger - Branch Management System[/bold cyan]")
     console.print()
     console.print("[dim]Auto-discovered module orchestration[/dim]")
     console.print()
@@ -91,7 +91,7 @@ def print_introspection(modules: List[Any]):
 def print_help(modules: List[Any]):
     """Display Rich-formatted help"""
     console.print()
-    header("TRIGGER - Branch Management System")
+    header("trigger - Branch Management System")
     console.print()
 
     console.print("[dim]Auto-discovered module orchestration[/dim]")
@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None):
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print(f"TRIGGER v{__version__}")
+        console.print(f"trigger v{__version__}")
         return 0
 
     if args[0] in ["--help", "-h", "help"]:
@@ -195,6 +195,6 @@ if __name__ == "__main__":
         console.print("\n\nOperation cancelled by user")
         sys.exit(0)
     except Exception as e:
-        logger.error(f"TRIGGER entry point error: {e}", exc_info=True)
+        logger.error(f"trigger entry point error: {e}", exc_info=True)
         error(f"Error: {e}")
         sys.exit(1)

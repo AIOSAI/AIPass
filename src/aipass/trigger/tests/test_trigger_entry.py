@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trigger_entry.py
 # Description: Tests for trigger.py CLI entry point — line coverage
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for the apps/trigger.py CLI entry point (discover, route, main)."""
@@ -222,7 +222,7 @@ class TestPrintHelp:
         trigger.print_help([mock_mod])
         joined = capsys.readouterr().out
         assert "status" in joined
-        assert "TRIGGER - Branch Management System" in joined
+        assert "trigger - Branch Management System" in joined
 
     def test_prints_help_with_modules_no_doc(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Help output shows 'No description' when module lacks docstring."""
@@ -265,7 +265,7 @@ class TestMain:
 
         result = trigger.main(["--version"])
         assert result == 0
-        assert f"TRIGGER v{trigger.__version__}" in capsys.readouterr().out
+        assert f"trigger v{trigger.__version__}" in capsys.readouterr().out
 
     def test_version_short_flag(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         """The -V short flag prints version string and returns 0."""
@@ -274,7 +274,7 @@ class TestMain:
 
         result = trigger.main(["-V"])
         assert result == 0
-        assert f"TRIGGER v{trigger.__version__}" in capsys.readouterr().out
+        assert f"trigger v{trigger.__version__}" in capsys.readouterr().out
 
     def test_help_flag(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         """The --help flag calls print_help and returns 0."""
@@ -283,7 +283,7 @@ class TestMain:
 
         result = trigger.main(["--help"])
         assert result == 0
-        assert "TRIGGER - Branch Management System" in capsys.readouterr().out
+        assert "trigger - Branch Management System" in capsys.readouterr().out
 
     def test_help_short_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The -h short flag calls print_help and returns 0."""

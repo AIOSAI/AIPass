@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_registry.py
 # Description: Structured error tracking and registry for Medic v2
-# Version: 2.11.0
+# Version: 2.12.0
 # Created: 2026-02-13
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -373,8 +373,9 @@ def normalize_message(message: str) -> str:
 
 
 def compute_fingerprint(error_type: str, normalized_msg: str, component: str) -> str:
-    """Compute a SHA1 fingerprint for error deduplication."""
-    content = f"{error_type}:{normalized_msg}:{component}"
+    """Compute a SHA1 fingerprint for error deduplication; the component's case never splits a fingerprint."""
+    # Folded to the case the registry was minted in, so stored rows and their suppressions keep their identity.
+    content = f"{error_type}:{normalized_msg}:{component.upper()}"
     return hashlib.sha1(content.encode("utf-8")).hexdigest()
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_log_events.py
 # Description: Branch log events module for log watcher public API
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-02-02
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -51,25 +51,26 @@ def print_introspection():
 
 def start() -> bool:
     """Start the branch log watcher."""
-    logger.info("[TRIGGER] Starting branch log watcher")
+    logger.info("[trigger] Starting branch log watcher")
 
     set_event_callback(trigger.fire)
 
     observer = start_branch_log_watcher()
     if observer:
         logger.info(
-            "[TRIGGER] Branch log watcher started, monitoring: every declared citizen's logs/*.log (memory's door, re-read every 300s)"
+            "[trigger] Branch log watcher started, monitoring: every declared citizen's logs/*.log"
+            " (memory's door, re-read every 300s)"
         )
         return True
-    logger.error("[TRIGGER] Failed to start branch log watcher")
+    logger.error("[trigger] Failed to start branch log watcher")
     return False
 
 
 def stop() -> None:
     """Stop the branch log watcher."""
-    logger.info("[TRIGGER] Stopping branch log watcher")
+    logger.info("[trigger] Stopping branch log watcher")
     stop_branch_log_watcher()
-    logger.info("[TRIGGER] Branch log watcher stopped")
+    logger.info("[trigger] Branch log watcher stopped")
 
 
 def status() -> dict:
@@ -80,7 +81,7 @@ def status() -> dict:
 def reset_hashes() -> None:
     """Clear the error deduplication hash set."""
     clear_seen_hashes()
-    logger.info("[TRIGGER] Branch log watcher hash set cleared")
+    logger.info("[trigger] Branch log watcher hash set cleared")
 
 
 def print_help() -> None:

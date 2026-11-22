@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
-# Version: 1.9.0
+# Version: 1.9.1
 # Created: 2026-08-08
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -113,9 +113,9 @@ def _branch_name_pattern() -> Optional[re.Pattern]:
         if not BRANCH_REGISTRY_FILE.exists():
             raise FileNotFoundError(BRANCH_REGISTRY_FILE)
         rows = fleet_branches(repo_root=BRANCH_REGISTRY_FILE.parent, name_from="registry", strict=True)
-        names = {str(row["name"]).upper() for row in rows if row.get("name")}
+        names = {str(row["name"]).lower() for row in rows if row.get("name")}
         if names:
-            # Longest first so AI_MAIL is matched before AI.
+            # Longest first so ai_mail is matched before ai.
             ordered = sorted(names, key=len, reverse=True)
             pattern = re.compile(r"\b(" + "|".join(re.escape(n) for n in ordered) + r")\b", re.IGNORECASE)
     except Exception as exc:
@@ -558,7 +558,7 @@ def _send_aged_notice(
     row = _registry_report(
         error_type="WARNING",
         message=str(entry.get("message", "")),
-        component=branch.upper(),
+        component=branch.lower(),
         log_path=str(entry.get("log_file", "")),
         severity="low",
     )
