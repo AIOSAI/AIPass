@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent.py
 # Description: Watchdog Agent Handler — block until dispatched agent exits
-# Version: 1.9.0
+# Version: 1.9.1
 # Created: 2026-04-14
-# Modified: 2026-11-09
+# Modified: 2026-11-22
 # =============================================
 
 # Liveness is ai_mail's dispatch lock: dispatch_monitor deletes it on any exit.
@@ -33,12 +33,6 @@ from aipass.ai_mail import (
     opencode_db,
     read_pointer,
 )
-
-
-def _stderr(msg: str) -> None:
-    """Write to stderr — visible in debug runs, doesn't pollute stdout capture."""
-    sys.stderr.write(msg + "\n")
-    sys.stderr.flush()
 
 
 def _stdout_event(msg: str) -> None:
@@ -570,7 +564,6 @@ class StallTracker:
         self.last_activity_at = now
         if self.stall_reported:
             _stdout_event(f"[watchdog.resumed] {self.agent_id}: JSONL activity resumed — stall cleared")
-            _stderr(f"[watchdog.agent] {self.agent_id}: activity resumed")
             logger.info("[watchdog.agent] activity resumed agent_id=%s", self.agent_id)
             self.stall_reported = False
         if inflight:
@@ -605,10 +598,6 @@ class StallTracker:
             f"(PID {self.pid} alive, no in-flight tool call). Agent may be stuck — "
             f"check, or kill+resume."
         )
-        _stderr(
-            f"[watchdog.agent] {self.agent_id}: STALLED — no JSONL activity for {idle_secs}s "
-            f"(PID {self.pid} still alive)"
-        )
         logger.info(
             "[watchdog.agent] stall detected agent_id=%s idle=%ss pid=%s",
             self.agent_id,
@@ -629,7 +618,6 @@ def watch_agent(
     agent_state is one of: "completed_replied", "completed_silent", "crashed", "timeout".
     """
     started_at = time.monotonic()
-    _stderr(f"[watchdog.agent] watching {agent_id} (timeout={timeout_seconds}s)")
     logger.info("[watchdog.agent] start agent_id=%s timeout=%s", agent_id, timeout_seconds)
 
     handle = _registry.register(
@@ -641,7 +629,7 @@ def watch_agent(
         try:
             branch_path = _resolve_branch_path(agent_id)
         except RegistryUnreadable as exc:
-            _stderr(f"[watchdog.agent] {agent_id}: main registry unreadable — refusing to resolve: {exc}")
+            logger.warning("[watchdog.agent] %s: main registry unreadable — refusing to resolve: %s", agent_id, exc)
             return {
                 "woke": False,
                 "reason": f"main registry unreadable: {exc}",
@@ -653,7 +641,7 @@ def watch_agent(
             }
         if branch_path is None:
             elapsed = int(time.monotonic() - started_at)
-            _stderr(f"[watchdog.agent] {agent_id}: branch not found in registry")
+            logger.info("[watchdog.agent] %s: branch not found in registry", agent_id)
             return {
                 "woke": False,
                 "reason": "agent not found",
@@ -671,7 +659,7 @@ def watch_agent(
         lock_existed_initially = initial_lock is not None
 
         if not lock_existed_initially:
-            _stderr(f"[watchdog.agent] {agent_id}: no active lock — agent already idle")
+            logger.info("[watchdog.agent] %s: no active lock — agent already idle", agent_id)
             elapsed = int(time.monotonic() - started_at)
             state, reason, exit_code = _classify_exit(branch_path, lock_existed=False, dispatch_ts=dispatch_ts)
             return {
@@ -684,7 +672,7 @@ def watch_agent(
                 "handle": handle,
             }
 
-        _stderr(f"[watchdog.agent] {agent_id}: lock present, monitor PID={initial_pid}")
+        logger.info("[watchdog.agent] %s: lock present, monitor PID=%s", agent_id, initial_pid)
 
         jsonl_dir = _get_jsonl_projects_dir(branch_path)
         tracker = StallTracker(agent_id, jsonl_dir, time.monotonic(), initial_pid, branch_path=branch_path)
@@ -692,7 +680,6 @@ def watch_agent(
         while True:
             elapsed = time.monotonic() - started_at
             if elapsed >= timeout_seconds:
-                _stderr(f"[watchdog.agent] {agent_id}: TIMEOUT after {int(elapsed)}s")
                 logger.info("[watchdog.agent] timeout agent_id=%s elapsed=%s", agent_id, int(elapsed))
                 return {
                     "woke": False,
@@ -705,7 +692,7 @@ def watch_agent(
                 }
 
             if not lock_file.exists():
-                _stderr(f"[watchdog.agent] {agent_id}: lock removed — agent done")
+                logger.info("[watchdog.agent] %s: lock removed — agent done", agent_id)
                 elapsed_int = int(time.monotonic() - started_at)
                 state, reason, exit_code = _classify_exit(branch_path, lock_existed=True, dispatch_ts=dispatch_ts)
                 logger.info("[watchdog.agent] wake agent_id=%s state=%s elapsed=%s", agent_id, state, elapsed_int)
@@ -722,9 +709,10 @@ def watch_agent(
                 return result
 
             if isinstance(initial_pid, int) and not _pid_alive(initial_pid):
-                _stderr(
-                    f"[watchdog.agent] {agent_id}: monitor PID {initial_pid} dead "
-                    f"but lock still present — treating as crash"
+                logger.warning(
+                    "[watchdog.agent] %s: monitor PID %s dead but lock still present — treating as crash",
+                    agent_id,
+                    initial_pid,
                 )
                 elapsed_int = int(time.monotonic() - started_at)
                 state, reason, exit_code = _classify_exit(branch_path, lock_existed=True, dispatch_ts=dispatch_ts)

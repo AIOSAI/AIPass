@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: timer.py
 # Description: Watchdog Timer Handler — wake-in-N + named duration tracking
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-04-14
-# Modified: 2026-10-28
+# Modified: 2026-11-22
 # =============================================
 
 # Operational state lives in .watchdog/, never .trinity/ (identity and memory only).
@@ -14,7 +14,6 @@ Watchdog Timer Handler — wake-in-N and named duration tracking.
 
 import json
 import re
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -30,12 +29,6 @@ _DURATION_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600}
 _STORAGE_FILENAME = "watchdog_timers.json"
 _STORAGE_VERSION = 1
 _LONG_TIMER_STATUS_INTERVAL = 10.0
-
-
-def _stderr(msg: str) -> None:
-    """Write to stderr so stdout stays clean for callers that capture it."""
-    sys.stderr.write(msg + "\n")
-    sys.stderr.flush()
 
 
 def default_storage_path() -> Path:
@@ -119,7 +112,6 @@ def wake_in(duration: str) -> dict:
     total_seconds = parse_duration(duration)
     started_at = time.monotonic()
     logger.info("[watchdog.timer] wake_in duration=%s total=%ss", duration, total_seconds)
-    _stderr(f"[watchdog.timer] sleeping {total_seconds}s ({duration})")
 
     handle = _registry.register(
         "timer",
@@ -136,10 +128,10 @@ def wake_in(duration: str) -> dict:
                 time.sleep(chunk)
                 remaining -= chunk
                 if remaining > 0:
-                    _stderr(f"[watchdog.timer] {int(remaining)}s remaining")
+                    logger.debug("[watchdog.timer] %ss remaining", int(remaining))
 
         elapsed = int(time.monotonic() - started_at)
-        _stderr(f"[watchdog.timer] woke after {elapsed}s")
+        logger.info("[watchdog.timer] woke after %ss", elapsed)
         return {
             "woke": True,
             "reason": "timer fired",

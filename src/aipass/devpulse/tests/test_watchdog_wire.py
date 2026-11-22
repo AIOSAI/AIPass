@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_wire.py
 # Description: Tests for the watchdog wire handler (DPLAN-0317 r4 — report, filter, deliver)
-# Version: 2.5.1
+# Version: 2.5.2
 # Created: 2026-08-19
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/watchdog/wire.py: arm_wire delivering THIS seat's dispatch completions."""
@@ -20,7 +20,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -74,6 +74,19 @@ class _SignalNoRebind:
 def _no_signal_rebind(monkeypatch):
     """arm_wire's SIGTERM handler must not leak; only wire's ``signal`` is swapped, never the process-wide one."""
     monkeypatch.setattr(wire, "signal", _SignalNoRebind())
+
+
+@pytest.fixture
+def wire_logs(monkeypatch):
+    """Capture the wire's logger — prax writes to files, not stderr, so sweep lines are asserted here."""
+    log = MagicMock()
+    monkeypatch.setattr(wire, "logger", log)
+    return log
+
+
+def _logged(log) -> str:
+    """Every logger call flattened to one string (format and args) for substring assertions."""
+    return " ".join(str(call) for call in log.mock_calls)
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -393,7 +406,7 @@ def test_the_wire_leaves_no_process_running(tmp_path, monkeypatch):
     assert still_running == [], f"the arm returned with a process still running: {still_running}"
 
 
-def test_a_pre_r4_daemon_still_running_is_retired(tmp_path, capsys):
+def test_a_pre_r4_daemon_still_running_is_retired(tmp_path, wire_logs):
     """An old detached daemon from another checkout would restore the double-wake, invisibly."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
@@ -404,7 +417,7 @@ def test_a_pre_r4_daemon_still_running_is_retired(tmp_path, capsys):
 
         wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
-        assert "retired pre-r4 detection daemon" in capsys.readouterr().err
+        assert "retired pre-r4 detection daemon" in _logged(wire_logs)
         old.wait(timeout=5)
         assert old.returncode is not None
         assert [w for w in _entries(store) if w["type"] == "baseline"] == []
@@ -425,7 +438,7 @@ def test_wire_touches_the_heartbeat_the_daemon_used_to_own(tmp_path, _private_he
     assert _private_heartbeat.exists(), "the wire owns the heartbeat now — nothing else writes it"
 
 
-def test_takeover_kills_wire_soldered_to_another_session(tmp_path, capsys, monkeypatch):
+def test_takeover_kills_wire_soldered_to_another_session(tmp_path, monkeypatch, wire_logs):
     root = _repo(tmp_path)
     store = _store(tmp_path)
     _write_feed(root, [])
@@ -439,7 +452,7 @@ def test_takeover_kills_wire_soldered_to_another_session(tmp_path, capsys, monke
 
         wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
-        assert "took over stale wire" in capsys.readouterr().err
+        assert "took over stale wire" in _logged(wire_logs)
         stale.wait(timeout=5)
         assert stale.returncode is not None
         leftover = [w for w in _entries(store) if w["type"] == "baseline_wire" and w["pid"] == stale.pid]
@@ -449,7 +462,7 @@ def test_takeover_kills_wire_soldered_to_another_session(tmp_path, capsys, monke
             stale.kill()
 
 
-def test_same_session_wire_is_taken_over_too(tmp_path, capsys, monkeypatch):
+def test_same_session_wire_is_taken_over_too(tmp_path, monkeypatch, wire_logs):
     """No 'already wired': a same-session wire proves a writer, never a listener; only the newest arm has ears."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
@@ -467,7 +480,7 @@ def test_same_session_wire_is_taken_over_too(tmp_path, capsys, monkeypatch):
         result = wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
         assert result["state"] == "stopped"
-        assert "took over stale wire" in capsys.readouterr().err
+        assert "took over stale wire" in _logged(wire_logs)
         peer.wait(timeout=5)
         assert peer.returncode is not None, "the old wire must die — only the newest arm has ears"
         leftover = [w for w in _entries(store) if w["type"] == "baseline_wire" and w["pid"] == peer.pid]
@@ -510,7 +523,7 @@ def test_seat_is_the_callers_project_owner_with_its_own_cursor(tmp_path, capsys,
     assert result["replayed"] == 1 and "@hooks" in out and "@writer" not in out, "@devpulse's cursor is its own"
 
 
-def test_another_seats_live_wire_is_left_alone(tmp_path, capsys, monkeypatch):
+def test_another_seats_live_wire_is_left_alone(tmp_path, monkeypatch, wire_logs):
     """A project manager's wire delivers its own completions; my arm must not SIGTERM it."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
@@ -524,8 +537,9 @@ def test_another_seats_live_wire_is_left_alone(tmp_path, capsys, monkeypatch):
 
         wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
-        err = capsys.readouterr().err
-        assert "@vera's wire" in err and "took over stale wire" not in err
+        logged = _logged(wire_logs)
+        assert "left another seat's wire alone" in logged and "@vera" in logged
+        assert "took over stale wire" not in logged
         assert theirs.poll() is None, "another seat's wire must survive my arm"
         kept = [w for w in _entries(store) if w["type"] == "baseline_wire" and w["pid"] == theirs.pid]
         assert len(kept) == 1
@@ -536,7 +550,7 @@ def test_another_seats_live_wire_is_left_alone(tmp_path, capsys, monkeypatch):
             theirs.kill()
 
 
-def test_recycled_pid_is_never_signalled(tmp_path, capsys):
+def test_recycled_pid_is_never_signalled(tmp_path, wire_logs):
     """A registry pid whose cmdline is not a watchdog gets buried, not shot."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
@@ -548,14 +562,14 @@ def test_recycled_pid_is_never_signalled(tmp_path, capsys):
         wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
         assert innocent.poll() is None, "recycled pid must be left alone"
-        assert "process left alone" in capsys.readouterr().err
+        assert "process left alone" in _logged(wire_logs)
         leftover = [w for w in _entries(store) if w.get("pid") == innocent.pid]
         assert leftover == []
     finally:
         innocent.kill()
 
 
-def test_dead_entries_are_buried_on_arm(tmp_path, capsys):
+def test_dead_entries_are_buried_on_arm(tmp_path, wire_logs):
     root = _repo(tmp_path)
     store = _store(tmp_path)
     _write_feed(root, [])
@@ -564,7 +578,7 @@ def test_dead_entries_are_buried_on_arm(tmp_path, capsys):
 
     wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
-    assert "buried dead" in capsys.readouterr().err
+    assert "buried dead" in _logged(wire_logs)
     assert [w for w in _entries(store) if w.get("pid") == DEAD_PID] == []
 
 
@@ -796,7 +810,7 @@ def test_dead_pid_has_no_stdout_target():
     assert wire.stdout_target(DEAD_PID) is None
 
 
-def test_a_continuous_wire_refuses_when_its_stdout_is_unknowable(tmp_path, capsys, monkeypatch):
+def test_a_continuous_wire_refuses_when_its_stdout_is_unknowable(tmp_path, capsys, monkeypatch, wire_logs):
     """Armed with no way of being heard is a lie: refuse by name, non-zero, no entry."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
@@ -810,7 +824,7 @@ def test_a_continuous_wire_refuses_when_its_stdout_is_unknowable(tmp_path, capsy
     assert asked == [None], "the refusal must come from asking where THIS process's stdout goes"
     assert exit_info.value.code == 1
     captured = capsys.readouterr()
-    assert "stdout target unresolvable" in captured.err
+    assert "stdout target unresolvable" in _logged(wire_logs)
     assert "BASELINE DEAD: stdout target unresolvable" in captured.out
     assert "armed handle=" not in captured.err
     assert _entries(store) == []
