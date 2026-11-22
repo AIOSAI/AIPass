@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cadence_regroup.py
 # Description: Cadence's regroup and counter machinery: reset, the regroup token and part queue, config, fail-loud
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-11-07
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/cadence.py: the regroup and counter machinery."""
@@ -291,7 +291,7 @@ class TestRegroupFireLog:
         log.info.assert_called_once()
         fmt, *args = log.info.call_args.args
         line = fmt % tuple(args)
-        assert "[HOOKS] regroup fired loader=branch,identity part=1/3" in line
+        assert "[hooks] regroup fired loader=branch,identity part=1/3" in line
         assert "bytes=6" in line  # the em dash is three UTF-8 bytes
         assert "chars=4" in line
         log.warning.assert_not_called()

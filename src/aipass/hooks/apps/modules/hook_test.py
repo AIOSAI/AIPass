@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hook_test.py
-# Version: 1.6.1
+# Version: 1.6.2
 # Description: Portable hook test runner — every hook with mock data; provider parity and smoke with real sessions
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-10
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """Portable hook test runner.
@@ -172,7 +172,7 @@ def _test_single_hook(event_type: str, hook_name: str, hook_def: dict, stdin_dat
         }
     except Exception as exc:
         elapsed_ms = round((time.monotonic() - start) * 1000, 1)
-        logger.error("[HOOKS:test] %s.%s crashed: %s", event_type, hook_name, exc)
+        logger.error("[hooks:test] %s.%s crashed: %s", event_type, hook_name, exc)
         return {
             "hook": hook_name,
             "status": "crashed",
@@ -451,7 +451,7 @@ def handle_command(command: str, args: list) -> bool:
         return False
     verbose = "--verbose" in args or "-v" in args
 
-    CONSOLE.print("[bold cyan]HOOKS Test Runner[/bold cyan]")
+    CONSOLE.print("[bold cyan]hooks Test Runner[/bold cyan]")
     CONSOLE.print("[dim]Firing every hook with mock data...[/dim]")
 
     results = run_test(verbose=verbose)

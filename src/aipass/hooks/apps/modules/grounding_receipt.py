@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: grounding_receipt.py
-# Version: 1.0.3
+# Version: 1.0.4
 # Description: The grounding receipt, .ai_mail.local/grounding.json: did the five grounding entries reach the model
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-28
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """The grounding receipt beside a branch's session pointer: one current row plus a history of 20.
@@ -115,7 +115,7 @@ def _write(path: Path, row: dict) -> None:
     }:
         history = [old, *history][:HISTORY_CAP]
     if not json_handler.write_json(path, {"current": row, "history": history}):
-        logger.error("[HOOKS] grounding_receipt: receipt not written at %s", path)
+        logger.error("[hooks] grounding_receipt: receipt not written at %s", path)
 
 
 def _base(hook_data: dict, path: Path) -> dict:
@@ -140,7 +140,7 @@ def observe(hook_data: dict) -> str:
         return ""
     if hook_data.get("provider") == "opencode":
         if not context_window.opencode_db_path().is_file():
-            logger.error("[HOOKS] grounding_receipt: no OpenCode store at %s", context_window.opencode_db_path())
+            logger.error("[hooks] grounding_receipt: no OpenCode store at %s", context_window.opencode_db_path())
             return ""
         row = _opencode_row(hook_data["session_id"])
     else:

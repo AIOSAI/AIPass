@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.31.0
+# Version: 1.31.1
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -37,8 +37,8 @@ GATE_CRASHED = (
     'Mail @hooks and @devpulse: drone @ai_mail email @hooks "Gate broken: edit_gate" "<what you ran, and this text>"'
 )
 # The tripwire pair: one fixed ERROR line per fault, so medic fingerprints it once; the cause follows at INFO.
-SNAPSHOT_FAILED_LOG = "[HOOKS] edit_gate tripwire: the memory snapshot could not be taken, Bash is refused until it can"
-TRIPWIRE_FAILED_LOG = "[HOOKS] edit_gate tripwire: the memory check failed, a shell write to memory may be unreported"
+SNAPSHOT_FAILED_LOG = "[hooks] edit_gate tripwire: the memory snapshot could not be taken, Bash is refused until it can"
+TRIPWIRE_FAILED_LOG = "[hooks] edit_gate tripwire: the memory check failed, a shell write to memory may be unreported"
 SNAPSHOT_REFUSED = (
     "The shell-memory tripwire could not take this call's before-image ({error}), so this Bash call is refused: "
     "a memory write it cannot see would land unreported. Every Bash call in this seat is refused until it is "
@@ -48,7 +48,7 @@ SNAPSHOT_REFUSED = (
 )
 # The one call a dark snapshot lets through, compared whole: no parser runs, so none can be what broke.
 ROLLBACK_COMMAND = "drone @hooks promote rollback"
-STORE_RESET_LOG = "[HOOKS] edit_gate tripwire: a damaged snapshot store started fresh, calls in flight lost their check"
+STORE_RESET_LOG = "[hooks] edit_gate tripwire: a damaged snapshot store started fresh, calls in flight lost their check"
 # A store that started fresh holds this key, stamped; a no-snapshot check inside the window is a lost snapshot.
 FRESH_START_KEY = "_fresh_start"
 FRESH_START_WINDOW_S = 600  # Claude Code's longest Bash timeout: no call in flight outlives it
@@ -115,7 +115,7 @@ def _refuse(reason: str) -> dict:
 
     engine.jsonl never records the reason, so this line is the only record of what was refused.
     Paths with extra detail log their own line first; two lines there is intended."""
-    logger.warning("[HOOKS] edit_gate: refused — %s", _one_line(reason))
+    logger.warning("[hooks] edit_gate: refused — %s", _one_line(reason))
     return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
 
 
@@ -133,7 +133,7 @@ def _is_admin_seat(cwd: str) -> bool:
         admin = _import_module("aipass.hooks.apps.modules.admin_seat")
     except Exception as exc:
         # A missing module must never open the exemption.
-        logger.warning("[HOOKS] edit_gate: admin lane dark — admin_seat unavailable: %s", exc)
+        logger.warning("[hooks] edit_gate: admin lane dark — admin_seat unavailable: %s", exc)
         return False
     return bool(admin.is_admin_seat(cwd))
 
@@ -146,7 +146,7 @@ def _check_project_boundary(cwd: str, caller: Any, landing: Any, target: Path) -
         return None, False
     if _is_admin_seat(cwd):
         logger.info(
-            "[HOOKS] edit_gate: cross-project write ALLOWED for the admin seat (@%s): %s -> %s (%s)",
+            "[hooks] edit_gate: cross-project write ALLOWED for the admin seat (@%s): %s -> %s (%s)",
             ADMIN_SEAT,
             _ownership().seat_label(caller),
             landing.root.name,
@@ -156,7 +156,7 @@ def _check_project_boundary(cwd: str, caller: Any, landing: Any, target: Path) -
     if (grant := _write_grant(cwd, caller, landing, target)).allowed:
         return None, True
     logger.warning(
-        "[HOOKS] edit_gate: cross-project write refused: caller %s != target root %s (%s)",
+        "[hooks] edit_gate: cross-project write refused: caller %s != target root %s (%s)",
         _ownership().seat_label(caller),
         landing.root,
         target,
@@ -194,7 +194,7 @@ def _check_provider_launch(cwd: str, command: str) -> dict | None:
         return None
     where, why = found
     logger.warning(
-        "[HOOKS] edit_gate: provider launch refused: @%s -> %s | cmd=%s", caller or "unnamed", where, command
+        "[hooks] edit_gate: provider launch refused: @%s -> %s | cmd=%s", caller or "unnamed", where, command
     )
     named = f"@{caller}" if caller else "unnamed (no passport above the cwd)"
     return _refuse(PROVIDER_LAUNCH_REFUSED.format(caller=named, why=why))
@@ -228,7 +228,7 @@ def _check_bash_project_boundary(cwd: str, caller: Any, targets: list[tuple[Path
             continue
         if _is_admin_seat(cwd):
             logger.info(
-                "[HOOKS] edit_gate: scripted cross-project write ALLOWED for the admin seat (@%s): %s -> %s (%s)",
+                "[hooks] edit_gate: scripted cross-project write ALLOWED for the admin seat (@%s): %s -> %s (%s)",
                 ADMIN_SEAT,
                 wo.seat_label(caller),
                 landing.root.name,
@@ -239,7 +239,7 @@ def _check_bash_project_boundary(cwd: str, caller: Any, targets: list[tuple[Path
         if (grant := _write_grant(cwd, caller, landing, target)).allowed:
             continue
         logger.warning(
-            "[HOOKS] edit_gate: scripted cross-project write refused: %s -> %s via %s (%s)",
+            "[hooks] edit_gate: scripted cross-project write refused: %s -> %s via %s (%s)",
             wo.seat_label(caller),
             landing.root,
             how,
@@ -259,7 +259,7 @@ def _check_bash_ownership(cwd: str, caller: Any, targets: list[tuple[Path, str]]
         if reason:
             seat = wo.branch_at(caller, Path(cwd), wo.package_of(Path(cwd)))
             logger.warning(
-                "[HOOKS] edit_gate: scripted write refused, not the seat's: @%s -> %s via %s",
+                "[hooks] edit_gate: scripted write refused, not the seat's: @%s -> %s via %s",
                 seat.name if seat else "unnamed",
                 target,
                 how,
@@ -276,7 +276,7 @@ def _check_bash_memory_write(targets: list[tuple[Path, str]]) -> dict | None:
     for target, how in targets:
         if target.parent.name != ".trinity" or target.name not in _TRINITY_MEMORY_FILES:
             continue
-        logger.warning("[HOOKS] edit_gate: shell write to a memory file refused: %s via %s", target, how)
+        logger.warning("[hooks] edit_gate: shell write to a memory file refused: %s via %s", target, how)
         reason = (
             f"Memory files are not written from a shell: {target} via {how}.\n"
             f"{_where_memory_is_written()}\n"
@@ -296,7 +296,7 @@ def _memory_service_reachable() -> bool:
         _import_module("aipass.memory").load_entry_limits
         return True
     except Exception as exc:  # any import failure means "not reachable here"
-        logger.info("[HOOKS] edit_gate: @memory is not reachable from this project (%s)", exc)
+        logger.info("[hooks] edit_gate: @memory is not reachable from this project (%s)", exc)
         return False
 
 
@@ -365,7 +365,7 @@ def _log_carried(entry_type: str, container: str, key: str, field: str) -> None:
 
     Not refused, not printed: detection belongs to ``drone @memory lint``. INFO: carrying is not misbehaviour."""
     logger.info(
-        "[HOOKS] edit_gate: CARRIED (not authored, not refused) %s [%s] in %s — no '%s' field. "
+        "[hooks] edit_gate: CARRIED (not authored, not refused) %s [%s] in %s — no '%s' field. "
         "Cure it with drone @memory lint.",
         entry_type,
         key,
@@ -435,7 +435,7 @@ def _entry_text(v: dict, after: dict, limits: dict) -> str | None:
     if isinstance(entry, dict):
         entry = entry.get(type_def.get("field", "value"))
     if not isinstance(entry, str) or len(entry) != v.get("length"):
-        logger.info("[HOOKS] edit_gate: no cut point for %s [%s] — text did not resolve", v.get("entry_type"), key)
+        logger.info("[hooks] edit_gate: no cut point for %s [%s] — text did not resolve", v.get("entry_type"), key)
         return None
     return entry
 
@@ -497,7 +497,7 @@ def _log_violation(v: dict, text: str | None = None) -> None:
     reason = v.get("reason")
     if reason in ("unknown_field", "field_over_cap", "file_over_budget"):
         logger.warning(
-            "[HOOKS] edit_gate: %s .trinity %s field '%s' %d/%d %s (+%d) — warn only",
+            "[hooks] edit_gate: %s .trinity %s field '%s' %d/%d %s (+%d) — warn only",
             reason,
             _where(v),
             v.get("field", "?"),
@@ -509,7 +509,7 @@ def _log_violation(v: dict, text: str | None = None) -> None:
         return
     if reason:
         logger.warning(
-            "[HOOKS] edit_gate: unreadable .trinity entry %s [%s]: %s (field '%s', cap %d) — warn only",
+            "[hooks] edit_gate: unreadable .trinity entry %s [%s]: %s (field '%s', cap %d) — warn only",
             v["entry_type"],
             v["key"],
             v["reason"],
@@ -518,7 +518,7 @@ def _log_violation(v: dict, text: str | None = None) -> None:
         )
         return
     logger.warning(
-        "[HOOKS] edit_gate: over-limit .trinity entry %s [%s]: %d/%d (+%d)%s — warn only",
+        "[hooks] edit_gate: over-limit .trinity entry %s [%s]: %d/%d (+%d)%s — warn only",
         v["entry_type"],
         v["key"],
         v["length"],
@@ -594,7 +594,7 @@ def _evaluate_file_budget(file_name: str, after_text: str, limits: dict, el: Any
             "  The identity block renders from this file on every cadence beat, so its size is a standing cost."
         )
     lines.append("  Caps live in @memory's memory.config.json (file_budgets).")
-    logger.warning("[HOOKS] edit_gate: %s refused — %d file-budget violation(s)", file_name, len(violations))
+    logger.warning("[hooks] edit_gate: %s refused — %d file-budget violation(s)", file_name, len(violations))
     return _refuse("\n".join(lines))
 
 
@@ -627,12 +627,12 @@ def _todos_count_advisory(after: dict, branch: str) -> str:
         cadence = _import_module("aipass.hooks.apps.modules.cadence")
         if not cadence.should_fire_advisory("todos_count"):
             # debug: the condition is unchanged and already recorded by the emission that fired.
-            logger.debug("[HOOKS] edit_gate: %s (throttled)", msg)
+            logger.debug("[hooks] edit_gate: %s (throttled)", msg)
             return ""
-        logger.warning("[HOOKS] edit_gate: %s", msg)
+        logger.warning("[hooks] edit_gate: %s", msg)
         return msg
     except Exception as exc:
-        logger.warning("[HOOKS] edit_gate: todos count check failed (skipping): %s", exc)
+        logger.warning("[hooks] edit_gate: todos count check failed (skipping): %s", exc)
         return ""
 
 
@@ -648,7 +648,7 @@ def _note_over_budget(branch: str, file_stem: str, label: str, count: int, cap: 
 
     INFO, not WARNING: over-budget is chosen behaviour; as a WARNING it fed @trigger's escalation lane."""
     logger.info(
-        "[HOOKS] edit_gate: @%s .trinity/%s.json — %s has %d entries, %d over the rollover budget of %d. "
+        "[hooks] edit_gate: @%s .trinity/%s.json — %s has %d entries, %d over the rollover budget of %d. "
         "The @memory rollover hook archives the %d oldest at the next PreCompact; "
         "nothing is lost — recall them with drone @memory search.",
         branch,
@@ -666,7 +666,7 @@ def _note_todos_over_pad(branch: str, count: int, cap: int) -> None:
 
     Todos roll to the backlog file, never to vectors, so "drone @memory search" would be the false clause."""
     logger.info(
-        "[HOOKS] edit_gate: @%s .trinity/local.json — todos has %d entries, %d over the pad of %d. "
+        "[hooks] edit_gate: @%s .trinity/local.json — todos has %d entries, %d over the pad of %d. "
         "The %d oldest roll to %s at @%s's next PreCompact (or drone @memory rollover run --branch @%s); "
         "nothing is lost — drone @memory todo backlog @%s lists them.",
         branch,
@@ -725,7 +725,7 @@ def _check_section_counts(after: dict, branch: str, file_stem: str) -> None:
             else:
                 _note_over_budget(branch, file_stem, section_name, len(entries), cap)
     except Exception as exc:
-        logger.warning("[HOOKS] edit_gate: section count check failed (skipping): %s", exc)
+        logger.warning("[hooks] edit_gate: section count check failed (skipping): %s", exc)
 
 
 def _check_newest_first(before: dict, after: dict) -> dict | None:
@@ -820,7 +820,7 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
         try:
             after = json.loads(after_text)
         except ValueError as exc:
-            logger.info("[HOOKS] edit_gate: refused a %s that leaves %s unparseable: %s", tool_name, fp, exc)
+            logger.info("[hooks] edit_gate: refused a %s that leaves %s unparseable: %s", tool_name, fp, exc)
             return _unparseable_refusal(fp, exc)
 
         try:
@@ -828,7 +828,7 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
         except ValueError as exc:
             # Already broken on disk and this edit parses: it is the repair, judged as a new file.
             logger.warning(
-                "[HOOKS] edit_gate: %s did not parse before this %s, which repairs it: %s", fp, tool_name, exc
+                "[hooks] edit_gate: %s did not parse before this %s, which repairs it: %s", fp, tool_name, exc
             )
             before = {}
 
@@ -857,7 +857,7 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
 
         return None
     except Exception as exc:  # fail closed: an unreadable memory file must not pass every cap
-        logger.warning("[HOOKS] edit_gate: .trinity check could not run, refusing: %s", exc)
+        logger.warning("[hooks] edit_gate: .trinity check could not run, refusing: %s", exc)
         return _refuse(
             f"{fp.name} could not be checked against its caps ({type(exc).__name__}: {exc}), so the write is "
             "refused: a memory file the gate cannot read is not one it has measured. Make it readable, then retry."
@@ -869,7 +869,7 @@ def _seat_trinity(cwd: str) -> Path | None:
     try:
         start = Path(cwd).resolve()
     except (OSError, ValueError) as exc:
-        logger.warning("[HOOKS] edit_gate tripwire: cwd unresolvable %r: %s", cwd, exc)
+        logger.warning("[hooks] edit_gate tripwire: cwd unresolvable %r: %s", cwd, exc)
         return None
     for candidate in (start, *start.parents):
         if (candidate / ".trinity").is_dir():
@@ -887,7 +887,7 @@ def _watched_trinity_dirs(cwd: str) -> list[Path]:
     try:
         project = wo.project_of(Path(cwd)) if cwd else None
     except wo.ProjectUnreadable as exc:  # the fence refuses the writes; reads and the repair route keep running
-        logger.warning("[HOOKS] edit_gate tripwire: watching the seat's own memory only: %s", exc)
+        logger.warning("[hooks] edit_gate tripwire: watching the seat's own memory only: %s", exc)
         return dirs
     if project is None:
         return dirs
@@ -899,7 +899,7 @@ def _watched_trinity_dirs(cwd: str) -> list[Path]:
                 if found.is_dir() and found not in dirs:
                     dirs.append(found)
     except OSError as exc:
-        logger.warning("[HOOKS] edit_gate tripwire: .trinity scan under %s failed: %s", root, exc)
+        logger.warning("[hooks] edit_gate tripwire: .trinity scan under %s failed: %s", root, exc)
     return dirs
 
 
@@ -958,14 +958,14 @@ def _measure_memory_file(path: Path) -> list[str]:
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
-            logger.info("[HOOKS] edit_gate tripwire: %s unreadable after a shell call: %s", path, exc)
+            logger.info("[hooks] edit_gate tripwire: %s unreadable after a shell call: %s", path, exc)
             return [f"  {path.name} could not be read: {exc}"]
         return [_format_violation(v) for v in el.check_file_budget(path.name, text)]
     try:
         text = path.read_text(encoding="utf-8")
         doc = json.loads(text)
     except (OSError, ValueError) as exc:
-        logger.info("[HOOKS] edit_gate tripwire: %s unreadable after a shell call: %s", path, exc)
+        logger.info("[hooks] edit_gate tripwire: %s unreadable after a shell call: %s", path, exc)
         return [f"  {path.name} no longer parses as JSON: {exc}"]
     if not isinstance(doc, dict):
         return [f"  {path.name} is no longer a JSON object."]
@@ -1113,7 +1113,7 @@ def _decide(hook_data: dict) -> dict:
         # Only-cross-file errors cannot justify the block: that is the red-first deadlock.
         if ds.all_cross_file(errors):
             logger.info(
-                "[HOOKS] edit_gate: %d cross-file error(s) in %s — not blocking (resolve elsewhere)",
+                "[hooks] edit_gate: %d cross-file error(s) in %s — not blocking (resolve elsewhere)",
                 len(errors),
                 Path(errored_file).name,
             )
@@ -1128,11 +1128,11 @@ def _decide(hook_data: dict) -> dict:
         wo = sys.modules.get("aipass.hooks.apps.modules.write_ownership")
         registry = isinstance(exc, getattr(wo, "RegistryUnreadable", ()))
         if registry:
-            logger.error("[HOOKS] edit_gate: registry unreadable, refused %s: %s", tool_name or "(no tool)", exc)
+            logger.error("[hooks] edit_gate: registry unreadable, refused %s: %s", tool_name or "(no tool)", exc)
         elif isinstance(exc, getattr(wo, "ProjectUnreadable", ())):
-            logger.warning("[HOOKS] edit_gate: refused on %s: %s", tool_name or "(no tool)", exc)
+            logger.warning("[hooks] edit_gate: refused on %s: %s", tool_name or "(no tool)", exc)
         else:
-            logger.error("[HOOKS] edit_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
+            logger.error("[hooks] edit_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
         if tool_name == "Bash" or tool_name in EDIT_TOOLS:
             return _refuse(str(exc) if registry else GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
         return {"stdout": "", "exit_code": 0}
@@ -1166,7 +1166,7 @@ def _tripwire_snapshot(hook_data: dict) -> dict:
             return {"stdout": "", "exit_code": 0}
         tool_use_id = hook_data.get("tool_use_id")
         if not tool_use_id:
-            logger.info("[HOOKS] edit_gate tripwire: no tool_use_id in the payload, call unwatched")
+            logger.info("[hooks] edit_gate tripwire: no tool_use_id in the payload, call unwatched")
             return {"stdout": "", "exit_code": 0}
         path = _tripwire_path(hook_data)
         reset = False
@@ -1174,7 +1174,7 @@ def _tripwire_snapshot(hook_data: dict) -> dict:
         try:
             pending = _load_pending(path)
         except (OSError, ValueError) as exc:  # the ERROR follows the write: a store it cannot replace refuses below
-            logger.info("[HOOKS] edit_gate tripwire: store %s unreadable: %s: %s", path, type(exc).__name__, exc)
+            logger.info("[hooks] edit_gate tripwire: store %s unreadable: %s: %s", path, type(exc).__name__, exc)
             pending, reset = {FRESH_START_KEY: time.time()}, True
         fresh = pending.pop(FRESH_START_KEY, None)
         pending.pop(tool_use_id, None)
@@ -1191,9 +1191,9 @@ def _tripwire_snapshot(hook_data: dict) -> dict:
             logger.error(STORE_RESET_LOG)
     except Exception as exc:  # declared FAIL_CLOSED: an unwatched call is refused, never let through
         logger.error(SNAPSHOT_FAILED_LOG)
-        logger.info("[HOOKS] edit_gate tripwire: snapshot into %s: %s: %s", _TRIPWIRE_DIR, type(exc).__name__, exc)
+        logger.info("[hooks] edit_gate tripwire: snapshot into %s: %s: %s", _TRIPWIRE_DIR, type(exc).__name__, exc)
         if str(hook_data.get("tool_input", {}).get("command", "")).strip() == ROLLBACK_COMMAND:
-            logger.info("[HOOKS] edit_gate tripwire: snapshot dark, %s let through unwatched", ROLLBACK_COMMAND)
+            logger.info("[hooks] edit_gate tripwire: snapshot dark, %s let through unwatched", ROLLBACK_COMMAND)
             return {"stdout": "", "exit_code": 0}
         return _refuse(SNAPSHOT_REFUSED.format(error=f"{type(exc).__name__}: {exc}"))
     return {"stdout": "", "exit_code": 0}
@@ -1260,7 +1260,7 @@ def _tripwire(hook_data: dict) -> dict:
                     raise LookupError(f"the snapshot of {tool_use_id} was lost when a damaged store started fresh")
             if _seat_trinity(cwd) is not None:
                 logger.info(
-                    "[HOOKS] edit_gate tripwire: no snapshot for %s, cannot tell if memory changed", tool_use_id
+                    "[hooks] edit_gate tripwire: no snapshot for %s, cannot tell if memory changed", tool_use_id
                 )
             return {"stdout": "", "exit_code": 0}
 
@@ -1273,7 +1273,7 @@ def _tripwire(hook_data: dict) -> dict:
         command = hook_data.get("tool_input", {}).get("command", "")
         if _runs_memory_verb(command, hook_data.get("cwd", "") or str(trinity.parent)):
             logger.info(
-                "[HOOKS] edit_gate tripwire: %s changed by a drone memory verb (sanctioned)", ", ".join(changed)
+                "[hooks] edit_gate tripwire: %s changed by a drone memory verb (sanctioned)", ", ".join(changed)
             )
             return {"stdout": "", "exit_code": 0}
 
@@ -1286,12 +1286,12 @@ def _tripwire(hook_data: dict) -> dict:
         context = "\n".join(parts)
         # A clean change is no defect, whoever made it: WARNING is what @trigger escalates.
         log = logger.info if all_clean else logger.warning
-        log("[HOOKS] edit_gate tripwire: %s", context.replace("\n", " | "))
+        log("[hooks] edit_gate tripwire: %s", context.replace("\n", " | "))
         output = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": context}}
         return {"stdout": json.dumps(output), "exit_code": 0}
     except Exception as exc:  # the call has run: nothing is left to refuse, so the seat is told the check is dark
         logger.error(TRIPWIRE_FAILED_LOG)
-        logger.info("[HOOKS] edit_gate tripwire: comparison failed: %s: %s", type(exc).__name__, exc)
+        logger.info("[hooks] edit_gate tripwire: comparison failed: %s: %s", type(exc).__name__, exc)
         dark = TRIPWIRE_DARK.format(error=f"{type(exc).__name__}: {exc}")
         output = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": dark}}
         return {"stdout": json.dumps(output), "exit_code": 0}

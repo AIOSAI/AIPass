@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: sound.py
-# Version: 2.1.0
+# Version: 2.1.1
 # Description: Shared sound utilities — Piper TTS speech with mute support
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-22
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """Shared sound functions for hook handlers. Silent unless hook sounds are switched on."""
@@ -42,7 +42,7 @@ def mute() -> bool:
     Returns the resulting muted state (always True); @api imports this directly.
     """
     SOUND_FLAG.unlink(missing_ok=True)
-    logger.info("[HOOKS] sound: muted")
+    logger.info("[hooks] sound: muted")
     return True
 
 
@@ -50,7 +50,7 @@ def unmute() -> bool:
     """Turn hook sounds on. Idempotent."""
     SOUND_FLAG.parent.mkdir(parents=True, exist_ok=True)
     SOUND_FLAG.touch()
-    logger.info("[HOOKS] sound: unmuted")
+    logger.info("[hooks] sound: unmuted")
     return False
 
 
@@ -88,9 +88,9 @@ def speak(text: str, tmp_dir: str | None = None) -> None:
             )
             playing = True
     except subprocess.TimeoutExpired:
-        logger.info("[HOOKS] speak: piper timed out")
+        logger.info("[hooks] speak: piper timed out")
     except OSError as exc:
-        logger.info("[HOOKS] speak: playback error: %s", exc)
+        logger.info("[hooks] speak: playback error: %s", exc)
     finally:
         if wav_path and not playing:
             Path(wav_path).unlink(missing_ok=True)

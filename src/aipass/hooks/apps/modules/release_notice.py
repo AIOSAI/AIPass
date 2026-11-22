@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: release_notice.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Manager-only "AIPass release available" notice builder (DPLAN-0335 leg 2)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-09
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Builds the manager-only notice that a project's scaffold is behind AIPass.
@@ -42,14 +42,14 @@ def _find_project_root(start: Path) -> Path | None:
     try:
         current = start.resolve()
     except OSError as exc:
-        logger.info("[HOOKS] release_notice: project root unresolvable for %s: %s", start, exc)
+        logger.info("[hooks] release_notice: project root unresolvable for %s: %s", start, exc)
         return None
     for candidate in [current, *current.parents]:
         try:
             if any(candidate.glob(_PROJECT_MARKER)):
                 return candidate
         except OSError as exc:
-            logger.info("[HOOKS] release_notice: project marker scan failed at %s: %s", candidate, exc)
+            logger.info("[hooks] release_notice: project marker scan failed at %s: %s", candidate, exc)
             break
     return None
 
@@ -59,7 +59,7 @@ def _find_passport(start: Path) -> Path | None:
     try:
         search = start.resolve()
     except OSError as exc:
-        logger.info("[HOOKS] release_notice: passport walk unresolvable for %s: %s", start, exc)
+        logger.info("[hooks] release_notice: passport walk unresolvable for %s: %s", start, exc)
         return None
     home = Path.home().resolve()  # both sides resolved: a symlinked home must still stop the walk
     while search != home and search.parent != search:
@@ -77,7 +77,7 @@ def _is_manager(passport: Path) -> bool:
     try:
         data = json.loads(passport.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        logger.info("[HOOKS] release_notice: passport unreadable at %s: %s", passport, exc)
+        logger.info("[hooks] release_notice: passport unreadable at %s: %s", passport, exc)
         return False
     if not isinstance(data, dict):
         return False
@@ -140,7 +140,7 @@ def _read_manifest(root: Path) -> dict | None:
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as exc:
-        logger.warning("[HOOKS] release_notice: manifest unreadable at %s: %s", path, exc)
+        logger.warning("[hooks] release_notice: manifest unreadable at %s: %s", path, exc)
         return None
     return data if isinstance(data, dict) else None
 
@@ -197,7 +197,7 @@ def _build_notice(start: Path) -> str:
     installed = _version_tuple(installed_raw)
     if installed is None:
         # An unreadable installed version is an AIPass defect; quiet keeps it out of every manager's prompt.
-        logger.info("[HOOKS] release_notice: installed version unparseable: %r", installed_raw)
+        logger.info("[hooks] release_notice: installed version unparseable: %r", installed_raw)
         return ""
 
     manifest = _read_manifest(root) or {}

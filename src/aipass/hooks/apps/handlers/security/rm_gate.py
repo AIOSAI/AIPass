@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: rm_gate.py
-# Version: 3.7.0
+# Version: 3.7.1
 # Description: Refuses raw rm, other deletes off the admin seat, and drone rm outside the caller's branch (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-02
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Refuses deletes on the agent Bash tool, and writes every refused one down.
@@ -133,7 +133,7 @@ def _seat(cwd: str) -> tuple[str | None, bool]:
     try:
         return importlib.import_module(_ADMIN_SEAT).seat_of(cwd)
     except Exception as exc:  # an unreachable seat module refuses rather than opens
-        logger.warning("[HOOKS] rm_gate: admin lane dark — admin_seat unavailable, refusing as unnamed: %s", exc)
+        logger.warning("[hooks] rm_gate: admin lane dark — admin_seat unavailable, refusing as unnamed: %s", exc)
         return None, False
 
 
@@ -145,7 +145,7 @@ def _record(cmd: str, cwd: str, caller: str | None, lanes: dict[str, int]) -> No
     for lane, count in lanes.items():
         for _ in range(count):
             logger.info(
-                "[HOOKS] rm_gate: DELETE refused | lane=%s | branch=%s | cwd=%s | cmd=%s",
+                "[hooks] rm_gate: DELETE refused | lane=%s | branch=%s | cwd=%s | cmd=%s",
                 lane,
                 caller or "unnamed",
                 cwd,
@@ -157,7 +157,7 @@ def _record_move(cmd: str, cwd: str, caller: str | None, count: int, target: str
     """Write down every refused drone rm: a move refused before drone ran, with the target and the reason."""
     for _ in range(count):
         logger.info(
-            "[HOOKS] rm_gate: MOVE refused | lane=drone rm | branch=%s | cwd=%s | target=%s | reason=%s | cmd=%s",
+            "[hooks] rm_gate: MOVE refused | lane=drone rm | branch=%s | cwd=%s | target=%s | reason=%s | cmd=%s",
             caller or "unnamed",
             cwd,
             target or "-",
@@ -184,7 +184,7 @@ def _ledger(cmd: str, cwd: str, caller: str | None, targets: list[str], reason: 
                 project_root=project.root if project else None,
             )
     except Exception as exc:  # the refusal is already decided; a lost row is logged, never an allow
-        logger.error("[HOOKS] rm_gate: ledger write failed, the refusal stands: %s", exc)
+        logger.error("[hooks] rm_gate: ledger write failed, the refusal stands: %s", exc)
         return NOT_RECORDED
     return RECORDED
 
@@ -345,7 +345,7 @@ def _decide(hook_data: dict) -> dict:
                     else _not_movable(drones, cwd)
                 )
             except (OSError, RuntimeError, ValueError) as exc:  # an unresolvable target is refused, never waved through
-                logger.info("[HOOKS] rm_gate: drone rm target unresolvable, refusing: %s", exc)
+                logger.info("[hooks] rm_gate: drone rm target unresolvable, refusing: %s", exc)
                 verdict = (f"a target cannot be resolved: {exc}.", "")
             if verdict is None:
                 return _BLOCK_ALLOW
@@ -364,5 +364,5 @@ def _decide(hook_data: dict) -> dict:
         return _block(_refusal(raw, others, admin, caller, cwd, why, recorded))
 
     except Exception as exc:  # fail closed on the Bash call this gate guards
-        logger.error("[HOOKS] rm_gate: crashed, refusing the Bash call: %s", exc)
+        logger.error("[hooks] rm_gate: crashed, refusing the Bash call: %s", exc)
         return _block(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))

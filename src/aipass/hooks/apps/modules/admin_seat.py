@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: admin_seat.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: The verified admin-seat exemption and the caller's name, read once for every gate
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Answers one question for every security gate: is this session the admin seat?
@@ -64,7 +64,7 @@ def seat_of(cwd: str) -> tuple[str | None, bool]:
     try:
         name = caller_name(cwd)
     except (OSError, ValueError, AttributeError) as exc:
-        logger.warning("[HOOKS] admin_seat: caller passport above %s unreadable, caller unnamed: %s", cwd, exc)
+        logger.warning("[hooks] admin_seat: caller passport above %s unreadable, caller unnamed: %s", cwd, exc)
         name = None
     return name, is_admin_seat(cwd)
 
@@ -74,7 +74,7 @@ def _verified(cwd: str) -> bool:
     try:
         from aipass.ai_mail import is_verified_admin_caller
     except Exception as exc:
-        logger.warning("[HOOKS] admin_seat: admin lane dark — verified-caller rail unavailable: %s", exc)
+        logger.warning("[hooks] admin_seat: admin lane dark — verified-caller rail unavailable: %s", exc)
         return False
 
     stamped = not os.environ.get("AIPASS_CALLER_CWD") and bool(cwd)
@@ -84,7 +84,7 @@ def _verified(cwd: str) -> bool:
         return bool(is_verified_admin_caller())
     # Every caller is a gate: a raising verifier fails closed, and the warning tells it from a no.
     except Exception as exc:
-        logger.warning("[HOOKS] admin_seat: admin verification raised (refusing): %s", exc)
+        logger.warning("[hooks] admin_seat: admin verification raised (refusing): %s", exc)
         return False
     finally:
         if stamped:

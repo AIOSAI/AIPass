@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: trust_registry.py
-# Version: 1.1.1
+# Version: 1.1.2
 # Description: Trusted-project registry — DPLAN-0244 Layer B
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-07-15
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """Trusted-project registry for hook config loading.
@@ -69,12 +69,12 @@ def enroll(project_dir: str) -> bool:
     project_path = Path(project_dir).resolve()
     config_path = project_path / ".aipass" / "hooks.json"
     if not config_path.exists():
-        logger.warning("[HOOKS] cannot enroll %s: no .aipass/hooks.json", project_path)
+        logger.warning("[hooks] cannot enroll %s: no .aipass/hooks.json", project_path)
         return False
     config_hash = _hash_file(config_path)
     registry, dropped = prune_stale(read_registry())
     if dropped:
-        logger.info("[HOOKS] enroll: pruned %d stale registry entries", dropped)
+        logger.info("[hooks] enroll: pruned %d stale registry entries", dropped)
     registry["projects"][str(project_path)] = {
         "enrolled": _isoformat_now(),
         "config_hash": config_hash,
@@ -82,7 +82,7 @@ def enroll(project_dir: str) -> bool:
     }
     _write_registry(registry)
     json_handler.log_operation("enroll", {"project": str(project_path)}, module_name="trust_registry")
-    logger.info("[HOOKS] enrolled %s (hash=%s)", project_path, config_hash)
+    logger.info("[hooks] enrolled %s (hash=%s)", project_path, config_hash)
     return True
 
 
@@ -95,7 +95,7 @@ def revoke(project_dir: str) -> bool:
     del registry["projects"][project_path]
     _write_registry(registry)
     json_handler.log_operation("revoke", {"project": project_path}, module_name="trust_registry")
-    logger.info("[HOOKS] revoked %s", project_path)
+    logger.info("[hooks] revoked %s", project_path)
     return True
 
 
@@ -159,13 +159,13 @@ def bootstrap() -> bool:
     """
     aipass_home = os.environ.get("AIPASS_HOME", "")
     if not aipass_home:
-        logger.warning("[HOOKS] registry absent and AIPASS_HOME not set — cannot bootstrap")
+        logger.warning("[hooks] registry absent and AIPASS_HOME not set — cannot bootstrap")
         return False
     aipass_path = Path(aipass_home).resolve()
     config_path = aipass_path / ".aipass" / "hooks.json"
     if not config_path.exists():
         logger.warning(
-            "[HOOKS] registry absent and AIPass hooks.json not found at %s",
+            "[hooks] registry absent and AIPass hooks.json not found at %s",
             config_path,
         )
         return False
@@ -178,7 +178,7 @@ def bootstrap() -> bool:
     }
     _write_registry(registry)
     json_handler.log_operation("bootstrap", {"aipass_home": str(aipass_path)}, module_name="trust_registry")
-    logger.info("[HOOKS] registry bootstrapped, enrolled AIPass install: %s", aipass_path)
+    logger.info("[hooks] registry bootstrapped, enrolled AIPass install: %s", aipass_path)
     return True
 
 

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: comments.py
-# Version: 1.0.3
+# Version: 1.0.4
 # Description: The comments verb — the comment budget's ledger, trend and on-demand scan
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """The comment budget: last edits, a file's trend, over-budget files, or a scan now."""
@@ -99,7 +99,7 @@ def _show_over() -> None:
 
 def _walk_error(error: OSError) -> None:
     """A directory the tree scan could not read is named, not dropped."""
-    logger.warning("[HOOKS] comments: unreadable directory skipped: %s", error)
+    logger.warning("[hooks] comments: unreadable directory skipped: %s", error)
     err_console.print(f"unreadable, skipped: {error.filename}", markup=False)
 
 

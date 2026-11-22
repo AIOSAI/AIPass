@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: email.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Checks inbox for unread emails on UserPromptSubmit
 # Branch: hooks
 # Layer: apps/handlers/notification
 # Created: 2026-05-21
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Checks branch inbox for unread emails and returns notification text."""
@@ -90,7 +90,7 @@ def _cadence_allows(new_count: int, hook_data: dict) -> bool:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         return cadence.should_fire_mail(new_count, hook_data)
     except Exception as exc:
-        logger.warning("[HOOKS] email: cadence check failed, announcing anyway: %s", exc)
+        logger.warning("[hooks] email: cadence check failed, announcing anyway: %s", exc)
         return new_count > 0
 
 
@@ -106,7 +106,7 @@ def _handle(hook_data: dict) -> dict:
     """Check inbox and return email notification if unread messages exist."""
     branch_root = _find_branch_root()
     if not branch_root:
-        logger.info("[HOOKS] email: no branch root found")
+        logger.info("[hooks] email: no branch root found")
         return {"stdout": "", "exit_code": 0}
 
     kinds = _count_new_emails(branch_root)
@@ -120,7 +120,7 @@ def _handle(hook_data: dict) -> dict:
         f"You have {new_count} new email{plural}: {named} - check with: drone @ai_mail inbox"
         " | then: drone @ai_mail view <id> | close with: drone @ai_mail close <id>"
     )
-    logger.info("[HOOKS] email: %d new email%s: %s", new_count, plural, named)
+    logger.info("[hooks] email: %d new email%s: %s", new_count, plural, named)
     return {
         "stdout": msg,
         "exit_code": 0,

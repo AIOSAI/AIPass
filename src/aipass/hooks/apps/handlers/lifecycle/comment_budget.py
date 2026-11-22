@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: comment_budget.py
-# Version: 1.5.1
+# Version: 1.5.2
 # Description: Comment budget — measures every edit's comment share (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-10-16
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Measures an edited file's comment share and tells the agent when it is over budget (docs/comments.md)."""
@@ -52,7 +52,7 @@ def ledger_rows() -> list[dict]:
             try:
                 rows.append(json.loads(line))
             except json.JSONDecodeError as exc:
-                logger.info("[HOOKS] comment_budget: unreadable ledger row skipped: %s", exc)
+                logger.info("[hooks] comment_budget: unreadable ledger row skipped: %s", exc)
     return rows
 
 
@@ -186,9 +186,9 @@ def _handle(hook_data: dict) -> dict:
         if not overs:
             return _SILENT
         overs.sort(key=lambda v: v[1].over(), reverse=True)
-        logger.info("[HOOKS] comment_budget: [comments] %s", "; ".join(_status(v) for v in verdicts))
+        logger.info("[hooks] comment_budget: [comments] %s", "; ".join(_status(v) for v in verdicts))
         result = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": _over_context(overs)}}
         return {"stdout": json.dumps(result), "exit_code": 0}
     except Exception as exc:
-        logger.warning("[HOOKS] comment_budget: unexpected error (allowing): %s", exc)
+        logger.warning("[hooks] comment_budget: unexpected error (allowing): %s", exc)
         return _SILENT

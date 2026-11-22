@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: injection_ledger.py
-# Version: 1.1.2
+# Version: 1.1.3
 # Description: Per-turn record of what the engine injected into a session, keyed on cadence's turn token (warn-only)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-16
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """What a seat was told, and when — one JSONL record per injecting dispatch.
@@ -36,7 +36,7 @@ def _turn_token_and_number(payload: dict) -> tuple[int | None, int | None]:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         return cadence.turn_token(payload), cadence.current_turn()
     except Exception as exc:  # a ledger line without a turn is still a record
-        logger.warning("[HOOKS] injection_ledger: turn unreadable, recorded without it: %s", exc)
+        logger.warning("[hooks] injection_ledger: turn unreadable, recorded without it: %s", exc)
         return None, None
 
 
@@ -48,7 +48,7 @@ def _automated(event_type: str, payload: dict) -> bool | None:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         return bool(cadence.is_automated(payload))
     except Exception as exc:  # a ledger line without the flag is still a record
-        logger.warning("[HOOKS] injection_ledger: automated flag unreadable, recorded without it: %s", exc)
+        logger.warning("[hooks] injection_ledger: automated flag unreadable, recorded without it: %s", exc)
         return None
 
 
@@ -62,7 +62,7 @@ def record(event_type: str, outputs: list[tuple[str, str, str]], merged: str, pa
     session_id = str(payload.get("session_id", "") or "")
     if not ledger_store.is_session_id(session_id):
         logger.info(
-            "[HOOKS] injection_ledger: no usable session_id in the payload, %s injection unrecorded", event_type
+            "[hooks] injection_ledger: no usable session_id in the payload, %s injection unrecorded", event_type
         )
         return None
     token, turn = _turn_token_and_number(payload)

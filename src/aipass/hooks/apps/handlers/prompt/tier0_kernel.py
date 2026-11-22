@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: tier0_kernel.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Tier 0 kernel — always-on minimal prompt injection (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-06-18
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Loads .aipass/tier0_kernel.md — tiny always-on identity + reflex block."""
@@ -37,7 +37,7 @@ def _kernel_and_banner(hook_data: dict, cadence_down: str | None = None) -> tupl
         loud = not cadence_down and _turn_or_none() in (0, None)
         log = logger.warning if loud else logger.info
         log(
-            "[HOOKS] tier0_kernel DEGRADED: carried=%s missing=%s", ",".join(carried) or "nothing", " | ".join(failures)
+            "[hooks] tier0_kernel DEGRADED: carried=%s missing=%s", ",".join(carried) or "nothing", " | ".join(failures)
         )
     return loaded.get("kernel", ""), banner
 
@@ -52,7 +52,7 @@ def _turn_or_none() -> int | None:
     try:
         return importlib.import_module("aipass.hooks.apps.modules.cadence").current_turn()
     except Exception as exc:  # an unreadable turn only raises the log level
-        logger.info("[HOOKS] tier0_kernel: turn unreadable, degraded line logs at WARNING: %s", exc)
+        logger.info("[hooks] tier0_kernel: turn unreadable, degraded line logs at WARNING: %s", exc)
         return None
 
 
@@ -77,7 +77,7 @@ def _handle(hook_data: dict) -> dict:
         cadence_down = reason if isinstance(reason, str) else None
     except Exception as exc:
         logger.warning(
-            "[HOOKS] tier0_kernel DEGRADED loader=tier0: cadence check raised, so the kernel fires alone EVERY "
+            "[hooks] tier0_kernel DEGRADED loader=tier0: cadence check raised, so the kernel fires alone EVERY "
             "turn until this is cured: %s",
             exc,
         )
@@ -91,5 +91,5 @@ def _handle(hook_data: dict) -> dict:
         return {"stdout": stdout, "exit_code": 0, "sound": "tier0 kernel"}
 
     except Exception as exc:
-        logger.error("[HOOKS] tier0_kernel: unexpected error: %s", exc)
+        logger.error("[hooks] tier0_kernel: unexpected error: %s", exc)
         return {"stdout": "", "exit_code": 0}

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: shell_programs.py
-# Version: 1.8.0
+# Version: 1.8.1
 # Description: Which programs only read, and which only take data — the default-deny tables (DPLAN-0356 phase 4)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """The tables that invert the gates: what is KNOWN safe, so everything else is not (DPLAN-0356 phase 4).
@@ -474,7 +474,7 @@ def _names_a_place(path: Path, places) -> bool:
     try:
         found = first_existing(path)
     except OSError as exc:
-        logger.warning("[HOOKS] shell_programs: %s could not be checked on disk, kept as an operand: %s", path, exc)
+        logger.warning("[hooks] shell_programs: %s could not be checked on disk, kept as an operand: %s", path, exc)
         return True
     return found == path or bool(places(found))
 

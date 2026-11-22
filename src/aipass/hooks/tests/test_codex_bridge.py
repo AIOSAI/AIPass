@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.14.0
+# Version: 2.14.1
 # Description: Tests for Codex, OpenCode and Seed bridges: payload mapping, output envelope, apply_patch, fail closed
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-11-19
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for bridges/codex.py, opencode.py and its plugin, seed.py, and the Claude bridge's safe mode (safe_mode.py)."""
@@ -537,9 +537,9 @@ class TestMountOrSource:
             spec.loader.exec_module(mount)
             assert mount.mount_or_source(str(bridge_file), "codex") == "source (fallback)"
         err = capsys.readouterr().err
-        assert "[HOOKS:codex] promoted copy unusable, serving the source tree:" in err and "missing" in err
+        assert "[hooks:codex] promoted copy unusable, serving the source tree:" in err and "missing" in err
         (line,) = (tmp_path / "logs" / "bridge.log").read_text(encoding="utf-8").splitlines()
-        assert " | bridges.codex | ERROR | [HOOKS:codex] promoted copy unusable" in line
+        assert " | bridges.codex | ERROR | [hooks:codex] promoted copy unusable" in line
 
 
 class TestOpenCodeBrokenEngine:

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: shell_reader.py
-# Version: 1.5.0
+# Version: 1.5.1
 # Description: The one shell-word reader: every program a Bash command runs, as the shell runs it (rm_gate, git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """What a Bash command RUNS, read the way bash reads it (DPLAN-0356 phase 3, R3 to R6).
@@ -791,7 +791,7 @@ def _command_candidates(word: _Word, text: str, ctx: _Ctx) -> list[str]:
         try:
             names = os.listdir(directory)
         except OSError as exc:  # an unlistable PATH entry offers no candidate; the rest still do
-            logger.info("[HOOKS] bash_writes: cannot list %s for a glob command word: %s", directory, exc)
+            logger.info("[hooks] bash_writes: cannot list %s for a glob command word: %s", directory, exc)
             continue
         found.update(name for name in names if fnmatch.fnmatchcase(name, text))
     return sorted(found) or [text]
@@ -821,7 +821,7 @@ def _not_yet_written(path: Path, path_text: str) -> bool:
     """
     if os.path.lexists(path):
         return False
-    logger.info("[HOOKS] shell_reader: script %s does not exist yet at decision time — allowed, not read", path_text)
+    logger.info("[hooks] shell_reader: script %s does not exist yet at decision time — allowed, not read", path_text)
     return True
 
 

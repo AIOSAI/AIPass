@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hooksound.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Hook sound control — mute/unmute all hook audio
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-22
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Hook sound control — mute and unmute all hook audio via drone @hooks hooksound."""
@@ -64,7 +64,7 @@ def handle_command(command: str, args: list) -> bool:
 
         # sound.py is the one flag writer and logs the effect; this logs that the CLI asked.
         if sub in ("on", "off"):
-            logger.info("[HOOKS] hooksound: '%s' requested via CLI", sub)
+            logger.info("[hooks] hooksound: '%s' requested via CLI", sub)
 
         if sub == "off":
             mute()

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: persistent_alert.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Injects advisory banners for active alerts on UserPromptSubmit — on arrival, then on cadence
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-14
-# Modified: 2026-11-20
+# Modified: 2026-11-22
 # =============================================
 
 """Injects advisory banners for active alerts from .aipass/alerts.json.
@@ -53,7 +53,7 @@ def _active_alerts(alerts_path: Path) -> list[dict]:
     try:
         data = json.loads(alerts_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("[HOOKS] persistent_alert: read error: %s", exc)
+        logger.warning("[hooks] persistent_alert: read error: %s", exc)
         return []
 
     alerts = data.get("alerts", []) if isinstance(data, dict) else []
@@ -67,7 +67,7 @@ def _active_alerts(alerts_path: Path) -> list[dict]:
                 if datetime.fromisoformat(expires).astimezone() < now:
                     continue
             except (ValueError, TypeError) as exc:
-                logger.info("[HOOKS] persistent_alert: bad expires_at: %s", exc)
+                logger.info("[hooks] persistent_alert: bad expires_at: %s", exc)
         active.append(alert)
     return active
 
@@ -89,7 +89,7 @@ def _mark_announced(session_id: str, alert_id: str) -> None:
         try:
             path.touch()
         except OSError as exc:
-            logger.info("[HOOKS] persistent_alert: guard write failed: %s", exc)
+            logger.info("[hooks] persistent_alert: guard write failed: %s", exc)
 
 
 def _repeat_allowed(hook_data: dict) -> bool:
@@ -102,7 +102,7 @@ def _repeat_allowed(hook_data: dict) -> bool:
         return bool(cadence.should_fire(_CADENCE_LOADER, hook_data))
     except Exception as exc:
         logger.warning(
-            "[HOOKS] persistent_alert FAIL-OPEN loader=%s: cadence check raised, so the banner repeats "
+            "[hooks] persistent_alert FAIL-OPEN loader=%s: cadence check raised, so the banner repeats "
             "EVERY turn until this is cured: %s",
             _CADENCE_LOADER,
             exc,
@@ -114,7 +114,7 @@ def _cap_body(body: str, alert_id: str) -> str:
     """Cut an alert body to _BODY_CHAR_CAP, saying where the rest is."""
     if len(body) <= _BODY_CHAR_CAP:
         return body
-    logger.info("[HOOKS] persistent_alert: body of %s is %d chars, cut to %d", alert_id, len(body), _BODY_CHAR_CAP)
+    logger.info("[hooks] persistent_alert: body of %s is %d chars, cut to %d", alert_id, len(body), _BODY_CHAR_CAP)
     marker = f"… [cut at {_BODY_CHAR_CAP} chars — full text: .aipass/alerts.json, id {alert_id}]"
     return body[: _BODY_CHAR_CAP - len(marker)].rstrip() + marker
 
@@ -180,13 +180,13 @@ def _alerts(hook_data: dict) -> dict:
         plural = "s" if count != 1 else ""
         sound = f"alert: {count} active alert{plural}"
     elif not _repeat_allowed(hook_data):
-        logger.info("[HOOKS] persistent_alert: %d active alerts held for the next beat", len(alerts))
+        logger.info("[hooks] persistent_alert: %d active alerts held for the next beat", len(alerts))
         return {"stdout": "", "exit_code": 0}
 
     banner = _format_banner(alerts)
 
     json_handler.log_operation("inject_alerts", {"count": len(alerts)})
-    logger.info("[HOOKS] persistent_alert: %d active alerts injected", len(alerts))
+    logger.info("[hooks] persistent_alert: %d active alerts injected", len(alerts))
     result = {"stdout": banner, "exit_code": 0}
     if sound:
         result["sound"] = sound

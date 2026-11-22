@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: claude.py
-# Version: 2.3.0
+# Version: 2.3.1
 # Description: Claude Code bridge — mounts the promoted hook code, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-05-18
-# Modified: 2026-11-19
+# Modified: 2026-11-22
 # =============================================
 
 """Claude Code bridge: runs the promoted copy (`drone @hooks promote`), never the tree being edited.
@@ -51,7 +51,7 @@ def _mount() -> str:
     spec.loader.exec_module(mount)
     served = mount.mount_or_source(__file__, "claude")
     if os.environ.get(mount.OVERRIDE_ENV):
-        sys.stderr.write(f"[HOOKS] served by {served}\n")
+        sys.stderr.write(f"[hooks] served by {served}\n")
     return served
 
 
@@ -84,7 +84,7 @@ def _record_break(event_type: str, line: str) -> None:
     except BaseException as exc:  # the answer is already out: nothing the record raises may change it
         with contextlib.suppress(BaseException):
             sys.stderr.write(
-                f"[HOOKS] bridge: the break was not recorded in {BREAK_LOG}: {type(exc).__name__}: {exc}\n"
+                f"[hooks] bridge: the break was not recorded in {BREAK_LOG}: {type(exc).__name__}: {exc}\n"
             )
 
 
@@ -99,7 +99,7 @@ def _broken(event_type: str, exc: BaseException, stdin_data: str = "") -> None:
             return
     except BaseException as trouble:  # the engine is already down: a safe mode that cannot judge refuses, loudly
         with contextlib.suppress(BaseException):
-            sys.stderr.write(f"[HOOKS] safe mode could not judge this call: {type(trouble).__name__}: {trouble}\n")
+            sys.stderr.write(f"[hooks] safe mode could not judge this call: {type(trouble).__name__}: {trouble}\n")
     try:
         diagnose = " ".join(("python3", "-I", SAFE_MODE, "diagnose"))
         reason = _printable(BROKEN.format(error=f"{type(exc).__name__}: {exc}", diagnose=diagnose))

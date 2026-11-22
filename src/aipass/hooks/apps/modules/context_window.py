@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.14.0
+# Version: 1.14.1
 # Description: Context fill per CLI (Claude transcript, Codex rollout, OpenCode store) and the compact window
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-20
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Live context fill from a session transcript, and the window each CLI runs, read from a live source only.
@@ -113,7 +113,7 @@ def _newest_picked(chunk: bytes, pick: Callable[[dict], object]) -> object:
         try:
             entry = json.loads(line)
         except json.JSONDecodeError as exc:
-            logger.info("[HOOKS] context_window: skipping unparsable transcript line: %s", exc)
+            logger.info("[hooks] context_window: skipping unparsable transcript line: %s", exc)
             continue
         found = pick(entry) if isinstance(entry, dict) else None
         if found is not None:
@@ -153,10 +153,10 @@ def _read_latest_usage(transcript_path: str, tail_bytes: int, provider: str) -> 
         else:
             usage = _latest(transcript_path, lambda e: _claude_message(e, "usage", _is_dict), tail_bytes)
     except FileNotFoundError:
-        logger.debug("[HOOKS] context_window: no transcript yet (turn 0): %s", transcript_path)
+        logger.debug("[hooks] context_window: no transcript yet (turn 0): %s", transcript_path)
         return None
     except OSError as exc:
-        logger.warning("[HOOKS] context_window: transcript read failed: %s", exc)
+        logger.warning("[hooks] context_window: transcript read failed: %s", exc)
         return None
     return usage if isinstance(usage, dict) else None
 
@@ -193,7 +193,7 @@ def live_window(session_id: str) -> int | None:
     try:
         data = json_files.read_json_file(path)
     except (OSError, ValueError) as exc:
-        logger.info("[HOOKS] context_window: live window unreadable for %s: %s", session_id, exc)
+        logger.info("[hooks] context_window: live window unreadable for %s: %s", session_id, exc)
         return None
     size = data.get("context_window_size") if isinstance(data, dict) else None
     return size if isinstance(size, int) and not isinstance(size, bool) and size > 0 else None
@@ -220,7 +220,7 @@ def explicit_window(cwd: str) -> int | None:
         try:
             return max(_EXPLICIT_MIN, min(_EXPLICIT_MAX, int(env_window)))
         except ValueError:
-            logger.warning("[HOOKS] context_window: bad env window value %r", env_window)
+            logger.warning("[hooks] context_window: bad env window value %r", env_window)
 
     candidates: list[Path] = []
     branch_dir = find_branch_dir(cwd)
@@ -233,7 +233,7 @@ def explicit_window(cwd: str) -> int | None:
         try:
             window = _settings_window(settings_path)
         except (json.JSONDecodeError, OSError) as exc:
-            logger.info("[HOOKS] context_window: settings read failed: %s", exc)
+            logger.info("[hooks] context_window: settings read failed: %s", exc)
             continue
         if window is not None:
             return window
@@ -291,7 +291,7 @@ def opencode_fill(session_id: str) -> int | None:
             row = conn.execute(_OPENCODE_LATEST, (session_id,)).fetchone()
         tokens = json.loads(row[0]).get("tokens") if row else None
     except (sqlite3.Error, ValueError, AttributeError) as exc:
-        logger.info("[HOOKS] context_window: OpenCode store unreadable for %s: %s", session_id, exc)
+        logger.info("[hooks] context_window: OpenCode store unreadable for %s: %s", session_id, exc)
         return None
     if not isinstance(tokens, dict):
         return None
@@ -320,7 +320,7 @@ def opencode_window(session_id: str, cwd: str) -> tuple[int | None, int | None]:
     """(limit, compact point) OpenCode runs the session at; (None, None) when the catalog lacks the model (logged)."""
     limit = _opencode_limit(session_id)
     if not limit:
-        logger.info("[HOOKS] context_window: no catalog limit for OpenCode session %s, window unknown", session_id)
+        logger.info("[hooks] context_window: no catalog limit for OpenCode session %s, window unknown", session_id)
         return None, None
     return limit, opencode_compact_point(limit, _opencode_buffer(cwd))
 
@@ -354,7 +354,7 @@ def _opencode_limit(session_id: str) -> int:
             found = conn.execute(_OPENCODE_LIMIT, (model.get("providerID"), model.get("id"))).fetchone()
         limit = json.loads(found[0]) if found and found[0] else {}
     except (sqlite3.Error, ValueError, AttributeError) as exc:
-        logger.info("[HOOKS] context_window: OpenCode catalog unreadable for %s: %s", session_id, exc)
+        logger.info("[hooks] context_window: OpenCode catalog unreadable for %s: %s", session_id, exc)
         return 0
     value = limit.get("input") or limit.get("context") if isinstance(limit, dict) else None
     value = value if isinstance(value, int) and value > 0 else 0
@@ -364,7 +364,7 @@ def _opencode_limit(session_id: str) -> int:
     try:
         json_files.write_json_file(opencode_limit_cache_path(), cache)
     except OSError as exc:
-        logger.warning("[HOOKS] context_window: OpenCode limit cache not written: %s", exc)
+        logger.warning("[hooks] context_window: OpenCode limit cache not written: %s", exc)
     return value
 
 
@@ -376,7 +376,7 @@ def _read_limit_cache() -> dict | None:
     try:
         cache = json_files.read_json_file(path)
     except (OSError, ValueError) as exc:
-        logger.warning("[HOOKS] context_window: OpenCode limit cache unreadable, left as found: %s", exc)
+        logger.warning("[hooks] context_window: OpenCode limit cache unreadable, left as found: %s", exc)
         return None
     return cache if isinstance(cache, dict) else None
 
@@ -394,7 +394,7 @@ def _opencode_buffer(cwd: str) -> int | None:
         try:
             buffer = json.loads(text).get("compaction", {}).get("buffer")
         except (ValueError, AttributeError) as exc:
-            logger.info("[HOOKS] context_window: OpenCode config unreadable: %s", exc)
+            logger.info("[hooks] context_window: OpenCode config unreadable: %s", exc)
             continue
         if isinstance(buffer, int):
             return buffer
@@ -405,7 +405,7 @@ def _read_text(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8") if path.is_file() else ""
     except (OSError, UnicodeDecodeError) as exc:
-        logger.info("[HOOKS] context_window: %s unreadable: %s", path, exc)
+        logger.info("[hooks] context_window: %s unreadable: %s", path, exc)
         return ""
 
 
@@ -417,7 +417,7 @@ def _codex_config_int(key: str) -> int | None:
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError) as exc:
-        logger.info("[HOOKS] context_window: codex config read failed: %s", exc)
+        logger.info("[hooks] context_window: codex config read failed: %s", exc)
         return 0
     for line in lines:
         if line.lstrip().startswith("["):
@@ -434,7 +434,7 @@ def _codex_window(transcript_path: str) -> int | None:
     try:
         window = _latest(transcript_path, lambda e: _codex_token_info(e, "model_context_window"))
     except OSError as exc:
-        logger.info("[HOOKS] context_window: rollout window read failed: %s", exc)
+        logger.info("[hooks] context_window: rollout window read failed: %s", exc)
         window = None
     if isinstance(window, int) and window > 0:
         return window
@@ -475,7 +475,7 @@ def _provider_or_claude(transcript_path: str) -> str:
     try:
         return transcript_provider(transcript_path)
     except OSError as exc:
-        logger.info("[HOOKS] context_window: transcript shape unreadable, reading it as Claude's: %s", exc)
+        logger.info("[hooks] context_window: transcript shape unreadable, reading it as Claude's: %s", exc)
         return "claude"
 
 

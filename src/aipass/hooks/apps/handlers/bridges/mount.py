@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: mount.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Mounts the promoted copy of aipass.hooks.apps before a bridge imports anything from it
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-09-30
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """The code a hook runs is the PROMOTED copy, never the tree being edited (DPLAN-0356 item 3).
@@ -103,7 +103,7 @@ def _record(log: str, source: str, line: str) -> None:
             os.close(fd)
     except BaseException as exc:  # an attempt: what it raises is said on stderr and goes no further
         with contextlib.suppress(BaseException):
-            sys.stderr.write(f"[HOOKS] bridge: not recorded in {log}: {type(exc).__name__}: {exc}\n")
+            sys.stderr.write(f"[hooks] bridge: not recorded in {log}: {type(exc).__name__}: {exc}\n")
 
 
 def mount_or_source(bridge_file: str, tag: str) -> str:
@@ -111,7 +111,7 @@ def mount_or_source(bridge_file: str, tag: str) -> str:
     try:
         return mount(branch_root(bridge_file))
     except Exception as exc:  # a bad promoted copy: the source still gates, and says so
-        message = f"[HOOKS:{tag}] promoted copy unusable, serving the source tree: {exc}"
+        message = f"[hooks:{tag}] promoted copy unusable, serving the source tree: {exc}"
         with contextlib.suppress(BaseException):
             sys.stderr.write(message.encode("utf-8", "backslashreplace").decode("utf-8") + "\n")
         _record(os.path.join(branch_root(bridge_file), "logs", "bridge.log"), f"bridges.{tag}", message)

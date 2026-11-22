@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: registry_gate.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Blocks raw writes, edits, and deletions of *_REGISTRY.json (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-07-10
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Blocks raw writes, edits, and deletions of *_REGISTRY.json files.
@@ -117,13 +117,13 @@ def _check_bash(tool_input: dict, cwd: str) -> dict:
     # The shell expands a glob after this gate reads it: a word that could match a registry is one.
     for path, role, _how in reader.mutated_paths(command, cwd):
         if _names_a_registry(path.name, path.parent):
-            logger.info("[HOOKS] registry_gate: refused a %s of %s", role, path)
+            logger.info("[hooks] registry_gate: refused a %s of %s", role, path)
             return _block(REGISTRY_REDIRECT.format(file=path.name))
     for inv in reader.invocations(command, cwd):
         for word in _unseen_operands(reader, inv):
             path = Path(word)
             if _names_a_registry(path.name, Path(inv.cwd) / path.parent if inv.cwd else None):
-                logger.info("[HOOKS] registry_gate: refused %s on %s", inv.program, word)
+                logger.info("[hooks] registry_gate: refused %s on %s", inv.program, word)
                 return _block(REGISTRY_REDIRECT.format(file=path.name))
     return _BLOCK_ALLOW
 
@@ -159,7 +159,7 @@ def _decide(hook_data: dict) -> dict:
             return _check_edit(tool_input)
         return _BLOCK_ALLOW
     except Exception as exc:  # fail closed on what this gate guards (DPLAN-0356 item 2)
-        logger.error("[HOOKS] registry_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
+        logger.error("[hooks] registry_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
         if tool_name == "Bash" or tool_name in EDIT_TOOLS:
             return _block(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
         return _BLOCK_ALLOW

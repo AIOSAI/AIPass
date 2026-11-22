@@ -41,10 +41,10 @@ put back the copy that worked; rollback smokes that copy before it moves the poi
 comparison, not a parse, so no parser can be what broke, and a quoted or respaced spelling is refused. Every
 other Bash call is refused with a text that names the cause, says Read, Edit and Write still work, and names the
 two repairs: that one command from the seat, or the owner's terminal. Either way it logs one
-fixed ERROR line, `[HOOKS] edit_gate tripwire: the memory snapshot could not be taken, Bash is refused until it
+fixed ERROR line, `[hooks] edit_gate tripwire: the memory snapshot could not be taken, Bash is refused until it
 can`, with the snapshot directory and cause at INFO. A comparison that fails runs after the command, so there is
 nothing left to refuse: the seat is told `MEMORY CHECK DID NOT RUN for this Bash call (<cause>)`, and one fixed
-ERROR line, `[HOOKS] edit_gate tripwire: the memory check failed, a shell write to memory may be unreported`,
+ERROR line, `[hooks] edit_gate tripwire: the memory check failed, a shell write to memory may be unreported`,
 reaches medic with the cause at INFO.
 
 **The snapshot store.** The pending snapshots live in one file per session in the temp directory,
@@ -54,7 +54,7 @@ store that does not exist, or holds no entry for this call, logs `no snapshot fo
 nothing to the seat, since the snapshot side either refused that call or chose not to watch it. Before the
 call, a damaged store starts fresh: refusing would refuse every Bash call for the rest of the session, because
 nothing else rewrites the store. The fresh store carries `_fresh_start`, the time it started. Once the write
-lands, one fixed ERROR line, `[HOOKS] edit_gate tripwire: a damaged snapshot store started fresh, calls in flight
+lands, one fixed ERROR line, `[hooks] edit_gate tripwire: a damaged snapshot store started fresh, calls in flight
 lost their check`, reaches medic with the cause at INFO; a store the write cannot replace (a directory) refuses
 the call as above. A damaged store cannot say which calls it held, so the stamp stands in: a watched call that
 finds no snapshot of its own while the stamp is younger than 600 seconds (Claude Code's longest Bash timeout,

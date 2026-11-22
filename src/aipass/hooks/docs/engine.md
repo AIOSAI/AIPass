@@ -48,8 +48,8 @@ live: .live-20200102T000000Z (was .live-20200103T000000Z)
 A handler that raises (any exception, `SystemExit` included, caught on its worker thread) is logged as two lines. The ERROR line holds its identity alone, so its fingerprint at @trigger never moves with the exception's text or the line number:
 
 ```
-ERROR | [HOOKS] handler raised fault[<event>.<hook>.<handler dotted path>.<ExcType>@<file basename>] in <function> line <n>
-INFO  | [HOOKS] handler raised, its text: <handler dotted path> <ExcType>: <text, newlines escaped, cut at 500 chars>
+ERROR | [hooks] handler raised fault[<event>.<hook>.<handler dotted path>.<ExcType>@<file basename>] in <function> line <n>
+INFO  | [hooks] handler raised, its text: <handler dotted path> <ExcType>: <text, newlines escaped, cut at 500 chars>
 ```
 
 The marker holds no whitespace and no `]` (either is written `_`). A handler that outlives its timeout logs `handler timed out fault[<event>.<hook>.<handler>.HandlerTimeout@<module>.py] after <n>s` at ERROR. `logs/engine.jsonl` keeps the raw exception text in the row's `stderr_preview`. A `KeyboardInterrupt` on the calling thread is never caught.

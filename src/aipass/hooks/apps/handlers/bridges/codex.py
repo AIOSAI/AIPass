@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: codex.py
-# Version: 2.8.0
+# Version: 2.8.1
 # Description: Codex bridge — mounts the promoted hook code, maps apply_patch, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-07-10
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Codex bridge.
@@ -75,7 +75,7 @@ def _normalize_stdin(stdin_data: str) -> str:
         parsed.setdefault("provider", PROVIDER)
         return json.dumps(parsed)
     except (json.JSONDecodeError, TypeError) as exc:
-        _log("info", "[HOOKS:codex] stdin normalization failed: %s", exc)
+        _log("info", "[hooks:codex] stdin normalization failed: %s", exc)
         return stdin_data
 
 
@@ -202,7 +202,7 @@ def _run_calls(arg: str, stdin_data: str) -> tuple[str, int]:
     event_type = arg.split(":", 1)[0]
     payloads = _claude_payloads(stdin_data)
     if not payloads and event_type in GUARDED_EVENTS:
-        _log("warning", "[HOOKS:codex] apply_patch denied on %s: %s", event_type, UNJUDGED)
+        _log("warning", "[hooks:codex] apply_patch denied on %s: %s", event_type, UNJUDGED)
         return json.dumps({"decision": "block", "reason": UNJUDGED}), 2
     outputs: list[tuple[str, str, str]] = []
     for payload in payloads:
@@ -247,7 +247,7 @@ def _record_break(event_type: str, line: str) -> None:
     except BaseException as exc:  # the answer is already out: nothing the record raises may change it
         with contextlib.suppress(BaseException):
             sys.stderr.write(
-                f"[HOOKS:codex] bridge: the break was not recorded in {BREAK_LOG}: {type(exc).__name__}: {exc}\n"
+                f"[hooks:codex] bridge: the break was not recorded in {BREAK_LOG}: {type(exc).__name__}: {exc}\n"
             )
 
 

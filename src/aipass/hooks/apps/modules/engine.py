@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 2.9.0
+# Version: 2.9.1
 # Description: Hook engine — unified dispatcher; gates fail closed, injectors skip on error
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-11-19
+# Modified: 2026-11-22
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL.
@@ -81,11 +81,11 @@ def _run_hook(hook_cmd: str, stdin_data: str, timeout_s: int = 30) -> dict:
         }
     except subprocess.TimeoutExpired:
         elapsed_ms = (time.monotonic() - start) * 1000
-        logger.error("[HOOKS] timeout after %ds: %s", timeout_s, hook_cmd)
+        logger.error("[hooks] timeout after %ds: %s", timeout_s, hook_cmd)
         return {"exit_code": -1, "stdout": "", "stderr": "TIMEOUT", "elapsed_ms": round(elapsed_ms, 1)}
     except OSError as exc:
         elapsed_ms = (time.monotonic() - start) * 1000
-        logger.error("[HOOKS] exec error: %s: %s", hook_cmd, exc)
+        logger.error("[hooks] exec error: %s: %s", hook_cmd, exc)
         return {"exit_code": -1, "stdout": "", "stderr": str(exc), "elapsed_ms": round(elapsed_ms, 1)}
 
 
@@ -128,12 +128,12 @@ def _fault(event: str, hook: str, handler_path: str, exc: BaseException, start: 
     where = f"in {frames[-1].name} line {frames[-1].lineno}" if frames else "with no frame"
     basename = Path(frames[-1].filename).name if frames else "unknown"
     kind = type(exc).__name__
-    logger.error("[HOOKS] handler raised %s %s", _fault_marker(event, hook, handler_path, kind, basename), where)
+    logger.error("[hooks] handler raised %s %s", _fault_marker(event, hook, handler_path, kind, basename), where)
     text = str(exc)
     shown = text.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n")
     if len(shown) > FAULT_TEXT_CAP:
         shown = f"{shown[:FAULT_TEXT_CAP]}... ({len(shown) - FAULT_TEXT_CAP} more chars)"
-    logger.info("[HOOKS] handler raised, its text: %s %s: %s", handler_path, kind, shown)
+    logger.info("[hooks] handler raised, its text: %s %s: %s", handler_path, kind, shown)
     elapsed_ms = (time.monotonic() - start) * 1000
     return {"exit_code": -1, "stdout": "", "stderr": text, "elapsed_ms": round(elapsed_ms, 1)}
 
@@ -160,7 +160,7 @@ def _run_handler(
         if not module_path.startswith("aipass.") and not own:
             elapsed_ms = (time.monotonic() - start) * 1000
             logger.warning(
-                "[HOOKS] handler path refused (not in aipass.* or a trusted project's namespace): %s",
+                "[hooks] handler path refused (not in aipass.* or a trusted project's namespace): %s",
                 handler_path,
             )
             return {
@@ -178,7 +178,7 @@ def _run_handler(
             try:
                 outcome["result"] = handler_func(hook_data)
             except BaseException as exc:  # a SystemExit here would end only this thread, and leave no "result"
-                logger.debug("[HOOKS] handler %s raised on its worker thread", handler_path)
+                logger.debug("[hooks] handler %s raised on its worker thread", handler_path)
                 outcome["error"] = exc
 
         worker = threading.Thread(target=_call, daemon=True)
@@ -189,7 +189,7 @@ def _run_handler(
             elapsed_ms = (time.monotonic() - start) * 1000
             module_file = module_path.rsplit(".", 1)[-1] + ".py"
             marker = _fault_marker(event, hook, handler_path, "HandlerTimeout", module_file)
-            logger.error("[HOOKS] handler timed out %s after %ds", marker, timeout_s)
+            logger.error("[hooks] handler timed out %s after %ds", marker, timeout_s)
             return {
                 "exit_code": -1,
                 "stdout": "",
@@ -233,7 +233,7 @@ def _gate_failure(result: dict, timeout_s: int) -> str | None:
         try:
             decision = json.loads(result.get("stdout") or "{}")
         except json.JSONDecodeError as exc:
-            logger.info("[HOOKS] gate exit 2 stdout is not JSON: %s", exc)
+            logger.info("[hooks] gate exit 2 stdout is not JSON: %s", exc)
             decision = None
         if not isinstance(decision, dict) or decision.get("decision") != "block":
             return "exited 2 without a decision"
@@ -243,7 +243,7 @@ def _gate_failure(result: dict, timeout_s: int) -> str | None:
 def _refuse_broken_gate(event_type: str, hook_name: str, handler: str, why: str, started: float) -> tuple[str, int]:
     """Answer a broken fail-closed gate with a BLOCK, and log it at ERROR: the line @trigger escalates."""
     reason = gates.broken_gate_reason(hook_name, handler, why)
-    logger.error("[HOOKS] GATE BROKEN %s.%s (%s) — refusing what it guards", event_type, hook_name, why)
+    logger.error("[hooks] GATE BROKEN %s.%s (%s) — refusing what it guards", event_type, hook_name, why)
     _log(
         {
             "ts": time.time(),
@@ -270,7 +270,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
     """Core dispatch — run hooks for event, return (merged_stdout, exit_code)."""
     if not config.get("hooks_enabled", True):
         # The master switch is the injectors' alone: a config file must never switch the gates off.
-        logger.info("[HOOKS] hooks disabled — gates still run")
+        logger.info("[hooks] hooks disabled — gates still run")
         _log({"ts": time.time(), "event": event_type, "action": "hooks_disabled_gates_run"})
         config = gates.gate_config(config)
 
@@ -285,10 +285,10 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
     if not isinstance(parsed, dict):
         why = f"the payload is not a JSON object: {str(parsed)[:120]}"
         if event_type == "PreToolUse":  # a tool call the gates cannot read is refused, never waved through
-            logger.error("[HOOKS] PreToolUse refused: %s", why)
+            logger.error("[hooks] PreToolUse refused: %s", why)
             _log({"ts": time.time(), "event": event_type, "action": "payload_unreadable", "why": why})
             return json.dumps({"decision": "block", "reason": f"AIPass hooks cannot read this tool call ({why})"}), 2
-        logger.warning("[HOOKS] %s %s, its hooks run on an empty payload", event_type, why)
+        logger.warning("[hooks] %s %s, its hooks run on an empty payload", event_type, why)
         parsed = {}
     match_value = parsed.get("tool_name", "") or parsed.get("compact_type", "") or parsed.get("type", "")
     payload_session_id = parsed.get("session_id", "")
@@ -302,19 +302,19 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 
         broken = config_break_banner()
         if broken:
-            logger.error("[HOOKS] AIPass config unreadable — emitting loud banner")
+            logger.error("[hooks] AIPass config unreadable — emitting loud banner")
             _log({"ts": time.time(), "event": event_type, "action": "config_break_banner"})
             return broken, 0
 
         banner = trust_break_banner()
         if banner:
-            logger.error("[HOOKS] trust break detected — emitting loud banner")
+            logger.error("[hooks] trust break detected — emitting loud banner")
             _log({"ts": time.time(), "event": event_type, "action": "trust_break_banner"})
             return banner, 0
 
         nudge = never_enrolled_banner(payload_session_id)
         if nudge:
-            logger.warning("[HOOKS] never-enrolled project — emitting one-time nudge")
+            logger.warning("[hooks] never-enrolled project — emitting one-time nudge")
             _log({"ts": time.time(), "event": event_type, "action": "never_enrolled_banner"})
             return nudge, 0
 
@@ -329,7 +329,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 
     for hook_name, hook_def in event_hooks.items():
         if not hook_def.get("enabled", True):
-            _log_detail("[HOOKS] %s.%s skipped (disabled)", event_type, hook_name)
+            _log_detail("[hooks] %s.%s skipped (disabled)", event_type, hook_name)
             _log({"ts": time.time(), "event": event_type, "hook": hook_name, "action": "skipped_disabled"})
             continue
 
@@ -354,7 +354,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 
         if command and not handler and config.get("_source") == "project":
             logger.warning(
-                "[HOOKS] %s.%s REFUSED: command-type not allowed in per-project config",
+                "[hooks] %s.%s REFUSED: command-type not allowed in per-project config",
                 event_type,
                 hook_name,
             )
@@ -386,7 +386,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 
         if result.get("stderr") == "TIMEOUT":
             logger.error(
-                "[HOOKS] %s.%s TIMED OUT after %ds — never silently swallowed",
+                "[hooks] %s.%s TIMED OUT after %ds — never silently swallowed",
                 event_type,
                 hook_name,
                 hook_timeout,
@@ -406,12 +406,12 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 
                 speak(f"{hook_name.replace('_', ' ')} timed out")
             except Exception as exc:
-                logger.info("[HOOKS] sound playback failed for timeout %s.%s: %s", event_type, hook_name, exc)
+                logger.info("[hooks] sound playback failed for timeout %s.%s: %s", event_type, hook_name, exc)
             continue
 
         ran += 1
         _log_detail(
-            "[HOOKS] %s.%s agent=%s exit=%d out=%db %dms",
+            "[hooks] %s.%s agent=%s exit=%d out=%db %dms",
             event_type,
             hook_name,
             parsed.get("agent_type", "") or "main",
@@ -442,7 +442,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 
                 speak(result["sound"])
             except Exception as exc:
-                logger.info("[HOOKS] sound playback failed for %s.%s: %s", event_type, hook_name, exc)
+                logger.info("[hooks] sound playback failed for %s.%s: %s", event_type, hook_name, exc)
 
         if result["exit_code"] == 2:
             is_intentional_block = False
@@ -451,7 +451,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
                 decision = json.loads(result["stdout"]) if result["stdout"].strip() else {}
                 is_intentional_block = decision.get("decision") == "block"
             except (json.JSONDecodeError, AttributeError):
-                logger.info("[HOOKS] %s.%s exit=2 stdout not JSON, treating as crash", event_type, hook_name)
+                logger.info("[hooks] %s.%s exit=2 stdout not JSON, treating as crash", event_type, hook_name)
 
             if is_intentional_block:
                 total_ms = (time.monotonic() - total_start) * 1000
@@ -459,7 +459,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
                 # "dispatch" ms is every hook that ran up to the block, summed, not this gate's cost.
                 block_reason = str(decision.get("reason", "")).strip().splitlines()
                 logger.info(
-                    "[HOOKS] %s blocked by %s (%dms dispatch): %s",
+                    "[hooks] %s blocked by %s (%dms dispatch): %s",
                     event_type,
                     hook_name,
                     total_ms,
@@ -477,7 +477,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
                 return result["stdout"], 2
 
             logger.error(
-                "[HOOKS] %s.%s CRASHED exit=2: %s",
+                "[hooks] %s.%s CRASHED exit=2: %s",
                 event_type,
                 hook_name,
                 result["stderr"][:200],
@@ -496,7 +496,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
             outputs.append((hook_name, handler, result["stdout"]))
 
     total_ms = (time.monotonic() - total_start) * 1000
-    _log_detail("[HOOKS] %s complete: %d hooks %dms", event_type, ran, total_ms)
+    _log_detail("[hooks] %s complete: %d hooks %dms", event_type, ran, total_ms)
     _log(
         {
             "ts": time.time(),
@@ -554,7 +554,7 @@ def _record_injection(event_type: str, outputs: list, merged: str, payload: dict
 
         injection_ledger.record(event_type, outputs, merged, payload)
     except Exception as exc:  # crash isolation: the ledger must never break a dispatch
-        logger.warning("[HOOKS] injection_ledger failed, %s injection unrecorded: %s", event_type, exc)
+        logger.warning("[hooks] injection_ledger failed, %s injection unrecorded: %s", event_type, exc)
 
 
 def print_introspection():

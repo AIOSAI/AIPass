@@ -1,6 +1,6 @@
 [← Back to AIPass](../../../README.md)
 
-# HOOKS
+# hooks
 
 **Purpose:** Hook infrastructure for AIPass. One dispatch engine routes every hook event across
 platforms (Claude Code, Codex, OpenCode) with per-project configuration, full logging and gates that fail closed. On

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: subagent_gate.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Checks modified Python files against sentry standards on SubagentStop
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-22
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Checks modified Python files against sentry standards and blocks on violations.
@@ -63,12 +63,12 @@ def _get_cwd_branch(cwd: str, repo_root: Path) -> str | None:
     """Detect which branch directory (src/<package>/<name>) the CWD is in."""
     package = _get_package_from_cwd(cwd)
     if not package:
-        logger.info("[HOOKS] subagent_gate: CWD %s not inside src/<package>", cwd)
+        logger.info("[hooks] subagent_gate: CWD %s not inside src/<package>", cwd)
         return None
     src = repo_root / "src" / package
     here = Path(cwd).resolve()
     if not here.is_relative_to(src):
-        logger.info("[HOOKS] subagent_gate: CWD %s not inside %s", cwd, src)
+        logger.info("[hooks] subagent_gate: CWD %s not inside %s", cwd, src)
         return None
     rel = here.relative_to(src)
     return rel.parts[0] if rel.parts else None
@@ -191,14 +191,14 @@ def _check_within_budget(modified: list[str], repo_root: Path) -> tuple[dict[str
         try:
             vs = _run_sentry_checklist(f, repo_root, timeout=min(_CHECKLIST_TIMEOUT_SECONDS, remaining))
         except subprocess.TimeoutExpired as exc:
-            logger.info("[HOOKS] subagent_gate: checklist timed out on %s after %.0fs", name, exc.timeout)
+            logger.info("[hooks] subagent_gate: checklist timed out on %s after %.0fs", name, exc.timeout)
             unchecked.append(name)
             continue
         if vs:
             violations[name] = vs
     if unchecked:
         logger.warning(
-            "[HOOKS] subagent_gate: %d of %d modified file(s) unchecked inside the %ss budget: %s",
+            "[hooks] subagent_gate: %d of %d modified file(s) unchecked inside the %ss budget: %s",
             len(unchecked),
             len(modified),
             _CHECK_BUDGET_SECONDS,
@@ -258,5 +258,5 @@ def _decide(hook_data: dict) -> dict:
         return _ALLOW
 
     except Exception as exc:  # OPEN by decision (DPLAN-0356): a block here traps the sub-agent, see the docstring
-        logger.info("[HOOKS] subagent_gate: unexpected error (allowing the stop, by decision): %s", exc)
+        logger.info("[hooks] subagent_gate: unexpected error (allowing the stop, by decision): %s", exc)
         return _ALLOW

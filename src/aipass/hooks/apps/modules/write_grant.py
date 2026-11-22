@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_grant.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Whether a dispatch's write grant covers one cross-project write, read through @ai_mail's door
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-11-03
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Whether this session's dispatch grant covers one crossing write: @ai_mail's door decides, any doubt refuses."""
@@ -60,7 +60,7 @@ def _granted(cwd: str, caller_root: Path | None, landing: Project, target: Path)
         return _ask(cwd, caller_root, landing, target, dispatch_id)
     # Every caller is a gate: a raising rail or door fails closed, and the warning tells it from a no.
     except Exception as exc:
-        logger.warning("[HOOKS] write_grant: grant check for dispatch %s raised (refusing): %s", dispatch_id, exc)
+        logger.warning("[hooks] write_grant: grant check for dispatch %s raised (refusing): %s", dispatch_id, exc)
         return Grant(False, UNREADABLE.format(error=exc))
 
 
@@ -79,7 +79,7 @@ def _ask(cwd: str, caller_root: Path, landing: Project, target: Path, dispatch_i
     reason = str(decision.get("reason") or "the door gave no reason")
     if decision.get("allowed") is True:
         logger.info(
-            "[HOOKS] edit_gate: cross-project write ALLOWED by a dispatch grant: seat %s, project %s, dispatch %s (%s)",
+            "[hooks] edit_gate: cross-project write ALLOWED by a dispatch grant: seat %s, project %s, dispatch %s (%s)",
             seat,
             landing.label,
             dispatch_id,

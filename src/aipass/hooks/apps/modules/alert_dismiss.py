@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: alert_dismiss.py
-# Version: 1.1.2
+# Version: 1.1.3
 # Description: Dismiss alerts from .aipass/alerts.json via drone @hooks dismiss
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-14
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Dismiss alerts from .aipass/alerts.json by ID."""
@@ -60,7 +60,7 @@ def _dismiss_alert(alert_id: str) -> bool:
     try:
         data = json_files.read_json_file(alerts_path)
     except (json.JSONDecodeError, OSError) as exc:
-        logger.error("[HOOKS] dismiss: read error: %s", exc)
+        logger.error("[hooks] dismiss: read error: %s", exc)
         CONSOLE.print(f"[red]Failed to read alerts.json: {exc}[/red]")
         return False
 
@@ -75,12 +75,12 @@ def _dismiss_alert(alert_id: str) -> bool:
     try:
         json_files.write_json_file(alerts_path, {"alerts": remaining})
     except OSError as exc:
-        logger.error("[HOOKS] dismiss: write error: %s", exc)
+        logger.error("[hooks] dismiss: write error: %s", exc)
         CONSOLE.print(f"[red]Failed to write alerts.json: {exc}[/red]")
         return False
 
     json_handler.log_operation("dismiss_alert", {"alert_id": alert_id})
-    logger.info("[HOOKS] dismiss: removed alert %s", alert_id)
+    logger.info("[hooks] dismiss: removed alert %s", alert_id)
     CONSOLE.print(f"[green]Dismissed alert {alert_id}[/green]")
     return True
 

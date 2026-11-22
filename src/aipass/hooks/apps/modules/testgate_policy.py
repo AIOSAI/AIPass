@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: testgate_policy.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Reads .aipass/test_write_policy.json — the switch behind the test-write gate
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Reads the test-write policy: may agents create new test files here?
@@ -61,7 +61,7 @@ def find_policy_file(start: str | Path) -> Path | None:
         search = Path(start) if start else Path.cwd()
         home = Path.home()
     except OSError as exc:
-        logger.info("[HOOKS] testgate_policy: no usable start directory (%s)", exc)
+        logger.info("[hooks] testgate_policy: no usable start directory (%s)", exc)
         return None
 
     while search != home and search.parent != search:
@@ -70,7 +70,7 @@ def find_policy_file(start: str | Path) -> Path | None:
             if candidate.exists():
                 return candidate
         except OSError as exc:
-            logger.info("[HOOKS] testgate_policy: unreadable while walking %s: %s", candidate, exc)
+            logger.info("[hooks] testgate_policy: unreadable while walking %s: %s", candidate, exc)
             return None
         search = search.parent
     return None

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_hook_test.py
-# Version: 1.6.0
+# Version: 1.6.1
 # Description: Tests for the portable hook test runner
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/hook_test.py and the parity and smoke handlers it drives."""
@@ -165,7 +165,7 @@ class TestHandleCommand:
         assert result is True
         mock_run.assert_called_once_with(verbose=False)
         mock_results.assert_called_once_with({}, verbose=False)
-        mock_print.assert_any_call("[bold cyan]HOOKS Test Runner[/bold cyan]")
+        mock_print.assert_any_call("[bold cyan]hooks Test Runner[/bold cyan]")
 
 
 class TestProbeIsolation:

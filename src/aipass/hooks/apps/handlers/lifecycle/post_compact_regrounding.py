@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: post_compact_regrounding.py
-# Version: 2.3.0
+# Version: 2.3.1
 # Description: Mid-turn grounding backstop after compaction, budgeted per fire (PostToolUse, DPLAN-0276, #752)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-31
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Re-grounds the agent after compaction even when no UserPromptSubmit arrives.
@@ -70,7 +70,7 @@ def _load_sections(hook_data: dict) -> list[tuple[str, str]]:
     banner = grounding_content.degraded_banner(failures, [label for label, _ in sections])
     if failures:
         logger.warning(
-            "[HOOKS] post_compact_regrounding DEGRADED: carried=%s missing=%s",
+            "[hooks] post_compact_regrounding DEGRADED: carried=%s missing=%s",
             ",".join(label for label, _ in sections) or "nothing",
             " | ".join(failures),
         )
@@ -81,7 +81,7 @@ def _load_sections(hook_data: dict) -> list[tuple[str, str]]:
         release_notice = importlib.import_module("aipass.hooks.apps.modules.release_notice")
         notice = release_notice.build_notice(hook_data)
     except Exception as exc:
-        logger.warning("[HOOKS] post_compact_regrounding: release notice failed: %s", exc)
+        logger.warning("[hooks] post_compact_regrounding: release notice failed: %s", exc)
         notice = ""
     if notice:
         if sections[0][0] == "branch":

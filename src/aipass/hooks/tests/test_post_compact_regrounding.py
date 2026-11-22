@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_post_compact_regrounding.py
-# Version: 1.3.1
+# Version: 1.3.2
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/lifecycle/post_compact_regrounding.py."""
@@ -771,7 +771,7 @@ class TestRegroupBudget752:
         with patch.object(cadence, "logger") as log:
             fired = self._sequence(tmp_path)
         lines = [c.args[0] % tuple(c.args[1:]) for c in log.info.call_args_list]
-        fire_lines = [line for line in lines if line.startswith("[HOOKS] regroup fired ")]
+        fire_lines = [line for line in lines if line.startswith("[hooks] regroup fired ")]
         assert len(fire_lines) == len(fired)
         for part, line in enumerate(fire_lines, 1):
             assert f"part={part}/{len(fired)}" in line

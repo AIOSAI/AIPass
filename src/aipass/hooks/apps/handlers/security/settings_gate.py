@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: settings_gate.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: No AI changes a provider's settings alone: Claude asks the owner; Codex, OpenCode, headless deny
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-10-25
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """The provider-settings gate (DPLAN-0424): the owner accepts every change to a CLI's own settings.
@@ -216,7 +216,7 @@ def _decide(hook_data: dict) -> dict:
         if cli in _NO_ASK:
             reason = DENY_NO_ASK.format(file=file, kind=kind, cli=_NO_ASK[cli])
         logger.warning(
-            "[HOOKS] settings_gate: deny caller=%s cli=%s path=%s tool=%s", _branch(cwd), cli, file, tool_name
+            "[hooks] settings_gate: deny caller=%s cli=%s path=%s tool=%s", _branch(cwd), cli, file, tool_name
         )
         return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2}
     asked = [(f, k) for f, k in targets if k != CLAUDE]
@@ -224,6 +224,6 @@ def _decide(hook_data: dict) -> dict:
         return _ALLOW
     file, kind = asked[0]
     reason = ASK.format(what=_what(tool_name, tool_input), file=", ".join(f for f, _ in asked), kind=kind)
-    logger.warning("[HOOKS] settings_gate: ask caller=%s cli=%s path=%s tool=%s", _branch(cwd), cli, file, tool_name)
+    logger.warning("[hooks] settings_gate: ask caller=%s cli=%s path=%s tool=%s", _branch(cwd), cli, file, tool_name)
     answer = {"hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason": reason}
     return {"stdout": json.dumps({"hookSpecificOutput": answer}), "exit_code": 0}

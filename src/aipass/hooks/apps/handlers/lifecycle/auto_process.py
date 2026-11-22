@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_process.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Kicks @memory's auto-process once per session and on pre-compact (TDPLAN-0005)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-06
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Kicks @memory's auto_process in a detached child; the work leaves the prompt lane.
@@ -41,7 +41,7 @@ def _mark_session_ran() -> None:
         try:
             guard.touch()
         except OSError as exc:
-            logger.warning("[HOOKS] auto_process: guard write failed: %s", exc)
+            logger.warning("[hooks] auto_process: guard write failed: %s", exc)
 
 
 def handle(hook_data: dict) -> dict:
@@ -59,7 +59,7 @@ def _handle() -> dict:
 
     # A probe must not start @memory's real worker; the per-session guard does not stop a new mock id.
     if os.environ.get("AIPASS_HOOK_PROBE") == "1":
-        logger.info("[HOOKS] auto_process: probe run — spawn suppressed")
+        logger.info("[hooks] auto_process: probe run — spawn suppressed")
         return {"stdout": "", "exit_code": 0}
 
     from aipass.memory import spawn_background
@@ -67,14 +67,14 @@ def _handle() -> dict:
     result = spawn_background()
 
     if not result.get("success"):
-        logger.error("[HOOKS] auto_process: spawn failed: %s", result.get("error"))
+        logger.error("[hooks] auto_process: spawn failed: %s", result.get("error"))
         return {"stdout": "", "exit_code": 1}
 
     _mark_session_ran()
 
     if result.get("skipped"):
-        logger.info("[HOOKS] auto_process: not spawned: %s", result.get("reason"))
+        logger.info("[hooks] auto_process: not spawned: %s", result.get("reason"))
         return {"stdout": "", "exit_code": 0}
 
-    logger.info("[HOOKS] auto_process: spawned pid %s", result.get("pid"))
+    logger.info("[hooks] auto_process: spawned pid %s", result.get("pid"))
     return {"stdout": "", "exit_code": 0, "sound": "auto process"}

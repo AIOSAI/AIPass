@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: testwrite_targets.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Which write targets are NEW test files — the classification behind the test-write gate
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Decides one question: is this path a test file that does not exist yet?"""
@@ -70,7 +70,7 @@ def is_new(path: Path) -> bool:
     try:
         return not path.exists()
     except OSError as exc:
-        logger.info("[HOOKS] testwrite_targets: cannot stat %s (%s) — treating as existing", path, exc)
+        logger.info("[hooks] testwrite_targets: cannot stat %s (%s) — treating as existing", path, exc)
         return False
 
 

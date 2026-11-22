@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_subagent_gate.py
-# Version: 1.0.5
+# Version: 1.0.6
 # Description: Tests for subagent_gate security handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/security/subagent_gate.py."""
@@ -231,7 +231,7 @@ class TestSubagentGateExternalProject:
         with patch("aipass.hooks.apps.handlers.security.subagent_gate.logger") as log:
             result, calls = _stop_in(repo, elsewhere, " M src/aipass/hooks/bad.py\n")
         assert result == {"stdout": "", "exit_code": 0} and calls == []
-        assert [c.args[0] for c in log.info.call_args_list] == ["[HOOKS] subagent_gate: CWD %s not inside %s"]
+        assert [c.args[0] for c in log.info.call_args_list] == ["[hooks] subagent_gate: CWD %s not inside %s"]
 
     def test_get_package_from_cwd_external(self, tmp_path):
         """Outside any src/<package>/<branch> the gate reads no status and allows."""

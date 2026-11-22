@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: opencode.py
-# Version: 1.5.0
+# Version: 1.5.1
 # Description: OpenCode bridge — the aipass.ts plugin's calls, mapped to Claude's protocol, answered in one JSON line
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-10-28
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """OpenCode bridge.
@@ -156,7 +156,7 @@ def _record_break(event_type: str, line: str) -> None:
     except BaseException as exc:  # the answer is already out: nothing the record raises may change it
         with contextlib.suppress(BaseException):
             sys.stderr.write(
-                f"[HOOKS:opencode] bridge: the break was not recorded in {BREAK_LOG}: {type(exc).__name__}: {exc}\n"
+                f"[hooks:opencode] bridge: the break was not recorded in {BREAK_LOG}: {type(exc).__name__}: {exc}\n"
             )
 
 

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_rollover.py
-# Version: 2.5.0
+# Version: 2.5.1
 # Description: Tests for rollover lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/lifecycle/rollover.py."""
@@ -128,7 +128,7 @@ class TestRolloverHandler:
 
         assert [argv[3] for argv in calls] == ["check", "run"]
         log.info.assert_any_call(
-            "[HOOKS] rollover: overdue files detected — %s", CHECK_OVERDUE_OUTPUT.strip().replace("\n", " | ")
+            "[hooks] rollover: overdue files detected — %s", CHECK_OVERDUE_OUTPUT.strip().replace("\n", " | ")
         )
 
     def test_run_check_parses_clean(self, monkeypatch, tmp_path):
@@ -141,23 +141,23 @@ class TestRolloverHandler:
         _result, calls, log = _rolled(monkeypatch, tmp_path, times_out="check")
 
         assert [argv[3] for argv in calls] == ["check"]
-        log.warning.assert_any_call("[HOOKS] rollover: check timed out (30s)")
+        log.warning.assert_any_call("[hooks] rollover: check timed out (30s)")
 
     def test_run_rollover_success(self, monkeypatch, tmp_path):
         _result, _calls, log = _rolled(monkeypatch, tmp_path)
 
-        log.info.assert_any_call("[HOOKS] rollover: complete (branch=%s)", None)
+        log.info.assert_any_call("[hooks] rollover: complete (branch=%s)", None)
         log.warning.assert_not_called()
 
     def test_run_rollover_failure(self, monkeypatch, tmp_path):
         _result, _calls, log = _rolled(monkeypatch, tmp_path, run_out="error", run_rc=1)
 
-        log.warning.assert_any_call("[HOOKS] rollover: FAILED — %s", "error")
+        log.warning.assert_any_call("[hooks] rollover: FAILED — %s", "error")
 
     def test_run_rollover_timeout(self, monkeypatch, tmp_path):
         _result, _calls, log = _rolled(monkeypatch, tmp_path, times_out="run")
 
-        log.warning.assert_any_call("[HOOKS] rollover: FAILED — %s", "Rollover timed out (110s)")
+        log.warning.assert_any_call("[hooks] rollover: FAILED — %s", "Rollover timed out (110s)")
 
 
 class TestACleanCheckIsTrusted:
@@ -167,7 +167,7 @@ class TestACleanCheckIsTrusted:
         _rolled(monkeypatch, tmp_path, check_out=CHECK_CLEAN_OUTPUT)
         result, calls, log = _rolled(monkeypatch, tmp_path, check_out=CHECK_CLEAN_OUTPUT)
         assert calls == [] and result == {"stdout": "", "exit_code": 0}
-        log.info.assert_any_call("[HOOKS] rollover: checked clean within %d min, skipped (branch=%s)", 30, None)
+        log.info.assert_any_call("[hooks] rollover: checked clean within %d min, skipped (branch=%s)", 30, None)
 
     def test_a_stale_stamp_checks_again(self, monkeypatch, tmp_path):
         _rolled(monkeypatch, tmp_path, check_out=CHECK_CLEAN_OUTPUT)
@@ -284,7 +284,7 @@ class TestTheCompactingBranchIsNamed:
         )
         _result, calls, log = _rolled(monkeypatch, tmp_path, check_out=todos_line)
         assert [argv[3] for argv in calls] == ["check", "run"]
-        log.info.assert_any_call("[HOOKS] rollover: overdue files detected — %s", todos_line.replace("\n", " | "))
+        log.info.assert_any_call("[hooks] rollover: overdue files detected — %s", todos_line.replace("\n", " | "))
 
 
 class TestFindRepoRootFailLoud:

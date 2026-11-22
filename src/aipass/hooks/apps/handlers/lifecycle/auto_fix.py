@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
-# Version: 1.9.0
+# Version: 1.9.1
 # Description: Post-edit diagnostics — syntax, lint, type, pattern, sentry checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Runs diagnostics on edited files and surfaces errors for the agent to fix."""
@@ -84,7 +84,7 @@ def _check_syntax(file_path: str) -> list[str]:
         if result.returncode != 0:
             return [f"SYNTAX: {result.stderr.strip()}"]
     except Exception as exc:
-        logger.warning("[HOOKS] auto_fix: py_compile failed: %s", exc)
+        logger.warning("[hooks] auto_fix: py_compile failed: %s", exc)
         return [f"UNCHECKED: syntax, py_compile could not run ({type(exc).__name__}: {exc})"]
     return []
 
@@ -98,14 +98,14 @@ def _check_ruff_lint(file_path: str) -> list[str]:
             timeout=10,
         )
         if result.returncode not in (0, 1):
-            logger.warning("[HOOKS] auto_fix: ruff lint error: %s", result.stderr.strip())
+            logger.warning("[hooks] auto_fix: ruff lint error: %s", result.stderr.strip())
             return [f"UNCHECKED: lint, ruff exit {result.returncode}: {result.stderr.strip()[:100]}"]
         if result.stdout.strip():
             lines = result.stdout.strip().split("\n")
             violations = [line for line in lines if ".py:" in line]
             return [f"LINT: {line}" for line in violations[:5]]
     except Exception as exc:
-        logger.warning("[HOOKS] auto_fix: ruff lint failed: %s", exc)
+        logger.warning("[hooks] auto_fix: ruff lint failed: %s", exc)
         return [f"UNCHECKED: lint, ruff could not run ({type(exc).__name__}: {exc})"]
     return []
 
@@ -122,10 +122,10 @@ def _check_ruff_format(file_path: str) -> list[str]:
             name = Path(file_path).name
             return [f"FORMAT: {name} needs ruff format (run: ruff format {name})"]
         if result.returncode not in (0, 1):
-            logger.warning("[HOOKS] auto_fix: ruff format error: %s", result.stderr.strip())
+            logger.warning("[hooks] auto_fix: ruff format error: %s", result.stderr.strip())
             return [f"UNCHECKED: format, ruff exit {result.returncode}: {result.stderr.strip()[:100]}"]
     except Exception as exc:
-        logger.warning("[HOOKS] auto_fix: ruff format check failed: %s", exc)
+        logger.warning("[hooks] auto_fix: ruff format check failed: %s", exc)
         return [f"UNCHECKED: format, ruff could not run ({type(exc).__name__}: {exc})"]
     return []
 
@@ -166,7 +166,7 @@ def _check_patterns(file_path: str) -> list[str]:
                     errors.append(f"PATTERN: {message}")
                     break
     except Exception as exc:
-        logger.warning("[HOOKS] auto_fix: pattern check failed: %s", exc)
+        logger.warning("[hooks] auto_fix: pattern check failed: %s", exc)
         errors.append(f"UNCHECKED: patterns ({type(exc).__name__}: {exc})")
     return errors
 
@@ -201,7 +201,7 @@ def _run_ruff_lint_structured(file_path: str, unanswered: list[str] | None = Non
             timeout=10,
         )
         if result.returncode not in (0, 1):
-            logger.info("[HOOKS] auto_fix: ruff structured lint error: %s", result.stderr.strip())
+            logger.info("[hooks] auto_fix: ruff structured lint error: %s", result.stderr.strip())
             return _no_answer(unanswered, "ruff", f"exit {result.returncode}: {result.stderr.strip()[:100]}")
         if not result.stdout.strip():
             return _no_answer(unanswered, "ruff", "an empty answer")
@@ -216,13 +216,13 @@ def _run_ruff_lint_structured(file_path: str, unanswered: list[str] | None = Non
             errors.append({"line": line, "message": f"{code}: {message}"})
         return errors
     except json.JSONDecodeError as exc:
-        logger.info("[HOOKS] auto_fix: ruff JSON parse failed: %s", exc)
+        logger.info("[hooks] auto_fix: ruff JSON parse failed: %s", exc)
         return _no_answer(unanswered, "ruff", f"unparseable answer: {exc}")
     except subprocess.TimeoutExpired:
-        logger.info("[HOOKS] auto_fix: ruff structured lint timed out")
+        logger.info("[hooks] auto_fix: ruff structured lint timed out")
         return _no_answer(unanswered, "ruff", "timed out")
     except Exception as exc:
-        logger.info("[HOOKS] auto_fix: ruff structured lint failed: %s", exc)
+        logger.info("[hooks] auto_fix: ruff structured lint failed: %s", exc)
         return _no_answer(unanswered, "ruff", f"failed: {exc}")
 
 
@@ -245,7 +245,7 @@ def _run_pyright_check(file_path: str, unanswered: list[str] | None = None) -> l
         try:
             data = json.loads(result.stdout)
         except (json.JSONDecodeError, ValueError) as exc:
-            logger.info("[HOOKS] auto_fix: pyright JSON parse failed: %s", exc)
+            logger.info("[hooks] auto_fix: pyright JSON parse failed: %s", exc)
             return _no_answer(unanswered, "pyright", f"unparseable answer: {exc}")
 
         errors: list[dict] = []
@@ -256,13 +256,13 @@ def _run_pyright_check(file_path: str, unanswered: list[str] | None = None) -> l
                 errors.append({"line": line, "message": message[:100]})
         return errors[:10]
     except FileNotFoundError:
-        logger.info("[HOOKS] auto_fix: pyright not installed")
+        logger.info("[hooks] auto_fix: pyright not installed")
         return _no_answer(unanswered, "pyright", "not installed")
     except subprocess.TimeoutExpired:
-        logger.info("[HOOKS] auto_fix: pyright timed out")
+        logger.info("[hooks] auto_fix: pyright timed out")
         return _no_answer(unanswered, "pyright", "timed out")
     except Exception as exc:
-        logger.info("[HOOKS] auto_fix: pyright failed: %s", exc)
+        logger.info("[hooks] auto_fix: pyright failed: %s", exc)
         return _no_answer(unanswered, "pyright", f"failed: {exc}")
 
 
@@ -301,7 +301,7 @@ def _checklist_marker() -> str:
         marker = getattr(_load_checklist_module(), "FINDING_MARKER", "")
     except Exception as exc:
         logger.warning(
-            "[HOOKS] auto_fix: sentry checklist module unreadable (%s) — using fallback marker %r",
+            "[hooks] auto_fix: sentry checklist module unreadable (%s) — using fallback marker %r",
             exc,
             _CHECKLIST_MARKER_FALLBACK,
         )
@@ -309,7 +309,7 @@ def _checklist_marker() -> str:
     if isinstance(marker, str) and marker:
         return marker
     logger.warning(
-        "[HOOKS] auto_fix: sentry publishes no FINDING_MARKER — using fallback %r",
+        "[hooks] auto_fix: sentry publishes no FINDING_MARKER — using fallback %r",
         _CHECKLIST_MARKER_FALLBACK,
     )
     return _CHECKLIST_MARKER_FALLBACK
@@ -417,7 +417,7 @@ def _run_sentry_checklist(
         # checklist exits 0 even with findings: parse stdout whatever the code, and only log a non-zero one.
         if result.returncode != 0:
             logger.info(
-                "[HOOKS] auto_fix: sentry checklist exited %d for %s (parsing stdout anyway)",
+                "[hooks] auto_fix: sentry checklist exited %d for %s (parsing stdout anyway)",
                 result.returncode,
                 Path(file_path).name,
             )
@@ -430,10 +430,10 @@ def _run_sentry_checklist(
                 advice.extend(_only_added([a for a in found if a.startswith("fallback: ")], added))
         return _only_added(_parse_checklist_findings(result.stdout, _checklist_marker()), added)[:5]
     except FileNotFoundError:
-        logger.info("[HOOKS] auto_fix: drone not found for sentry checklist")
+        logger.info("[hooks] auto_fix: drone not found for sentry checklist")
         _no_answer(unanswered, "sentry checklist", "drone not found")
     except Exception as exc:
-        logger.info("[HOOKS] auto_fix: sentry checklist failed: %s", exc)
+        logger.info("[hooks] auto_fix: sentry checklist failed: %s", exc)
         _no_answer(unanswered, "sentry checklist", f"{type(exc).__name__}: {exc}")
     return []
 
@@ -467,7 +467,7 @@ def _run_json_checks(file_path: str) -> list[str]:
     try:
         content = Path(file_path).read_text(encoding="utf-8")
     except Exception as e:
-        logger.info("[HOOKS] auto_fix: json read failed: %s", e)
+        logger.info("[hooks] auto_fix: json read failed: %s", e)
         return [f"READ ERROR: {e!s}"]
 
     for char in JSON_CORRUPTION_CHARS:
@@ -478,7 +478,7 @@ def _run_json_checks(file_path: str) -> list[str]:
     try:
         data = json.loads(content)
     except json.JSONDecodeError as e:
-        logger.info("[HOOKS] auto_fix: json syntax error in %s: %s", file_path, e)
+        logger.info("[hooks] auto_fix: json syntax error in %s: %s", file_path, e)
         errors.append(f"JSON SYNTAX: {e.msg} at line {e.lineno}")
         return errors
 
@@ -565,7 +565,7 @@ def _handle(hook_data: dict) -> dict:
             added = None
         sentry_violations = _run_sentry_checklist(file_path, unanswered, added=added, advice=advice)
         for v in sentry_violations:
-            errors.append(f"SENTRY: {v}")
+            errors.append(f"sentry: {v}")
 
         type_errors = _run_pyright_check(file_path, unanswered)
         for te in type_errors or []:
@@ -589,7 +589,7 @@ def _handle(hook_data: dict) -> dict:
     if advice:
         sites = "\n".join(f"  - {a}" for a in advice)
         warning = f"[FALLBACK] this edit adds a fallback (sentry standard fallback):\n{sites}\n{FALLBACK_WARNING}"
-        logger.info("[HOOKS] auto_fix: %s", warning.replace("\n", " | "))
+        logger.info("[hooks] auto_fix: %s", warning.replace("\n", " | "))
 
     if errors:
         head = f"[AUTO-FIX] {len(errors)} error(s) in {Path(file_path).name}:\n"
@@ -598,11 +598,11 @@ def _handle(hook_data: dict) -> dict:
             tail = f"{tail}\n{no_answer}"
         error_text = _fit("\n".join(f"  - {e}" for e in errors), head + tail, file_path)
         context = f"{head}{error_text}{tail}" + (f"\n\n{warning}" if warning else "")
-        logger.info("[HOOKS] auto_fix: %s", context.replace("\n", " | "))
+        logger.info("[hooks] auto_fix: %s", context.replace("\n", " | "))
         return {"stdout": _to_model(context), "exit_code": 0, "sound": "auto fix diagnostics"}
 
     if not no_answer:
         return {"stdout": _to_model(warning), "exit_code": 0} if warning else {"stdout": "", "exit_code": 0}
-    logger.info("[HOOKS] auto_fix: %s in %s", no_answer, file_path)
+    logger.info("[hooks] auto_fix: %s in %s", no_answer, file_path)
     quiet = f"[diagnostics] {no_answer}" + (f"\n\n{warning}" if warning else "")
     return {"stdout": _to_model(quiet), "exit_code": 0}

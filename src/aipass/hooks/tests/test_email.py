@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_email.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Tests for email notification handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/notification/email.py."""
@@ -281,7 +281,7 @@ class TestFindBranchRoot:
             result = handle({})
 
         assert result["stdout"] == ""
-        log.info.assert_any_call("[HOOKS] email: no branch root found")
+        log.info.assert_any_call("[hooks] email: no branch root found")
 
     def test_returns_none_at_repo_root(self, tmp_path, monkeypatch):
         here = tmp_path.resolve()
@@ -298,7 +298,7 @@ class TestFindBranchRoot:
             result = handle({})
 
         assert result["stdout"] == ""
-        log.info.assert_any_call("[HOOKS] email: no branch root found")
+        log.info.assert_any_call("[hooks] email: no branch root found")
 
 
 class TestEmailCadenceGate:

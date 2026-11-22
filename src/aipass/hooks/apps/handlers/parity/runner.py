@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: runner.py
-# Version: 1.2.1
+# Version: 1.2.2
 # Description: Provider parity: the same scripted prompts headless on Claude, Codex and OpenCode, hook by hook
 # Branch: hooks
 # Layer: apps/handlers/parity
 # Created: 2026-10-26
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Provider parity runner.
@@ -168,7 +168,7 @@ def session_id_of(provider: str, stdout: str) -> str:
         try:
             doc = json.loads(line)
         except json.JSONDecodeError as exc:
-            logger.debug("[HOOKS] parity: %s printed a non-JSON line: %s", provider, exc)
+            logger.debug("[hooks] parity: %s printed a non-JSON line: %s", provider, exc)
             continue
         if not isinstance(doc, dict):
             continue
@@ -189,13 +189,13 @@ def session_entries(session_id: str) -> list[dict]:
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except OSError as exc:
-            logger.info("[HOOKS] parity: %s unreadable: %s", path, exc)
+            logger.info("[hooks] parity: %s unreadable: %s", path, exc)
             continue
         for line in lines:
             try:
                 doc = json.loads(line)
             except json.JSONDecodeError as exc:
-                logger.debug("[HOOKS] parity: torn line in %s: %s", path, exc)
+                logger.debug("[hooks] parity: torn line in %s: %s", path, exc)
                 continue
             if isinstance(doc, dict) and doc.get("session_id") == session_id and "exit_code" in doc:
                 entries.append(doc)
@@ -233,7 +233,7 @@ def free_limited(stdout: str) -> bool:
         try:
             doc = json.loads(line)
         except json.JSONDecodeError as exc:
-            logger.debug("[HOOKS] parity: opencode printed a non-JSON line: %s", exc)
+            logger.debug("[hooks] parity: opencode printed a non-JSON line: %s", exc)
             continue
         error = doc.get("error") if isinstance(doc, dict) else None
         if isinstance(error, dict) and error.get("type") == FREE_LIMIT:
@@ -263,11 +263,11 @@ def run_session(provider: str, prompt: str, branch: Path) -> tuple[str, list[dic
                 timeout=RUN_TIMEOUT,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            logger.warning("[HOOKS] parity: %s session did not finish: %s", provider, exc)
+            logger.warning("[hooks] parity: %s session did not finish: %s", provider, exc)
             return "", [], False
         if not free_limited(done.stdout):
             break
-        logger.warning("[HOOKS] parity: %s answered the free limit (429)", model)
+        logger.warning("[hooks] parity: %s answered the free limit (429)", model)
     else:
         return "", [], False
     session_id = session_id_of(provider, done.stdout)
@@ -275,7 +275,7 @@ def run_session(provider: str, prompt: str, branch: Path) -> tuple[str, list[dic
         "parity_session", {"provider": provider, "model": model, "session": session_id, "exit": done.returncode}
     )
     if not session_id:
-        logger.warning("[HOOKS] parity: %s printed no session id (exit %s)", provider, done.returncode)
+        logger.warning("[hooks] parity: %s printed no session id (exit %s)", provider, done.returncode)
         return "", [], False
     return session_id, session_entries(session_id), _pointer_stamp(branch) != before
 
@@ -286,6 +286,6 @@ def send_probe_mail(branch: Path) -> str:
     try:
         done = subprocess.run(argv, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        logger.warning("[HOOKS] parity: probe mail not sent: %s", exc)
+        logger.warning("[hooks] parity: probe mail not sent: %s", exc)
         return f"not sent: {exc}"
     return "sent" if done.returncode == 0 else f"not sent: {(done.stdout + done.stderr).strip()[:120]}"

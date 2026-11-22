@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: promote.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: The one step that makes edited hook code live: check, copy, smoke, then point (drone @hooks promote)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Hook code goes live through one explicit step, never by being saved (DPLAN-0356 item 3).
@@ -170,7 +170,7 @@ def check_smoke(root: Path, name: str) -> tuple[bool, str]:
     try:
         refused = code == 2 and json.loads(out).get("decision") == "block"
     except (json.JSONDecodeError, AttributeError) as exc:
-        logger.info("[HOOKS] promote: smoke refusal unreadable: %s", exc)
+        logger.info("[hooks] promote: smoke refusal unreadable: %s", exc)
         refused = False
     if not refused:
         return False, f"raw rm was not refused through the candidate (exit {code}): {out[:300]}"
@@ -194,7 +194,7 @@ def rotate(root: Path, keep: int = KEEP) -> list[str]:
     gone = [name for name in copies[:-keep] if name != live] if keep > 0 else []
     for name in gone:
         shutil.rmtree(root / name)
-        logger.info("[HOOKS] promote: rotated out %s", name)
+        logger.info("[hooks] promote: rotated out %s", name)
     return gone
 
 
@@ -216,26 +216,26 @@ def promote(
         ok, detail = check(root)
         report.append(f"{check.__name__}: {'ok' if ok else 'FAILED'} — {detail}")
         if not ok:
-            logger.warning("[HOOKS] promote refused at %s: %s", check.__name__, detail[:300])
+            logger.warning("[hooks] promote refused at %s: %s", check.__name__, detail[:300])
             return False, report
     name = copy_source(root)
     if fingerprint(root / name) != checked:
         _discard(root, name)
         report.append("copy: FAILED — apps/ changed while the checks ran; the copy is not what was checked")
-        logger.warning("[HOOKS] promote refused: apps/ changed while the checks ran")
+        logger.warning("[hooks] promote refused: apps/ changed while the checks ran")
         return False, report
     ok, detail = check_smoke(root, name)
     report.append(f"check_smoke: {'ok' if ok else 'FAILED'} — {detail}")
     if not ok:
         _discard(root, name)
-        logger.warning("[HOOKS] promote refused at check_smoke: %s", detail[:300])
+        logger.warning("[hooks] promote refused at check_smoke: %s", detail[:300])
         return False, report
     before = live_name(root)
     point_at(root, name)
     report.append(f"live: {name} (was {before or 'the source tree'})")
     report.extend(f"rotated out: {gone}" for gone in rotate(root))
     json_handler.log_operation("promote", {"live": name, "was": before or ""})
-    logger.info("[HOOKS] promote: %s is live (was %s)", name, before or "the source tree")
+    logger.info("[hooks] promote: %s is live (was %s)", name, before or "the source tree")
     return True, report
 
 
@@ -251,11 +251,11 @@ def rollback(root: Path | None = None) -> tuple[bool, list[str]]:
     target = older[-1]
     ok, detail = check_smoke(root, target)
     if not ok:
-        logger.warning("[HOOKS] rollback refused: %s failed its smoke: %s", target, detail[:300])
+        logger.warning("[hooks] rollback refused: %s failed its smoke: %s", target, detail[:300])
         return False, [f"rollback: refused — {target} failed its smoke ({detail}); {live} stays live"]
     point_at(root, target)
     json_handler.log_operation("rollback", {"live": target, "was": live})
-    logger.info("[HOOKS] rollback: %s is live (was %s)", target, live)
+    logger.info("[hooks] rollback: %s is live (was %s)", target, live)
     return True, [f"check_smoke: ok — {detail}", f"live: {target} (was {live})"]
 
 

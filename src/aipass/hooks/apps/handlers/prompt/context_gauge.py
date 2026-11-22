@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_gauge.py
-# Version: 1.11.0
+# Version: 1.11.1
 # Description: Heads-up to run /prep ($prep on Codex) before auto-compact, and the grounding receipt (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-20
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Heads-up so the model banks memories via /prep before the compact ceiling.
@@ -34,7 +34,7 @@ def _window_key(hook_data: dict) -> str:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         opened_at = cadence.window_opened_at(hook_data)
     except Exception as exc:
-        logger.warning("[HOOKS] context_gauge: window stamp unreadable, guarding per session: %s", exc)
+        logger.warning("[hooks] context_gauge: window stamp unreadable, guarding per session: %s", exc)
         return "w0"
     return f"w{int(opened_at)}" if opened_at else "w0"
 
@@ -56,7 +56,7 @@ def _mark_fired(session_id: str, window: str, threshold: str) -> None:
         try:
             path.touch()
         except OSError as exc:
-            logger.info("[HOOKS] context_gauge: guard write failed: %s", exc)
+            logger.info("[hooks] context_gauge: guard write failed: %s", exc)
 
 
 def _reading(hook_data: dict, session_id: str) -> tuple[int, int | None, int | None] | None:
@@ -90,7 +90,7 @@ def _receipt_line(hook_data: dict) -> str:
     try:
         return importlib.import_module("aipass.hooks.apps.modules.grounding_receipt").observe(hook_data)
     except Exception as exc:
-        logger.error("[HOOKS] context_gauge: grounding receipt not written: %s", exc)
+        logger.error("[hooks] context_gauge: grounding receipt not written: %s", exc)
         return ""
 
 
@@ -146,7 +146,7 @@ def _gauge(hook_data: dict) -> dict:
             _mark_fired(session_id, window, "95")
             _mark_fired(session_id, window, "80")
             logger.info(
-                "[HOOKS] context_gauge: escalate fired at %.0f%% session=%s window=%s", pct, session_id[:8], window
+                "[hooks] context_gauge: escalate fired at %.0f%% session=%s window=%s", pct, session_id[:8], window
             )
             return {
                 "stdout": (
@@ -161,7 +161,7 @@ def _gauge(hook_data: dict) -> dict:
         if pct >= _NUDGE_THRESHOLD_PCT and not _already_fired(session_id, window, "80"):
             _mark_fired(session_id, window, "80")
             logger.info(
-                "[HOOKS] context_gauge: nudge fired at %.0f%% session=%s window=%s", pct, session_id[:8], window
+                "[hooks] context_gauge: nudge fired at %.0f%% session=%s window=%s", pct, session_id[:8], window
             )
             return {
                 "stdout": (
@@ -176,5 +176,5 @@ def _gauge(hook_data: dict) -> dict:
         return {"stdout": "", "exit_code": 0}
 
     except Exception as exc:
-        logger.error("[HOOKS] context_gauge: unexpected error: %s", exc)
+        logger.error("[hooks] context_gauge: unexpected error: %s", exc)
         return {"stdout": "", "exit_code": 0}

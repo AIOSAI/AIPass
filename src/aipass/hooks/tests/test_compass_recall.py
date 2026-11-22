@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_compass_recall.py
-# Version: 1.6.0
+# Version: 1.6.1
 # Description: Tests for compass recall prompt handler
 # Branch: hooks
 # Created: 2026-07-16
-# Modified: 2026-11-19
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/prompt/compass_recall.py."""
@@ -562,7 +562,7 @@ class TestGovernanceKnobsAndWindow:
 
         assert result["stdout"] == ""
         lines = [c.args[0] % c.args[1:] for c in mock_logger.info.call_args_list]
-        assert "[HOOKS] compass_recall: refused #400: Session budget exhausted (5/5)" in lines
+        assert "[hooks] compass_recall: refused #400: Session budget exhausted (5/5)" in lines
 
     def test_knobs_are_renamed_and_non_numbers_fall_to_defaults(self, tmp_path):
         """Read through handle() (fleet green leg 8), not _governance_config by name:

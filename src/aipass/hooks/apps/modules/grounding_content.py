@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: grounding_content.py
-# Version: 1.5.0
+# Version: 1.5.1
 # Description: Shared content loaders for grounding prompt injections (DPLAN-0276), each rendered under its cap
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-01
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Loads raw grounding content — kernel, navmap, branch, identity — with no cadence gating."""
@@ -65,7 +65,7 @@ def _truncate_block(text: str, limit: int, source: Path | str) -> str:
     if boundary > keep // 2:
         window = window[:boundary]
     logger.warning(
-        "[HOOKS] grounding_content: %s renders %d chars, over the %d budget — cut, marker names the file",
+        "[hooks] grounding_content: %s renders %d chars, over the %d budget — cut, marker names the file",
         source,
         len(text),
         limit,
@@ -164,7 +164,7 @@ def load_branch(hook_data: dict) -> str:
     prompt_file = branch_root / ".aipass" / "aipass_local_prompt.md"
     if prompt_file.exists():
         content = prompt_file.read_text(encoding="utf-8").strip()
-        branch_name = branch_root.name.upper()
+        branch_name = branch_root.name
         block = f"# Branch Context: {branch_name}\n<!-- Source: {prompt_file} -->\n{content}"
         parts.append(_truncate_block(block, BRANCH_CHAR_BUDGET, prompt_file))
 

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_auto_fix.py
-# Version: 1.6.0
+# Version: 1.6.1
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_fix.py."""
@@ -209,7 +209,7 @@ class TestAutofixPython:
             result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "noheader.py")}})
 
         parsed = json.loads(result["stdout"])
-        assert "SENTRY: missing file header" in parsed["hookSpecificOutput"]["additionalContext"]
+        assert "sentry: missing file header" in parsed["hookSpecificOutput"]["additionalContext"]
         assert result.get("sound") == "auto fix diagnostics"
 
 
@@ -508,12 +508,12 @@ class TestAutoFixSubprocessChecks:
 
     def test_an_unreadable_sentry_falls_back_loudly(self, tmp_path):
         context, warned = self._edit_with_fallback_marker(tmp_path, side_effect=ImportError("no sentry"))
-        assert "SENTRY: meta: Missing META" in context
+        assert "sentry: meta: Missing META" in context
         assert [c.args[-1] for c in warned.call_args_list] == ["[FAIL]"]
 
     def test_a_sentry_publishing_no_marker_falls_back_loudly(self, tmp_path):
         context, warned = self._edit_with_fallback_marker(tmp_path, return_value=object())
-        assert "SENTRY: meta: Missing META" in context
+        assert "sentry: meta: Missing META" in context
         assert [c.args[-1] for c in warned.call_args_list] == ["[FAIL]"]
 
     @pytest.mark.parametrize("spell", _HOOK_SPELLINGS)
@@ -763,7 +763,7 @@ class TestTheFallbackWarning:
 
     def test_an_edit_on_an_old_logged_fallback_site_still_shows_it(self, tmp_path):
         context = self._edit(tmp_path, {"old_string": "x", "new_string": "    pass"})
-        assert "SENTRY: logged_fallback: mod.py:2 except returns None" in context
+        assert "sentry: logged_fallback: mod.py:2 except returns None" in context
         assert "  - fallback: mod.py:2 default with no warning-level log" in context
 
     def test_a_write_is_every_line_so_every_site_shows(self, tmp_path):

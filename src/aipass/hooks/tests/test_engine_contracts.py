@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_engine_contracts.py
 # Description: The hook engine's contracts and resilience: bad config, log writes, fixtures, CLI routing, paths
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-10-08
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/engine.py: its contracts and error resilience."""
@@ -287,7 +287,7 @@ class TestCliRouting:
     def test_print_help_writes_output(self, capsys):
         print_help()
         captured = capsys.readouterr()
-        assert "HOOKS" in captured.out
+        assert "hooks v" in captured.out and "HOOKS" not in captured.out
         assert "drone @hooks" in captured.out
 
     def test_print_help_surfaces_subcommands(self, capsys):

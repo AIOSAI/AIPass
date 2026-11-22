@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: git_gate.py
-# Version: 5.5.0
+# Version: 5.5.1
 # Description: Raw git and gh, GitHub writes, credentials and the secrets store for every seat; protected changes
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Blocks raw git and gh, GitHub writes without gh, the gh credential, and changes to the protected files.
@@ -217,7 +217,7 @@ class _Seat:
         try:
             answer = importlib.import_module("aipass.hooks.apps.modules.admin_seat").seat_of(self.cwd)
         except Exception as exc:  # an unreachable seat module refuses rather than opens
-            logger.warning("[HOOKS] git_gate: admin lane dark — admin_seat unavailable, refusing as unnamed: %s", exc)
+            logger.warning("[hooks] git_gate: admin lane dark — admin_seat unavailable, refusing as unnamed: %s", exc)
         self._answer = answer
         return answer
 
@@ -381,7 +381,7 @@ def _program_refusal(invocations: list, reader, seat: _Seat) -> dict | None:
     """R5, R6 and R7, for every seat: git/gh from an interpreter, the gh credential, GitHub writes, the store."""
     store_seen = next((seen for inv in invocations if (seen := _secrets_read(inv, reader))), "")
     if store_seen:
-        logger.warning("[HOOKS] git_gate: store read refused: %s", store_seen)
+        logger.warning("[hooks] git_gate: store read refused: %s", store_seen)
         return _block(SECRETS_READ_REFUSED.format(caller=seat.named, what=store_seen))
     launches, reader_commands, writes = [], [], []
     for inv in invocations:
@@ -392,7 +392,7 @@ def _program_refusal(invocations: list, reader, seat: _Seat) -> dict | None:
     if not (launches or reader_commands or writes):
         return None
     if reader_commands:
-        logger.warning("[HOOKS] git_gate: credential read refused: %s", reader_commands[0])
+        logger.warning("[hooks] git_gate: credential read refused: %s", reader_commands[0])
         return _block(CREDENTIAL_REFUSED.format(caller=seat.named, what=reader_commands[0]))
     if writes:
         return _block(GITHUB_HTTP_REFUSED.format(caller=seat.named, what=writes[0]))
@@ -402,12 +402,12 @@ def _program_refusal(invocations: list, reader, seat: _Seat) -> dict | None:
 def _protected_refusal(path: str, what: str, lane: str, seat: _Seat) -> dict | None:
     """The refusal for a change to a gate-switching file; None on the verified admin seat, the store aside (R7)."""
     if what == _protected_paths().SECRETS:
-        logger.warning("[HOOKS] git_gate: secrets store write refused: %s (%s) caller=%s", path, lane, seat.named)
+        logger.warning("[hooks] git_gate: secrets store write refused: %s (%s) caller=%s", path, lane, seat.named)
         return _block(SECRETS_WRITE_REFUSED.format(caller=seat.named, what=f"{path} ({lane})"))
     if seat.admin and what != _protected_paths().REGISTER:  # no seat writes it: only @ai_mail's in-process verbs do
-        logger.info("[HOOKS] git_gate: protected change ALLOWED for the admin seat: %s (%s)", path, lane)
+        logger.info("[hooks] git_gate: protected change ALLOWED for the admin seat: %s (%s)", path, lane)
         return None
-    logger.warning("[HOOKS] git_gate: protected change refused: %s (%s) caller=%s", path, lane, seat.named)
+    logger.warning("[hooks] git_gate: protected change refused: %s (%s) caller=%s", path, lane, seat.named)
     return _block(PROTECTED_REFUSED.format(path=path, what=what, lane=lane, caller=seat.named))
 
 
@@ -427,7 +427,7 @@ def _check_bash_protected(cmd: str, cwd: str, invocations: list, seat: _Seat) ->
         if what is None and role in _CONTAINER_ROLES:
             what = pp.protected_within(path)
             if what and role == "delete" and not seat.admin:  # the delete is what is refused, not a config change
-                logger.warning("[HOOKS] git_gate: delete refused: %s (Bash: %s) caller=%s", path, how, seat.named)
+                logger.warning("[hooks] git_gate: delete refused: %s (Bash: %s) caller=%s", path, how, seat.named)
                 return _block(DELETE_REFUSED.format(path=path, lane=how, what=what, caller=seat.named))
         if what:
             return _protected_refusal(str(path), what, f"Bash: {how}", seat)
@@ -489,7 +489,7 @@ def _decide(hook_data: dict) -> dict:
             return _check_edit(tool_input, cwd)
         return _BLOCK_ALLOW
     except Exception as exc:  # fail closed on what this gate guards
-        logger.error("[HOOKS] git_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
+        logger.error("[hooks] git_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
         if tool_name == "Bash" or tool_name in EDIT_TOOLS:
             return _block(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
         return _BLOCK_ALLOW

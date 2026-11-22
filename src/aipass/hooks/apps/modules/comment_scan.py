@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: comment_scan.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Comment budget counter: full-line comment share of a source file
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-16
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Counts a source file's full-line comment lines against the comment budget (docs/comments.md)."""
@@ -122,7 +122,7 @@ def _python_comments(text: str, lines: list[str]) -> set[int]:
     try:
         tokens = list(tokenize.generate_tokens(io.StringIO(textwrap.dedent(text)).readline))
     except (tokenize.TokenError, IndentationError, SyntaxError) as exc:
-        logger.info("[HOOKS] comment_scan: tokenizer refused the text, counting # lines: %s", exc)
+        logger.info("[hooks] comment_scan: tokenizer refused the text, counting # lines: %s", exc)
         return _python_by_lines(lines)
     marked = set()
     previous = tokenize.ENCODING

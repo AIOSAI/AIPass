@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine_closure.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: The hook engine's import closure, and the edit check that keeps a NameError out of it
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-04
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Which files the hook engine imports, and a refusal for an edit that would crash one of them.
@@ -57,9 +57,9 @@ RUFF_DARK = (
 )
 
 # One fixed text per fault, so medic fingerprints it once; the path and cause follow at INFO.
-RUFF_DARK_LOG = "[HOOKS] engine_closure: ruff did not answer, closure edits are refused until it does"
-CONFIG_HOLE_LOG = "[HOOKS] engine_closure: hooks.json unreadable, the closure is the engine's own roots only"
-PARSE_HOLE_LOG = "[HOOKS] engine_closure: a closure file did not parse, its imports are not followed"
+RUFF_DARK_LOG = "[hooks] engine_closure: ruff did not answer, closure edits are refused until it does"
+CONFIG_HOLE_LOG = "[hooks] engine_closure: hooks.json unreadable, the closure is the engine's own roots only"
+PARSE_HOLE_LOG = "[hooks] engine_closure: a closure file did not parse, its imports are not followed"
 
 
 class RuffDark(Exception):
@@ -73,7 +73,7 @@ def _wired_handlers(home: Path) -> list[str]:
         data = json.loads(config.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         logger.error(CONFIG_HOLE_LOG)
-        logger.info("[HOOKS] engine_closure: %s: %s", config, exc)
+        logger.info("[hooks] engine_closure: %s: %s", config, exc)
         data = {}
     found: list[str] = []
     stack: list[object] = [data]
@@ -116,7 +116,7 @@ def _imports(path: Path, package: str) -> list[str]:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except (OSError, SyntaxError, ValueError) as exc:
         logger.error(PARSE_HOLE_LOG)
-        logger.info("[HOOKS] engine_closure: %s not parsed: %s", path, exc)
+        logger.info("[hooks] engine_closure: %s not parsed: %s", path, exc)
         return []
     names: list[str] = []
     for node in _top_level(tree.body):
@@ -203,11 +203,11 @@ def crash_refusal(path: Path, tool_name: str, tool_input: dict, after_text, home
         hits = crash_hits(target, text)
     except RuffDark as exc:
         logger.error(RUFF_DARK_LOG)
-        logger.info("[HOOKS] engine_closure: ruff did not answer for %s: %s", target, exc)
+        logger.info("[hooks] engine_closure: ruff did not answer for %s: %s", target, exc)
         return RUFF_DARK.format(name=target.name, why=exc, python=sys.executable)
     if not hits:
         return None
-    logger.warning("[HOOKS] engine_closure: refused an edit leaving %s crashing at import", target)
+    logger.warning("[hooks] engine_closure: refused an edit leaving %s crashing at import", target)
     return REFUSED.format(name=target.name, hits="\n".join(hits))
 
 

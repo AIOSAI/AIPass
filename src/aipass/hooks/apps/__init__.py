@@ -1,1 +1,1 @@
-# HOOKS apps package
+# hooks apps package

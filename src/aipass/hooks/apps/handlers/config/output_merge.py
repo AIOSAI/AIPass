@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: output_merge.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: One hook output, one document - merges fan-out handler stdouts for the engine
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-09-10
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Merges every handler's stdout on one event into the ONE document Claude Code reads.
@@ -92,7 +92,7 @@ def _combine(event_type: str, outputs: list[tuple[str, str, str]]) -> str:
             merged["hookSpecificOutput"]["additionalContext"] = _CONTEXT_SEP.join(kept)
     if messages:
         merged["systemMessage"] = "\n".join(messages)
-    logger.info("[HOOKS] %s: %d outputs merged into one document, %d context(s) kept", event_type, len(docs), len(kept))
+    logger.info("[hooks] %s: %d outputs merged into one document, %d context(s) kept", event_type, len(docs), len(kept))
     return json.dumps(merged)
 
 
@@ -102,7 +102,7 @@ def _first_wins(into: dict, doc: dict, skip: tuple[str, ...], where: str) -> Non
         if key in skip:
             continue
         if key in into and into[key] != value:
-            logger.warning("[HOOKS] %s: %r conflicts with an earlier handler's value - earlier kept", where, key)
+            logger.warning("[hooks] %s: %r conflicts with an earlier handler's value - earlier kept", where, key)
             continue
         into[key] = value
 
@@ -118,7 +118,7 @@ def _fit_contexts(contexts: list[tuple[int, str, str, bool]], event_type: str) -
         size = _cc_len(text) + (_cc_len(_CONTEXT_SEP) if placed else 0)
         if placed and total + size > CONTEXT_LIMIT:
             logger.warning(
-                "[HOOKS] %s.%s context DROPPED (%d units): the merged additionalContext would cross %d",
+                "[hooks] %s.%s context DROPPED (%d units): the merged additionalContext would cross %d",
                 event_type,
                 name,
                 _cc_len(text),

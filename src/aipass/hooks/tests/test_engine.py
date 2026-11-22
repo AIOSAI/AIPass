@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 2.7.1
+# Version: 2.7.2
 # Description: Tests for hook engine dispatch logic: the dispatcher core; contracts and safeguards in two siblings
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/engine.py: the dispatcher core and the hook dispatch it drives."""
@@ -753,7 +753,7 @@ class TestHooksEntryPoint:
     def test_print_introspection_prints_output(self, capsys):
         print_introspection()
         captured = capsys.readouterr()
-        assert "HOOKS" in captured.out
+        assert "hooks — Hook Infrastructure" in captured.out
         assert "Discovered Modules" in captured.out
 
     def test_handle_command_returns_bool(self):

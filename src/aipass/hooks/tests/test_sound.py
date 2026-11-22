@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_sound.py
-# Version: 2.1.0
+# Version: 2.1.1
 # Description: Tests for shared sound module
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/sound.py."""
@@ -136,7 +136,7 @@ class TestSpeak:
             speak("test", tmp_dir=str(tmp_path))
 
         assert mock_sub.run.call_count == 1
-        mock_logger.info.assert_called_once_with("[HOOKS] speak: piper timed out")
+        mock_logger.info.assert_called_once_with("[hooks] speak: piper timed out")
         assert not list(tmp_path.glob("*.wav")), "a timed-out synthesis leaves no wav behind"
 
     def test_a_failed_synthesis_leaves_no_wav(self, tmp_path):
@@ -171,7 +171,7 @@ class TestSpeak:
 
         assert mock_logger.info.call_count == 1
         template, exc = mock_logger.info.call_args[0]
-        assert template == "[HOOKS] speak: playback error: %s"
+        assert template == "[hooks] speak: playback error: %s"
         assert str(exc) == "broken"
 
 
@@ -206,6 +206,6 @@ class TestMuteWritePair:
             sound.unmute()
             sound.mute()
         assert [c.args[0] for c in mock_logger.info.call_args_list] == [
-            "[HOOKS] sound: unmuted",
-            "[HOOKS] sound: muted",
+            "[hooks] sound: unmuted",
+            "[hooks] sound: muted",
         ]

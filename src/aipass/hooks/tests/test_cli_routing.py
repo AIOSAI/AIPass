@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for hooks's entry point routing, help and introspection
-# Version: 1.2.6
+# Version: 1.2.7
 # Created: 2026-09-03
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/hooks.py, the branch's CLI entry point."""
@@ -84,7 +84,7 @@ def test_print_introspection_renders_identity_and_help_pointer(capsys):
     branch_entry.print_introspection()
 
     out = capsys.readouterr().out
-    assert "HOOKS" in out
+    assert "hooks — Hook Infrastructure" in out and "HOOKS" not in out
     assert "Discovered Modules:" in out
     assert "--help" in out
 
