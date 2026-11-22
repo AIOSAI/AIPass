@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: push_central.py
 # Description: Push to Plans Central Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2025-11-21
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """Push to Plans Central Handler"""
@@ -126,7 +126,7 @@ def _extract_plans_by_branch(registry: Dict[str, Any]) -> Dict[str, Dict[str, An
         recently_closed = closed[:5]
 
         result[branch_name] = {
-            "branch_name": branch_name.upper(),
+            "branch_name": branch_name.lower(),
             "branch_path": bucket["location"],
             "active_plans": active,
             "recently_closed": recently_closed,

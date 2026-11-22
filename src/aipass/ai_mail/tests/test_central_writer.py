@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_central_writer.py
 # Description: Tests for central_writer -- branch inbox aggregation and central file writing
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-03
-# Modified: 2026-11-08
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/central_writer.py."""
@@ -33,21 +33,21 @@ def _suppress_logger(monkeypatch):
 
 
 def test_extract_branch_name_standard_path(tmp_path):
-    """Standard .ai_mail.local path extracts uppercase branch name."""
+    """Standard .ai_mail.local path extracts the lowercase branch name."""
     inbox = tmp_path / "repo" / "src" / "aipass" / "sentry" / ".ai_mail.local" / "inbox.json"
-    assert mod.extract_branch_name(inbox) == "SENTRY"
+    assert mod.extract_branch_name(inbox) == "sentry"
 
 
 def test_extract_branch_name_nested_path(tmp_path):
     """Deeply nested path still extracts the immediate parent of .ai_mail.local."""
     inbox = tmp_path / "repo" / "src" / "aipass" / "deep" / "nested" / "drone" / ".ai_mail.local" / "inbox.json"
-    assert mod.extract_branch_name(inbox) == "DRONE"
+    assert mod.extract_branch_name(inbox) == "drone"
 
 
-def test_extract_branch_name_lowercase_dir(tmp_path):
-    """Lowercase directory name is uppercased."""
-    inbox = tmp_path / "prax" / ".ai_mail.local" / "inbox.json"
-    assert mod.extract_branch_name(inbox) == "PRAX"
+def test_extract_branch_name_capital_dir(tmp_path):
+    """A capital directory name is lowercased."""
+    inbox = tmp_path / "PRAX" / ".ai_mail.local" / "inbox.json"
+    assert mod.extract_branch_name(inbox) == "prax"
 
 
 def test_read_inbox_stats_valid_inbox(tmp_path):
@@ -179,12 +179,12 @@ def test_find_all_inbox_files_refuses_an_unreadable_registry():
         mod.find_all_inbox_files()
 
 
-def test_get_valid_branch_names_reads_the_fleet_rows_uppercased(monkeypatch):
-    """Every fleet citizen's name comes back uppercased, a declared-root external's included."""
+def test_get_valid_branch_names_reads_the_fleet_rows_lowercased(monkeypatch):
+    """Every fleet citizen's name comes back lowercased, a declared-root external's included."""
     rows = [{"name": "sentry"}, {"name": "Drone"}, {"name": "GROW", "residency": "external"}]
     monkeypatch.setattr(mod, "get_fleet_branches", lambda: rows)
 
-    assert mod.get_valid_branch_names() == {"SENTRY", "DRONE", "GROW"}
+    assert mod.get_valid_branch_names() == {"sentry", "drone", "grow"}
 
 
 def test_aggregate_branch_stats_multiple_branches(tmp_path, monkeypatch):
@@ -211,13 +211,13 @@ def test_aggregate_branch_stats_multiple_branches(tmp_path, monkeypatch):
     monkeypatch.setattr(
         mod,
         "get_valid_branch_names",
-        lambda: {"SENTRY", "DRONE"},
+        lambda: {"sentry", "drone"},
     )
 
     result = mod.aggregate_branch_stats()
     assert result == {
-        "SENTRY": {"unread": 2, "total": 5},
-        "DRONE": {"unread": 1, "total": 3},
+        "sentry": {"unread": 2, "total": 5},
+        "drone": {"unread": 1, "total": 3},
     }
 
 
@@ -245,13 +245,11 @@ def test_aggregate_branch_stats_skips_unregistered(tmp_path, monkeypatch):
     monkeypatch.setattr(
         mod,
         "get_valid_branch_names",
-        lambda: {"SENTRY"},  # ROGUE not registered
+        lambda: {"sentry"},  # rogue not registered
     )
 
     result = mod.aggregate_branch_stats()
-    assert "ROGUE" not in result
-    assert "SENTRY" in result
-    assert result["SENTRY"] == {"unread": 1, "total": 2}
+    assert result == {"sentry": {"unread": 1, "total": 2}}
 
 
 def test_aggregate_branch_stats_skips_malformed_inbox(tmp_path, monkeypatch):
@@ -275,12 +273,11 @@ def test_aggregate_branch_stats_skips_malformed_inbox(tmp_path, monkeypatch):
     monkeypatch.setattr(
         mod,
         "get_valid_branch_names",
-        lambda: {"BAD", "GOOD"},
+        lambda: {"bad", "good"},
     )
 
     result = mod.aggregate_branch_stats()
-    assert "BAD" not in result
-    assert "GOOD" in result
+    assert result == {"good": {"unread": 1, "total": 1}}
 
 
 def test_write_central_file_creates_file(tmp_path, monkeypatch):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_push_central.py
 # Description: Tests for push_central handler -- push to Plans Central
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-05-12
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/dashboard/push_central.py."""
@@ -528,7 +528,7 @@ class TestExtractPlansByBranch:
         }
         result = _branches(tmp_path, registry)
         section = result["flow"]
-        assert section["branch_name"] == "FLOW"
+        assert section["branch_name"] == "flow"
         assert section["branch_path"] == "/repo/src/aipass/flow"
         assert "active_plans" in section
         assert "recently_closed" in section

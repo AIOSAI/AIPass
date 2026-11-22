@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Event handler registry for startup registration
-# Version: 0.7.0
+# Version: 0.7.1
 # Created: 2025-12-04
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Event Handler Registry - Setup all event handlers on startup"""
@@ -42,7 +42,7 @@ def setup_handlers():
         """
         email_data = {
             "from": from_branch,
-            "from_name": "TRIGGER",
+            "from_name": "trigger",
             "to": to_branch,
             "subject": subject,
             "message": message,

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: central_writer.py
 # Description: AI_MAIL Central File Writer
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2025-11-27
-# Modified: 2026-11-08
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -62,7 +62,7 @@ def find_all_inbox_files() -> List[Path]:
 def extract_branch_name(inbox_path: Path) -> str:
     """Extract branch name from inbox.json path."""
     branch_dir = inbox_path.parent.parent
-    branch_name = branch_dir.name.upper()
+    branch_name = branch_dir.name.lower()
 
     return branch_name
 
@@ -79,8 +79,8 @@ def read_inbox_stats(inbox_path: Path) -> Tuple[int, int]:
 
 
 def get_valid_branch_names() -> set:
-    """The fleet's citizen names, uppercased: core, residents and declared-root externals."""
-    return {branch["name"].upper() for branch in get_fleet_branches()}
+    """The fleet's citizen names, lowercased: core, residents and declared-root externals."""
+    return {branch["name"].lower() for branch in get_fleet_branches()}
 
 
 def aggregate_branch_stats() -> Dict[str, Dict[str, int]]:

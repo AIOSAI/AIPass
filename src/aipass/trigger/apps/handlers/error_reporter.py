@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_reporter.py
 # Description: Error reporting handler for registry and source fix email
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-08
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -69,7 +69,7 @@ Reply to @trigger with your fix status."""
 
         email_data = {
             "from": "@trigger",
-            "from_name": "TRIGGER",
+            "from_name": "trigger",
             "to": recipient,
             "subject": subject,
             "message": body,
