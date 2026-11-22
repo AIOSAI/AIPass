@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_timer_install.py
 # Description: Tests for the timer_install module (systemd user timer installer)
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-06-25
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/timer_install.py — install-timer and uninstall-timer, the systemd user timer."""
@@ -89,7 +89,7 @@ class TestHandleCommand:
             result = handle_command("install-timer", ["--help"])
         out = capsys.readouterr().out
         assert result is True
-        assert "install-timer / uninstall-timer — Daemon Scheduler Timer" in out, (
+        assert "install-timer / uninstall-timer — daemon Scheduler Timer" in out, (
             f"install-timer --help printed: {out[:200]!r}"
         )
         assert "USAGE:" in out, "install-timer --help must print a USAGE: block"

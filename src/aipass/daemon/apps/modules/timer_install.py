@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: timer_install.py
 # Description: Idempotent systemd user timer installer for daemon scheduler
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-06-25
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -55,7 +55,7 @@ def print_introspection():
 
 def print_help():
     """Display usage information."""
-    console.print("\n[bold cyan]install-timer / uninstall-timer — Daemon Scheduler Timer[/bold cyan]")
+    console.print("\n[bold cyan]install-timer / uninstall-timer — daemon Scheduler Timer[/bold cyan]")
     console.print("\n[yellow]USAGE:[/yellow]")
     console.print("  drone @daemon install-timer     Install + enable daemon-tick timer")
     console.print("  drone @daemon uninstall-timer   Stop + remove daemon-tick timer")
