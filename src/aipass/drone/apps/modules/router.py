@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router.py
 # Description: Command routing logic for the drone module
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-03-09
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -97,7 +97,7 @@ def route_command(
     # Same resolver execute_branch_command uses, so the tag names who is stamped on the work.
     caller = resolve_caller_identity(caller_cwd())
     # UNKNOWN, not an empty tag: an omitted caller hides the gap.
-    caller_tag = f" [CALLER:{caller.upper()}]" if caller else " [CALLER:UNKNOWN]"
+    caller_tag = f" [CALLER:{caller}]" if caller else " [CALLER:UNKNOWN]"
     logger.info(
         "Routing @%s%s → %s %s (timeout=%ds, extend_on_output=%s)",
         branch_name,

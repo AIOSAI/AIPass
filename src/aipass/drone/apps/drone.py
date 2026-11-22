@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-05
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -140,7 +140,7 @@ def print_help() -> None:
     table.add_row("--version", "Show version")
 
     console.print()
-    console.print(f"[bold cyan]Drone[/bold cyan] [dim]v{VERSION}[/dim] — Command Router & Discovery")
+    console.print(f"[bold cyan]drone[/bold cyan] [dim]v{VERSION}[/dim] — Command Router & Discovery")
     console.print()
     console.print("[dim]Routes commands to registered AIPass branches and modules.[/dim]")
     console.print()
@@ -163,7 +163,7 @@ def print_help() -> None:
 def print_introspection() -> None:
     """Display branch overview — auto-discovers modules."""
     console.print()
-    console.print("[bold cyan]Drone - Command Router & Discovery[/bold cyan]")
+    console.print("[bold cyan]drone - Command Router & Discovery[/bold cyan]")
     console.print()
     console.print("[dim]Routes commands to AIPass branches and internal modules[/dim]")
     console.print()

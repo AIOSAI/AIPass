@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_handler.py
 # Description: Handler for command routing implementation; the caller stamp for routed children and in-process modules
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-03-09
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Handler for command routing implementation."""
@@ -309,7 +309,7 @@ def execute_branch_command(
         extend_on_output=extend_on_output,
     )
 
-    caller_tag = f" [CALLER:{caller_branch.upper()}]" if caller_branch else ""
+    caller_tag = f" [CALLER:{caller_branch}]" if caller_branch else ""
     logger.info("Executed @%s%s %s → exit %d", branch_name, caller_tag, command or "(introspection)", result.exit_code)
     json_handler.log_operation(
         "execute_branch_command", {"branch": branch_name, "command": command or "", "exit_code": result.exit_code}

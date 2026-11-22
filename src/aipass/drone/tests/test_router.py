@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_router.py
 # Description: Command routing - router module and router_handler
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-14
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/router.py and apps/handlers/router_handler.py."""
@@ -899,7 +899,7 @@ class TestIdentityMessageSeverity:
             route_command("@testbranch", "status")
 
         routing = " ".join(str(c) for c in mock_logger.info.call_args_list)
-        assert "CALLER:COMMONS" in routing
+        assert "CALLER:commons" in routing
 
 
 class TestCallerBranchEnvVar:
