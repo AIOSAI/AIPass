@@ -3,7 +3,7 @@
 # Description: Tests for rollover trigger detection handler
 # Version: 1.3.1
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/monitor/detector.py."""
@@ -170,7 +170,7 @@ class TestCheckSingleFile:
         mem_file = tmp_path / "SENTRY.local.json"
         data = {
             "document_metadata": {"schema_version": "3.0.0"},
-            "sessions": [{"id": f"s{i}", "notes": "padding"} for i in range(50)],
+            "sessions": [{"id": f"s{i}", "number": 50 - i, "notes": "padding"} for i in range(50)],
         }
         content = json.dumps(data, indent=2)
         mem_file.write_text(content, encoding="utf-8")
@@ -201,7 +201,7 @@ class TestCheckSingleFile:
         mem_file = tmp_path / "DRONE.local.json"
         data = {
             "document_metadata": {"schema_version": "2.0.0"},
-            "sessions": [{"id": "s1"}, {"id": "s2"}, {"id": "s3"}, {"id": "s4"}],
+            "sessions": [{"id": f"s{n}", "number": n} for n in range(4, 0, -1)],
         }
         mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -368,14 +368,15 @@ class TestCheckSingleFile:
 
         assert result["success"] is True
         assert result["should_rollover"] is False
-        assert "parse failure" in result.get("v2_reason", "")
+        assert result["v2_reason"].startswith("damaged - not valid JSON"), result
+        assert result["damaged"][0].startswith("not valid JSON"), result
 
     def test_defaults_fallback_when_branch_missing_from_per_branch(self, tmp_path: Path, monkeypatch):
         """Branch not in per_branch should fall back to defaults and still trigger on entry count."""
         mem_file = tmp_path / "NEWBRANCH.local.json"
         data = {
             "document_metadata": {"schema_version": "3.0.0"},
-            "sessions": [{"id": f"s{i}"} for i in range(15)],
+            "sessions": [{"id": f"s{i}", "number": 15 - i} for i in range(15)],
         }
         mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -427,11 +428,11 @@ class TestSessionAutoCompactBudget:
         data = {
             "document_metadata": {"schema_version": "3.0.0"},
             "sessions": [
-                {"id": "regular-1", "status": "completed"},
-                {"id": "auto-0", "status": "auto-compact"},
-                {"id": "auto-1", "status": "auto-compact"},
-                {"id": "auto-2", "status": "auto-compact"},
-                {"id": "auto-3", "status": "auto-compact"},
+                {"id": "regular-1", "number": 5, "status": "completed"},
+                {"id": "auto-0", "number": 4, "status": "auto-compact"},
+                {"id": "auto-1", "number": 3, "status": "auto-compact"},
+                {"id": "auto-2", "number": 2, "status": "auto-compact"},
+                {"id": "auto-3", "number": 1, "status": "auto-compact"},
             ],
         }
         mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -483,7 +484,7 @@ class TestSessionAutoCompactBudget:
         mem_file = tmp_path / "MEMORY.local.json"
         data = {
             "document_metadata": {"schema_version": "3.0.0"},
-            "sessions": [{"id": f"s{i}", "status": "completed"} for i in range(12)],
+            "sessions": [{"id": f"s{i}", "number": 12 - i, "status": "completed"} for i in range(12)],
         }
         mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -856,3 +857,82 @@ class TestTheCallerCwdWalkReadsNamesNotSpellings:
         found = [branch["name"] for branch in detector.read_scope()]
 
         assert found == ["real"]
+
+
+def _flow_local(tmp_path: Path, monkeypatch, raw: str) -> Path:
+    """A one-branch fleet ("b") whose local.json is *raw*, judged against a sessions count of 15."""
+    trinity = tmp_path / "flow" / ".trinity"
+    trinity.mkdir(parents=True)
+    (trinity / "local.json").write_text(raw, encoding="utf-8")
+    monkeypatch.setattr(
+        detector.config_loader,
+        "section",
+        lambda name: {"per_branch": {}, "defaults": {"local": {"sessions": {"count": 15}}}},
+    )
+    registry = {"branches": [{"name": "b", "path": str(tmp_path / "flow"), "status": "active"}]}
+    (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+    monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
+    return trinity / "local.json"
+
+
+def _sessions(numbers: list) -> str:
+    """local.json text with one session per entry of *numbers*; None leaves the number out."""
+    rows = [{"summary": f"s {n}"} if n is None else {"number": n, "summary": f"s {n}"} for n in numbers]
+    return json.dumps({"document_metadata": {"schema_version": "3.0.0"}, "sessions": rows})
+
+
+class TestADamagedFileIsNamedNeverOk:
+    """check / status / run read a zero-byte or non-list local.json as 'OK' / 'No files need rollover'."""
+
+    @pytest.mark.parametrize(
+        ("raw", "named"),
+        [
+            ("", "empty file"),
+            ('{"sessions": "a string"}', "'sessions' is a str, not a list"),
+            ("[]", "top level is a list, not an object"),
+        ],
+    )
+    def test_the_walk_and_the_stats_name_it(self, tmp_path: Path, monkeypatch, raw: str, named: str):
+        _flow_local(tmp_path, monkeypatch, raw)
+
+        walk = detector.check_all_branches()
+        stats = detector.get_rollover_stats()
+
+        assert walk["triggers"] == []
+        assert [(d.branch, d.memory_type, d.reasons) for d in walk["damaged"]] == [("b", "local", [named])]
+        assert stats["files_damaged"] == 1
+        assert stats["branches"]["b"]["local"]["damaged"] == [named]
+
+
+class TestAnOverCountListRolloverCannotOrderIsDamagedNotATrigger:
+    """18/15 with the newest unnumbered was a trigger the extractor then skipped as 'No entries exceed'."""
+
+    def test_a_missing_number_is_named_by_index_and_type(self, tmp_path: Path, monkeypatch):
+        _flow_local(tmp_path, monkeypatch, _sessions([None, *range(17, 0, -1)]))
+
+        walk = detector.check_all_branches()
+
+        assert walk["triggers"] == []
+        assert walk["damaged"][0].reasons == ["sessions[0] (sessions entry) has no 'number'"]
+
+    def test_a_repeated_number_is_named(self, tmp_path: Path, monkeypatch):
+        _flow_local(tmp_path, monkeypatch, _sessions([2, *range(17, 0, -1)]))
+
+        walk = detector.check_all_branches()
+
+        assert walk["triggers"] == []
+        assert walk["damaged"][0].reasons == ["sessions[16] repeats number 2 of sessions[0]"]
+
+    def test_oldest_first_still_triggers_the_extractor_re_sorts_it(self, tmp_path: Path, monkeypatch):
+        _flow_local(tmp_path, monkeypatch, _sessions(list(range(1, 19))))
+
+        walk = detector.check_all_branches()
+
+        assert [str(t) for t in walk["triggers"]] == ["b.local (18/15 sessions)"]
+        assert walk["damaged"] == []
+
+    def test_under_its_count_an_unnumbered_entry_is_lint_s_not_rollover_s(self, tmp_path: Path, monkeypatch):
+        _flow_local(tmp_path, monkeypatch, _sessions([None, 2, 1]))
+
+        assert detector.check_all_branches()["damaged"] == []

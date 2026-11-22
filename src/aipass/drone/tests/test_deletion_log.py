@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_deletion_log.py
 # Description: Every drone delete, and every refused one, leaves a deletion record
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-08-14
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/deletion_log.py, the safe_delete path writing it and the package door handing it out."""
@@ -47,6 +47,15 @@ def project(tmp_path, monkeypatch):
 
 
 @pytest.fixture()
+def seat(project, monkeypatch):
+    """A citizen's own branch in the fake project, stood in: off the admin seat, drone rm moves only inside it."""
+    home = project / "src" / "aipass" / "me"
+    (home / ".trinity").mkdir(parents=True)
+    monkeypatch.chdir(home)
+    return home
+
+
+@pytest.fixture()
 def outside_project(tmp_path_factory):
     """A temp folder outside the project: only a true delete there can take the cwd with it."""
     return tmp_path_factory.mktemp("outside")
@@ -61,8 +70,8 @@ def read_records(project_root: Path) -> list[dict]:
 
 
 class TestDeletionIsRecorded:
-    def test_a_successful_move_writes_a_record_naming_both_paths(self, project):
-        target = project / "build"
+    def test_a_successful_move_writes_a_record_naming_both_paths(self, project, seat):
+        target = seat / "build"
         target.mkdir()
         (target / "a.txt").write_text("x", encoding="utf-8")
 
@@ -71,7 +80,7 @@ class TestDeletionIsRecorded:
         (record,) = read_records(project)
         assert record["outcome"] == "moved"
         assert record["path"] == str(target.resolve())
-        assert record["moved_to"] == str(project.resolve() / ".archive" / "build")
+        assert record["moved_to"] == str(seat.resolve() / ".archive" / "build")
 
     def test_refusal_writes_a_record(self, project, monkeypatch):
         """A guard refusal is the only trace that attempt leaves — record it."""
@@ -144,8 +153,8 @@ class TestRecordContents:
         for field in self.REQUIRED:
             assert field in record, f"record is missing {field!r}"
 
-    def test_file_record_carries_its_size(self, project):
-        target = project / "sized.txt"
+    def test_file_record_carries_its_size(self, project, seat):
+        target = seat / "sized.txt"
         target.write_text("0123456789", encoding="utf-8")
 
         safe_delete([str(target)])
@@ -154,8 +163,8 @@ class TestRecordContents:
         assert record["kind"] == "file"
         assert record["size_bytes"] == 10
 
-    def test_directory_record_counts_entries_and_bytes(self, project):
-        target = project / "tree"
+    def test_directory_record_counts_entries_and_bytes(self, project, seat):
+        target = seat / "tree"
         (target / "nested").mkdir(parents=True)
         (target / "a.txt").write_text("aa", encoding="utf-8")
         (target / "nested" / "b.txt").write_text("bbb", encoding="utf-8")
@@ -167,9 +176,9 @@ class TestRecordContents:
         assert record["entry_count"] == 3  # a.txt, nested/, nested/b.txt
         assert record["size_bytes"] == 5
 
-    def test_measurement_happens_before_the_delete(self, project):
+    def test_measurement_happens_before_the_delete(self, project, seat):
         """Size of a deleted tree is unknowable afterwards — measure first."""
-        target = project / "tree"
+        target = seat / "tree"
         target.mkdir()
         (target / "a.txt").write_text("hello", encoding="utf-8")
 
@@ -435,9 +444,9 @@ class TestBounded:
         siblings = deletion_log.deletion_log_path().parent.glob("deletions.jsonl*")
         assert sorted(p.name for p in siblings) == ["deletions.jsonl", "deletions.jsonl.1"]
 
-    def test_huge_tree_measurement_is_capped(self, project, monkeypatch):
+    def test_huge_tree_measurement_is_capped(self, project, seat, monkeypatch):
         monkeypatch.setattr(deletion_log, "_MEASURE_ENTRY_CAP", 5)
-        target = project / "many"
+        target = seat / "many"
         target.mkdir()
         for i in range(20):
             (target / f"f{i}.txt").write_text("x", encoding="utf-8")
@@ -586,8 +595,8 @@ class TestAnotherBranchRecordsThroughTheDoor:
 
 
 class TestRecordFailureIsContained:
-    def test_delete_still_happens_when_the_store_is_unwritable(self, project):
-        target = project / "x.txt"
+    def test_delete_still_happens_when_the_store_is_unwritable(self, project, seat):
+        target = seat / "x.txt"
         target.write_text("x", encoding="utf-8")
 
         with patch.object(deletion_log, "_append_record", side_effect=OSError("disk full")):

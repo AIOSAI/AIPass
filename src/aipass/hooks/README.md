@@ -7,7 +7,7 @@ platforms (Claude Code, Codex, OpenCode) with per-project configuration, full lo
 one side it injects the grounding an agent wakes up with; on the other it fences the writes an agent
 makes.
 **Module:** `aipass.hooks`
-**Version:** 1.4.0
+**Version:** 1.3.1
 
 ---
 
@@ -108,8 +108,8 @@ the gates), `provider_launch` (a provider session started outside the caller's b
 `cc_sessions`, `cc_transcripts`, `diagnostics_state`, `hook_test`, `release_notice`, `sandbox` and
 `wire_verify`. `apps/handlers/` holds the implementation, one directory per concern: `bridges/` per
 platform, `prompt/` for injection, `security/` for the gates, `lifecycle/` for session and compaction
-events, `notification/` for sound and mail, plus `config/`, `cli/` and the `json/` service every
-branch shares.
+events, `notification/` for sound and mail, `parity/`, plus `config/`, `cli/` and the `json/` service
+every branch shares.
 
 Handlers are imported dynamically by dotted path at dispatch time, never statically, which is why no
 handler is referenced anywhere in this tree and why static analysis cannot see them as used.
@@ -168,7 +168,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 
 ---
 
-**Last Updated:** 2026-10-29
+**Last Updated:** 2026-11-21
 
 ---
 [← Back to AIPass](../../../README.md)

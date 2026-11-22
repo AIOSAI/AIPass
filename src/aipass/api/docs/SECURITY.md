@@ -148,6 +148,6 @@ key = "sk-or-v1-FAKE-no-hex-patterns"
 
 1. **Rotate immediately** — bots scan public repos within seconds
 2. Revoke the old key at the provider dashboard
-3. Generate a new key and update `~/.secrets/aipass/.env`
+3. Generate a new key, write it into `~/.secrets/aipass/` and run `drone @api secrets migrate`, which stores it in the keyring (service `aipass`, entry `<provider>/<slug>`) and shreds the file
 4. Check git history: `git log --all -p -- '*.env' '*.json'`
 5. If the key entered git history, consider `git filter-branch` or BFG Repo-Cleaner

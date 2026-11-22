@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for CLI routing and help output
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-27
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/spawn.py's CLI routing, help output, and introspection."""
@@ -56,6 +56,11 @@ class TestCliRouting:
                 result = main()
         assert result == 0
         mock_help.assert_called_once()
+
+    def test_top_help_names_the_registry_rebuild(self, capsys: pytest.CaptureFixture[str]):
+        """A corrupt registry's way out is findable from the top help. Mutant: the line dropped -> red."""
+        print_help()
+        assert "sync-registry --rebuild" in capsys.readouterr().out
 
     def test_help_word(self):
         """main() with 'help' command calls print_help."""

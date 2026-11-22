@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_create_plan.py
 # Description: Tests for apps/modules/create_plan.py -- handle_command routing
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/create_plan.py."""
@@ -182,3 +182,15 @@ class TestAFailedCreateIsAnError:
         out, err = capsys.readouterr()
         assert "Refused: inside .git/" in err and "Refused" not in out
         assert command_failed()
+
+
+class TestABlankSubjectIsRefused:
+    @pytest.mark.parametrize("subject", ["", "   ", "\n"])
+    def test_a_blank_subject_is_refused_on_stderr_and_creates_nothing(self, subject, capsys):
+        with patch(f"{_MOD}.create_plan") as create:
+            assert handle_command("create", [".", subject]) is True
+
+        out, err = capsys.readouterr()
+        assert "A plan needs a subject" in err and "subject" not in out
+        assert command_failed()
+        create.assert_not_called()

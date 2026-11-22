@@ -30,7 +30,7 @@ detector.check_all_branches()        # scan AIPASS_REGISTRY.json + external regi
                                      # against auto_compact_cap (3), key_learnings, observations
                                      # per_branch[branch][file_type] → defaults[file_type]
                                      # no limit either place = CONFIG GAP, logged, skipped
-                                     # unparseable file = logged, skipped — never a fallback
+                                     # a DAMAGED file is never a trigger (below)
 → orchestrator.execute_rollover()
   → extract_items()                  # the len - count oldest entries; none at exactly the limit
   → embed via subprocess             # fastembed (ONNX) — see vector_search.md re: venv
@@ -50,6 +50,33 @@ image, so a todo, a meta line or an entry written during storage stays.
 walk never rolls a pad. `rollover run` rolls ONE branch's pad before the walk (file only, no
 embedding) and `rollover check` counts it after — see
 [todos_and_backlog.md](todos_and_backlog.md).
+
+A trigger the extractor skips is a file over its limit that was not rolled: `rollover run` prints
+it through `error()`, so the run exits 2, never "complete" with exit 0.
+
+---
+
+## A damaged file is refused by name
+
+`detector.damage_in()` is the one judge, shared by the detector, the extractor and `lint`. A file is
+damaged when it is empty or not valid JSON, when its top level is not an object, when a capped
+container (`sessions`, `key_learnings`, `observations`) is neither a list nor a 2.0.0 dict, or when
+a list over its count holds an entry rollover cannot order: no int `number`
+(`sessions[0] (sessions entry) has no 'number'`) or a repeated one
+(`sessions[16] repeats number 2 of sessions[0]`).
+
+A damaged file is never a trigger. `rollover check`, `run` and `status` list it with its reasons
+through `error()` (exit 2), and `extract_items` refuses it with the same words if it is handed one
+anyway. Rollover never numbers an entry or reshapes a container itself: a person repairs it.
+
+Why each shape is refused, not rolled:
+
+- **No number.** With an unnumbered head the valve below loses its number rule and falls back to
+  dates, so on the day the entries were written every tail candidate is held back and nothing drains.
+- **A repeated number.** The extractor re-sorts by `number` before taking the tail, so a newest entry
+  that reuses an old number moves into the tail and is archived as oldest history.
+- **Oldest-first is not damage.** The re-sort archives the lowest numbers and the trim persists the
+  newest-first order, so it rolls. `lint` and `health` still name it.
 
 ---
 
@@ -131,8 +158,8 @@ a fresh write landed at the wrong end — numbered above the array head, or date
 
 The **date** half is off for the snapshot lane (`date_guard=False`). Snapshots are machine-written
 several times a day, so at cap the oldest one is nearly always dated today: with the date rule on, the
-valve would refuse every candidate and the lane could never drain. Ordering says which snapshot is oldest there, not the date. Numbering still guards both lanes,
-and when an entry carries no usable `number` the date rule stays on regardless of the caller.
+valve would refuse every candidate and the lane could never drain. Ordering says which snapshot is oldest there, not the date. Numbering still guards both lanes;
+an over-count list with an entry carrying no usable `number` is damaged and never reaches the valve.
 
 ---
 

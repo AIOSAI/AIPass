@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitor_registry.py
 # Description: Tests for monitor_ops handler and registry_monitor module
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-03-08
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/registry/monitor_ops.py and apps/modules/registry_monitor.py."""
@@ -23,6 +23,7 @@ from aipass.flow.apps.handlers.plan import authority
 from aipass.flow.apps.handlers.registry import monitor_ops
 from aipass.flow.apps.handlers.template import get_template as template_mod
 from aipass.flow.apps.modules import registry_monitor
+from aipass.trigger import trigger as trigger_bus
 
 
 def _make_plan_file(directory: Path, number: str) -> Path:
@@ -489,16 +490,24 @@ class TestRegistryMove:
 class TestFireEvent:
     """Tests for the _fire_event helper function."""
 
-    def test_fire_event_success(self, tmp_path):
-        """Successful event fire should return True."""
-        mod = monitor_ops
-        mock_trigger = MagicMock()
-        plan_path = str(tmp_path / "FPLAN-0001.md")
-        # Replaced at trigger's door, the name _fire_event imports; a fake core module would be cached by the door.
-        with patch("aipass.trigger.trigger", mock_trigger):
-            result = mod._fire_event("plan_file_created", path=plan_path)
-        assert result is True
-        mock_trigger.fire.assert_called_once_with("plan_file_created", path=plan_path)
+    @pytest.mark.parametrize(
+        ("outcome", "counted"),
+        [
+            ({"handlers": 1, "ran": 1, "failed": 0}, True),
+            ({"event": "plan_file_created", "deferred": True}, True),
+            ({"handlers": 0, "ran": 0, "failed": 0}, False),
+            ({"handlers": 1, "ran": 0, "failed": 1}, False),
+        ],
+    )
+    def test_a_fire_counts_as_a_change_only_when_a_handler_acted(self, tmp_path, outcome, counted):
+        """FPLAN-1154 item 1: plan_file_* has no handler, and 'Updated: 9' was printed for a scan that wrote nothing."""
+        plan_path = _make_plan_file(tmp_path, "0001")
+        with patch.object(trigger_bus, "fire", return_value=outcome) as fire:
+            result = monitor_ops.scan_plan_files_impl(tmp_path, load_registry=lambda: {"plans": {}})
+
+        fire.assert_called_once_with("plan_file_created", path=str(plan_path))
+        assert result["added"] == (["0001"] if counted else [])
+        assert result["healing_performed"] is counted
 
     def test_fire_event_import_error(self, mock_logger):
         """ImportError should return False and log warning."""
@@ -705,3 +714,42 @@ class TestARepairVerbIsFlowsOrTheAdminsRun:
         assert stopped.value.code == 1
         move.assert_called_once_with(tmp_path / "a", tmp_path, apply=False)
         assert "registry_move rewrites" in capsys.readouterr().err
+
+
+class TestScanReportsWhatItDid:
+    """FPLAN-1154 items 1 and 3: one true statement, and a plan-named file the registry cannot see is named."""
+
+    def test_a_plan_named_file_with_no_plan_title_is_reported_and_left_alone(self, tmp_path):
+        plan = _write_plan(tmp_path / "flow", "FPLAN-0001_real_2026-11-21.md")
+        fake = tmp_path / "flow" / "FPLAN-9999_fake_2026-11-21.md"
+        fake.write_text("hand-written, no title line\n", encoding="utf-8")
+
+        with patch.object(monitor_ops, "_fire_event", MagicMock(return_value=True)) as fire:
+            result = monitor_ops.scan_plan_files_impl(tmp_path, load_registry=lambda: {"plans": {}})
+
+        assert result["unrecognised"] == [str(fake)]
+        fire.assert_called_once_with("plan_file_created", path=str(plan))
+        assert fake.read_text(encoding="utf-8") == "hand-written, no title line\n"
+
+    def test_scan_names_the_unrecognised_file_and_never_claims_unapplied_changes(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: "@flow")
+        fake = str(tmp_path / "FPLAN-9999_fake_2026-11-21.md")
+        result = {
+            "total_plans": 3,
+            "added": [],
+            "updated": [],
+            "removed": [],
+            "duplicates": [],
+            "unrecognised": [fake],
+            "healing_performed": False,
+            "doctrine_healed": 0,
+        }
+
+        with patch.object(registry_monitor, "scan_plan_files", return_value=result):
+            assert registry_monitor.handle_command("registry", ["scan"]) is True
+
+        out, err = capsys.readouterr()
+        assert "1 file(s) named like a plan are not plans" in err
+        assert fake in out and "re-run scan to register it" in out
+        assert "Updated: 0" in out and "No changes needed" in out
+        assert "no changes applied" not in out + err

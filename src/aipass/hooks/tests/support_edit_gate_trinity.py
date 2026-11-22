@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_edit_gate_trinity.py
 # Description: Helpers shared by the edit_gate .trinity test files: cap tables, hook data, the import seam routers
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Helpers for the edit_gate .trinity tests (no test_ prefix: never collected)."""
@@ -81,11 +81,12 @@ def _hook_data(file_path, content=None, tool_name="Write", cwd=None, **extra_inp
 
 
 def _mock_entry_limits(limits):
-    """Create a mock module with controlled limits and real changed_entries."""
+    """Create a mock module with controlled limits and real changed_entries and check_file_budget."""
     el = memory_entry_limits
     mock_module = MagicMock()
     mock_module.load_entry_limits.return_value = limits
     mock_module.changed_entries = el.changed_entries
+    mock_module.check_file_budget = el.check_file_budget
     return mock_module
 
 

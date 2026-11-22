@@ -6,7 +6,8 @@ Why `apps/handlers/json/json_handler.py` is a shim and not an implementation.
 
 `apps/handlers/json/json_handler.py` is **not an implementation**. It is the
 fleet's canonical shim: 1724 bytes,
-byte-identical in all eighteen branches, sha256
+byte-identical in seventeen of the eighteen branches that carry it (@hooks binds
+with `for_branch("hooks")` and is one byte shorter), sha256
 `237bc66d92337a188bcd85e515863fe2141a607df0b7534c820b9ead55ae50db`. sentry
 checks it by hash, so nothing branch-specific may be added to it.
 

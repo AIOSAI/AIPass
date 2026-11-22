@@ -7,7 +7,7 @@ Tracked public reference for the `AIPASS` branch.
 **This is the only one of the branch's four directories that rides the PR.** It is in
 git's index, so anything written here ships to the public repo and strangers read it —
 write accordingly. The other three (`docs.local/`, `dropbox/`, `artifacts/`) are
-gitignored by design (`.gitignore` lines 55–58) and never leave this machine.
+gitignored by design (`.gitignore`) and never leave this machine.
 
 ## The pages
 
@@ -17,11 +17,11 @@ the depth behind it.
 | Page | What it covers |
 |---|---|
 | [init_and_install.md](init_and_install.md) | Every entry form of `install` and `init`, including the ones no help page names |
-| [scaffold_update.md](scaffold_update.md) | The update ritual, the manifest hash rule, seeds, `.updateignore` |
+| [scaffold_update.md](scaffold_update.md) | The update ritual, the manifest hash rule, `.updateignore` |
 | [doctor.md](doctor.md) | The seven groups, the flags, the provider wiring door, what it refuses |
 | [trust_and_projects.md](trust_and_projects.md) | The enrolled hash, and `new` / `adopt` |
 | [baud_phone_face.md](baud_phone_face.md) | Fetch, verify, unpack, swap, point — and every refusal |
 | [admin_setup.md](admin_setup.md) | The admin lane: the five legs, the threat model, lighting it |
-| [shared_contract.md](shared_contract.md) | `shared/`, the part of this branch @spawn imports |
+| [shared_contract.md](shared_contract.md) | `shared/`, the install-time helpers and the AIPass home they answer |
 | [probe_hygiene.md](probe_hygiene.md) | How this branch probes the system without mutating it |
 | [two_clis.md](two_clis.md) | One citizen on Claude Code, Codex and OpenCode: what each reads, the ritual spellings, the compact flow |

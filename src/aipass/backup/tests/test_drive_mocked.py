@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_drive_mocked.py
 # Description: Tests for the drive_* command modules, the settings verb and the suite-wide Drive seal
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-06-12
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/drive_*.py and settings.py, and the Drive seal on apps/handlers/drive/client.py."""
@@ -22,6 +22,7 @@ from aipass.backup.apps import backup as entry
 from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.handlers.project import registry
 from aipass.backup.apps.modules import drive_check, drive_clear, drive_stats, drive_sync, settings
+from aipass.cli import command_failed
 
 # run_drive_check and run_drive_sync reach a REAL Google account and run_drive_clear deletes the tracker:
 # every test that passes an argument a run_* could act on replaces that run_* with a recorder first.
@@ -53,6 +54,20 @@ class TestDriveSyncRouting:
         assert "Handlers: drive/client, drive/upload, drive/tracker" in out
         assert err == ""
 
+    @pytest.mark.parametrize("module", [drive_sync, drive_stats], ids=["drive_sync", "drive_stats"])
+    def test_a_missing_path_is_refused_before_drive_is_dialled(self, module, tmp_path, capsys, monkeypatch) -> None:
+        """drive_sync named the keyring first; drive_stats read an empty tracker, then Drive's quota, exit 0."""
+        ran: list = []
+        run = "run_drive_sync" if module is drive_sync else "run_drive_stats"
+        monkeypatch.setattr(module, run, lambda *a, **k: ran.append(a))
+
+        assert module.handle_command(module.PRIMARY_COMMAND, [str(tmp_path / "gone")]) is True
+
+        err = capsys.readouterr().err
+        assert (ran, command_failed()) == ([], True)
+        assert "Project path is not a directory" in err
+        assert "gone" in err
+
     # A module that claimed every verb would swallow the others; one that declines must also stay silent.
     def test_drive_sync_declines_a_verb_that_is_not_its_own(self, capsys) -> None:
         """An unclaimed verb returns False, silently, so the router keeps asking."""
@@ -75,6 +90,12 @@ class TestDriveCheckRouting:
         assert "Handlers: drive/client, drive/test" in out
         assert "Drive connectivity test" not in out
         assert err == ""
+
+    def test_no_args_says_nothing_was_checked_and_how_to_check(self, capsys) -> None:
+        """Bare drive_check exited 0 with a page that never said no check had run."""
+        drive_check.handle_command(drive_check.PRIMARY_COMMAND, [])
+
+        assert "Nothing checked: drive_check run tests the Drive connection" in capsys.readouterr().out
 
     def test_a_command_that_is_not_drive_check_is_declined_silently(self, capsys) -> None:
         """An unclaimed command returns False and prints nothing, so the router keeps asking."""

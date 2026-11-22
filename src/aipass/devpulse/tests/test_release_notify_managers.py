@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_release_notify_managers.py
 # Description: Tests for release_notify manager discovery's declared roots
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-09
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/release_notify/managers.py: declared roots come through memory's door."""
@@ -46,3 +46,24 @@ def test_discover_managers_lists_a_declared_root_through_the_door(monkeypatch, t
     assert asked == [repo]
     assert discovery["roots"] == [str(ext.resolve())]
     assert [entry["address"] for entry in discovery["managers"]] == ["@vera"]
+
+
+def test_discover_managers_skips_an_unrendered_template_passport(monkeypatch, tmp_path):
+    """A template passport ({{name}} placeholders) under a declared root is scaffold, never a recipient."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    ext = tmp_path / "elsewhere" / "seedish"
+    template_trinity = ext / "src" / "spawn" / "templates" / "manager" / ".trinity"
+    template_trinity.mkdir(parents=True)
+    (template_trinity / "passport.json").write_text(
+        json.dumps({"branch_info": {"branch_name": "{{name}}", "email": "@{{name}}"}, "citizen_class": "manager"}),
+        encoding="utf-8",
+    )
+    rows = [{"path": str(ext), "status": "active"}]
+    (repo / "AIPASS_ROOTS.json").write_text(json.dumps({"roots": rows}), encoding="utf-8")
+    monkeypatch.setattr(managers, "aipass_root", lambda: repo)
+
+    discovery = managers.discover_managers()
+
+    assert discovery["managers"] == []
+    assert any("template passport" in entry["reason"] for entry in discovery["skipped"])

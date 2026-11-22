@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_list_plans.py
 # Description: Unit tests for apps/modules/list_plans.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/list_plans.py."""
@@ -15,6 +15,8 @@
 import pytest
 from unittest.mock import patch
 
+from aipass.cli import command_failed
+from aipass.flow.apps.handlers.registry import load_registry as plan_load
 from aipass.flow.apps.modules.list_plans import handle_command, list_plans
 
 # Patch where used, not where defined.
@@ -323,3 +325,21 @@ class TestListIsScopedToTheCallersProject:
         out, err = capsys.readouterr()
         assert "plan" not in out
         assert "no project" in err
+
+    @pytest.mark.parametrize("body", ["", '{"plans": {"0001": '])
+    def test_an_unreadable_registry_is_refused_not_listed_as_empty(self, seats, monkeypatch, body, capsys):
+        """Chaos lane: a zero-byte or truncated registry listed as 'No plans found' while create refused it."""
+        host, _ext, tmp, sit = seats
+        flow_json = tmp / "flow_json"
+        flow_json.mkdir()
+        (flow_json / "fplan_registry.json").write_text(body, encoding="utf-8")
+        monkeypatch.setattr(plan_load, "FLOW_JSON_DIR", flow_json)
+        monkeypatch.setattr(f"{_MOD}.load_registry", plan_load.load_registry)
+        sit(host / "src" / "a")
+
+        assert list_plans("all") is False
+
+        out, err = capsys.readouterr()
+        assert "fplan_registry.json cannot be read" in err
+        assert "No plans found" not in out + err
+        assert command_failed()

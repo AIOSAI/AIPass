@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repair.py
 # Description: Project structure repair — thin CLI layer for move, cleanup, scan
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-05-15
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Repair orchestrator for project structure fixes."""
@@ -18,6 +18,7 @@ from aipass.spawn.apps.handlers.repair_ops import (
     move_branch,
     rename_branch,
     cleanup_pollution,
+    not_a_project,
     repair_project,
 )
 from aipass.spawn.apps.handlers.json import json_handler
@@ -89,7 +90,7 @@ def _route(args, dry_run):
 
 
 def _handle_relocate(args, dry_run):
-    """Handle --relocate @branch new/path [--relocate-artifacts]."""
+    """Handle --relocate @branch new/path [--relocate-artifacts]. 0 moved, 1 refused, 2 crashed."""
     flags = {"--dry-run", "--apply", "--relocate", "--relocate-artifacts"}
     positional = [a for a in args if a not in flags]
     relocate_artifacts = "--relocate-artifacts" in args
@@ -114,7 +115,7 @@ def _handle_relocate(args, dry_run):
     except Exception as exc:
         logger.error("[repair] Unexpected error relocating %s: %s", branch_name, exc)
         error(f"Error relocating {branch_name}: {exc}")
-        return 1
+        return 2
 
     _print_move_result(result, dry_run)
 
@@ -125,7 +126,9 @@ def _handle_relocate(args, dry_run):
 
 
 def _handle_rename(args, dry_run):
-    """Handle --rename @old @new [registry]: the directory is already renamed; re-point entry and passport."""
+    """Handle --rename @old @new [registry]: re-point entry and passport at a renamed directory.
+
+    0 renamed, 1 refused, 2 crashed."""
     positional = [a for a in args if a not in {"--dry-run", "--apply", "--rename"}]
     if len(positional) < 2:
         error("--rename requires @old and @new")
@@ -138,7 +141,7 @@ def _handle_rename(args, dry_run):
     except Exception as exc:
         logger.error("[repair] Unexpected error renaming %s: %s", old, exc)
         error(f"Error renaming {old}: {exc}")
-        return 1
+        return 2
 
     console.print()
     if not result.get("success"):
@@ -197,8 +200,11 @@ def _handle_scan(args, dry_run):
         error(f"Error scanning project: {exc}")
         return 1
 
+    if not result.get("success"):
+        error(not_a_project(project_path, result.get("error", "")))
+        return 1
     _print_scan_result(result)
-    return 0 if result.get("success") else 1
+    return 0
 
 
 def _print_help():

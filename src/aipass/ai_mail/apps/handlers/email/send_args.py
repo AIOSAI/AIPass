@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: send_args.py
 # Description: Email Send Argument Parsing Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-08
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -114,6 +114,25 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
             recipients.append(a)
         else:
             rest.append(a)
+
+    refusal = None
+    if recipients and len(rest) >= 2:
+        usage = 'Usage: send @recipient "subject" "message"'
+        # Known flags are gone by now: a flag in the subject slot is a typo, never a subject.
+        if rest[0].startswith("--"):
+            refusal = f"Unknown flag {rest[0]!r} — {usage}"
+        elif not rest[0].strip():
+            refusal = f"Empty subject refused — give the mail a subject. {usage}"
+    if refusal:
+        return _flag_error(
+            refusal,
+            auto_execute=auto_execute,
+            no_memory_save=no_memory_save,
+            reply_to=reply_to,
+            from_branch=from_branch,
+            upsert_key=upsert_key,
+            kind=kind,
+        )
 
     if recipients and len(rest) >= 2:
         mode = "direct"

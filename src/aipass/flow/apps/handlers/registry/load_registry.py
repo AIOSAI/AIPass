@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load_registry.py
 # Description: Load Registry Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2025-11-07
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Load Registry Handler"""
@@ -27,11 +27,7 @@ class RegistryUnreadableError(Exception):
 
 
 def load_registry(registry_file: str | None = None) -> Dict[str, Any]:
-    """Load PLAN registry
-
-    The empty default means the file is absent, never unreadable: that raises
-    RegistryUnreadableError, since an empty answer lets create reissue 0001 over live plans.
-    """
+    """Load a plan registry; empty only when absent, since an empty answer lets create overwrite live rows."""
     target = FLOW_JSON_DIR / registry_file if registry_file else REGISTRY_FILE
 
     if not target.exists():
@@ -44,6 +40,8 @@ def load_registry(registry_file: str | None = None) -> Dict[str, Any]:
         raise RegistryUnreadableError(f"Plan registry {target} cannot be read: {e}") from e
     if not isinstance(data, dict):
         raise RegistryUnreadableError(f"Plan registry {target} is not a JSON object: {type(data).__name__}")
+    if not isinstance(data.get("plans"), dict):
+        raise RegistryUnreadableError(f"Plan registry {target} has no 'plans' object")
     json_handler.log_operation(
         "registry_loaded",
         {

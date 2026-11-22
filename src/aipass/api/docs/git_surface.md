@@ -52,12 +52,13 @@ a lie told by omission.
 
 **Two door limits shape the lanes:**
 
-- **`drone @git diff` takes no path and no `-U`.** `_handle_diff` recognises
-  exactly `--staged` and `--all`; everything else in argv is ignored, `--json`
-  included. So `path` is served by generating the patch and splitting it here, on
-  the per-file headers — machine structure, which is the only thing this file still
-  parses out of text anywhere. **Context stays at three lines, not the `-U1` the
-  design specified**, because context is baked in at generation time.
+- **`drone @git diff` takes `[--staged] [--stat] [--all] [path ...]` and no `-U`.**
+  `_handle_diff` refuses any other flag by name, `--json` included. This lane
+  passes only `--staged` and `--all`, so `path` is served by generating the patch
+  and splitting it here, on the per-file headers — machine structure, which is the
+  only thing this file still parses out of text anywhere. **Context stays at three
+  lines, not the `-U1` the design specified**, because the door has no `-U` and
+  context is baked in at generation time.
 - **`drone @git log` is `--oneline` underneath, `--json` or not.** A row carries
   a sha and a subject and nothing else — no author, no relative date; the document
   has exactly the two fields the rendered line has. The door does not clamp either:

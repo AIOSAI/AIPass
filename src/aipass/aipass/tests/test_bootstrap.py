@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap.py
 # Description: Tests for init bootstrap handler (DPLAN-0164)
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-05-04
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
@@ -291,6 +291,9 @@ def test_init_project_gitignore_content(tmp_path):
     assert ".ai_mail.local/" in content
     assert "__pycache__/" in content
     assert "logs/" in content
+    # The eight plan types `drone @flow templates` lists: a missing one is a plan file the project tracks.
+    plan_lines = {"DPLAN-*", "FPLAN-*", "RPLAN-*", "PPLAN-*", "APLAN-*", "TDPLAN-*", "NPLAN-*", "CPLAN-*"}
+    assert plan_lines <= set(content.splitlines())
 
 
 def test_init_project_ignores_runtime_state_and_seeds_the_aipass_whitelist_and_an_empty_updateignore(tmp_path):

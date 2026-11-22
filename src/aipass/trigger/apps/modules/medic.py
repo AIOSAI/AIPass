@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: medic.py
 # Description: Medic toggle module for auto-healing error dispatch control
-# Version: 1.13.0
+# Version: 1.14.0
 # Created: 2026-02-12
 # Modified: 2026-11-21
 # =============================================
@@ -28,6 +28,7 @@ from aipass.trigger.apps.handlers.service_control import (
     systemd_available,
 )
 from aipass.trigger.apps.handlers.json import json_handler
+from aipass.trigger.apps.handlers.events.error_detected import _get_registered_emails
 
 from aipass.trigger.apps.handlers.medic_state import (
     is_enabled,
@@ -221,6 +222,20 @@ def _fmt_remaining(iso_expiry: str) -> str:
         return "unknown"
 
 
+def _refuse_unknown_branch(branch_name: str) -> bool:
+    """Print the refusal and answer True when the fleet census does not hold @branch_name."""
+    from aipass.cli import error
+
+    try:
+        known = f"@{branch_name}" in _get_registered_emails()
+    except RuntimeError as exc:
+        error(f"Cannot check @{branch_name} against the fleet: {exc}", suggestion="Nothing was muted")
+        return True
+    if not known:
+        error(f"Unknown branch @{branch_name}", suggestion="drone systems lists every branch")
+    return not known
+
+
 def _handle_mute(console, args: list) -> None:
     """Handle 'medic mute @branch [--for <dur>] [--forever]'."""
     from aipass.cli import error
@@ -237,6 +252,8 @@ def _handle_mute(console, args: list) -> None:
     branch_name = _extract_branch_name(rest[0])
     if not branch_name:
         error("Missing branch name", suggestion="Usage: medic mute @branch [--for 48h] [--forever]")
+        return
+    if _refuse_unknown_branch(branch_name):
         return
     if mute_branch(branch_name, duration_seconds=duration_secs):
         logger.info(f"[MEDIC] Muted branch: {branch_name}")
@@ -284,6 +301,8 @@ def _handle_volume_mute(console, args: list) -> None:
     branch_name = _extract_branch_name(rest[0])
     if not branch_name:
         error("Missing branch name", suggestion=usage)
+        return
+    if _refuse_unknown_branch(branch_name):
         return
     if mute_branch_volume(branch_name, duration_seconds=duration_secs):
         logger.info(f"[MEDIC] Volume-muted branch: {branch_name}")

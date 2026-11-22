@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete: in-tree targets move to the local .archive
-# Version: 1.10.0
+# Version: 1.11.0
 # Created: 2026-06-02
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """Contained safe-delete handler.
@@ -47,11 +47,14 @@ ELSEWHERE_EXEMPTION = "elsewhere"
 # The provider settings folders are the owner's by standing rule, refused to every seat.
 _PROVIDER_DIRS = (".claude", ".codex")
 _EXEMPTION_NOTES = {
-    ADMIN_EXEMPTION: "across the sibling fence",
+    ADMIN_EXEMPTION: "across the branch fence",
     DOT_EXEMPTION: f"dot guard lifted by {DOT_FLAG}",
     ELSEWHERE_EXEMPTION: "in another project",
 }
 SIBLING_NEXT_STEP = " — not yours to remove: mail @devpulse the path and why"
+OWN_BRANCH_NEXT_STEP = (
+    " — a branch root is retired through @spawn; for a folder holding it, mail @devpulse the path and why"
+)
 RECORDED_LINE = "This attempt is recorded in .ai_central/deletions.jsonl."
 
 
@@ -112,7 +115,7 @@ def check_protected_dirs(resolved: Path) -> tuple[bool, str]:
     """The carve-out half of the fence, apart so stale mode can keep it. Returns ``(blocked, reason)``."""
     for part in resolved.parts:
         if part in _CARVEOUT_DIRS:
-            return True, f"Protected directory: path is inside {part}/"
+            return True, f"Protected directory: path is inside {part}/, which drone rm never moves{SIBLING_NEXT_STEP}"
     return False, ""
 
 
@@ -161,7 +164,7 @@ def judge(resolved: Path, project_root: Path | None, seat: Seat, *, lift_dot: bo
 def check_carveouts(
     resolved: Path, project_root: Path | None, *, admin_may_cross: bool = False, seat: Seat | None = None
 ) -> tuple[bool, str, str | None]:
-    """Refuse protected paths even inside allowed roots; one exemption, the verified admin in a sibling's tree.
+    """Refuse protected paths even inside allowed roots; one exemption, the verified admin outside its own branch.
 
     The branch root itself stays refused (retiring a citizen is @spawn's), and so does every
     carve-out, which is judged first. *seat* is the asker, the shell's when not given.
@@ -173,6 +176,7 @@ def check_carveouts(
 
     seat = seat or cli_seat(project_root)
     own = seat.own
+    target_branch_root = None
     if project_root is not None:
         target_branch_root = _find_branch_root(resolved, project_root)
         if target_branch_root is not None and target_branch_root != own:
@@ -182,8 +186,18 @@ def check_carveouts(
 
     blocked, reason = check_contained_citizens(resolved, project_root, own)
     if not blocked and own is not None and own.is_relative_to(resolved):
-        return True, f"Protected: path is your own branch {own.name}/ or holds it", None
-    return blocked, reason, None
+        return True, f"Protected: path is your own branch {own.name}/ or holds it{OWN_BRANCH_NEXT_STEP}", None
+    if blocked or project_root is None or target_branch_root is not None or not resolved.is_relative_to(project_root):
+        return blocked, reason, None
+    # In the project but in no branch: the own-branch-only rule, which only the admin seat crosses.
+    if admin_may_cross and seat.is_admin("branch fence"):
+        return False, "", ADMIN_EXEMPTION
+    where = (
+        f"outside your own branch {own.name}/"
+        if own is not None
+        else "in no branch of yours (no passport above the cwd)"
+    )
+    return True, f"Protected: path is {where}{SIBLING_NEXT_STEP}", None
 
 
 def _verified_admin(fence: str) -> bool:

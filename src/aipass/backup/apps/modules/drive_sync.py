@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drive_sync.py
 # Description: Drive sync module — uploads the snapshot store to Google Drive
-# Version: 2.6.3
+# Version: 2.6.4
 # Created: 2026-04-17
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Drive Sync Module — orchestrates file upload to Google Drive.
@@ -385,8 +385,12 @@ def handle_command(command: str, args: list) -> bool:
         error(f"drive_sync does not take: {(stray or args)[0]}", suggestion=USAGE)
         return True
 
+    project_root = resolve_caller_path(args[0])
+    if not project_root.is_dir():
+        error(f"Project path is not a directory: {project_root}", suggestion=USAGE)
+        return True
     run_drive_sync(
-        str(resolve_caller_path(args[0])),
+        str(project_root),
         project_name=values["--project"],
         note=values["--note"],
         force=force,

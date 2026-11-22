@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_birth_receipt.py
 # Description: Birth receipt lane — a newborn arrives carrying .trinity/.template_version.json
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-08-27
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/receipt_ops.py and the birth-receipt lane it drives through apps/modules/core.py."""
@@ -317,6 +317,13 @@ def test_retire_carries_the_whole_trinity_into_the_archive(tmp_path, monkeypatch
     assert "LEAVER" not in names
 
 
+def _drop_rows(registry):
+    """Empty the registry's rows, credential kept: create adopts a passported folder only when no row holds it."""
+    doc = json.loads(Path(registry).read_text(encoding="utf-8"))
+    doc["branches"] = []
+    Path(registry).write_text(json.dumps(doc), encoding="utf-8")
+
+
 def test_adopting_a_directory_without_a_receipt_stamps_one(tmp_path, monkeypatch):
     """Adoption's template update resolves the branch by name through update_ops.find_registry,
     which walks from the CWD - it is pointed at the tmp_path registry, never the live one."""
@@ -326,6 +333,7 @@ def test_adopting_a_directory_without_a_receipt_stamps_one(tmp_path, monkeypatch
     monkeypatch.setattr(update_ops, "find_registry", lambda *a, **k: Path(registry))
     spawn_agent(str(target), role="Test", purpose="adopt receipt", registry_path=registry)
     (target / ".trinity" / receipt_ops.RECEIPT_NAME).unlink()
+    _drop_rows(registry)
 
     result = spawn_agent(str(target), registry_path=registry)
 
@@ -495,7 +503,7 @@ def test_adoption_never_restamps_a_receipt_another_lane_wrote(tmp_path, monkeypa
         "config_rendered": "2026-01-01T00:00:00",
     }
     receipt_path.write_text(json.dumps(theirs, indent=2) + "\n", encoding="utf-8")
+    _drop_rows(registry)
 
-    spawn_agent(str(target), registry_path=registry)
-
+    assert spawn_agent(str(target), registry_path=registry)["adopted"] is True
     assert json.loads(receipt_path.read_text(encoding="utf-8")) == theirs

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: backup.py
 # Description: BACKUP Branch — main orchestrator with auto-discovery
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-04-16
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """BACKUP Branch - Main Orchestrator"""
@@ -168,6 +168,14 @@ def route_command(command: str, args: list[str], modules: list[Any]) -> tuple[bo
     return False, failure
 
 
+def _unresolved(target: str) -> int:
+    """Name a target that is neither a directory nor a registered name, and how to register it; exit 1."""
+    name = target.removeprefix("@")
+    why = "no registered project has that name" if target.startswith("@") else "not a directory or a registered name"
+    error(f"Cannot resolve project: {target} ({why})", suggestion=f"register <project_path> --name {name}")
+    return 1
+
+
 def main():
     """Main entry point - routes commands or shows help.
 
@@ -206,14 +214,18 @@ def main():
         print_help()
         return 0
 
+    if remaining[:1] == [""]:
+        # resolve_caller_path("") is the caller's cwd: "" would back up wherever the caller stood.
+        error(f"{command} needs a project path: got an empty one", suggestion=f"{command} <project_path|@name>")
+        return 1
+
     if command == "backup" and len(args) > 1:
         from aipass.backup.apps.modules.register import resolve_project
 
         target = args[1]
         project_root = resolve_project(target)
         if project_root is None:
-            error(f"Cannot resolve project: {target}")
-            return 1
+            return _unresolved(target)
         remaining = [project_root] + args[2:]
         mode = "snapshot"
         if "--all" in args:
@@ -234,10 +246,12 @@ def main():
     if remaining and remaining[0].startswith("@"):
         from aipass.backup.apps.modules.register import resolve_project
 
+        if not (MODULES_DIR / f"{command}.py").is_file():
+            error(f"Unknown command: {command}", suggestion="drone @backup --help")
+            return 1
         resolved = resolve_project(remaining[0])
         if resolved is None:
-            error(f"Cannot resolve project: {remaining[0]}")
-            return 1
+            return _unresolved(remaining[0])
         remaining = [resolved] + remaining[1:]
 
     handled, failure = route_command(command, remaining, modules)

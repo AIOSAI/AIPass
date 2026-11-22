@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.15.0
+# Version: 1.16.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -1144,6 +1144,8 @@ class TestAnUnreadableRegistryFencesLoudAndLeavesTheRepairRouteOpen:
             assert _blocked(refused)
             assert str(registry) in _reason(refused) and "@spawn" in _reason(refused)
             assert "Gate broken" not in _reason(refused), "a torn registry is not a broken gate"
+            assert "drone commands still run" not in _reason(refused), "drone commands that read it fail"
+            assert "tell the user" in _reason(refused), "a route that works when the dispatch does not"
         logged = [r.levelname for r in caplog.records if "edit_gate: registry unreadable" in r.getMessage()]
         assert logged == ["ERROR", "ERROR"]
 
@@ -1169,7 +1171,8 @@ class TestAWordTheGateCannotProbe:
         result = _run(registered_projects["hooks"], command=f"echo hi > {name}")
         assert _blocked(result)
         reason = _reason(result)
-        assert "ENAMETOOLONG" in reason and "could not check" not in reason
+        assert "too long to be a file name" in reason and "could not check" not in reason
+        assert "ENAMETOOLONG" not in reason, "an OS error name is not a reason"
         assert "\n" not in reason and name not in reason
 
     @pytest.mark.parametrize("program", ["printf", "echo"])
@@ -1310,6 +1313,8 @@ class TestAProviderSessionStartsOnlyInTheOwnBranch:
         "screen -c rc -dm claude",
         "cd ../other && screen -dmS x claude",
         "echo claude | at now",
+        'echo "0 * * * * cd ../devpulse && claude -p hi" | crontab -',
+        "printf '0 * * * * claude -p hi\\n' | crontab -",
         "cd $UNSET_DIR && claude",
         "opencode $UNSET_DIR",
     )

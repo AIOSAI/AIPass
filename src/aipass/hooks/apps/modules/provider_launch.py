@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: provider_launch.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Where a provider CLI started from the Bash tool would run, judged against the caller's own branch
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-11-15
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Names a provider session (claude, codex, opencode) that would start outside the caller's own branch.
@@ -43,8 +43,9 @@ _UNIT_DIR = "WorkingDirectory="
 _SAME_DIR = frozenset({"-d", "--same-dir"})
 
 #: Launchers that run a command detached or later. tmux and screen are read below; at, batch, dtach and
-#: abduco are not installed to read, so a command naming a provider through them stays refused.
-_DEFERRED = frozenset({"tmux", "screen", "at", "batch", "dtach", "abduco"})
+#: abduco are not installed to read, so a command naming a provider through them stays refused. crontab
+#: runs its lines from the home directory, never the caller's branch.
+_DEFERRED = frozenset({"tmux", "screen", "at", "batch", "dtach", "abduco", "crontab"})
 
 #: tmux's own flags that take a value (tmux -h, tmux list-commands). Top-level -c is a shell command.
 _TMUX_VALUED = "cfLST"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_restore_ops.py
 # Description: Tests for restore_ops handler -- plan restore business logic, and validator
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-29
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/plan/restore_ops.py and apps/handlers/plan/validator.py."""
@@ -888,7 +888,7 @@ class TestRestoreFileFromBackup:
 
         target, msg = restore_file_from_backup(row, "0042", backup_dir=archive)
         assert target is None
-        assert "no archived copy" in msg
+        assert msg == f"archive copy is missing: expected {archive / name}"
 
 
 class TestRestoreOfANormallyClosedPlan:
@@ -962,7 +962,7 @@ class TestRestoreOfANormallyClosedPlan:
         assert result["success"] is False
         assert any(m.get("error_type") == "file_missing" for m in result["messages"])
         blob = " ".join(str(m.get("text", "")) for m in result["messages"])
-        assert "Archive lookup" in blob and "no archived copy" in blob
+        assert "Archive lookup" in blob and f"archive copy is missing: expected {archive / name}" in blob
 
 
 class TestRestoreAnswersToThePlansOwners:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lint_handler.py
 # Description: Read-only lint handler for .trinity entry limit violations
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-06-13
-# Modified: 2026-10-17
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -28,6 +28,7 @@ from aipass.memory.apps.handlers.json.entry_limits import (
     load_entry_limits,
     load_file_budgets,
 )
+from aipass.memory.apps.handlers.monitor.detector import _CAPPED_CONTAINERS, entry_order_faults
 
 # The passport is measured as a WHOLE FILE, never against a field shape:
 # @spawn owns its schema, so this handler asks only how big it is.
@@ -120,6 +121,42 @@ def _violation_record(
     return violation
 
 
+# Damage that makes the whole file or container unjudgeable; lint reports it as an error, not a warning.
+FILE_DAMAGE = ("unreadable_file", "wrong_container")
+
+
+def _damage_record(
+    branch_name: str, file_name: str, container: str, key: str, type_name: str, reason: str, detail: str
+) -> dict[str, Any]:
+    """One violation that is not a length: ``detail`` is its whole named reason."""
+    logger.warning(f"[lint] {branch_name}/{file_name}: {detail}")
+    return {
+        "branch": branch_name,
+        "file": file_name,
+        "container": container,
+        "key": key,
+        "length": 0,
+        "cap": 0,
+        "over_by": 0,
+        "entry_type": type_name,
+        "reason": reason,
+        "detail": detail,
+    }
+
+
+def _read_object(file_path: Path) -> tuple[dict[str, Any], str]:
+    """Parse one .trinity file as a JSON object -> ``(data, "")``, or ``({}, problem)`` naming why not."""
+    raw = ""
+    try:
+        raw = file_path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+        return {}, "empty file" if isinstance(exc, json.JSONDecodeError) and not raw.strip() else str(exc)
+    if not isinstance(data, dict):
+        return {}, f"top level is a {type(data).__name__}, not an object"
+    return data, ""
+
+
 def _lint_branch(
     branch_name: str,
     branch_path: str,
@@ -127,6 +164,7 @@ def _lint_branch(
 ) -> list[dict[str, Any]]:
     """Lint a single branch and return a list of violation dicts."""
     violations: list[dict[str, Any]] = []
+    unreadable: set[str] = set()
     trinity_dir = Path(branch_path) / ".trinity"
 
     if not trinity_dir.is_dir():
@@ -146,11 +184,12 @@ def _lint_branch(
             logger.info(f"[lint] {branch_name}: missing {file_name}, skipping {type_name}")
             continue
 
-        try:
-            raw = file_path.read_text(encoding="utf-8")
-            data = json.loads(raw)
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.warning(f"[lint] {branch_name}: failed to read {file_name}: {exc}")
+        data, problem = _read_object(file_path)
+        if problem and file_name not in unreadable:
+            unreadable.add(file_name)
+            detail = f"unreadable: {problem}"
+            violations.append(_damage_record(branch_name, file_name, "", "", type_name, "unreadable_file", detail))
+        if problem:
             continue
 
         container_data = data.get(container)
@@ -161,7 +200,16 @@ def _lint_branch(
             pairs = _measure_dict_container(container_data, field)
         elif kind == "list" and isinstance(container_data, list):
             pairs = _measure_list_container(container_data, field)
+            faults = entry_order_faults(container, container_data) if container in _CAPPED_CONTAINERS else []
+            violations.extend(
+                _damage_record(branch_name, file_name, container, key, type_name, reason, detail)
+                for key, reason, detail in faults
+            )
         else:
+            detail = f"'{container}' is a {type(container_data).__name__}, not a {kind}"
+            violations.append(
+                _damage_record(branch_name, file_name, container, "", type_name, "wrong_container", detail)
+            )
             continue
 
         for key, text, present in pairs:

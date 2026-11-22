@@ -18,7 +18,7 @@ pack inventory.
 | `audit/discovery.py` | Branch discovery, CWD-first registry. |
 | `audit/audit_display.py` | Rich result formatting — the score grid, the violation detail, the info lines. |
 | `audit/incremental_cache.py` | Content-hash cache: a branch whose inputs did not change replays its stored score instead of re-running every checker, and a branch where one checker changed re-runs that checker alone. |
-| `audit/artifact.py` | The untruncated violation set → `.sentry/last_audit_<branch>.json`, because the console view is capped and the full set is what you actually debug against. |
+| `audit/artifact.py` | The untruncated violation set → `.sentry/last_audit.json` for a default-pack fleet run (a branch, `--no-bypass` or other-pack run gets a suffix, e.g. `last_audit_<branch>.json`), because the console view is capped and the full set is what you actually debug against. |
 | `registry_scan.py` | Case-EXACT registry discovery — the one reader every lane uses. |
 
 ---

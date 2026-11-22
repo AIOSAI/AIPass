@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rm_stale.py
 # Description: drone rm --stale: the stale-temp sweep, its age, args, record and summary
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-11-15
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/rm_handler.py's stale sweep and apps/modules/rm.py's --stale lane."""
@@ -291,8 +291,10 @@ class TestStaleRecord:
 
     def test_a_plain_move_keeps_its_twelve_keys_plus_where_it_went(self, project_dir, monkeypatch, tmp_path):
         """Without --stale there is no mode key; a move adds moved_to and nothing else."""
-        monkeypatch.chdir(project_dir)
-        target = project_dir / "build.log"
+        seat = project_dir / "src" / "aipass" / "me"
+        (seat / ".trinity").mkdir(parents=True)
+        monkeypatch.chdir(seat)
+        target = seat / "build.log"
         target.write_text("x", encoding="utf-8")
         safe_delete([str(target)])
         (record,) = rm_ledger(tmp_path)

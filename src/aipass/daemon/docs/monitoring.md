@@ -25,7 +25,8 @@ are deep-merged with per-branch overrides; a copy here would be a snapshot that 
 | Fact | Severity | Rendered |
 |------|----------|----------|
 | `should_rollover: True` | INFO — rollover being due is not a fault; it auto-fires at the next PreCompact | `[PENDING]` |
-| `total_violations > 0` | WARNING — a write got past the character-cap gate | `[!] WARNING` |
+| a non-empty `damaged` list on a file | ERROR — rollover refuses the file (empty, not JSON, a capped section that is not a list); it wins over rollover and never shows as OK | `[ERROR] <file>: DAMAGED - <memory's reasons>` |
+| `total_violations > 0` | WARNING — a write got past the character-cap gate, or lint named a fault; a fault with a `detail` prints that detail, never its 0 length and 0 cap | `[!] WARNING` |
 | memory file absent | skipped, not an error | `[SKIP]` |
 | unknown branch / @memory not importable | named reason, never an empty section | `[!]` |
 

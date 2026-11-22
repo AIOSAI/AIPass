@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Tests for registry-led citizen discovery and .daemon/ schedule job discovery
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-06-15
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/schedule/discovery.py — citizens from the registries, jobs from their .daemon/."""
@@ -225,6 +225,44 @@ class TestCommandJobValidation:
         with caplog.at_level("WARNING"):
             assert discovered_ids(one_branch, command_job(command=command)) == ["keep"]
         assert "Command job 'sweep' refused" in caplog.text
+
+    @pytest.mark.parametrize(
+        "command, operator",
+        [
+            ("drone @flow --help | tee /tmp/x", "|"),
+            ("drone @flow --help|tee x", "|"),
+            ("drone @flow --help; drone @ai_mail inbox", ";"),
+            ("drone @flow --help && drone @flow", "&&"),
+            ("drone @flow --help > out.txt", ">"),
+            ("drone @flow --help &", "&"),
+        ],
+    )
+    def test_a_shell_operator_is_refused_and_named(self, command, operator, one_branch, caplog):
+        with caplog.at_level("WARNING"):
+            assert discovered_ids(one_branch, command_job(command=command)) == ["keep"]
+        assert f"no shell runs a command job, so {operator} would reach drone as text" in caplog.text
+
+    @pytest.mark.parametrize("command", ['drone @commons post "a | b; c"', "drone @commons post '|' ';' \"&&\""])
+    def test_an_operator_inside_quotes_is_text_and_accepted(self, command, one_branch):
+        """A lone quoted operator was refused like a bare one (FPLAN-1161 follow-up)."""
+        assert discovered_ids(one_branch, command_job(command=command)) == ["keep", "sweep"]
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'drone @ai_mail dispatch @testbranch "loop" "again"',
+            'drone ai_mail dispatch @flow "s" "b"',
+            'drone @AI_Mail dispatch @flow "s" "b"',
+        ],
+    )
+    def test_a_command_job_that_dispatches_is_refused(self, command, one_branch, caplog):
+        with caplog.at_level("WARNING"):
+            assert discovered_ids(one_branch, command_job(command=command)) == ["keep"]
+        assert "a scheduled wake is a prompt job" in caplog.text
+
+    def test_a_command_job_that_mails_without_waking_is_accepted(self, one_branch):
+        job = command_job(command='drone @ai_mail email @devpulse "nightly" "report"')
+        assert discovered_ids(one_branch, job) == ["keep", "sweep"]
 
     def test_a_rotation_command_job_is_refused(self, one_branch, caplog):
         job = command_job(schedule={"type": "rotation", "time": "05:00"})
@@ -566,7 +604,8 @@ class TestProjectCitizens:
         root, src, citizen, _decoy = projects_tree
         daemon_dir = citizen / ".daemon"
         daemon_dir.mkdir()
-        (daemon_dir / "schedule.json").write_text(json.dumps(sample_schedule), encoding="utf-8")
+        doc = {**sample_schedule, "branch": "@proj"}
+        (daemon_dir / "schedule.json").write_text(json.dumps(doc), encoding="utf-8")
 
         with patched_roots(root, src):
             jobs = discover_jobs()
@@ -1067,6 +1106,34 @@ class TestSkippedOwners:
         discovered_ids(one_branch)
         discover_jobs(skipped_owners=skipped)
         assert skipped == set()
+
+
+class TestBranchField:
+    """A schedule's place names its owner; a branch field naming anyone else is refused, never ignored."""
+
+    def test_a_job_naming_another_branch_is_refused_and_its_owner_named(self, one_branch):
+        refusals, skipped = [], set()
+        claim = {"id": "claim", "branch": "@devpulse", "schedule": {"type": "daily", "time": "04:00"}, "prompt": "x"}
+        (one_branch / "schedule.json").write_text(json.dumps({"jobs": [KEEP, claim]}), encoding="utf-8")
+        assert [j["id"] for j in discover_jobs(skipped_owners=skipped, refusals=refusals)] == ["keep"]
+        assert skipped == {"@testbranch"}
+        assert refusals == [
+            f"Job 'claim' refused in {one_branch / 'schedule.json'}: branch '@devpulse' is not its owner @testbranch"
+        ]
+
+    @pytest.mark.parametrize("branch", ["@devpulse", 7])
+    def test_a_file_naming_another_branch_is_refused_whole(self, branch, one_branch):
+        refusals = []
+        doc = {"branch": branch, "jobs": [KEEP]}
+        (one_branch / "schedule.json").write_text(json.dumps(doc), encoding="utf-8")
+        assert discover_jobs(refusals=refusals) == []
+        assert refusals == [f"{one_branch / 'schedule.json'} refused: branch {branch!r} is not its owner @testbranch"]
+
+    @pytest.mark.parametrize("branch", ["@testbranch", "testbranch", "@TestBranch"])
+    def test_the_owners_own_address_in_any_spelling_is_accepted(self, branch, one_branch):
+        job = {**KEEP, "branch": branch}
+        (one_branch / "schedule.json").write_text(json.dumps({"branch": branch, "jobs": [job]}), encoding="utf-8")
+        assert [j["id"] for j in discover_jobs()] == ["keep"]
 
 
 class TestFleetRootIsTheResolvedHome:

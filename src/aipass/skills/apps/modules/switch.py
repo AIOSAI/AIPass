@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: switch.py
 # Description: Per-skill off-switch — on, off, and status
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-18
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Skill off-switch module."""
@@ -18,6 +18,8 @@ from aipass.skills.apps.handlers.switch_handler import (
     turn_on,
 )
 from aipass.skills.apps.handlers.json import json_handler
+from aipass.skills.apps.handlers.registry import get_skill
+from aipass.skills.apps.modules.discovery import discover_all
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -39,6 +41,11 @@ def handle_command(command: str, args: list) -> bool:
 
     if command == "switch":
         return show_switch(args[0])
+
+    # on/off write whatever name they are given, so a typo would record a skill that does not exist.
+    if get_skill(args[0], discover_all()) is None:
+        error(f"Error: unknown skill '{args[0]}'. See every skill this machine can see: drone @skills list")
+        return False
 
     if command == "on":
         return switch_on(args[0])

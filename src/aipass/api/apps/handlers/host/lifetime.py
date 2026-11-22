@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lifetime.py
 # Description: Host API Lifetime Handler — a serve that outlives the shell that started it
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-08-19
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -168,7 +168,13 @@ def _alive(pid: int) -> bool:
         logger.warning("[host_api] pid %s is running but not ours to signal", pid)
         return True
 
-    return True
+    # Another parent's zombie (init's, in a container with none) cannot be reaped here, and kill says yes to it.
+    stat_file = Path(f"/proc/{pid}/stat")
+    if not stat_file.exists():
+        logger.debug("[host_api] pid %s went between the signal and the state read", pid)
+        return False
+
+    return stat_file.read_text(encoding="utf-8").rsplit(")", 1)[-1].split()[0] != "Z"
 
 
 def running() -> Optional[Dict[str, Any]]:

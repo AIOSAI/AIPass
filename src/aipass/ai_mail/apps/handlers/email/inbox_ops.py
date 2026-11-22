@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_ops.py
 # Description: Inbox Operations Handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2025-11-15
-# Modified: 2026-10-17
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -61,7 +61,7 @@ def migrate_inbox_format(raw: Any) -> Tuple[Dict[str, Any], bool]:
     """Bring parsed inbox data to the v2 schema in memory. Returns (data, changed).
 
     The one schema fixer: delivery and load_inbox both run it, so the shape cannot drift between them.
-    A JSON value that is neither a list nor an object reads as an empty mailbox, unchanged on disk.
+    Raises ValueError on a store that is no mailbox: read as empty, the next write would erase it.
     """
     migrated = False
     data: Dict[str, Any]
@@ -69,14 +69,20 @@ def migrate_inbox_format(raw: Any) -> Tuple[Dict[str, Any], bool]:
     if isinstance(raw, list):
         data = {"messages": [m for m in raw if isinstance(m, dict)]}
         migrated = True
-    elif isinstance(raw, dict):
-        data = raw
+    elif (
+        not isinstance(raw, dict)
+        or not {"messages", "inbox", "mailbox"} & raw.keys()
+        or not isinstance(raw.get("messages", raw.get("inbox", [])), list)
+    ):
+        raise ValueError(
+            f"wrong-shaped mail store ({json.dumps(raw)[:80]}), refused and left untouched: "
+            "restore it from backup or move it aside so a fresh inbox is provisioned"
+        )
     else:
-        return {"mailbox": "inbox", "total_messages": 0, "unread_count": 0, "messages": []}, False
+        data = raw
 
     if "inbox" in data and "messages" not in data:
-        old_messages = data.pop("inbox", [])
-        data["messages"] = old_messages if isinstance(old_messages, list) else []
+        data["messages"] = data.pop("inbox")
         migrated = True
 
     if "messages" not in data:
@@ -133,6 +139,8 @@ def load_inbox(inbox_file: Path) -> Dict:
 
     except json.JSONDecodeError as e:
         raise Exception(f"Invalid inbox JSON format: {e}")
+    except ValueError as e:
+        raise Exception(f"Failed to load inbox {inbox_file}: {e}")
     except Exception as e:
         raise Exception(f"Failed to load inbox: {e}")
 

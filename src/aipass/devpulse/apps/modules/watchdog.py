@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watchdog.py
 # Description: Watchdog Module — directed wake system for devpulse
-# Version: 2.2.2
+# Version: 2.3.0
 # Created: 2026-04-14
-# Modified: 2026-11-01
+# Modified: 2026-11-21
 # =============================================
 
 """Watchdog Module — devpulse's personal directed-wake system.
@@ -449,16 +449,21 @@ def _handle_status() -> bool:
     console.print("[bold]Watchdog Status[/bold]")
     console.print("===============")
 
-    if not watches:
+    if watches:
+        console.print(f"{len(watches)} active watch(es):")
+        console.print()
+        for watch in watches:
+            console.print(presenter.format_status_line(watch, timer_mod.format_human))
+    else:
         console.print("No active watches.")
-        return True
 
-    console.print(f"{len(watches)} active watch(es):")
-    console.print()
-    for watch in watches:
-        console.print(presenter.format_status_line(watch, timer_mod.format_human))
-
-    presenter.print_delivery_lag()
+    # Work out with no wire is the one state nothing recovers from: no completion can wake this session.
+    open_count = presenter.print_delivery_lag()
+    if open_count and not any(watch.get("type") == "baseline_wire" for watch in watches):
+        console.print(
+            f"[bold red]NO WIRE ARMED[/bold red] — {open_count} dispatch(es) out and nothing will wake this "
+            "session when they finish. Arm it: drone @devpulse watchdog baseline --once (Bash, run_in_background)"
+        )
     return True
 
 

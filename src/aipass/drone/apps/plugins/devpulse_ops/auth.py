@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.15.0
+# Version: 1.15.1
 # Created: 2026-03-30
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -336,7 +336,8 @@ def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
         return Refusal(
             (
                 f"caller '{caller.name}' is citizen_class '{citizen_class or 'unset'}' — "
-                f"owner-tier requires '{_MANAGER_CLASS}'"
+                f"owner-tier requires '{_MANAGER_CLASS}'. Writes are the project's manager's: "
+                "mail @devpulse what to commit (in another project, its manager)"
             ),
             _AUTHORITY,
         )

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: timer_install.py
 # Description: Idempotent systemd user timer installer for daemon scheduler
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-06-25
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from aipass.prax import logger
+from aipass.ai_mail import resolve_verified_caller
 from aipass.cli import console, error
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
@@ -33,6 +34,9 @@ _SERVICE_NAME = "daemon-tick.service"
 _TIMER_NAME = "daemon-tick.timer"
 
 HANDLED_COMMANDS = {"install-timer", "uninstall-timer"}
+
+#: The seat that may start or stop the fleet's scheduler; the owner runs it from that seat too.
+ADMIN_SEAT = "@devpulse"
 
 
 def print_introspection():
@@ -61,6 +65,8 @@ def print_help():
     console.print("  ~/.config/systemd/user/")
     console.print("  Then reloads systemd and enables+starts the timer.")
     console.print("  Idempotent — safe to run multiple times.")
+    console.print("  An install that cannot enable the timer puts the unit folder back as it was.")
+    console.print(f"  The admin seat ({ADMIN_SEAT}) only, run from its folder: the timer wakes the whole fleet.")
     console.print()
 
 
@@ -103,8 +109,48 @@ def _run_systemctl(*args: str, not_loaded_ok: bool = False, not_found_ok: bool =
         return False
 
 
+def _seat_refusal(command: str) -> str:
+    """'' when the admin seat runs *command*, else the refusal naming what to do.
+
+    The seat is the rule, not the admin grant: a fresh install's lane is dark and cannot be lit.
+    A rail that raises propagates, so a check that cannot run never reads as granted.
+    """
+    caller = resolve_verified_caller()
+    if caller == ADMIN_SEAT:
+        return ""
+    logger.warning("[timer_install] %s refused for %s: not the admin seat", command, caller or "no seat")
+    reason = (
+        f"the daemon-tick timer wakes the whole fleet, so only the admin seat ({ADMIN_SEAT}) installs or removes it."
+    )
+    if not caller:
+        seat_dir = _DAEMON_ROOT.parent / ADMIN_SEAT.lstrip("@")
+        return f"{command} refused: no AIPass seat ran it: {reason} Run it from that seat: cd {seat_dir} && drone @daemon {command}"
+    return (
+        f"{command} refused for {caller}: {reason} "
+        f'Ask: drone @ai_mail email {ADMIN_SEAT} "{command}" "why the timer should change"'
+    )
+
+
+def _restore(previous: dict) -> None:
+    """Put each unit path back as it was before the copy: its old bytes, or absent."""
+    from aipass.trigger import trigger
+
+    for dst, old in previous.items():
+        if old is None:
+            dst.unlink(missing_ok=True)
+            try:
+                trigger.fire("file_deleted", path=str(dst), source="timer_install")
+            except Exception as e:
+                logger.warning("[timer_install] Trigger fire failed (non-critical): %s", e)
+            console.print(f"  [yellow]Removed:[/yellow] {dst} (install did not finish)")
+        else:
+            dst.write_bytes(old)
+            console.print(f"  [yellow]Restored:[/yellow] {dst} (install did not finish)")
+    logger.warning("[timer_install] install did not finish: unit folder put back as it was")
+
+
 def _install() -> int:
-    """Install and enable the daemon-tick timer."""
+    """Install and enable the daemon-tick timer. A failed systemctl step puts the unit folder back as it was."""
     service_src = _DAEMON_ROOT / _SERVICE_NAME
     timer_src = _DAEMON_ROOT / _TIMER_NAME
 
@@ -120,24 +166,24 @@ def _install() -> int:
     console.print("[bold cyan]Installing daemon-tick units...[/bold cyan]")
     console.print()
 
+    previous = {}
     for src in (service_src, timer_src):
         dst = _UNIT_DIR / src.name
+        previous[dst] = dst.read_bytes() if dst.exists() else None
         shutil.copy2(src, dst)
         console.print(f"  [green]Copied:[/green] {src.name} -> {dst}")
 
     console.print()
 
-    console.print("  Reloading systemd user daemon...")
-    if not _run_systemctl("daemon-reload"):
-        return 1
-
-    console.print("  Enabling daemon-tick.timer...")
-    if not _run_systemctl("enable", _TIMER_NAME):
-        return 1
-
-    console.print("  Starting daemon-tick.timer...")
-    if not _run_systemctl("start", _TIMER_NAME):
-        return 1
+    for label, step in (
+        ("Reloading systemd user daemon...", ("daemon-reload",)),
+        ("Enabling daemon-tick.timer...", ("enable", _TIMER_NAME)),
+        ("Starting daemon-tick.timer...", ("start", _TIMER_NAME)),
+    ):
+        console.print(f"  {label}")
+        if not _run_systemctl(*step):
+            _restore(previous)
+            return 1
 
     console.print()
     console.print("[bold green]daemon-tick.timer installed and active.[/bold green]")
@@ -167,8 +213,8 @@ def _uninstall() -> int:
     Installed means a unit file in _UNIT_DIR or a unit systemd knows, so the stop is always asked.
     Each step must answer True: the first failure is named with error(), the answer is 1, and the files stay.
 
-    Where systemctl is not found: no unit file standing means nothing installed (exit 0); a standing
-    unit file makes the stop the failed step (exit 1, files stay). A stop timeout is a failure.
+    Where systemctl is not found, no systemd runs the units, so there is nothing to stop: standing unit
+    files are removed (exit 0). A stop timeout or failure where systemctl exists stops the uninstall.
     """
     console.print("[bold cyan]Uninstalling daemon-tick units...[/bold cyan]")
     console.print()
@@ -181,9 +227,9 @@ def _uninstall() -> int:
         console.print()
         logger.info("[timer_install] uninstall: no systemctl and no unit file, nothing installed")
         return 0
-    if not stopped:
+    if stopped is False:
         return _uninstall_step_failed("stop", _TIMER_NAME)
-    if (_UNIT_DIR / _TIMER_NAME).exists() and not _run_systemctl("disable", _TIMER_NAME):
+    if stopped and (_UNIT_DIR / _TIMER_NAME).exists() and not _run_systemctl("disable", _TIMER_NAME):
         return _uninstall_step_failed("disable", _TIMER_NAME)
 
     if not installed:
@@ -200,7 +246,10 @@ def _uninstall() -> int:
             logger.warning("[timer_install] Trigger fire failed (non-critical): %s", e)
         console.print(f"  [yellow]Removed:[/yellow] {dst}")
 
-    if not _run_systemctl("daemon-reload"):
+    if stopped is None:
+        console.print("  [dim]No systemctl on this host: nothing was running the units, nothing to reload[/dim]")
+        logger.info("[timer_install] uninstall: no systemctl, unit files removed without a reload")
+    elif not _run_systemctl("daemon-reload"):
         return _uninstall_step_failed("daemon-reload")
 
     console.print()
@@ -221,6 +270,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     gate(command, args, usage=f"drone @daemon {command}")
+
+    refusal = _seat_refusal(command)
+    if refusal:
+        error(refusal)
+        sys.exit(1)
 
     if command == "install-timer":
         exit_code = _install()

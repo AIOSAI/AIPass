@@ -12,8 +12,8 @@ The scheduled scan that builds the registry, and the watcher's own lifecycle eve
 as a **snapshot**: modules added, modules whose file is gone removed,
 `discovered_time` carried over for anything already on record. A second run over
 an unchanged tree reports 0 added and 0 removed, which is what makes it safe to
-schedule. It runs daily as `module-scan-daily` in `.daemon/schedule.json` (04:30,
-`timeout_seconds` 60, `notify: false`). Bare `drone @prax discover` shows
+schedule. It is defined as the daily job `module-scan-daily` in `.daemon/schedule.json` (04:30,
+`timeout_seconds` 60, `notify: false`) and ships disabled (`"enabled": false`). Bare `drone @prax discover` shows
 introspection and scans nothing — the fleet's module standard, and the right
 default for a verb that rewrites a registry.
 
@@ -42,13 +42,10 @@ site, not at module level: a module-level import cannot succeed, because trigger
 initialising. By the time a fire site runs, this module is fully imported and the
 cycle is gone.
 
-The import is guarded `(ImportError, OSError)` to a warning and returns `None`
-when the host cannot give a bus. The guard is that wide because trigger's own
-import guard can raise `FileNotFoundError` on a host with no readable working
-directory, and an optional dependency's fallback must be at least as wide as the
-failures its import can produce. There is no module-level "trigger available"
-flag: a flag set once at import could only ever hold the value of the failed
-first attempt.
+The import is unguarded: a failure raises to the fire site, which catches
+`Exception` and logs it. There is no module-level "trigger available" flag: a
+flag set once at import could only ever hold the value of the failed first
+attempt.
 
 ## The discovery watcher cannot kill its own thread
 

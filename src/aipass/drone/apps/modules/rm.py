@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rm.py
 # Description: Module orchestrator for contained safe-delete: in-tree targets move to .archive
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-06-02
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """Module orchestrator for contained safe-delete.
@@ -150,7 +150,7 @@ def print_help() -> None:
     """Display help (--help flag)."""
     console.print("Usage: drone rm [--dot] <path> [<path>...]")
     console.print()
-    console.print("Contained safe-delete, within the project root and the system temp dir.")
+    console.print("Contained safe-delete: a citizen's own branch and the system temp dir.")
     console.print("Inside the project nothing is deleted: the target MOVES to")
     console.print("<its folder>/.archive/<its name> in one rename, a directory whole, the")
     console.print(".archive made if absent. A name already archived keeps both: the new one")
@@ -166,8 +166,11 @@ def print_help() -> None:
     console.print("  • A target inside a .archive is refused: emptying one is the owner's")
     console.print("  • A failed move fails loudly and moves nothing; a symlinked .archive refuses")
     console.print("  • Carve-outs: .git, .trinity, .aipass, .codex, .agents, other citizens' trees")
-    console.print("  • The verified admin seat alone may work inside other citizens' trees (never")
-    console.print("    a branch root, a carve-out or a .archive); unverifiable means refused")
+    console.print("  • Off the admin seat, a project path outside your own branch is refused: the")
+    console.print("    repo root, src/ and every file in no branch (mail @devpulse the path and why)")
+    console.print("  • The verified admin seat alone may work outside its own branch, in other")
+    console.print("    citizens' trees and the files in no branch (never a branch root, a carve-out")
+    console.print("    or a .archive); unverifiable means refused")
     console.print("  • A project folder that CONTAINS another citizen is refused, naming it")
     console.print("  • Outside the allowed roots, the verified admin seat reaches any project under")
     console.print("    the owner's home (the nearest folder holding a *_REGISTRY.json or .git): the")

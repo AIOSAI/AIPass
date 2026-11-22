@@ -3,7 +3,7 @@
 # Description: The trinity push lane — dry-run reporting and gated execution
 # Version: 1.2.0
 # Created: 2026-08-27
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Trinity Push Module
@@ -40,6 +40,11 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if not args:
         print_introspection()
+        error(
+            "push needs a flag: --dry-run (report what would change, write nothing) or "
+            "--confirm (the fleet write, @devpulse's lane, after reading the dry-run)",
+            suggestion="Run 'drone @memory push --help' for every flag",
+        )
         return True
 
     # A help flag anywhere outranks everything — asking about the push must

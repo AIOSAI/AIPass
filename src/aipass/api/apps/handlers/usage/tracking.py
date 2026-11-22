@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tracking.py
 # Description: Usage Tracking Handler
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2025-11-16
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Usage Tracking Handler"""
@@ -48,7 +48,8 @@ def track_usage(
                 api_key = get_api_key("openrouter")
             except Exception as e:
                 logger.error(f"[{MODULE_NAME}] Failed to load API key: {e}")
-                return {"success": False, "error": "No API key available"}
+                # The cause, as every other key verb says it: a locked keyring is not a missing key.
+                return {"success": False, "error": f"No API key available: {e}"}
 
         if not api_key:
             return {"success": False, "error": "No API key available"}

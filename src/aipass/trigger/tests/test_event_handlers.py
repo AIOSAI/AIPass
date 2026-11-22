@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_event_handlers.py
 # Description: Tests for simple event handler functions, the warning escalation lane and the mute expiry sweep
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-25
 # Modified: 2026-11-21
 # =============================================
@@ -13,6 +13,7 @@
 
 import json
 import os
+import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -416,7 +417,8 @@ class TestMuteExpirySweep:
             delivered.append(email)
             return True, ""
 
-        monkeypatch.setattr(ai_mail, "deliver_email_to_branch", deliver)
+        # Patched at its home: undoing a setattr on the package door would pin the real function there for good.
+        monkeypatch.setattr(sys.modules[ai_mail.deliver_email_to_branch.__module__], "deliver_email_to_branch", deliver)
         wired: Dict[str, Any] = {}
         monkeypatch.setattr(core.Trigger, "on", staticmethod(lambda event, handler: wired.setdefault(event, handler)))
 

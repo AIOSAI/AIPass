@@ -154,7 +154,7 @@ The contacts system (`contacts.py`) maintains an address book at `.ai_mail.local
 | 3 | The `projects/*` sweep — the cross-project bridge | verified admin only |
 | 4 | The declared-roots **external tier** | — (declaration is the credential) |
 
-Step 4 consumes @memory's public gateway, `aipass.memory.apps.modules.fleet.external_branches()`, which reads the machine anchor `AIPASS_ROOTS.json` at AIPass home. Nothing here re-reads that file — one anchor, one reader. No anchor means no external roots, which is the ordinary state of a fresh clone, and resolution then uses the first three sources only.
+Step 4 consumes @memory's public gateway, `from aipass.memory import external_branches`, which reads the machine anchor `AIPASS_ROOTS.json` at AIPass home. Nothing here re-reads that file — one anchor, one reader. No anchor means no external roots, which is the ordinary state of a fresh clone, and resolution then uses the first three sources only.
 
 There is no admin gate on step 4: @daemon fires scheduled wakes unverified, and the anchor is a machine-managed file the owner blessed, so an external root is already an authorised destination. The admin sweep keeps its position *above* the tier — moving it below would let a sibling repo shadow a citizen living in our own `projects/`.
 

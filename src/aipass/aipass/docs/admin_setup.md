@@ -47,9 +47,14 @@ its signature loudly rather than quietly succeeding.
 
 ## Fresh-install state
 
-Every citizen is born with a plain birth certificate — no `privileges` block, no
-`signature`. There is no key at `~/.aipass/admin_grant.key`. Every admin action
-refuses.
+Every citizen spawn creates is born with a plain birth certificate — no
+`privileges` block, no `signature`. There is no key at
+`~/.aipass/admin_grant.key`. Every admin action refuses.
+
+The 18 shipped agents carry no certificate on a new install: `artifacts/` is
+untracked and install does not write one. `admin_grant mint` refuses while
+devpulse's certificate is absent, so the ceremony below completes only on a
+machine where that file exists.
 
 That is the intended default. Only the ceremony below creates an admin.
 

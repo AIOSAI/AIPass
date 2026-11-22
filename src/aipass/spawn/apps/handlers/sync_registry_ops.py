@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_registry_ops.py
 # Description: Registry sync handler — implementation logic for registry repair
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """Registry synchronization handler for branch lifecycle management.
@@ -12,14 +12,20 @@ Reference: docs/registry_and_repair.md
 """
 
 import json
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from aipass.prax import logger
 
+from aipass.spawn.apps.handlers.seed_ops import find_seed
 from aipass.spawn.apps.handlers.registry import (
+    ADMIN_BRANCH,
+    CI_CURE_BRANCH,
+    _default_registry_schema,
     _validate_path_containment,
+    ensure_project_has_owner,
     find_registry,
     load_registry,
     registry_is_writable_document,
@@ -132,6 +138,7 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
     empty = {
         "stale": [],
         "damaged": [],
+        "damaged_cures": {},
         "unregistered": [],
         "healthy": [],
         "fixed": [],
@@ -153,12 +160,9 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
         # load_registry answers an unreadable file with an empty document; --fix would then re-register
         # every branch with new ids and no metadata.id, orphaning every passport. Refuse instead.
         if not registry_is_writable_document(registry_path):
-            logger.error(
-                "[sync-registry] %s exists but could not be read as a registry document — refusing to sync. "
-                "Restore or repair the file by hand; a rebuild here would re-mint the project.",
-                registry_path.name,
-            )
-            return {"error": f"{registry_path.name} exists but could not be read as a registry document", **empty}
+            reason = f"{registry_path.name} exists but could not be read as a registry document; {REBUILD_HINT}"
+            logger.error("[sync-registry] %s", reason)
+            return {"error": reason, **empty}
 
         registry = load_registry(registry_path)
         branches = branches_as_list(registry.get("branches", []))
@@ -173,6 +177,7 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
 
         stale: list[str] = []
         damaged: list[str] = []
+        damaged_cures: dict[str, str] = {}
         unregistered_list: list[str] = []
         healthy: list[str] = []
 
@@ -195,12 +200,8 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
                 else:
                     # The folder is the citizen; a lost passport is repaired, never a reason to deregister.
                     damaged.append(name)
-                    logger.error(
-                        "[sync-registry] %s: folder on disk, %s missing - kept registered; restore with: %s",
-                        name,
-                        passport,
-                        RESTORE_CURE,
-                    )
+                    damaged_cures[name] = damaged_cure(branch_dir, name)
+                    logger.error("[sync-registry] %s: %s (%s); %s", name, DAMAGED_STATE, passport, damaged_cures[name])
             else:
                 stale.append(name)
 
@@ -359,6 +360,7 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
     return {
         "stale": stale,
         "damaged": damaged,
+        "damaged_cures": damaged_cures,
         "unregistered": unregistered_list,
         "healthy": healthy,
         "fixed": fixed,
@@ -370,6 +372,124 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
 
 
 RESTORE_CURE = "aipass doctor --fix"
+DAMAGED_STATE = "folder on disk, passport missing - kept registered"
+REBUILD_CURE = "drone @spawn sync-registry --rebuild"
+REBUILD_HINT = f"rebuild it from the passports on disk: {REBUILD_CURE} (preview), then --confirm"
+# A rebuild never writes these flags: each belongs to its ceremony (usage in apps/modules/grant_admin.py).
+SEAT_CEREMONIES = {ADMIN_BRANCH: "drone @spawn grant-admin", CI_CURE_BRANCH: "drone @spawn grant-ci-cure"}
+
+
+def damaged_cure(branch_dir, name: str) -> str:
+    """The next step for a damaged citizen: restore from its passport vault, else retire it."""
+    if find_seed(branch_dir):
+        return f"restore with: {RESTORE_CURE}"
+    return (
+        f"no passport vault to restore from; retire it from the admin seat (@{ADMIN_BRANCH}): "
+        f"drone @spawn delete @{name} --retire"
+    )
+
+
+def rebuild_registry(registry_path, confirm=False) -> dict:
+    """Rebuild a corrupt registry from the passports under its folder; a preview unless confirm.
+
+    Refused, nothing written, when the file still parses as a registry or the passports do not share
+    one registry_id. With confirm the corrupt file is moved aside as <name>.corrupt-<stamp>, never deleted.
+    Returns a receipt: refused, credential, rows, owner, ceremonies, aside, written."""
+    registry_path = Path(registry_path)
+    project_root = registry_path.parent
+    receipt = {
+        "registry": str(registry_path),
+        "refused": None,
+        "credential": "",
+        "rows": [],
+        "owner": None,
+        "ceremonies": [],
+        "aside": None,
+        "written": False,
+    }
+
+    def _refuse(reason):
+        logger.error("[rebuild-registry] %s", reason)
+        receipt["refused"] = reason
+        return receipt
+
+    with registry_lock(registry_path):
+        if not registry_path.is_file():
+            return _refuse(f"{registry_path} does not exist - nothing to rebuild, nothing written")
+        if registry_is_writable_document(registry_path):
+            return _refuse(
+                f"{registry_path.name} is not corrupt - a rebuild never replaces a good registry; "
+                "reconcile it with: drone @spawn sync-registry --fix"
+            )
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        credentials: dict[str, str] = {}
+        rows = []
+        for name, branch_path in _scan_for_branches(project_root).items():
+            passport_path = branch_path / ".trinity" / "passport.json"
+            try:
+                citizenship = json.loads(passport_path.read_text(encoding="utf-8")).get("citizenship") or {}
+                credentials[name] = citizenship.get("registry_id", "")
+                citizen_id = citizenship.get("citizen_id", "")
+            except (json.JSONDecodeError, OSError, AttributeError) as exc:
+                # A citizen left out of the rebuild would lose its row; restore its passport first.
+                return _refuse(f"{name}: passport {passport_path} unreadable ({exc}); restore it with: {RESTORE_CURE}")
+            rows.append(
+                {
+                    "name": name.upper(),
+                    "path": branch_path.relative_to(project_root).as_posix(),
+                    "profile": "library",
+                    "description": _derive_description(branch_path),
+                    "email": f"@{name}",
+                    "status": "active",
+                    "created": today,
+                    "last_active": today,
+                    "registry_id": citizen_id or str(uuid.uuid4()),
+                }
+            )
+
+        distinct = set(credentials.values()) - {""}
+        if len(distinct) != 1:
+            found = ", ".join(f"{n}={c or '(none)'}" for n, c in sorted(credentials.items())) or "no passports"
+            return _refuse(
+                f"the passports under {project_root} must share one citizenship.registry_id - found {found}; "
+                "nothing written"
+            )
+        credential = distinct.pop()
+        owner = pick_owner_branch(rows, project_root)
+        receipt.update(
+            credential=credential,
+            rows=sorted(rows, key=lambda r: r["name"]),
+            owner=owner["name"] if owner else None,
+            ceremonies=[
+                f"{SEAT_CEREMONIES[r['name'].lower()]} --registry {registry_path}"
+                for r in rows
+                if r["name"].lower() in SEAT_CEREMONIES
+            ],
+        )
+        if not confirm:
+            return receipt
+
+        aside = registry_path.with_name(f"{registry_path.name}.corrupt-{datetime.now():%Y%m%d-%H%M%S}")
+        if aside.exists():
+            return _refuse(f"{aside} already exists - it is never overwritten; retry in a second")
+        document = _default_registry_schema(credential)
+        document["branches"] = receipt["rows"]
+        document["metadata"]["total_branches"] = len(rows)
+        os.replace(registry_path, aside)
+        try:
+            atomic_write_text(registry_path, json.dumps(document, indent=2, ensure_ascii=False) + "\n")
+        except OSError as exc:
+            os.replace(aside, registry_path)
+            return _refuse(f"{registry_path.name} could not be written ({exc}); the corrupt file is back in place")
+        receipt.update(aside=str(aside), written=True)
+
+    ensure_project_has_owner(registry_path)
+    json_handler.log_operation("registry_rebuilt", data={"registry": str(registry_path), "rows": len(rows)})
+    logger.info(
+        "[rebuild-registry] %s rebuilt with %d row(s); corrupt bytes kept at %s", registry_path, len(rows), aside
+    )
+    return receipt
 
 
 def _read_owner_passport(owner, project_root):
@@ -402,7 +522,7 @@ def check_owner_identity(registry_path=None):
         return {"clean": False, "owner": None, "owner_uid": "", "issues": [{"flag": "no_registry", "detail": reason}]}
     registry_path = Path(registry_path)
     if not registry_is_writable_document(registry_path):
-        reason = f"{registry_path.name} exists but could not be read as a registry document"
+        reason = f"{registry_path.name} exists but could not be read as a registry document; {REBUILD_HINT}"
         logger.error("[registry-check] %s", reason)
         return {
             "clean": False,
@@ -550,7 +670,7 @@ def fix_owner_identity(registry_path=None, dry_run=False):
     with registry_lock(registry_path):
         # An unreadable registry loads as empty; saving that would wipe every branch and the credential.
         if not registry_is_writable_document(registry_path):
-            reason = f"{registry_path.name} exists but could not be read as a registry document"
+            reason = f"{registry_path.name} exists but could not be read as a registry document; {REBUILD_HINT}"
             logger.error("[fix-identity] %s", reason)
             return {"actions": [], "applied": False, "error": reason}
         reg_data = load_registry(registry_path)

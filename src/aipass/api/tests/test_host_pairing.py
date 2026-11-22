@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_pairing.py
 # Description: Tests for the pairing door — one-use QR codes a phone trades for its bearer
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-10-13
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/host/pairings.py, POST /v1/pair, the host-api pair verb and its extension mode."""
@@ -119,6 +119,8 @@ class TestMintPairing:
         ("label", "scope", "ttl"),
         [
             ("  ", "read", 300),
+            ("bad;rm-x", "read", 300),
+            ("x" * 65, "read", 300),
             ("phone", "admin", 300),
             ("phone", "read", 29),
             ("phone", "read", 901),

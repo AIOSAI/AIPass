@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: alert_dismiss.py
-# Version: 1.1.1
+# Version: 1.1.2
 # Description: Dismiss alerts from .aipass/alerts.json via drone @hooks dismiss
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-14
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Dismiss alerts from .aipass/alerts.json by ID."""
@@ -46,7 +46,10 @@ def _dismiss_alert(alert_id: str) -> bool:
     """Remove an alert by ID from alerts.json. Returns True if found and removed."""
     aipass_dir = _find_aipass_dir()
     if not aipass_dir:
-        CONSOLE.print("[red]No .aipass/ directory found in this directory tree.[/red]")
+        CONSOLE.print(
+            f"[yellow]Alert {alert_id} is unknown: no .aipass/alerts.json from {Path.cwd()} upward, "
+            "so there are no alerts to dismiss.[/yellow]"
+        )
         return False
 
     alerts_path = aipass_dir / "alerts.json"

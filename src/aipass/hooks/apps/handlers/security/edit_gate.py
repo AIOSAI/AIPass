@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.30.0
+# Version: 1.31.0
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -59,9 +59,9 @@ TRIPWIRE_DARK = (
 # Named for the log line only: WHO is decided by modules/admin_seat's verified rail. Spelled, not imported:
 # a handler reaches modules at call time. It must equal modules/admin_seat.ADMIN_SEAT; no test pins that.
 ADMIN_SEAT = "devpulse"
-# @spawn owns passport's schema, so it is measured by SIZE only (@memory's check_file_budget).
 _TRINITY_MEMORY_FILES = frozenset({"local.json", "observations.json", "passport.json"})
-_FILE_BUDGET_FILES = frozenset({"passport.json"})
+# @spawn owns passport's schema, so it is measured by SIZE only (@memory's check_file_budget).
+_SIZE_ONLY_FILES = frozenset({"passport.json"})
 # src/<pkg>/<branch>/.trinity is four deep; bounded, as a full repo walk on every Bash call costs too much.
 _TRINITY_SCAN_DEPTH = 4
 _NEWEST_FIRST_ARRAYS = ("sessions", "key_learnings")
@@ -577,11 +577,9 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
 
 
 def _evaluate_file_budget(file_name: str, after_text: str, limits: dict, el: Any) -> dict | None:
-    """Measure a whole-file budget — the passport row (DPLAN-0347, @memory 1.11.0).
+    """Measure the whole file against @memory's file_budgets row for it; a file with no row has no budget.
 
-    SIZE only: @spawn owns passport's schema, @memory the numbers. Warn mode logs and allows."""
-    if file_name not in _FILE_BUDGET_FILES:
-        return None
+    SIZE only: it holds a key the entry shape does not name, and passport's schema is @spawn's. Warn mode logs."""
     violations = el.check_file_budget(file_name, after_text)
     if not violations:
         return None
@@ -591,10 +589,11 @@ def _evaluate_file_budget(file_name: str, after_text: str, limits: dict, el: Any
         return None
     lines = [f"{file_name} is over its budget (fix before saving):"]
     lines.extend(_format_violation(v) for v in violations)
-    lines.append(
-        "  The identity block renders from this file on every cadence beat, so its size is a standing cost. "
-        "Caps live in @memory's memory.config.json (file_budgets); @spawn owns the schema."
-    )
+    if file_name == "passport.json":
+        lines.append(
+            "  The identity block renders from this file on every cadence beat, so its size is a standing cost."
+        )
+    lines.append("  Caps live in @memory's memory.config.json (file_budgets).")
     logger.warning("[HOOKS] edit_gate: %s refused — %d file-budget violation(s)", file_name, len(violations))
     return _refuse("\n".join(lines))
 
@@ -954,7 +953,7 @@ def _measure_memory_file(path: Path) -> list[str]:
     The WHOLE file is measured (the snapshot holds stats, not text), so the report says "holds", never "wrote"."""
     if not path.is_file():
         return [f"  {path.name} no longer exists."]
-    if path.name in _FILE_BUDGET_FILES:
+    if path.name in _SIZE_ONLY_FILES:
         el = _import_module("aipass.memory")
         try:
             text = path.read_text(encoding="utf-8")
@@ -963,7 +962,8 @@ def _measure_memory_file(path: Path) -> list[str]:
             return [f"  {path.name} could not be read: {exc}"]
         return [_format_violation(v) for v in el.check_file_budget(path.name, text)]
     try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        doc = json.loads(text)
     except (OSError, ValueError) as exc:
         logger.info("[HOOKS] edit_gate tripwire: %s unreadable after a shell call: %s", path, exc)
         return [f"  {path.name} no longer parses as JSON: {exc}"]
@@ -974,7 +974,8 @@ def _measure_memory_file(path: Path) -> list[str]:
     if not limits.get("enabled"):
         return []
     over = _dedupe_violations(el.changed_entries({}, doc, limits))
-    return [_format_violation(v, None if v.get("reason") else _entry_text(v, doc, limits)) for v in over]
+    found = [_format_violation(v, None if v.get("reason") else _entry_text(v, doc, limits)) for v in over]
+    return found + [_format_violation(v) for v in el.check_file_budget(path.name, text)]
 
 
 def handle(hook_data: dict) -> dict:
@@ -1206,7 +1207,7 @@ def _report_change(path: Path, seat: Path) -> tuple[list[str], bool]:
     findings = _measure_memory_file(path)
     mine = path.parent == seat
     if mine and not findings:
-        clean = "It is inside its file budget." if path.name in _FILE_BUDGET_FILES else "It measures clean."
+        clean = "It is inside its file budget." if path.name in _SIZE_ONLY_FILES else "It measures clean."
         return [
             f"MEMORY CHANGED DURING THIS BASH CALL: {path} changed during this Bash call, outside the caps gate. "
             f"{clean} If this command wrote it, memory is written with Edit/Write or a drone @memory verb, never "
@@ -1227,7 +1228,7 @@ def _report_change(path: Path, seat: Path) -> tuple[list[str], bool]:
         )
     if findings:
         return [f"{head}, and it does not measure clean:", *findings, cure], False
-    clean = "It is inside its file budget." if path.name in _FILE_BUDGET_FILES else "It measures clean."
+    clean = "It is inside its file budget." if path.name in _SIZE_ONLY_FILES else "It measures clean."
     return [f"{head}. {clean}", cure], True
 
 

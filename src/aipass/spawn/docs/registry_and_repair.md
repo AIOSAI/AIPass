@@ -36,11 +36,24 @@ Sync acts on ONE registry, never the fleet: a named `[project-path]` is the regi
 reads and writes, and with none it takes the nearest `*_REGISTRY.json` walking up from the cwd.
 A path with no registry above it, or no registry above the cwd, exits 1 and never falls back. A registry that exists
 but will not parse is refused by the sync, `--fix` and `--check` alike (`--check` flags
-`unreadable_registry`): rebuilding it would re-mint the project. Under `--fix`, a stale entry
+`unreadable_registry`): rebuilding it would re-mint the project. Each refusal names the way out,
+`drone @spawn sync-registry --rebuild`. Under `--fix`, a stale entry
 whose branch is found elsewhere in the project has its `path` rewritten, so `owner`, `admin`
 and `registry_id` stay; directory names are keyed through `normalize_branch_name`, so
 `my-agent` on disk matches `MY_AGENT`. Every registry writer holds `registry_lock` (`flock`
 on `.<stem>.lock`) and loads inside it.
+
+`--rebuild` is for a registry that will not parse (empty, `[]`, truncated, or JSON with garbage
+after it); a registry that parses is refused untouched and pointed at `--fix`. It reads the
+passports the sync scan finds under the registry's folder. Their `citizenship.registry_id` becomes
+`metadata.id`, and if they do not all carry the same one the rebuild refuses and names each.
+Each passport becomes a row the way `--fix` registers a stray, keeping its `citizen_id` as the
+row's `registry_id`. Without `--confirm` it writes nothing and prints the rows it would write. With
+`--confirm` the corrupt file is moved aside as `<name>.corrupt-<YYYYmmdd-HHMMSS>` beside it, never
+deleted, and the new registry is written atomically. The owner seat is set as a fresh project's is.
+`admin` and `ci_cure` are not restored: only their ceremonies write them, so the rebuild lists
+`drone @spawn grant-admin` and `drone @spawn grant-ci-cure` to re-run. Spawn's package door
+exposes `rebuild_registry`, so `aipass doctor` can call it while drone cannot route `@spawn`.
 
 ---
 

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_hookstatus.py
-# Version: 1.0.2
+# Version: 1.1.0
 # Description: Tests for hookstatus module (drone @hooks status)
 # Branch: hooks
 # Created: 2026-05-28
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/hookstatus.py — read-only hook config viewer."""
@@ -17,6 +17,8 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.hooks.apps import hooks
+from aipass.hooks.apps.modules import hookstatus
 from aipass.hooks.apps.modules.hookstatus import handle_command, print_introspection
 
 SAMPLE_CONFIG = {
@@ -218,3 +220,30 @@ class TestPrintIntrospection:
         print_introspection()
 
         assert "hookstatus — Read-only hook config viewer" in capsys.readouterr().err
+
+
+class TestBareHooksSaysTheConfigIsUnreadable:
+    """Chaos finding: with .aipass/hooks.json zero bytes, bare drone @hooks exited 0 with its module list alone."""
+
+    @pytest.fixture
+    def broken_home(self, tmp_path):
+        (tmp_path / ".aipass").mkdir()
+        (tmp_path / ".aipass" / "hooks.json").write_text("", encoding="utf-8")
+        with patch("aipass.hooks.apps.handlers.config.loader.aipass_home", return_value=tmp_path):
+            yield tmp_path / ".aipass" / "hooks.json"
+
+    def test_bare_hooks_names_the_unreadable_config(self, broken_home, capsys):
+        hooks.print_introspection()
+
+        captured = capsys.readouterr()
+        said = " ".join((captured.err + captured.out).split())
+        assert "HOOKS CONFIG UNREADABLE" in said and str(broken_home) in said
+        assert "Discovered Modules" in said, "the map still prints"
+
+    def test_a_readable_config_adds_no_line(self, tmp_path, capsys):
+        (tmp_path / ".aipass").mkdir()
+        (tmp_path / ".aipass" / "hooks.json").write_text("{}", encoding="utf-8")
+        with patch("aipass.hooks.apps.handlers.config.loader.aipass_home", return_value=tmp_path):
+            hookstatus.print_config_break()
+
+        assert capsys.readouterr().err == ""

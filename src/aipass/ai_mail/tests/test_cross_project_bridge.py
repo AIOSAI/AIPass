@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cross_project_bridge.py
 # Description: Tests for the verified-admin cross-project bridge + reply return path (FPLAN-0401 ph5/5b)
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-08-12
-# Modified: 2026-11-08
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py and the cross-project bridge across wake.py and registry/read.py."""
@@ -79,6 +79,12 @@ def repo(tmp_path):
         seat_path.mkdir(parents=True)
         (seat_path / f"{project.upper()}_REGISTRY.json").write_text(
             json.dumps({"branches": [{"name": seat.upper(), "email": f"@{seat}", "path": str(seat_path)}]}),
+            encoding="utf-8",
+        )
+        # Delivery refuses a registered seat with no passport, so a live seat carries one.
+        (seat_path / ".trinity").mkdir()
+        (seat_path / ".trinity" / "passport.json").write_text(
+            json.dumps({"branch_info": {"branch_name": seat, "email": f"@{seat}"}}),
             encoding="utf-8",
         )
     return tmp_path

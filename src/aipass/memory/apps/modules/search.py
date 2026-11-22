@@ -3,13 +3,14 @@
 # Description: Search Orchestration Module
 # Version: 0.7.0
 # Created: 2025-11-27
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """
 Search Orchestration Module
 """
 
+import re
 import sys
 from pathlib import Path
 from typing import List
@@ -52,19 +53,21 @@ def handle_command(command: str, args: List[str]) -> bool:
 
         i = 0
         while i < len(args):
-            if args[i] == "--branch" and i + 1 < len(args):
-                branch = args[i + 1]
-                i += 2
-            elif args[i] == "--type" and i + 1 < len(args):
-                memory_type = args[i + 1]
-                i += 2
-            elif args[i] == "--n" and i + 1 < len(args):
-                try:
-                    n_results = int(args[i + 1])
-                except ValueError:
-                    logger.warning(f"[search] Invalid --n argument: {args[i + 1]}")
-                    error(f"Invalid number: {args[i + 1]}")
+            if args[i] in ("--branch", "--type", "--n"):
+                flag, value = args[i], args[i + 1] if i + 1 < len(args) else ""
+                if flag == "--branch":
+                    value = value.removeprefix("@")
+                problem = _option_problem(flag, value)
+                if problem:
+                    logger.warning(f"[search] Refused {flag} {value!r}: {problem}")
+                    error(problem, suggestion="Run 'drone @memory search --help' for the options")
                     return True
+                if flag == "--branch":
+                    branch = value
+                elif flag == "--type":
+                    memory_type = value
+                else:
+                    n_results = int(value)
                 i += 2
             else:
                 query_parts.append(args[i])
@@ -79,6 +82,21 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     return False
+
+
+_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+
+
+def _option_problem(flag: str, value: str) -> str | None:
+    """Why *value* cannot follow *flag*, or None; checked before the embedding model loads."""
+    if flag == "--n":
+        if not (value.isascii() and value.isdigit() and int(value) >= 1):
+            return f"--n needs a whole number of results, 1 or more, got {value!r}"
+        return None
+    if not _NAME_RE.fullmatch(value):
+        what = "a branch name (e.g. SENTRY)" if flag == "--branch" else "a memory type (e.g. observations, local)"
+        return f"{flag} needs {what}: a letter or digit, then letters, digits, _ or -, got {value!r}"
+    return None
 
 
 def print_help() -> None:

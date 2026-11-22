@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: usage_tracker.py
 # Description: Usage Tracking Module
-# Version: 1.0.5
+# Version: 1.0.6
 # Created: 2025-11-15
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Usage Tracking Module"""
@@ -16,6 +16,8 @@ from aipass.prax import branch_state_root, logger
 from aipass.cli import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.usage import tracking, aggregation, cleanup
+
+CALLER_MAX_CHARS = 100
 
 
 def print_introspection():
@@ -191,6 +193,10 @@ def show_caller_usage(args: List[str]):
         return
 
     caller = args[0]
+    # Refused, never echoed: a caller is a branch or app name, and the header would print whatever it is handed.
+    if len(caller) > CALLER_MAX_CHARS:
+        error(f"Caller name is {len(caller)} characters, over the {CALLER_MAX_CHARS}-character cap")
+        return
 
     header(f"Usage for Caller: {caller}")
     console.print()

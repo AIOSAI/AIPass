@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_ops.py
 # Description: Tests for registry_ops handler — template registry CRUD
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/template/registry_ops.py and the plan registry save it drives."""
@@ -55,6 +55,17 @@ class TestPlanRegistryLoadRefusesWhatItCannotRead:
 
         with pytest.raises(plan_load.RegistryUnreadableError, match="is not a JSON object: list"):
             plan_load.load_registry("dplan_registry.json")
+
+    @pytest.mark.parametrize("body", ['{"next_number": 2}', '{"plans": [], "next_number": 2}'])
+    def test_a_registry_without_a_plans_object_refuses_and_is_left_as_it_was(self, flow_json, body):
+        """Chaos lane: read as empty, create saved a registry holding only its new row."""
+        target = flow_json / "fplan_registry.json"
+        target.write_text(body, encoding="utf-8")
+
+        with pytest.raises(plan_load.RegistryUnreadableError, match="has no 'plans' object"):
+            plan_load.load_registry()
+
+        assert target.read_text(encoding="utf-8") == body
 
 
 _MOD = "aipass.flow.apps.handlers.template.registry_ops"

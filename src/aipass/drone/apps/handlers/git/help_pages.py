@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.13.0
+# Version: 1.13.1
 # Created: 2026-10-04
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -412,7 +412,7 @@ def page(command: str | None = None) -> str:
         "                         Show recent git log (default: 10); with paths, only the\n"
         "                         commits touching them. count: N, -n N or -N\n"
         "  log [count] <a>..<b>   Every commit in a range (a count caps it)\n"
-        "  show <ref> [path]      Show a commit, or a file's contents at it\n"
+        "  show <ref> [path] [--stat]  Show a commit, or a file's contents at it\n"
         "  blame <file> [-L START,END]  Who last changed each line (optionally a range)\n"
         "  tracked <path ...>     Tracked, ignored, untracked, missing or outside, per path\n"
         "  export <ref> <dir>     The tracked tree at ref into an empty dir (temp or docs.local)\n"

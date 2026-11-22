@@ -3,7 +3,7 @@
 # Description: Text-in vectorize_and_store — the store owns the embedding model choice
 # Version: 1.1.0
 # Created: 2026-08-24
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/storage/chroma_subprocess.py _vectorize_and_store."""
@@ -19,6 +19,7 @@ import io
 import json
 
 from aipass.memory.apps.handlers.storage import chroma_subprocess
+from aipass.memory.apps.handlers.vector import embed_subprocess
 
 
 class _FakeCompleted:
@@ -246,3 +247,30 @@ class TestTheChildReportsInItsReply:
 
         assert "no JSON reply on stdout" in reason
         assert reason.endswith("stderr: empty")
+
+
+class TestAMissingModelSaysHowToGetIt:
+    """Offline with an empty cache, fastembed refuses; the refusal must say the model is downloaded once, online."""
+
+    def test_the_refusal_names_the_download_and_the_cache(self, monkeypatch, capsys):
+        import sys
+
+        import pytest
+
+        fastembed = pytest.importorskip("fastembed")
+        from fastembed.common.utils import define_cache_dir
+
+        class _Offline:
+            def __init__(self, model_name):
+                raise ValueError(f"Could not load model {model_name} from any source.")
+
+        monkeypatch.setattr(fastembed, "TextEmbedding", _Offline)
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"texts": ["q"]})))
+        with pytest.raises(SystemExit):
+            embed_subprocess.main()
+
+        reply = json.loads(capsys.readouterr().out)
+        assert reply["success"] is False
+        assert "Could not load model sentence-transformers/all-MiniLM-L6-v2 from any source." in reply["error"]
+        assert "downloaded once with network access" in reply["error"]
+        assert str(define_cache_dir()) in reply["error"] and "FASTEMBED_CACHE_PATH" in reply["error"]

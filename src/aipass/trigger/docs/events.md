@@ -37,7 +37,7 @@ event.)
 
 | Event | Handler | State |
 |-------|---------|-------|
-| `cli_header_displayed` | `.archive/cli.py` | **Retired** — still fired by cli's `header()` in `cli/apps/modules/display.py`, runs no handler here |
+| `cli_header_displayed` | `.archive/cli.py` | **Retired** — no sender fires it, runs no handler here |
 | `plan_file_created` | `.archive/plan_file.py` | **Retired** — still fired by @flow's registry scan, runs no handler here |
 | `plan_file_deleted` | `.archive/plan_file.py` | **Retired** — same |
 | `plan_file_moved` | `.archive/plan_file.py` | **Retired** — same |
@@ -49,9 +49,9 @@ event.)
 `Trigger.fire("error_logged")` anywhere in the fleet. The watchers fire `error_detected`
 and `warning_logged`, and nothing else.
 
-**Vocabulary with no handler.** `cli_header_displayed` and the three plan-file events are
-still fired — cli from `display.py`, @flow from `handlers/registry/monitor_ops.py` — but
-trigger runs no handler for them, and neither sender needs anything back. The reason each
+**Vocabulary with no handler.** `cli_header_displayed` is fired by no sender. The three
+plan-file events are still fired by @flow from `handlers/registry/monitor_ops.py`, but
+trigger runs no handler for them, and the sender needs nothing back. The reason each
 is unwired is written beside it in `registry.py`. A fire into an empty handler list
 reports `handlers: 0`, which is the honest answer and not an error.
 

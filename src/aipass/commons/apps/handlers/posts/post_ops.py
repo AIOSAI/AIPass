@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: post_ops.py
 # Description: Post operations handler
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-03-07
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -20,6 +20,8 @@ from aipass.commons.apps.handlers.json import json_handler
 from aipass.commons.apps.handlers.search.search_queries import sync_post_to_fts
 from aipass.commons.apps.handlers.profiles.profile_queries import increment_post_count
 
+POST_USAGE = "Usage: post <room> <title> <content> [--type discussion|review|question|announcement]"
+
 
 def create_post(args: List[str]) -> dict:
     """Create a new post in a room."""
@@ -35,14 +37,17 @@ def create_post(args: List[str]) -> dict:
             i += 1
 
     if len(filtered_args) < 3:
-        return {
-            "success": False,
-            "error": "Usage: post <room> <title> <content> [--type discussion|review|question|announcement]",
-        }
+        return {"success": False, "error": POST_USAGE}
 
     room_name = filtered_args[0].lower()
     title = filtered_args[1]
     content = filtered_args[2]
+
+    for label, value in (("Room", room_name), ("Title", title)):
+        if not value.strip():
+            return {"success": False, "error": f"{label} is empty. {POST_USAGE}"}
+        if value.startswith("--"):
+            return {"success": False, "error": f"{label} '{value}' is a flag, not a {label.lower()}. {POST_USAGE}"}
 
     valid_types = ("discussion", "review", "question", "announcement")
     if post_type not in valid_types:

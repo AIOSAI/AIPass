@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: restore_ops.py
 # Description: Plan Restore Implementation Handler
-# Version: 1.7.0
+# Version: 1.7.1
 # Created: 2026-03-08
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Plan Restore Operations Handler
@@ -189,7 +189,9 @@ def restore_file_from_backup(plan_info: Dict[str, Any], plan_key: str, backup_di
     """
     source = find_backup_copy(plan_info, plan_key, backup_dir=backup_dir)
     if source is None:
-        return None, "no archived copy found"
+        row_file = Path(plan_info.get("file_path", "") or "")
+        archive = backup_dir if backup_dir is not None else archive_dir_for(row_file, PROCESSED_PLANS_DIR)
+        return None, f"archive copy is missing: expected {archive / row_file.name}"
 
     target = Path(plan_info.get("file_path", "") or "")
     if not target.name:

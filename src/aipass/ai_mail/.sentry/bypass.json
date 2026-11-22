@@ -121,14 +121,14 @@
       "file": "apps/modules/email.py",
       "standard": "logged_fallback",
       "lines": [
-        197,
-        201,
-        246,
-        250,
-        291,
-        325,
-        355,
-        375
+        198,
+        202,
+        247,
+        251,
+        296,
+        330,
+        360,
+        383
       ],
       "reason": "CLI handler layer (ai_mail, fleet green leg 9). A handle_* return is 'command recognised', not 'it worked' (branch prompt, Critical Rules): the router stops on True. Failure is told by cli error(), which calls mark_command_failed() and sets the process exit; a BrokenPipeError is stdout closed early, not a failure. So True on these lines is the contract, and the checker reads it as an indistinguishable fallback."
     },
@@ -145,10 +145,10 @@
       "file": "apps/modules/dispatch.py",
       "standard": "logged_fallback",
       "lines": [
-        345,
-        394,
-        449,
-        476
+        346,
+        395,
+        450,
+        477
       ],
       "reason": "Same CLI handler contract (ai_mail, fleet green legs 9 and 10): 484 is the send phase failing to resolve the sender, 457 a refused grant, 353 is dispatch stop and 402 dispatch close meeting an unreadable registry; each has already called error() (mark_command_failed). True tells the router the command was recognised."
     },
@@ -201,8 +201,8 @@
       "file": "apps/handlers/dispatch/register.py",
       "standard": "logged_fallback",
       "lines": [
-        151,
-        304
+        149,
+        302
       ],
       "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined DPLAN-0404 leg 15). 368: record_monitor_pid returns True only when the annotation was appended; False is its documented failure answer, the same as for a bad pid, and its one caller (wake.py's spawn, after the monitor is already running) must not cancel a live dispatch over a lost annotation; the row then falls back to expected_by. 611: _is_overdue cannot read expected_by, so it cannot say the row is late; the row stays listed as outstanding, the warning names it, and the flag is read as a bool by @devpulse's watchdog (dispatches.py:164, wire.py:531), so a third value would reach another branch."
     },
@@ -227,7 +227,7 @@
       "file": "apps/modules/email.py",
       "standard": "logged_fallback",
       "lines": [
-        86
+        87
       ],
       "reason": "The value is the answer (ai_mail, fleet green leg 10): the caller-identity gate returns '' when the caller resolves and the refusal text when it does not, as its docstring says; the except arm IS the refusal, carrying get_current_user()'s own RuntimeError text, and the entry point refuses on any non-empty answer."
     },

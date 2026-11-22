@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Decentralized .daemon/ schedule file discovery
-# Version: 2.8.0
+# Version: 2.9.0
 # Created: 2026-06-15
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -292,6 +292,11 @@ def _load_schedule_file(file_path: Path) -> dict:
     return data
 
 
+def _names_owner(branch, owner: str) -> bool:
+    """True when a schedule's ``branch`` field is its owner's address, with or without the @, any case."""
+    return isinstance(branch, str) and branch.strip().lstrip("@").lower() == owner.lstrip("@").lower()
+
+
 def _jobs_for_citizen(citizen: dict, skipped_owners: set, refusals: Optional[list] = None) -> List[dict]:
     """Return one citizen's validated jobs; an unreadable file or refused job adds it to *skipped_owners*."""
     daemon_dir = citizen["path"] / ".daemon"
@@ -311,10 +316,33 @@ def _jobs_for_citizen(citizen: dict, skipped_owners: set, refusals: Optional[lis
             _refused(refusals, "[discovery] %s: not a readable schedule (%s)", sched_file, e)
             continue
 
+        # The file's place names its owner; a branch field that names anyone else is a claim, refused.
+        if "branch" in data and not _names_owner(data["branch"], citizen["email"]):
+            skipped_owners.add(citizen["email"])
+            _refused(
+                refusals,
+                "[discovery] %s refused: branch %r is not its owner %s",
+                sched_file,
+                data["branch"],
+                citizen["email"],
+            )
+            continue
+
         for job in data["jobs"]:
             if not isinstance(job, dict):
                 skipped_owners.add(citizen["email"])
                 _refused(refusals, "[discovery] A job in %s is not an object", sched_file)
+                continue
+            if "branch" in job and not _names_owner(job["branch"], citizen["email"]):
+                skipped_owners.add(citizen["email"])
+                _refused(
+                    refusals,
+                    "[discovery] Job '%s' refused in %s: branch %r is not its owner %s",
+                    job.get("id"),
+                    sched_file,
+                    job["branch"],
+                    citizen["email"],
+                )
                 continue
             if not _validate_job(job, sched_file, refusals):
                 skipped_owners.add(citizen["email"])

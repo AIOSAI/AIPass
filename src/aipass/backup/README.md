@@ -4,7 +4,7 @@
 
 **Purpose:** Project-owned, local-first backups for any directory on this machine
 **Module:** `aipass.backup`
-**Version:** 1.2.0
+**Version:** 1.3.0
 **Created:** 2026-04-16
 
 ---
@@ -133,11 +133,11 @@ Depth lives in [docs/](docs/), one page per lane or handler group:
 - **Any project on this machine** — registered or named by path; the store is
   written into the project, not into this branch.
 - **@memory** — rollover safety copies share the `.backup/` directory.
-- **@flow** — closed plans are archived under the repo root's `.backup/`.
+- **@flow** — each closed plan is archived under its own project's `.backup/processed_plans/`; the repo root's `.backup/` is the fallback when no project register is found.
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-11-21
 
 ---
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stop.py
 # Description: End a running dispatch from outside: the stop verb's handler, and the live-monitor test close uses
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-11-01
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -116,21 +116,39 @@ def running_monitor(branch_path: Path) -> Optional[int]:
     return pid if isinstance(pid, int) and is_monitor(pid) else None
 
 
+def _newest_row(email: str) -> Optional[dict]:
+    try:
+        return next((e for e in register.outstanding() if e.get("target") == email), None)
+    except OSError as e:
+        logger.warning("[stop] register unreadable, stopping %s unregistered: %s", email, e)
+        return None
+
+
+def _close_dead_row(email: str, by: str) -> Tuple[bool, str, str]:
+    """Close the target's newest row when register reads its monitor GONE; otherwise nothing runs."""
+    entry = _newest_row(email)
+    if entry is None or entry.get("monitor_alive") is not False:
+        return False, f"no dispatch is running for {email}", ""
+    dispatch_id = str(entry.get("dispatch_id"))
+    if not register.close_dispatch(dispatch_id, STATUS_STOPPED):
+        return False, f"{email}'s dispatch {dispatch_id} has no monitor, but its register row could not be closed", ""
+    logger.info("[stop] %s's dispatch %s closed by %s: monitor gone", email, dispatch_id, by)
+    pid = entry.get("monitor_pid")
+    return True, f"closed {email}'s dispatch {dispatch_id}: its monitor (PID {pid}) is gone (by {by})", ""
+
+
 def stop_dispatch(branch_path: Path, email: str, by: str) -> Tuple[bool, str, str]:
     """(stopped, the one output line, a warning or "").
 
-    False with "no dispatch is running for @x" when no live monitor holds the branch's lock.
+    With no live monitor on the lock, a register row whose monitor is gone is closed as stopped;
+    with no such row either, False and "no dispatch is running for @x".
     """
     json_handler.log_operation("dispatch_stop", {"target": email, "by": by})
     pid = running_monitor(branch_path)
     if pid is None:
-        return False, f"no dispatch is running for {email}", ""
+        return _close_dead_row(email, by)
 
-    try:
-        entry: Optional[dict] = next((e for e in register.outstanding() if e.get("target") == email), None)
-    except OSError as e:
-        logger.warning("[stop] register unreadable, stopping %s unregistered: %s", email, e)
-        entry = None
+    entry = _newest_row(email)
 
     _end_process_group(pid, GRACE_SECONDS)
     # The group reads empty while the monitor is still exiting, so a stop right behind the signal

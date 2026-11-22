@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_module.py
 # Description: Tests for dispatch.py orchestrator functions
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-04-26
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/dispatch.py."""
@@ -335,6 +335,15 @@ class TestOrchestrateWake:
             result = _wake(["@branch"])
         assert result is True
         assert any("Wake failed for @branch" in e for e in errors)
+
+    def test_an_unknown_target_prints_its_steps_before_the_failure_line(self, monkeypatch, capsys):
+        # FPLAN-1160: stdout steps landed after the stderr failure line; both now share stderr, in order.
+        monkeypatch.setattr(f"{_H_WAKE}.resolve_branch", lambda email, admin=False: None)
+
+        _wake(["@nobody"])
+
+        err = capsys.readouterr().err
+        assert display.command_failed() and err.index("not found: @nobody") < err.index("Wake failed for @nobody")
 
     def test_fresh_flag(self, monkeypatch):
         """--fresh flag is passed through to wake_branch."""
@@ -1438,6 +1447,20 @@ class TestDispatchStop:
         assert display.command_failed()
         assert [e["dispatch_id"] for e in register.outstanding()] == [dispatch_id]
         assert mails == []
+
+    def test_register_and_stop_agree_on_a_dead_monitor_and_stop_closes_its_row(self, running_dispatch, capsys):
+        # FPLAN-1160: register read a dead monitor's row as running while stop said nothing runs.
+        _, dispatch_id, _, mails = running_dispatch
+        (gone := subprocess.Popen([sys.executable, "-c", ""])).wait()
+        register.record_monitor_pid(dispatch_id, gone.pid)
+        assert register.outstanding()[0]["monitor_alive"] is False
+
+        _stop("@worker", "--by", "Seed")
+
+        out, err = capsys.readouterr()
+        assert out.strip() == f"closed @worker's dispatch {dispatch_id}: its monitor (PID {gone.pid}) is gone (by Seed)"
+        assert not display.command_failed() and err == "" and mails == []
+        assert register.outstanding() == [] and _last_status(dispatch_id) == "stopped"
 
     def test_a_second_stop_is_the_nothing_running_line(self, running_dispatch, capsys):
         _, _, start, mails = running_dispatch

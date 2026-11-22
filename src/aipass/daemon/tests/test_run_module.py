@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_run_module.py
 # Description: Tests for the drone @daemon run module
-# Version: 1.4.0
+# Version: 1.4.1
 # Created:2026-06-15
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
@@ -781,8 +781,8 @@ class TestCommandArgv:
         assert argv == ["drone", "@ai_mail", "email", "@x", "two words"]
 
     def test_shell_syntax_arrives_as_plain_arguments(self):
-        # No shell: a glob, a pipe and a ; are characters in argv, never operators.
-        argv = command_job.command_argv("drone rm *.tmp | tee x ; echo y")
+        # No shell: a glob and a quoted pipe or ; are characters in argv, never operators.
+        argv = command_job.command_argv("drone rm *.tmp '|' tee x ';' echo y")
         assert argv == ["drone", "rm", "*.tmp", "|", "tee", "x", ";", "echo", "y"]
 
     @pytest.mark.parametrize(
@@ -948,7 +948,7 @@ class TestRunCommand:
         (tmp_path / "a.tmp").write_text("x", encoding="utf-8")
         launcher, _ = fake_drone(tmp_path, "print(json.dumps(sys.argv[1:]))\n")
         monkeypatch.setattr(command_job, "LAUNCHER", launcher)
-        result = command_job.run_command("drone rm *.tmp ; echo pwned", tmp_path, 30)
+        result = command_job.run_command("drone rm *.tmp ';' echo pwned", tmp_path, 30)
         assert json.loads(result.tail) == ["rm", "*.tmp", ";", "echo", "pwned"]
 
     def test_no_branch_directory_is_refused_never_run_from_here(self, tmp_path, monkeypatch):

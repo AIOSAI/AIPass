@@ -16,7 +16,7 @@ sweep of stale staging temps is one:
 ```json
 {
   "id": "tmp-sweep-weekly",
-  "enabled": true,
+  "enabled": false,
   "schedule": { "type": "interval", "interval_minutes": 10080, "slot": "2026-09-13T04:00:00" },
   "command": "drone rm --stale 10d ..",
   "timeout_seconds": 120,
@@ -24,7 +24,7 @@ sweep of stale staging temps is one:
 }
 ```
 
-It lives in `src/aipass/prax/.daemon/schedule.json`, so it runs from `src/aipass/prax/`. A
+It lives in `src/aipass/prax/.daemon/schedule.json` and is defined but ships disabled (`"enabled": false`); once enabled it runs from `src/aipass/prax/`. A
 relative path in the command resolves from there, which makes `..` the `src/aipass/` directory:
 one call covers every branch. The slot names a Sunday, 04:00. The live file's `_note` explains its
 120-second timeout, which is shorter than the default because a command job holds the tick lock for its whole run.
@@ -47,7 +47,14 @@ one call covers every branch. The slot names a Sunday, 04:00. The live file's `_
 - **No shell.** The command is split with `shlex.split`, which applies POSIX quoting on every
   platform, and runs as an argv list with `shell=False`. That means no globs, no pipes, no `;`
   and no variable expansion. `drone rm *.tmp ; echo x` reaches drone as the literal arguments
-  `*.tmp`, `;`, `echo`, `x`. Nothing in a JSON string can turn into a second command.
+  `*.tmp`, `;`, `echo`, `x`. Nothing in a JSON string can turn into a second command. Because a
+  bare operator would be passed to drone as text, a command holding an unquoted `|`, `;`, `&`,
+  `&&`, `>` or `<` is refused at discovery and the refusal names the operator. Inside quotes it is
+  text and is accepted, alone or in a phrase (`drone @commons post '|' "a | b"`).
+- **Never a dispatch.** `drone @ai_mail dispatch ...` wakes its target, and a command job wakes
+  nobody. A scheduled wake is a prompt job, which goes through `wake_branch` as `@daemon` and
+  shows in the queue as a wake. The branch is matched without its `@` and in any case.
+  `drone @ai_mail email ...` sends mail without a wake and is accepted.
 - **It runs in the owner's branch directory.** Drone reads cwd as identity, so the work is logged
   as the citizen whose schedule asked for it. The directory comes from the same citizen record
   that vouched for the schedule file, looked up by email. It is not looked up again by directory

@@ -95,6 +95,9 @@ def _mock_infrastructure(monkeypatch):
         monkeypatch.setattr(medic, name, getattr(medic_state_mod, name))
     _RECORDERS["medic_state"] = medic_state_mod
 
+    # The real census reads the live fleet registry.
+    monkeypatch.setattr(medic, "_get_registered_emails", lambda: {"@speakeasy", "@api"})
+
     # The real installer writes a systemd unit.
     installer = MagicMock(return_value=True)
     monkeypatch.setattr(medic, "ensure_service_installed", installer)
@@ -356,6 +359,35 @@ def test_handle_command_mute_prints_confirmation(capsys):
 
     printed = _printed(capsys)
     assert "  Muted @api — auto-expires in 4h" in printed, printed
+
+
+@pytest.mark.parametrize("command", ["mute", "volume-mute"])
+def test_mute_refuses_a_branch_the_fleet_does_not_know(command, capsys):
+    """`medic mute @nosuch` names the unknown branch, fails, and mutes nothing."""
+    medic = _import_medic()
+    medic.handle_command(command, ["@nosuch"])
+
+    err = capsys.readouterr().err
+    assert "Unknown branch @nosuch" in err, err
+    assert display.command_failed() is True
+    state = _get_medic_state()
+    state.mute_branch.assert_not_called()
+    state.mute_branch_volume.assert_not_called()
+
+
+def test_mute_with_an_unreadable_census_says_why_and_mutes_nothing(monkeypatch, capsys):
+    """No census, no guess: the reason is printed and nothing is muted."""
+    medic = _import_medic()
+
+    def unreadable():
+        raise RuntimeError("branch registry unreadable (AIPASS_REGISTRY.json): file absent")
+
+    monkeypatch.setattr(medic, "_get_registered_emails", unreadable)
+    medic.handle_command("mute", ["@speakeasy"])
+
+    assert "file absent" in capsys.readouterr().err
+    assert display.command_failed() is True
+    _get_medic_state().mute_branch.assert_not_called()
 
 
 def test_volume_mute_keeps_its_own_24h_default():

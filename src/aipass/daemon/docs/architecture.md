@@ -107,4 +107,4 @@ per-directory notes that the tree points at.
 | `timer_install` | Idempotent systemd user timer installer for daemon scheduler | Operational |
 | `run` | Decentralized scheduler tick: discover .daemon/ jobs, fire due ones — a wake, or a drone subprocess for a command job | Operational |
 | `inbox_sweep` | Fleet unread-mail backstop — wakes owners of mail unread past 24h | Operational *(hand tool — no scheduled job)* |
-| `rotation` | Nightly rounds — alphabetical roster, pointer, turn history | Operational *(job `rounds` enabled: 05:00, opus, one citizen a night)* |
+| `rotation` | Nightly rounds — alphabetical roster, pointer, turn history | Operational *(job `rounds` is defined and ships disabled: 05:00, opus, one citizen a night)* |

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_message_correlation.py
 # Description: Tests that a delivered message can be traced back to the sender's sent record
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-16
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py and the reply/inbox_ops/inbox_cleanup correlation it enables."""
@@ -61,6 +61,10 @@ def noop_inbox_lock(monkeypatch):
 
 def _setup_branch(tmp_path, email: str = "@target", name: str = "TARGET"):
     branch_path = tmp_path / "branches" / name.lower()
+    (branch_path / ".trinity").mkdir(parents=True, exist_ok=True)
+    (branch_path / ".trinity" / "passport.json").write_text(
+        "{}", encoding="utf-8"
+    )  # delivery refuses passport-less branches
     mailbox_dir = branch_path / ".ai_mail.local"
     mailbox_dir.mkdir(parents=True, exist_ok=True)
     inbox_file = mailbox_dir / "inbox.json"

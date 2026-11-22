@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.6.0
+# Version: 3.6.1
 # Created: 2025-12-02
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -455,6 +455,17 @@ def deliver_email_to_branch(
     if branch_path == Path("/") or branch_path == _REPO_ROOT:
         inbox_file = _REPO_ROOT / ".ai_mail.local" / "inbox.json"
     else:
+        # Provisioning into a folder that is no agent would leave a ghost spawn reads as damaged.
+        if not branch_path.is_dir():
+            return False, (
+                f"Refused: {to_branch} is registered at {branch_path} but that folder is missing - "
+                "restore the branch or retire its registry row"
+            )
+        if not (branch_path / ".trinity" / "passport.json").is_file():
+            return False, (
+                f"Refused: {to_branch} at {branch_path} has no .trinity/passport.json - "
+                "restore its passport or retire its registry row"
+            )
         inbox_file = branch_path / ".ai_mail.local" / "inbox.json"
 
     if not inbox_file.exists():
@@ -474,11 +485,10 @@ def deliver_email_to_branch(
             try:
                 with open(inbox_file, "r", encoding="utf-8") as f:
                     inbox_data = json.load(f)
+                inbox_data = _migrate_inbox_format(inbox_data, inbox_file)
             except Exception as e:
                 logger.warning("[delivery] failed to read inbox %s: %s", inbox_file, e)
-                return False, f"Failed to read inbox: {e}"
-
-            inbox_data = _migrate_inbox_format(inbox_data, inbox_file)
+                return False, f"Failed to read inbox {inbox_file}: {e}"
 
             effective_key = upsert_key if upsert_key is not None else email_data.get("upsert_key")
             existing = None
@@ -601,11 +611,10 @@ def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str
             try:
                 with open(inbox_file, "r", encoding="utf-8") as fh:
                     inbox_data = json.load(fh)
+                inbox_data = _migrate_inbox_format(inbox_data, inbox_file)
             except Exception as exc:
                 logger.warning("[delivery] deliver_to_inbox_file read failed %s: %s", inbox_file, exc)
-                return False, f"Failed to read inbox: {exc}", ""
-
-            inbox_data = _migrate_inbox_format(inbox_data, inbox_file)
+                return False, f"Failed to read inbox {inbox_file}: {exc}", ""
 
             reply_id = str(uuid.uuid4())[:8]
             email_data = dict(email_data)

@@ -15,8 +15,8 @@ what counts as a match. The verbs themselves are in `drone @memory --help`.
 All ML operations (fastembed, chromadb) run via subprocess. The main process never imports these
 libraries. `handlers/storage/lane.py` owns the lane: `memory_python()` resolves the interpreter (env var
 `AIPASS_MEMORY_PYTHON` → `memory/.venv/bin/python` → `sys.executable`) and `run_json()` sends the
-JSON request on stdin and reads the JSON reply on stdout. Another branch reaches both, and
-`CHROMA_SUBPROCESS_SCRIPT`, through `apps/modules/door_subprocess_lane.py`.
+JSON request on stdin and reads the JSON reply on stdout. `CHROMA_SUBPROCESS_SCRIPT` sits beside it in
+the same file. The package door does not carry the lane or the script path.
 
 **Who says what when it fails.** The child (`chroma_subprocess.py`) logs nothing: every failure it
 sees coming is named in its JSON reply, including an embed run that left no JSON
@@ -25,6 +25,18 @@ child's stderr is the crash record for a death before it could reply. `run_json(
 case through prax at WARNING — the label, the exit code and the stderr tail (last 20 lines, at most
 2000 characters) — and logs a reply that is not a JSON object. A non-zero exit that carries a JSON
 refusal is returned unlogged; the caller logs it.
+
+**Options are checked before the lane starts.** `search` refuses a `--branch`, `--type` or `--n` with
+no value, a `--branch`/`--type` that is not a name (a letter or digit, then letters, digits, `_` or
+`-`; a leading `@` on `--branch` is dropped) and an `--n` below 1, before the embedding subprocess
+runs. Whether a branch or type has vectors is the store's answer, after the model loads.
+
+**The model is downloaded once, with network.** `embed_subprocess.py` loads
+`sentence-transformers/all-MiniLM-L6-v2` through fastembed, which reads it from its cache
+(`$FASTEMBED_CACHE_PATH`, default `<tempdir>/fastembed_cache`) or downloads it there from Hugging Face
+(`qdrant/all-MiniLM-L6-v2-onnx`) or fastembed's storage.googleapis.com mirror. Offline with an empty
+cache, fastembed retries and then refuses with "Could not load model ... from any source."; the
+refusal names the cache directory and says to run one search while online. There is no fallback.
 
 ---
 

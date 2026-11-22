@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access — the tiers, the owner gate and its log severity
-# Version: 1.7.0
+# Version: 1.7.1
 # Created: 2026-05-12
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py: the git tiers and how owner tier is earned per repo."""
@@ -218,8 +218,9 @@ class TestOwnerTierIsEarnedPerRepo:
         """Forged/insufficient class: everything else correct, class is not manager."""
         make_owner_project(tmp_path, branch="sentry", citizen_class="builder")
         monkeypatch.chdir(tmp_path)
-        with pytest.raises(PermissionError, match="citizen_class"):
+        with pytest.raises(PermissionError, match="citizen_class") as exc_info:
             verify_git_access("commit")
+        assert "mail @devpulse what to commit" in str(exc_info.value)
 
     def test_wrong_tenancy_denied(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """T-C: a manager of another project, holding a passport for a different registry.

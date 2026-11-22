@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_upsert.py
 # Description: Tests for upsert_key delivery (repeat-signal collapsing)
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-08-10
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py's upsert_key handling."""
@@ -81,6 +81,10 @@ def noop_inbox_lock(monkeypatch):
 def _setup_branch(tmp_path, name: str = "TARGET", email: str = "@target"):
     """Create branch directory with .ai_mail.local/inbox.json and return branch data."""
     branch_path = tmp_path / "branches" / name.lower()
+    (branch_path / ".trinity").mkdir(parents=True, exist_ok=True)
+    (branch_path / ".trinity" / "passport.json").write_text(
+        "{}", encoding="utf-8"
+    )  # delivery refuses passport-less branches
     mailbox_dir = branch_path / ".ai_mail.local"
     mailbox_dir.mkdir(parents=True, exist_ok=True)
     inbox_file = mailbox_dir / "inbox.json"

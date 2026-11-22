@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-18
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """
@@ -58,6 +58,7 @@ def discover_modules() -> list[Any]:
 def print_introspection():
     """Print branch introspection — discovered modules and capabilities."""
     modules = discover_modules()
+    importlib.import_module("aipass.hooks.apps.modules.hookstatus").print_config_break()
     console.print()
     console.print("[bold cyan]HOOKS — Hook Infrastructure for AIPass[/bold cyan]")
     console.print()

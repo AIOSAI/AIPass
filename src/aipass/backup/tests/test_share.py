@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_share.py
 # Description: Tests for the share module and the drive/share handler it drives
-# Version: 2.0.5
+# Version: 2.1.1
 # Created: 2026-07-01
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/share.py and apps/handlers/drive/share.py."""
@@ -22,6 +22,7 @@ import pytest
 from aipass.backup.apps.handlers.drive import client as client_mod
 from aipass.backup.apps.handlers.drive import share as share_handler
 from aipass.backup.apps.handlers.drive import upload as upload_mod
+from aipass.backup.apps.handlers.project import registry
 from aipass.backup.apps.modules import share as share_module
 
 # `share` publishes to a REAL Google account: run_share() refuses a path that is
@@ -173,6 +174,53 @@ class TestShareModuleRouting:
         assert result == {"success": False, "link": None, "file_id": None, "error": f"Not a file: {missing}"}
         assert "Not a file: " in err
         assert "not_there.pdf" in err
+
+    @pytest.mark.parametrize("rel", ["id.key", "deploy/.env", ".secrets/notes.txt", "x_json/tokens_data.json"])
+    def test_a_file_the_floor_names_is_refused_before_drive_even_inside_a_project(
+        self, rel, tmp_path, tmp_registry, capsys, monkeypatch
+    ) -> None:
+        """share checked only is_file(): a key file went to Drive, with a public link if asked."""
+        built: list = []
+        monkeypatch.setattr(client_mod, "DriveClient", lambda *a, **kw: built.append(a) or MagicMock())
+        registry.register_project("proj", str(tmp_path))
+        # Not named for what it holds: CodeQL reads a path in a variable called secret as secret text reaching the log.
+        key_file = tmp_path / rel
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        key_file.write_text("k", encoding="utf-8")
+
+        result = share_module.run_share(str(key_file), public=True)
+
+        assert (built, result["success"]) == ([], False)
+        assert result["error"].endswith("never leaves the machine (the never-leaves floor names it)")
+        assert "never leaves the machine" in capsys.readouterr().err
+
+    def test_a_file_outside_every_registered_project_is_refused_before_drive(
+        self, tmp_path, tmp_registry, capsys, monkeypatch
+    ) -> None:
+        built: list = []
+        monkeypatch.setattr(client_mod, "DriveClient", lambda *a, **kw: built.append(a) or MagicMock())
+        (tmp_path / "proj").mkdir()
+        registry.register_project("proj", str(tmp_path / "proj"))
+        outside = tmp_path / "passwd"
+        outside.write_text("root:x:0:0", encoding="utf-8")
+
+        result = share_module.run_share(str(outside), public=True)
+
+        assert (built, result["success"]) == ([], False)
+        assert result["error"].endswith("is outside every registered project")
+        assert "outside every registered project" in capsys.readouterr().err
+
+    def test_a_plain_file_inside_a_registered_project_still_reaches_drive(self, tmp_path, tmp_registry, monkeypatch):
+        built: list = []
+        monkeypatch.setattr(client_mod, "DriveClient", lambda *a, **kw: built.append(a) or MagicMock())
+        failed = {"success": False, "link": None, "file_id": None, "error": "stub"}
+        monkeypatch.setattr(share_handler, "share_file", lambda *a, **kw: failed)
+        registry.register_project("proj", str(tmp_path))
+        report = tmp_path / "report.pdf"
+        report.write_text("pdf", encoding="utf-8")
+
+        assert share_module.run_share(str(report)) is failed
+        assert built == [()]
 
 
 # ---------------------------------------------------------------------------

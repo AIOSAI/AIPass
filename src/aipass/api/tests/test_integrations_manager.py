@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_integrations_manager.py
 # Description: Tests for integrations_manager command handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-05-12
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/modules/integrations_manager.py, the integrations command handler."""
@@ -100,15 +100,15 @@ class TestHandleCommand:
 
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
-    def test_call_without_name_exits_1(
+    def test_call_without_name_exits_2(
         self,
         mock_error: MagicMock,
         _mock_header: MagicMock,
     ) -> None:
-        """call subcommand without contract name shows error and exits 1."""
+        """call without a contract name is recognised and refused: exit 2, never the unrecognised 1."""
         with pytest.raises(SystemExit) as exc_info:
             handle_command("integrations", ["call"])
-        assert exc_info.value.code == 1
+        assert exc_info.value.code == 2
         mock_error.assert_called_once()
 
 

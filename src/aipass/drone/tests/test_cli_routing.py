@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: CLI Routing Tests for Drone (adapted from universal template)
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-03-27
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/drone.py, the drone CLI entry point and its routing."""
@@ -1160,3 +1160,30 @@ class TestMainRepoRootRefusal:
             rc = main()
         assert rc == 1
         assert "drone: /tmp/x is not inside a git repository" in capsys.readouterr().err
+
+
+class TestACorruptRegistryAnswersInOneLineWithTheRepair:
+    """A registry that does not parse: one line naming the file and the repair, never a traceback."""
+
+    @pytest.fixture()
+    def corrupt(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """A zero-byte registry pinned by AIPASS_REGISTRY: a fixture, never the live registry."""
+        registry = tmp_path / "corrupt.json"
+        registry.write_text("", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_REGISTRY", str(registry))
+        registry_handler.reset_registry_path()
+        yield registry
+        registry_handler.reset_registry_path()
+
+    @pytest.mark.parametrize("argv", [["@spawn", "--help"], ["@spawn"], ["@flow", "list"], ["systems"]])
+    def test_the_line_names_the_file_and_the_repair_command(
+        self, corrupt: Path, argv: list[str], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Mutant: the interactive branch check unguarded — @spawn --help dies in a traceback."""
+        with patch("sys.argv", ["drone", *argv]):
+            result = main()
+
+        err = " ".join(capsys.readouterr().err.split())
+        assert result == 1
+        assert f"Registry file {corrupt} is corrupted" in err
+        assert "drone @spawn sync-registry --rebuild" in err

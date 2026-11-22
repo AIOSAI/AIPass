@@ -4,7 +4,7 @@
 
 **Purpose:** Standards compliance platform for AIPass. Scores every citizen branch against a pack of code standards, runs the per-file gate that fires after each edit, certifies its own pack, measures how much a test suite proves, and measures what a greeting costs.
 **Module:** `aipass.sentry`
-**Version:** 2.1.0
+**Version:** 2.0.5
 **Created:** 2026-03-05
 
 ---
@@ -115,7 +115,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-11-21
 
 ---
 [<- Back to AIPass](../../../README.md)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_admin_lane.py
 # Description: Tests for admin-grant verification + dispatch wiring (FPLAN-0401 Phase 4)
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-08-12
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/users/verified_caller.py and the dispatch admin-wiring it feeds."""
@@ -333,6 +333,25 @@ class TestDispatchSendAdminWiring:
         assert calls[0]["admin"] is False
         out = " ".join(capsys.readouterr().out.split())
         assert "lane dark until ceremony" in out, out
+        # FPLAN-1160: the bare reason read as an error; the line must say what it means for the send.
+        assert "Admin lane not available" in out and "continuing as an ordinary sender" in out, out
+
+    @pytest.mark.parametrize(("seat", "admin", "waking"), [("sentry", False, False), ("devpulse", True, True)])
+    def test_waking_is_printed_for_a_manager_only_when_the_admin_lane_wakes_it(
+        self, monkeypatch, capsys: pytest.CaptureFixture[str], seat, admin, waking
+    ):
+        """FPLAN-1160: "Waking @devpulse" printed before the manager gate skipped the wake."""
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", seat)
+        with _send_patches(
+            {
+                f"{_H_WAKE}.wake_branch": MagicMock(side_effect=_wake_spy([])),
+                f"{_H_WAKE}.is_manager": MagicMock(return_value=True),
+                f"{_H_VERIFIED}.verify_admin_caller": MagicMock(return_value=(admin, "verdict")),
+            }
+        ):
+            _dispatch_send(["@mgr", "Subject", "Body"])
+
+        assert ("Waking @mgr" in capsys.readouterr().out) is waking
 
     def test_dispatch_survives_a_verifier_that_raises(self, monkeypatch):
         """A privilege path that explodes must not take the mail down with it."""

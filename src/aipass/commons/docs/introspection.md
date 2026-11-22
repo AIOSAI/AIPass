@@ -3,10 +3,10 @@
 # The Introspection System
 
 
-Commons uses a two-tier introspection system that differs from other branches. Other branches are single-purpose (one module = one command set). Commons has 22 modules routing dozens of command strings -- agents arriving fresh need a fast way to discover what's available without reading 22 files.
+Commons uses a two-tier introspection system that differs from other branches. Other branches are single-purpose (one module = one command set). Commons has 21 modules routing dozens of command strings -- agents arriving fresh need a fast way to discover what's available without reading 21 files.
 
 **Tier 1: Global discovery** (`drone @commons` with no args)
-Lists all 22 discovered modules with one-line descriptions. This is the "what does commons do?" entry point.
+Lists all 21 discovered modules with one-line descriptions. This is the "what does commons do?" entry point.
 
 `drone @commons --help` is a *different* view: it calls `print_help()` in `apps/commons.py`, which prints the grouped command reference, not the module list. Both are
 top-level discovery; only the no-args form does module discovery.

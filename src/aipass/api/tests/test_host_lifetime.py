@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_lifetime.py
 # Description: Tests for a serve that outlives the shell that started it
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-08-20
-# Modified: 2026-11-15
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/host/lifetime.py, a detached serve, its record and its log."""
@@ -294,6 +294,26 @@ class TestADeadChildIsDead:
             assert host_lifetime.running() is None, "a zombie was reported as a running server"
         finally:
             child.wait()
+
+    def test_another_parents_zombie_is_not_reported_alive(self, runtime: Path) -> None:
+        """A detached server whose parent never reaps it (a container with no init): not ours to wait on."""
+        # WNOWAIT in the spawner: the grandchild is a zombie before its pid is printed, and stays one.
+        spawner = (
+            "import os, subprocess, sys; p = subprocess.Popen([sys.executable, '-c', 'pass']); "
+            "os.waitid(os.P_PID, p.pid, os.WEXITED | os.WNOWAIT); print(p.pid, flush=True); sys.stdin.read()"
+        )
+        parent = subprocess.Popen(
+            [sys.executable, "-c", spawner], stdin=subprocess.PIPE, stdout=subprocess.PIPE, encoding="utf-8"
+        )
+        try:
+            orphan = int(parent.stdout.readline())  # type: ignore[union-attr]
+            assert Path(f"/proc/{orphan}/stat").read_text(encoding="utf-8").rsplit(")", 1)[-1].split()[0] == "Z"
+            host_lifetime.record_path().write_text(json.dumps({"pid": orphan}), encoding="utf-8")
+
+            assert host_lifetime.running() is None, "another parent's zombie was reported as a running server"
+        finally:
+            parent.kill()
+            parent.wait()
 
     def test_a_reap_that_fails_for_another_reason_is_raised(self, runtime: Path) -> None:
         """Only ChildProcessError means "not ours"; any other OSError is a fault, not a no."""

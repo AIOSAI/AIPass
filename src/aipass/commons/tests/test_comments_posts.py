@@ -5,7 +5,7 @@
 # Date: 2026-04-03
 # Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -27,6 +27,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+from aipass.cli import resolve_exit
 
 # Eagerly import the target modules so they are in sys.modules before
 # unittest.mock.patch tries to resolve the dotted attribute paths.
@@ -561,6 +563,30 @@ class TestCreatePost:
         assert row["content"] == "Verify insert"
         assert row["author"] == "test-branch"
         assert row["room_name"] == "general"
+
+    @pytest.mark.usefixtures("_mock_caller_test_branch")
+    @pytest.mark.parametrize(
+        ("args", "refusal"),
+        [
+            (["", "Title", "Body"], "Room is empty."),
+            (["  ", "Title", "Body"], "Room is empty."),
+            (["general", "", "Body"], "Title is empty."),
+            (["--room", "", "--title", "", "Body"], "Room '--room' is a flag, not a room."),
+            (["general", "--title", "Body"], "Title '--title' is a flag, not a title."),
+        ],
+    )
+    def test_post_refuses_an_empty_or_flag_room_or_title_and_posts_nothing(
+        self, mock_db: sqlite3.Connection, capsys: pytest.CaptureFixture[str], args, refusal
+    ):
+        """Chaos 2026-11-21: '--room \"\"' read the flag as the room, and 'general --title Body' posted a '--title'."""
+        with patch("aipass.commons.apps.modules.post.json_handler", autospec=True):
+            assert post_module.handle_command("post", args) is True
+
+        err = " ".join(capsys.readouterr().err.split())
+        assert refusal in err
+        assert "Usage: post <room> <title> <content>" in err
+        assert resolve_exit(True) == 2
+        assert mock_db.execute("SELECT COUNT(*) FROM posts").fetchone()[0] == 0
 
 
 class TestViewThread:

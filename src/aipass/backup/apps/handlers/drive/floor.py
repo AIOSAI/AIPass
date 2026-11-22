@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: floor.py
 # Description: Never-leaves floor — paths the Drive lane refuses to upload
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-11-21
 # =============================================
 
 """Never-leaves floor for the Drive lane."""
@@ -23,11 +23,16 @@ NEVER_LEAVES_MACHINE: tuple[str, ...] = (
     "*.pem",  # certificates and keys
     ".env",  # environment files
     ".env.*",
-    "**/*_json/tokens_data.json",  # the host API's token store
+    "**/*_json/tokens_data.json",  # api's operation counters, not tokens (those sit in .secrets/); held anyway
     "**/*_json/tokens_config.json",
 )
 
 _FLOOR_SPEC = pathspec.PathSpec.from_lines("gitignore", NEVER_LEAVES_MACHINE)
+
+
+def never_leaves(path: Path) -> bool:
+    """True when the floor names this file, wherever it sits: its whole absolute path is matched."""
+    return _FLOOR_SPEC.match_file(path.as_posix().lstrip("/"))
 
 
 def hold_back(files: list[Path], store_path: Path) -> tuple[list[Path], int]:

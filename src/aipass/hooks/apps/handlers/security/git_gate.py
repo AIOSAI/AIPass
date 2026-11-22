@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: git_gate.py
-# Version: 5.4.0
+# Version: 5.5.0
 # Description: Raw git and gh, GitHub writes, credentials and the secrets store for every seat; protected changes
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-11-17
+# Modified: 2026-11-21
 # =============================================
 
 """Blocks raw git and gh, GitHub writes without gh, the gh credential, and changes to the protected files.
@@ -161,6 +161,15 @@ PROTECTED_REFUSED = (
     "Only the admin seat (@devpulse) writes it ({lane}). Caller: {caller}.\n"
     "If a real change is needed, mail @devpulse:\n"
     '  drone @ai_mail email @devpulse "Config change" "<path>: <what and why>"'
+)
+
+DELETE_REFUSED = (
+    "{path}: this command deletes under it ({lane}), and you do not delete: every raw delete off the admin "
+    "seat is refused. It would also reach {what} inside it. Caller: {caller}.\n"
+    "To have a file gone, use drone rm inside your own branch:\n"
+    "  drone rm <path>     # moves it into the .archive/ beside it\n"
+    "Outside your own branch? Mail @devpulse with the path and why:\n"
+    '  drone @ai_mail email @devpulse "Delete request" "<path>: <why>"'
 )
 
 GATE_CRASHED = (
@@ -417,6 +426,9 @@ def _check_bash_protected(cmd: str, cwd: str, invocations: list, seat: _Seat) ->
         what = pp.protected(path, cwd)
         if what is None and role in _CONTAINER_ROLES:
             what = pp.protected_within(path)
+            if what and role == "delete" and not seat.admin:  # the delete is what is refused, not a config change
+                logger.warning("[HOOKS] git_gate: delete refused: %s (Bash: %s) caller=%s", path, how, seat.named)
+                return _block(DELETE_REFUSED.format(path=path, lane=how, what=what, caller=seat.named))
         if what:
             return _protected_refusal(str(path), what, f"Bash: {how}", seat)
     return None

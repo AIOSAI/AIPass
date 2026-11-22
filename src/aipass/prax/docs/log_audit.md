@@ -47,8 +47,10 @@ fleet.
 
 ## Scheduled job — the weekly tmp sweep
 
-prax owns one daemon job, in `.daemon/schedule.json`: **`tmp-sweep-weekly`**.
-It is a *command* job, so the daemon tick runs it as a subprocess from this
+prax defines two daemon jobs in `.daemon/schedule.json`: **`tmp-sweep-weekly`**
+(this page) and `module-scan-daily` (see discovery.md). Both ship with
+`"enabled": false`, so neither runs until it is enabled; the rest of this section
+describes `tmp-sweep-weekly` as defined. It is a *command* job, so the daemon tick runs it as a subprocess from this
 directory. No agent is woken and no tokens are spent.
 
 ```

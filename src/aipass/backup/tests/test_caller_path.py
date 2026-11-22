@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_caller_path.py
 # Description: Tests for caller-CWD path resolution across user-facing commands
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-08
-# Modified: 2026-11-16
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/path/caller.py and caller-CWD resolution."""
@@ -87,6 +87,11 @@ class TestResolveCallerPath:
 
 class TestShareUsesCallerCwd:
     """share — a relative file argument is uploaded from the caller's dir."""
+
+    @pytest.fixture(autouse=True)
+    def registered_tmp(self, tmp_path: Path, tmp_registry: Path) -> None:
+        """share sends files from a registered project only: these files sit in one."""
+        registry.register_project("caller_path", str(tmp_path))
 
     def _run(self, file_arg: str):
         """Run run_share with Drive fully mocked; return the local_file share_file saw."""

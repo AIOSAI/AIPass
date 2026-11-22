@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mint_ops.py
 # Description: The mint of a new citizen from the template, step by step
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-09-28
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """The mint body: a validated target becomes a registered citizen."""
@@ -14,7 +14,12 @@ from pathlib import Path
 
 from aipass.prax import logger
 
-from aipass.spawn.apps.handlers.metadata import get_branch_name, normalize_branch_name, detect_profile
+from aipass.spawn.apps.handlers.metadata import (
+    branch_name_refusal,
+    get_branch_name,
+    normalize_branch_name,
+    detect_profile,
+)
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, validate_no_placeholders
 from aipass.spawn.apps.handlers.file_ops import (
     copy_template,
@@ -32,6 +37,7 @@ from aipass.spawn.apps.handlers.registry import (
     get_next_citizen_number,
     ensure_project_has_owner,
     load_registry,
+    row_at,
 )
 from aipass.spawn.apps.handlers.adoption_ops import adopt_existing, birth_from_seed, error_result
 from aipass.spawn.apps.handlers.class_registry import (
@@ -91,6 +97,10 @@ def spawn_at(
             )
 
     target = Path(target_path).resolve()
+    # Every lane below (mint, adopt, seed birth) takes its name from the folder, so one check covers them all.
+    refusal = branch_name_refusal(get_branch_name(target))
+    if refusal:
+        return error_result(refusal)
     # A relative registry would never contain the target, and the mint would fall back to a new registry.
     registry_path = Path(registry_path).resolve() if registry_path else None
     if template_dir:
@@ -115,11 +125,17 @@ def spawn_at(
                 "Move it aside, fix the template, then create again."
             )
         passport_path = target / ".trinity" / "passport.json"
+        # A fresh clone carries the seed but not the gitignored .trinity/; the only door a seed is found at.
+        seed_file = None if passport_path.exists() else find_seed(target)
+
         if passport_path.exists():
+            # A passport and a row is a live agent; a vault without a passport is a seat to bring back.
+            refusal = live_row_refusal(target, registry_path)
+            if refusal:
+                logger.warning("[spawn] Create refused over a live agent: %s", target)
+                return error_result(refusal)
             return adopt_existing(target, purpose, profile, registry_path)
 
-        # A fresh clone carries the seed but not the gitignored .trinity/; the only door a seed is found at.
-        seed_file = find_seed(target)
         if seed_file:
             return birth_from_seed(target, seed_file, purpose, profile, registry_path)
 
@@ -138,6 +154,21 @@ def spawn_at(
         registry_path=registry_path,
         citizen_class=citizen_class,
         arrival=arrival,
+    )
+
+
+def live_row_refusal(target: Path, registry_path) -> str:
+    """The refusal when the registry adopt would use already holds a row at target; empty when it holds none."""
+    reg_path = registry_path or find_registry(target.parent)
+    row = row_at(reg_path, target) if reg_path else None
+    if reg_path is None or row is None:
+        return ""
+    name = normalize_branch_name(row.get("name") or get_branch_name(target), "lower")
+    return (
+        f"REFUSED: {target} is already registered as @{name} in {reg_path}; create would rewrite a live "
+        f"agent, so nothing was written. To bring its scaffold up to the template: "
+        f"drone @spawn update @{name} (preview first). To fix the project's structure: "
+        f"drone @spawn repair {reg_path.parent}"
     )
 
 

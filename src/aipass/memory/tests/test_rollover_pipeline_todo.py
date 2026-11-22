@@ -3,7 +3,7 @@
 # Description: Rollover pipeline - the todo pad rolls to a backlog file, the backlog trim and restore
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # Category: memory/tests
 # =============================================
 
@@ -133,6 +133,23 @@ class TestTodoRoll:
         ]
         entries = json.loads(_backlog_file(tmp_path).read_text(encoding="utf-8"))["entries"]
         assert [record["entry"]["number"] for record in entries] == [1, 2]
+
+    def test_an_unnumbered_todo_rolls_under_the_next_number_so_restore_reaches_it(self, tr, tmp_path):
+        unnumbered = {"task": "no number", "date": "2026-09-01"}
+        local = _mint_pad(tmp_path, [_todo(n) for n in range(10, 0, -1)] + [unnumbered])
+
+        result = self._roll(tr, local, tmp_path)
+
+        assert result["success"] is True, result["error"]
+        assert result["numbers"] == [11]
+        entries = json.loads(_backlog_file(tmp_path).read_text(encoding="utf-8"))["entries"]
+        assert entries[0]["entry"] == {**unnumbered, "number": 11}
+        pad = json.loads(local.read_text(encoding="utf-8"))
+        pad["todos"] = pad["todos"][1:]
+        local.write_text(json.dumps(pad), encoding="utf-8")
+        restored = tr.restore_todo("guinea", 11, local_path=local, backup_root=tmp_path / ".backup")
+        assert restored["success"] is True, restored["error"]
+        assert restored["task"] == "no number"
 
     def test_a_backlog_outside_the_aipass_root_is_refused_and_the_pad_kept(self, tr, tmp_path, monkeypatch):
         """The backlog's directory is made BEFORE the gated write, so it needs its own fence.
@@ -749,6 +766,16 @@ class TestTodoRestore:
 
         _point_todos_count(monkeypatch, tmp_path, tr, 4)
         assert self._restore(tr, 1, local, tmp_path)["success"] is True, "the count is config's, not a literal"
+
+    def test_an_unknown_number_on_a_full_pad_is_not_found_not_full(self, tr, tmp_path, monkeypatch):
+        _point_todos_count(monkeypatch, tmp_path, tr, 3)
+        local = _mint_pad(tmp_path, [_todo(n) for n in (2, 3, 4)])
+        backlog = self._backlog_with(tmp_path, [self._record(_todo(1))])
+
+        result = self._restore(tr, 999, local, tmp_path)
+
+        assert result["success"] is False
+        assert result["error"] == f"no todo #999 in the backlog at {backlog}"
 
     def test_an_unknown_number_is_refused(self, tr, tmp_path):
         local = _mint_pad(tmp_path, [_todo(3)])

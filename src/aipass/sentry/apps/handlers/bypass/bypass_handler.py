@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bypass_handler.py
 # Description: Bypass Configuration Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-08
-# Modified: 2026-11-14
+# Modified: 2026-11-21
 # =============================================
 
 """Bypass Configuration Handler"""
@@ -109,3 +109,28 @@ def load_bypass_rules(branch_path: str) -> List[Dict[str, Any]]:
         logger.error("[bypass_handler] Error loading bypass rules: %s", e)
 
     return []
+
+
+def bypass_file_problem(branch_path: str) -> Optional[str]:
+    """Why the branch's .sentry/bypass.json exists but cannot be used, or None when it is absent or well formed.
+
+    load_bypass_rules reads such a file as no rules, so the caller names it rather than score as if waived.
+    """
+    bypass_file = Path(branch_path) / ".sentry" / "bypass.json"
+    if not bypass_file.exists():
+        return None
+    try:
+        content = bypass_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning("[bypass_handler] Unreadable bypass.json at %s: %s", bypass_file, exc)
+        return f"{bypass_file} is unreadable ({exc})"
+    if not content.strip():
+        return f"{bypass_file} is empty"
+    try:
+        config = json.loads(content)
+    except json.JSONDecodeError as exc:
+        logger.warning("[bypass_handler] Corrupt bypass.json at %s: %s", bypass_file, exc)
+        return f"{bypass_file} is not JSON ({exc})"
+    if not isinstance(config, dict) or not isinstance(config.get("bypass", []), list):
+        return f'{bypass_file} is not a {{"bypass": [...]}} object'
+    return None

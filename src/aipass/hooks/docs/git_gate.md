@@ -126,7 +126,9 @@ sandbox ([sandbox.md](sandbox.md)) is the real one.
 lane, off the verified admin seat (`PROTECTED_REFUSED`). A change is a write, a delete, a move away, a
 move over, a recursive copy over, or making a hard link to it; a directory deleted or moved whole
 counts when a protected file is inside it. The protected lane decides each on its own, without
-`rm_gate`:
+`rm_gate`. A directory deleted off the admin seat because it holds one (`find . -delete` in a branch
+with `.claude/`) is refused as a raw delete, naming `drone rm <path>`, not as a config change
+(`DELETE_REFUSED`). Protected files:
 
 - any `.aipass/hooks.json` under AIPASS_HOME, the root one included;
 - `~/.aipass/trusted_projects.json`;

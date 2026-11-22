@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_display.py
 # Description: Tests for apps/handlers/plan/display.py -- plan display formatting
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/plan/display.py."""
@@ -11,6 +11,8 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that display.py parses and imports
 # sentry: no-test-needed(documentation) — the module's per-function docstrings
+
+import pytest
 
 import aipass.flow.apps.handlers.plan.display as mod
 
@@ -229,7 +231,8 @@ class TestFormatRestoreError:
     def test_file_missing(self):
         fn = _import("format_restore_error")
         result = fn("file_missing", plan_key="0001")
-        assert "file not found" in result
+        assert "cannot be restored: its file is gone from the registered location" in result
+        assert "move file back" not in result
 
     def test_invalid_number(self):
         fn = _import("format_restore_error")
@@ -255,6 +258,17 @@ class TestFormatRestoreUsageError:
 
 
 class TestFormatPlanInfo:
+    @pytest.mark.parametrize("subject", ["line one\nline two", "x" * 2000, "tab\there\r\nand more"])
+    def test_a_newline_or_huge_subject_stays_one_capped_table_line(self, subject):
+        row = _import("format_plan_info")("0001", {"subject": subject, "relative_path": "flow", "status": "open"})
+
+        flat = " ".join(subject.split())
+        shown = flat if len(flat) <= 60 else flat[:59] + "…"
+
+        assert "\n" not in row and "\r" not in row and "\t" not in row
+        assert f"  {shown}" in row
+        assert flat[:60] not in row or len(flat) <= 60
+
     def test_basic_plan_info(self):
         fn = _import("format_plan_info")
         plan_info = {

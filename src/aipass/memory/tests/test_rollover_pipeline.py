@@ -3,7 +3,7 @@
 # Description: Rollover pipeline — the rollover module's run, status and triggers, normalize
 # Version: 1.5.1
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-21
 # Category: memory/tests
 # =============================================
 
@@ -526,7 +526,8 @@ class TestASkippedTriggerIsVisibleOnScreen:
 
         printed = capsys.readouterr().out
         assert "0/1" in printed, printed
-        assert "guinea.local" in printed and "skipped" in printed, printed
+        # Through error(), so the exit is non-zero: a file over its limit was left unrolled.
+        mocks["error"].assert_any_call("guinea.local (16/15 sessions) skipped: No entries exceed v2 limits")
 
     def test_a_run_with_no_skips_prints_no_skip_line(self, monkeypatch, capsys):
         """The absence of a category must not print an empty heading."""
@@ -564,6 +565,63 @@ class TestASkippedTriggerIsVisibleOnScreen:
 
         warned = " ".join(str(c) for c in mocks["warning"].call_args_list)
         assert stuck in warned and "cannot drain" in warned, warned
+
+
+class TestADamagedFileIsAnErrorInRunCheckAndStatus:
+    """A damaged file read 'No files need rollover' / 'local: OK', exit 0; now each verb names it through error()."""
+
+    HURT = "flow.local (sessions[0] (sessions entry) has no 'number')"
+
+    def _errors(self, mocks) -> str:
+        return " ".join(str(c) for c in mocks["error"].call_args_list)
+
+    def test_run_names_it(self, monkeypatch):
+        rollover, mocks = _import_rollover_module(monkeypatch)
+        mocks["orchestrator"].execute_rollover.return_value = {
+            "success": True,
+            "triggers_count": 0,
+            "success_count": 0,
+            "failed": [],
+            "skipped": [],
+            "results": [],
+            "damaged": [self.HURT],
+        }
+
+        rollover.run_rollover()
+
+        assert self.HURT in self._errors(mocks), self._errors(mocks)
+
+    def test_check_names_it_and_never_says_ready(self, monkeypatch, capsys):
+        rollover, mocks = _import_rollover_module(monkeypatch)
+        mocks["detector"].check_all_branches.return_value = {
+            "success": True,
+            "triggers": [],
+            "undrainable": [],
+            "damaged": [self.HURT],
+        }
+
+        rollover.check_triggers()
+
+        assert self.HURT in self._errors(mocks), self._errors(mocks)
+        assert "ready for rollover" not in capsys.readouterr().out
+
+    def test_status_never_says_ok_for_it(self, monkeypatch, capsys):
+        rollover, mocks = _import_rollover_module(monkeypatch)
+        mocks["detector"].get_rollover_stats.return_value = {
+            "success": True,
+            "total_branches": 1,
+            "files_checked": 1,
+            "files_ready": 0,
+            "files_undrainable": 0,
+            "files_damaged": 1,
+            "branches": {"flow": {"local": {"current": 0, "ready": False, "damaged": ["empty file"]}}},
+        }
+
+        rollover.show_status()
+
+        out = capsys.readouterr().out
+        assert "local: DAMAGED (empty file)" in out and "local: OK" not in out, out
+        assert "1 damaged files" in self._errors(mocks), self._errors(mocks)
 
 
 # The lane against the REAL write gate: nothing below the extractor is mocked, and every

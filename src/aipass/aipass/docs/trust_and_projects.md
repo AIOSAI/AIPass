@@ -31,8 +31,8 @@ cross-branch import is a written bypass rule rather than an accident.
 |---|---|
 | `trust` | Show the registry — project, short hash, enrolled date |
 | `trust <path>` | Enroll a project. No `.aipass/hooks.json`, no enrolment |
-| `revoke <path>` | Remove a project from the registry |
-| `trust prune` | Drop entries whose project path no longer exists |
+| `revoke <path>` | Remove a project from the registry; without a path it fails (exit 2) |
+| `trust prune` | Drop entries whose project path no longer exists; `aipass doctor` warns of each one |
 
 Code: [`apps/modules/trust.py`](../apps/modules/trust.py).
 

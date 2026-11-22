@@ -20,7 +20,9 @@ wall of log lines.
 When a file is over its limit and *nothing* is archivable, the detector would re-fire on it forever
 and refuse the same entries every run, a skip loop. That case says `NOTHING DRAINED` in words and
 names the two shapes that cause it: an array that is not newest-first, or entries carrying no usable
-`number`. *A lane whose refusals are all correct can still be a lane that never drains.*
+`number`. *A lane whose refusals are all correct can still be a lane that never drains.* An
+over-count list with an unnumbered or repeated `number` is refused as damaged before the valve runs,
+and a skipped trigger prints through `error()`, so `rollover run` exits 2 for it.
 
 The valve itself is in [rollover_pipeline.md](rollover_pipeline.md).
 

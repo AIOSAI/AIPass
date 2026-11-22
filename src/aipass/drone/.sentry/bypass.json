@@ -19,7 +19,7 @@
       "file": "apps/drone.py",
       "standard": "cli",
       "lines": [
-        58
+        64
       ],
       "reason": "_reports_passport_fault writes the passport fault line with sys.stderr.write: it is one fact and must not wrap when piped, and Rich wraps at 80 columns. The line is a diagnostic about this seat's own passport and goes to stderr so a caller that parses the command's stdout (drone is run by every citizen and by scripts) never sees it in the answer; the cli console prints to stdout and is the wrong channel. cli's help offers no err console that prints plain to stderr without markup or wrapping. Fleet green leg 8, drone's decision.",
       "anchor": "sys.stderr.write(fault"
@@ -123,11 +123,11 @@
       "file": "apps/drone.py",
       "standard": "logged_fallback",
       "lines": [
-        597,
-        616,
-        620,
-        676,
-        686
+        622,
+        642,
+        646,
+        702,
+        712
       ],
       "reason": "main() is the process exit status: 1 is the failure answer to the OS on every path that returns it (routing refused, unknown command, the registry unreadable, an unhandled systems error, a module that failed to import or raised), and success is 0. Each handler prints the error to stderr before it. A passport fault (leg 7) is printed after routing by the _reports_passport_fault wrapper and never changes the code. The checker counts the other `return 1`s as a success path because they are not error() calls; they are failures too. Callers: the console script entry only (sys.exit(main())). Fleet green leg 6, drone's decision.",
       "anchor": "return 1"

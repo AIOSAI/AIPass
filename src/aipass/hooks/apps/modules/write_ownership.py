@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_ownership.py
-# Version: 2.9.0
+# Version: 2.9.2
 # Description: Who may write whose files: project roots and branch owners read from the registries
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-18
-# Modified: 2026-11-20
+# Modified: 2026-11-21
 # =============================================
 
 """Answers, for the edit gate's two lanes, whose file a write lands in and whether this seat may make it.
@@ -98,7 +98,8 @@ def _read(marker: Path) -> object:
         raise RegistryUnreadable(
             f"{marker} cannot be read ({type(exc).__name__}: {exc}), so whose file a write lands in is unknown "
             "and writes here are refused. The registry is @spawn's: drone @ai_mail dispatch @spawn \"Registry "
-            'unreadable" "<this text>". Reads and drone commands still run.'
+            'unreadable" "<this text>". This gate refuses no read and no drone command, but a command that '
+            "reads this registry may fail on it, that dispatch included; if it does, tell the user."
         ) from exc
 
 
@@ -201,8 +202,14 @@ def unprobeable(targets: list[tuple[Path, str]]) -> str | None:
         except OSError as exc:
             if exc.errno in (errno.ENOENT, errno.ENOTDIR):  # not written yet
                 continue
-            name = errno.errorcode.get(exc.errno or 0, type(exc).__name__)
             shown = text if len(text) <= _SHOWN_CHARS else f"{text[:_SHOWN_CHARS]}… ({len(text)} chars)"
+            if exc.errno == errno.ENAMETOOLONG:
+                return (
+                    f"edit_gate reads a word of this call as a path it writes ({how}), and at {len(text)} chars it "
+                    f"is too long to be a file name, so the call is refused: {shown}. Long text goes in a file "
+                    "or a heredoc, not a command word."
+                )
+            name = errno.errorcode.get(exc.errno or 0, type(exc).__name__)
             return f"edit_gate cannot probe a path this call names ({name}), so it is refused: {shown} ({how})"
     return None
 
