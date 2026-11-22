@@ -658,3 +658,74 @@ class TestConvertRegistry:
 
         assert _tree(reg.parent) == before
         assert "already converted" in capsys.readouterr().out
+
+
+# Odd spacing and key order on purpose: only the one value may change, every other byte stays.
+CERTIFICATE = '{\n    "id": "3",\n    "name": "FLOW Birth Certificate",\n    "owner":   "FLOW",\n    "rarity": "x"\n}\n'
+PASSPORT = '{"branch_info": {"branch_name": "FLOW", "email": "@flow"},\n  "identity": {"purpose": "FLOW stays"}}'
+
+
+def _seat_flow(reg, signed=False):
+    """FLOW's certificate and passport under the mixed registry's src/flow; returns their paths."""
+    seat = reg.parent / "src" / "flow"
+    certificate = seat / "artifacts" / "birth_certificate.json"
+    passport = seat / ".trinity" / "passport.json"
+    certificate.parent.mkdir(parents=True)
+    passport.parent.mkdir(parents=True)
+    signature = '{\n    "signature": "sig",' if signed else "{"
+    certificate.write_text(CERTIFICATE.replace("{", signature, 1), encoding="utf-8")
+    passport.write_text(PASSPORT, encoding="utf-8")
+    return certificate, passport
+
+
+class TestConvertCitizenFiles:
+    """The same lane lowercases each citizen's certificate owner and passport branch_name, one value each."""
+
+    def test_confirm_rewrites_only_the_owner_and_branch_name_values(self, tmp_path):
+        """Mutant: the file re-dumped instead of edited in place, or the passport left out -> red."""
+        reg = _mixed_registry(tmp_path)
+        certificate, passport = _seat_flow(reg)
+
+        assert handle_sync_registry([str(reg), "--lowercase", "--confirm"]) == 0
+
+        assert certificate.read_text(encoding="utf-8") == CERTIFICATE.replace('"owner":   "FLOW"', '"owner":   "flow"')
+        assert passport.read_text(encoding="utf-8") == PASSPORT.replace(
+            '"branch_name": "FLOW"', '"branch_name": "flow"'
+        )
+
+    def test_a_preview_names_each_file_and_value_and_writes_nothing(self, tmp_path, capsys):
+        reg = _mixed_registry(tmp_path)
+        _seat_flow(reg)
+        before = _tree(reg.parent)
+
+        assert handle_sync_registry([str(reg), "--lowercase"]) == 1
+
+        out = " ".join(capsys.readouterr().out.split())
+        assert _tree(reg.parent) == before
+        assert "birth_certificate.json: owner FLOW -> flow" in out
+        assert "passport.json: branch_info.branch_name FLOW -> flow" in out
+        assert "skipped" in out and "src/drone/artifacts/birth_certificate.json: missing" in out
+
+    def test_a_signed_certificate_with_a_capital_owner_refuses_the_run(self, tmp_path, capsys):
+        """Mutant: the signature check dropped -> a signed certificate is rewritten -> red."""
+        reg = _mixed_registry(tmp_path)
+        certificate, _passport = _seat_flow(reg, signed=True)
+        before = _tree(reg.parent)
+
+        assert handle_sync_registry([str(reg), "--lowercase", "--confirm"]) == 2
+
+        said = capsys.readouterr()
+        assert _tree(reg.parent) == before
+        assert f"{certificate} is signed" in " ".join((said.out + said.err).split())
+
+    def test_a_second_run_over_converted_files_has_nothing_to_do(self, tmp_path, capsys):
+        reg = _mixed_registry(tmp_path)
+        _seat_flow(reg)
+        assert handle_sync_registry([str(reg), "--lowercase", "--confirm"]) == 0
+        capsys.readouterr()
+        before = _tree(reg.parent)
+
+        assert handle_sync_registry([str(reg), "--lowercase", "--confirm"]) == 0
+
+        assert _tree(reg.parent) == before
+        assert "already converted" in capsys.readouterr().out

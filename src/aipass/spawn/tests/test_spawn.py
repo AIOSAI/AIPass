@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.4.2
+# Version: 1.4.3
 # Created: 2026-03-05
 # Modified: 2026-11-22
 # =============================================
@@ -180,6 +180,13 @@ class TestRegistry:
 
 
 class TestSpawnAgent:
+    def test_a_newborn_certificate_names_its_owner_in_lowercase(self, tmp_agent, tmp_registry):
+        """Mutant: the certificate template's owner back on the capital token -> red."""
+        assert spawn_agent(str(tmp_agent), registry_path=str(tmp_registry))["success"] is True
+
+        certificate = json.loads((tmp_agent / "artifacts" / "birth_certificate.json").read_text(encoding="utf-8"))
+        assert certificate["owner"] == "test_agent"
+
     def test_full_spawn(self, tmp_agent, tmp_registry):
         result = spawn_agent(
             str(tmp_agent),

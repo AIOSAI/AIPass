@@ -87,6 +87,15 @@ when two rows fold to one name (it names both; choosing which row lives is the o
 when a row's path is outside the registry's folder (it names the row), or when the file does not
 parse (that is `--rebuild`'s case). A second run finds nothing to convert and says so.
 
+The same lane reaches each registered citizen's own copies of its name: the certificate's `owner`
+in `artifacts/birth_certificate.json` and the passport's `branch_info.branch_name` in
+`.trinity/passport.json`, found under the row's path. The preview lists each file and the one value
+that would change. Only that value's bytes are rewritten, in place and atomically: key order,
+indent, the certificate's `name` and `description` prose and the trailing newline stay as written.
+A missing or unreadable file is skipped and named, not an error. A certificate that carries a
+`signature` is signed over its content, so if its `owner` would change the whole run is refused,
+naming the file, and exits 2. New citizens are born with both values in lowercase.
+
 ---
 
 ## Passport migration

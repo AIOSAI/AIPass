@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: sync_registry.py
 # Description: Registry repair — thin CLI layer for registry synchronization
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-07
 # Modified: 2026-11-22
 # =============================================
@@ -81,7 +81,8 @@ def handle_sync_registry(args: list[str]) -> int:
             " rebuilt one; admin and ci_cure are not restored (re-run grant-admin, grant-ci-cure)"
         )
         console.print(
-            "  [green]--lowercase[/green]    Preview converting rows to lowercase names and relative paths"
+            "  [green]--lowercase[/green]    Preview lowercasing row names, certificate owners and passport names,"
+            " and relative paths"
             " (exit 0 nothing to convert, 1 rows to convert, 2 refused)"
         )
         console.print(
@@ -221,7 +222,7 @@ def _handle_rebuild(registry_path, confirm=False) -> int:
 
 
 def _handle_lowercase(registry_path, confirm=False) -> int:
-    """Convert one registry to lowercase names and relative paths; a preview unless --confirm.
+    """Lowercase a registry's rows and its citizens' certificate owner and passport name; preview unless --confirm.
 
     Exit 0: nothing to convert, or converted. 1: a preview with rows to convert. 2: refused or crashed."""
     registry_path = registry_path or find_registry()
@@ -244,20 +245,27 @@ def _handle_lowercase(registry_path, confirm=False) -> int:
         return 2
 
     console.print()
-    if not receipt["changes"]:
+    for skipped in receipt["skipped"]:
+        console.print(f"  skipped {skipped['file']}: {skipped['skipped']}", markup=False)
+    if not (receipt["changes"] or receipt["files"]):
         console.print(f"{registry_path} is already converted - nothing to do.", markup=False)
         console.print()
         return 0
     label = "Converted" if receipt["written"] else "Would convert"
-    console.print(f"{label} {len(receipt['changes'])} row(s) in {registry_path}", markup=False)
+    console.print(
+        f"{label} {len(receipt['changes'])} row(s) and {len(receipt['files'])} file(s) for {registry_path}",
+        markup=False,
+    )
     for change in receipt["changes"]:
         console.print(
             f"  {change['old_name']} -> {change['new_name']}    {change['old_path']} -> {change['new_path']}",
             markup=False,
         )
+    for change in receipt["files"]:
+        console.print(f"  {change['file']}: {change['field']} {change['old']} -> {change['new']}", markup=False)
     if receipt["copy"]:
         console.print(f"  Original kept at {receipt['copy']}", markup=False)
-    else:
+    if not receipt["written"]:
         console.print("[dim]Preview - nothing written. Add --confirm to convert.[/dim]")
     console.print()
     return 0 if receipt["written"] else 1
