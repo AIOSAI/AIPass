@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: profile_queries.py
 # Description: Social Profile Query Handlers
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -23,8 +23,8 @@ def get_profile(conn: sqlite3.Connection, branch_name: str) -> Optional[Dict[str
     row = conn.execute(
         "SELECT branch_name, display_name, description, karma, joined_at, "
         "last_active, bio, status, role, post_count, comment_count "
-        "FROM agents WHERE branch_name = ?",
-        (branch_name,),
+        "FROM agents WHERE LOWER(branch_name) = LOWER(?) ORDER BY branch_name = ? DESC LIMIT 1",
+        (branch_name, branch_name),
     ).fetchone()
 
     if not row:

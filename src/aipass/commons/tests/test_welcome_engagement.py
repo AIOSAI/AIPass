@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.0
 # Created: 2026-03-28
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -165,6 +165,27 @@ def test_welcome_new_branches_welcomes_unwelcomed(
     assert has_been_welcomed(initialized_db, "THE_COMMONS") is True
 
 
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
+def test_welcome_skips_the_system_account_in_either_case_and_counts_its_old_welcome(
+    mock_json: MagicMock,
+    initialized_db: sqlite3.Connection,
+) -> None:
+    initialized_db.execute("INSERT INTO agents (branch_name, display_name) VALUES ('system', 'System')")
+    initialized_db.execute(
+        "INSERT INTO posts (room_name, author, title, content) VALUES ('general', 'system', 'Welcome @newbie!', 'x')"
+    )
+    initialized_db.commit()
+
+    with (
+        patch("aipass.commons.apps.handlers.welcome.welcome_ops.get_db", return_value=initialized_db),
+        patch("aipass.commons.apps.handlers.welcome.welcome_ops.close_db") as close,
+    ):
+        assert "system" not in run_welcome(["--dry-run"])["would_welcome"]
+    close.assert_called_once_with(initialized_db)
+    assert "system" not in welcome_new_branches(initialized_db)
+    assert has_been_welcomed(initialized_db, "newbie") is True
+
+
 def _refuse_welcome_mention_for_broken(conn: sqlite3.Connection) -> None:
     """Seed agents 'broken' and 'good'; a trigger makes the mention insert for 'broken' raise a real sqlite3 error.
 
@@ -253,12 +274,13 @@ def test_generate_prompt_creates_post(
     assert result["success"] is True
     assert result["post_id"] is not None
     assert result["room"] == "watercooler"
-    assert result["author"] == "THE_COMMONS"
+    assert result["author"] == "the_commons"
     assert "theme" in result
 
     row = initialized_db.execute("SELECT * FROM posts WHERE id = ?", (result["post_id"],)).fetchone()
     assert row is not None
     assert row["post_type"] == "discussion"
+    assert row["author"] == "the_commons"
 
 
 def test_create_event_no_args_returns_error() -> None:
@@ -289,12 +311,14 @@ def test_create_event_with_args_creates_event_post(
     assert result["post_id"] is not None
     assert result["room"] == "watercooler"
     assert result["title"] == "Code Jam"
-    assert result["author"] == "THE_COMMONS"
+    assert result["author"] == "the_commons"
 
     row = initialized_db.execute("SELECT * FROM posts WHERE id = ?", (result["post_id"],)).fetchone()
     assert row is not None
     assert row["post_type"] == "announcement"
     assert "Code Jam" in row["title"]
+    assert row["author"] == "the_commons"
+    assert "Host: the_commons" in row["content"]
 
 
 @patch("aipass.commons.apps.modules.welcome.run_welcome")
@@ -332,7 +356,7 @@ def test_engagement_module_routes_prompt_command(
         "post_id": 1,
         "room": "watercooler",
         "theme": "Test theme",
-        "author": "THE_COMMONS",
+        "author": "the_commons",
     }
 
     result = engagement_module.handle_command("prompt", [])
@@ -354,7 +378,7 @@ def test_engagement_module_routes_event_command(
         "post_id": 2,
         "room": "watercooler",
         "title": "Hackathon",
-        "author": "THE_COMMONS",
+        "author": "the_commons",
     }
 
     result = engagement_module.handle_command("event", ["Hackathon", "Build stuff"])

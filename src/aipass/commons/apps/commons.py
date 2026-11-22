@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @commons
 # Version: 1.2.2
 # Created: 2026-03-08
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -277,7 +277,7 @@ def main() -> int:
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print(f"THE_COMMONS v{VERSION}")
+        console.print(f"the_commons v{VERSION}")
         return 0
 
     if args[0] in ["--help", "-h", "help"]:

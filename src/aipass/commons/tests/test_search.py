@@ -3,7 +3,7 @@
 # Description: Unit tests for search handler, search queries, and log export
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/search/search_ops.py, search_queries.py, and log_export.py."""
@@ -19,7 +19,9 @@ from unittest.mock import patch, MagicMock
 from aipass.commons.apps.handlers.search.search_ops import run_search
 
 from aipass.commons.apps.handlers.search.search_queries import (
+    search_comments,
     search_posts,
+    sync_comment_to_fts,
     sync_post_to_fts,
 )
 
@@ -276,3 +278,17 @@ def test_search_posts_hyphenated_query_end_to_end(initialized_db: sqlite3.Connec
 
     assert len(results) == 1
     assert results[0]["id"] == post_id
+
+
+def test_the_author_filter_finds_an_old_capitalised_author_by_its_lowercase_name(initialized_db: sqlite3.Connection):
+    post_id = _seed_agent_and_post(initialized_db, "Old host post", "hello")
+    cursor = initialized_db.execute(
+        "INSERT INTO comments (post_id, author, content) VALUES (?, 'SEARCH_FIX_BRANCH', 'hello back')", (post_id,)
+    )
+    comment_id = cursor.lastrowid
+    assert comment_id is not None
+    sync_comment_to_fts(initialized_db, comment_id, "hello back", "SEARCH_FIX_BRANCH")
+    initialized_db.commit()
+
+    assert [r["id"] for r in search_posts(initialized_db, "hello", author="search_fix_branch")] == [post_id]
+    assert [r["id"] for r in search_comments(initialized_db, "hello", author="search_fix_branch")] == [comment_id]

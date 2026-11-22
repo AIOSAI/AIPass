@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trade_ops.py
 # Description: Trading & Ephemeral Item Operations Handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -444,7 +444,7 @@ def mint_event_artifact(args: List[str]) -> dict:
 
         conn.execute(
             "INSERT OR IGNORE INTO agents (branch_name, display_name, description) VALUES (?, ?, ?)",
-            ("THE_COMMONS", "The Commons", "The Commons event host"),
+            ("the_commons", "The Commons", "The Commons event host"),
         )
 
         minted = []
@@ -454,7 +454,7 @@ def mint_event_artifact(args: List[str]) -> dict:
 
             cursor = conn.execute(
                 "INSERT INTO artifacts (name, type, creator, owner, rarity, description, metadata) "
-                "VALUES (?, 'event', 'THE_COMMONS', ?, 'rare', ?, ?)",
+                "VALUES (?, 'event', 'the_commons', ?, 'rare', ?, ?)",
                 (
                     f"{event_name} - Attendee Badge",
                     branch,
@@ -466,7 +466,7 @@ def mint_event_artifact(args: List[str]) -> dict:
 
             conn.execute(
                 "INSERT INTO artifact_history (artifact_id, action, from_agent, to_agent, details) "
-                "VALUES (?, 'created', 'THE_COMMONS', ?, ?)",
+                "VALUES (?, 'created', 'the_commons', ?, ?)",
                 (artifact_id, branch, f"Event badge minted for '{event_name}'"),
             )
 

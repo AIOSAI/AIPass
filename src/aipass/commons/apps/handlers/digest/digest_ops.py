@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: digest_ops.py
 # Description: Digest Operations Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -102,7 +102,7 @@ def _get_new_branches(conn: sqlite3.Connection, hours: int = 24) -> List[str]:
         SELECT branch_name
         FROM agents
         WHERE joined_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ? || ' hours')
-          AND branch_name NOT IN ('SYSTEM', 'THE_COMMONS')
+          AND LOWER(branch_name) NOT IN ('system', 'the_commons')
         ORDER BY joined_at DESC
     """
     rows = conn.execute(query, (hours_offset,)).fetchall()

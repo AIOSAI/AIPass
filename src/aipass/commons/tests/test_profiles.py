@@ -5,7 +5,7 @@
 # Date: 2026-03-24
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -125,6 +125,21 @@ def test_get_profile_returns_agent_data(mock_json: object, initialized_db: sqlit
     assert profile["bio"] == "Hello world"
     assert profile["status"] == "online"
     assert profile["role"] == "tester"
+
+
+def test_get_profile_finds_an_old_capitalised_row_and_prefers_the_exact_spelling(
+    initialized_db: sqlite3.Connection,
+) -> None:
+    _insert_test_agent(initialized_db, "THE_COMMONS")
+    profile = get_profile(initialized_db, "the_commons")
+    assert profile is not None
+    assert profile["branch_name"] == "THE_COMMONS"
+
+    _insert_test_agent(initialized_db, "the_commons")
+    for name in ("the_commons", "THE_COMMONS"):
+        profile = get_profile(initialized_db, name)
+        assert profile is not None
+        assert profile["branch_name"] == name
 
 
 def test_get_profile_nonexistent_returns_none(initialized_db: sqlite3.Connection) -> None:
