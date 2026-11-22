@@ -1,4 +1,4 @@
-"""{{BRANCHNAME}} handlers package, the fence: another branch reaches these only through the package door, aipass.{{BRANCH}}.
+"""{{BRANCH}} handlers package, the fence: another branch reaches these only through the package door, aipass.{{BRANCH}}.
 Frames are kin (this branch), transport (importlib, stdlib such as unittest.mock, site-packages) or foreign.
 The first foreign frame is refused unless kin code imported on its behalf and its line does not name the handlers.
 Fires only on a process's first import; the wall is drone @sentry audit (handlers, encapsulation).

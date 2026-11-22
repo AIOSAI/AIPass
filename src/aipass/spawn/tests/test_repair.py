@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_repair.py
 # Description: Tests for repair and adopt-citizen — move, rename, pollution, cross-project adoption
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-05-15
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/repair_ops.py and adopt_citizen_ops.py — move, rename, pollution, adopt-citizen."""
@@ -343,7 +343,7 @@ class TestRenameBranch:
         assert handle_repair(["--rename", "@old", "@new", "--apply"]) == 0
 
         row = json.loads(reg.read_text(encoding="utf-8"))["branches"][0]
-        assert (row["name"], row["path"], row["email"]) == ("NEW", "src/aipass/new", "@new")
+        assert (row["name"], row["path"], row["email"]) == ("new", "src/aipass/new", "@new")
         assert (row["registry_id"], row["created"], row["custom_key"]) == ("cid-old", "2026-01-01", "keep-me")
         passport = json.loads(passport_path.read_text(encoding="utf-8"))
         assert passport["branch_info"] == {
@@ -476,7 +476,7 @@ class TestRenameProjectCitizen:
             "description": "x",
         }
         assert (seed["name"], seed["path"], seed["email"], seed["registry_id"]) == (
-            "SEED",
+            "seed",
             "src/seed/seed",
             "@seed",
             "cid-beo",

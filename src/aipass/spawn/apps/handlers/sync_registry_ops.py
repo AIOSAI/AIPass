@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_registry_ops.py
 # Description: Registry sync handler — implementation logic for registry repair
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-07
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Registry synchronization handler for branch lifecycle management.
@@ -248,7 +248,7 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
                 rel_path = branch_path.relative_to(project_root).as_posix()
 
                 entry = {
-                    "name": name.upper(),
+                    "name": name,
                     "path": rel_path,
                     "profile": "library",
                     "description": _derive_description(branch_path),
@@ -259,7 +259,7 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
                 }
                 raw_branches = registry["branches"]
                 if isinstance(raw_branches, dict):
-                    raw_branches[name.upper()] = entry
+                    raw_branches[name] = entry
                 else:
                     raw_branches.append(entry)
                 logger.info(f"[sync-registry] Added unregistered branch: {name}")
@@ -436,7 +436,7 @@ def rebuild_registry(registry_path, confirm=False) -> dict:
                 return _refuse(f"{name}: passport {passport_path} unreadable ({exc}); restore it with: {RESTORE_CURE}")
             rows.append(
                 {
-                    "name": name.upper(),
+                    "name": name,
                     "path": branch_path.relative_to(project_root).as_posix(),
                     "profile": "library",
                     "description": _derive_description(branch_path),

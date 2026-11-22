@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for CLI routing and help output
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-27
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/spawn.py's CLI routing, help output, and introspection."""
@@ -140,7 +140,7 @@ class TestCreateDryRun:
         assert result == 0
         out = capsys.readouterr().out
         assert "DRY RUN" in out
-        assert "DRYTEST" in out
+        assert "drytest" in out
 
     def test_dry_run_creates_no_files(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """--dry-run creates nothing on disk."""
@@ -280,7 +280,7 @@ class TestCreateUnknownClassRefusal:
         result = handle_create([str(target), "--registry", str(registry)])
 
         assert result == 0
-        assert "Agent created: LEGIT_AGENT" in capsys.readouterr().out
+        assert "Agent created: legit_agent" in capsys.readouterr().out
         assert target.exists()
         assert (target / ".trinity" / "passport.json").exists()
 
@@ -327,7 +327,7 @@ class TestCreateUnknownClassRefusal:
         result = handle_create(["./dotted_agent", "--registry", str(registry)])
 
         assert result == 0
-        assert "Agent created: DOTTED_AGENT" in capsys.readouterr().out
+        assert "Agent created: dotted_agent" in capsys.readouterr().out
         assert (tmp_path / "dotted_agent").exists()
 
 

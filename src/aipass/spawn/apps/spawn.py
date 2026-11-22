@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-03-05
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -287,12 +287,10 @@ def _dry_run_create(target_path, citizen_class, parsed, template_dir=None):
     template = Path(template_dir) if template_dir else get_template_dir(citizen_class or get_default_class())
     class_display = citizen_class or "decided at mint (manager if first citizen in the project, else specialist)"
     branch_name = get_branch_name(target)
-    branch_upper = normalize_branch_name(branch_name, "upper")
-
     console.print()
     header("DRY RUN — Create Preview")
     console.print()
-    console.print(f"  [bold]Branch:[/bold]  {branch_upper}")
+    console.print(f"  [bold]Branch:[/bold]  {normalize_branch_name(branch_name)}")
     console.print(f"  [bold]Class:[/bold]   {class_display}")
     console.print(f"  [bold]Path:[/bold]    {target}")
     console.print(f"  [bold]Template:[/bold] {template}")

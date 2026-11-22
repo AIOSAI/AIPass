@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_credential.py
 # Description: metadata.id — the project credential a new registry is born with
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-24
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/registry.py's project-credential mint (metadata.id)."""
@@ -492,7 +492,7 @@ class TestRebuildRegistry:
 
         assert _tree(reg.parent) == before
         assert receipt["refused"] is None and receipt["written"] is False
-        assert sorted(r["name"] for r in receipt["rows"]) == sorted(n.upper() for n in citizens)
+        assert sorted(r["name"] for r in receipt["rows"]) == sorted(n for n in citizens)
 
     @pytest.mark.parametrize("shape", sorted(CORRUPT_SHAPES))
     def test_confirm_keeps_the_corrupt_bytes_aside_and_writes_every_passported_seat(self, tmp_path, shape):
@@ -506,10 +506,8 @@ class TestRebuildRegistry:
         doc = json.loads(reg.read_text(encoding="utf-8"))
         assert doc["metadata"]["id"] == MACHINE_REGISTRY_ID
         rows = {r["name"]: r for r in doc["branches"]}
-        assert {name: row["registry_id"] for name, row in rows.items()} == {
-            n.upper(): cid for n, cid in citizens.items()
-        }
-        assert rows["ALPHA"]["path"] == "src/alpha" and rows["ALPHA"]["email"] == "@alpha"
+        assert {name: row["registry_id"] for name, row in rows.items()} == {n: cid for n, cid in citizens.items()}
+        assert rows["alpha"]["path"] == "src/alpha" and rows["alpha"]["email"] == "@alpha"
         assert not any("admin" in r or "ci_cure" in r for r in doc["branches"])
         assert receipt["written"] is True and receipt["aside"] == str(aside[0])
         assert {"drone @spawn grant-admin", "drone @spawn grant-ci-cure"} == {

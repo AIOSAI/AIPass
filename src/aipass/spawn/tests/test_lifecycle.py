@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_lifecycle.py
 # Description: Tests for spawn lifecycle commands (delete, retire-project, sync-registry)
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-07
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/delete_ops.py and apps/handlers/sync_registry_ops.py."""
@@ -364,7 +364,7 @@ class TestSyncRegistry:
         assert "SPAWN" not in names
         assert "DEVPULSE" not in names
 
-        assert "PHANTOM" in names
+        assert "phantom" in names
 
         assert "TEST_API" in names
 
@@ -415,7 +415,7 @@ class TestSyncRegistryCwdAware:
         result, reg = _scan_through_sync(tmp_path, monkeypatch, fix=True)
         assert result["unregistered"] == ["my_agent"]
         entries = json.loads(reg.read_text(encoding="utf-8"))["branches"]
-        assert [(e["name"], e["path"]) for e in entries] == [("MY_AGENT", "my_agent")]
+        assert [(e["name"], e["path"]) for e in entries] == [("my_agent", "my_agent")]
 
     def test_finds_src_level_agents(self, tmp_path, monkeypatch):
         """Agents at src/ level (project/src/agent/) should be discovered."""
@@ -506,9 +506,9 @@ class TestSyncRegistryCwdAware:
         assert result["fixed"] is True
         reg = json.loads(reg_path.read_text(encoding="utf-8"))
         names = [b["name"] for b in reg["branches"]]
-        assert "DAEMON" in names
+        assert "daemon" in names
 
-        daemon_entry = next(b for b in reg["branches"] if b["name"] == "DAEMON")
+        daemon_entry = next(b for b in reg["branches"] if b["name"] == "daemon")
         assert daemon_entry["path"] == "src/daemon"
 
     def test_escaped_paths_detected_as_stale(self, tmp_path):
@@ -664,12 +664,12 @@ class TestAdoptExisting:
 
         assert result["success"] is True
         assert result["adopted"] is True
-        assert result["branch_name"] == "MY_AGENT"
+        assert result["branch_name"] == "my_agent"
         assert result["registry_updated"] is True
 
         reg = json.loads(reg_path.read_text(encoding="utf-8"))
         names = [b["name"] for b in reg["branches"]]
-        assert "MY_AGENT" in names
+        assert "my_agent" in names
 
     def test_existing_without_passport_still_fails(self, tmp_path):
         """Target that exists but has NO passport should still fail."""
@@ -714,7 +714,7 @@ class TestAdoptExisting:
 
         assert result["success"] is True
         reg = json.loads(reg_path.read_text(encoding="utf-8"))
-        entry = next(b for b in reg["branches"] if b["name"] == "SMART_AGENT")
+        entry = next(b for b in reg["branches"] if b["name"] == "smart_agent")
         assert entry["description"] == "Process reports daily"
 
     def test_adopt_existing_fixes_registry_id(self, tmp_path):

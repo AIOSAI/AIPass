@@ -53,7 +53,7 @@ def test_print_introspection_renders_identity_and_help_pointer(capsys):
     branch_entry.print_introspection()
 
     out = capsys.readouterr().out
-    assert "{{BRANCHNAME}}" in out
+    assert "{{BRANCH}}" in out
     assert "Discovered Modules:" in out
     assert "--help" in out
 
@@ -92,7 +92,7 @@ def test_version_flag_prints_version(monkeypatch, capsys, flag):
     assert _run(monkeypatch, [flag]) == 0
 
     out = capsys.readouterr().out
-    assert "{{BRANCHNAME}}" in out
+    assert "{{BRANCH}}" in out
     assert branch_entry.__version__ in out
 
 

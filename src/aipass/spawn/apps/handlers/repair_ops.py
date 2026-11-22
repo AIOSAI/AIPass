@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repair_ops.py
 # Description: Repair handler — move branches, update registry paths, clean pollution
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-05-15
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Repair handler implementation for project structure fixes.
@@ -362,7 +362,7 @@ def rename_branch(old_name, new_name, registry_path=None, dry_run=True):
             row["path"] = moves[name][0]
             row["description"] = _swap_word(row.get("description", ""), old, new)
             if name == old:
-                row.update(name=new.upper(), email=f"@{new}")
+                row.update(name=new, email=f"@{new}")
         registry["branches"] = rows
         if namesake:
             registry["metadata"]["name"] = new.upper()

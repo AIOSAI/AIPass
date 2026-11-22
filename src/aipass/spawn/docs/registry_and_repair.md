@@ -40,7 +40,7 @@ but will not parse is refused by the sync, `--fix` and `--check` alike (`--check
 `drone @spawn sync-registry --rebuild`. Under `--fix`, a stale entry
 whose branch is found elsewhere in the project has its `path` rewritten, so `owner`, `admin`
 and `registry_id` stay; directory names are keyed through `normalize_branch_name`, so
-`my-agent` on disk matches `MY_AGENT`. Every registry writer holds `registry_lock` (`flock`
+`my-agent` on disk matches `my_agent`. Every registry writer holds `registry_lock` (`flock`
 on `.<stem>.lock`) and loads inside it.
 
 `--rebuild` is for a registry that will not parse (empty, `[]`, truncated, or JSON with garbage
@@ -57,21 +57,20 @@ exposes `rebuild_registry`, so `aipass doctor` can call it while drone cannot ro
 
 ---
 
-## Registry entry shape — mixed casing is not a rule
+## Registry entry shape — the name is lowercase, the path relative
 
-`AIPASS_REGISTRY.json` carries entries in two shapes: UPPERCASE names with
-registry-relative paths, and lowercase names with absolute paths.
+The system stores an agent's name in lowercase. Every row spawn writes carries the name
+in lowercase, hyphens as underscores, and a path relative to the registry's own folder. That
+covers `create` (mint and adopt), `add_to_registry`, `sync-registry --fix`, `--rebuild` and
+`repair --rename`. `normalize_branch_name` defaults to lowercase. A target outside the
+registry's project is refused, never written with an absolute path. The project's own name (the
+registry file's stem and `metadata.name`) is not an agent name and stays as it is.
 
-**The uppercase-plus-relative shape is what `create` writes.** `handlers/mint_ops.py` hands
-`add_to_registry` the uppercased name and a path relativized to the registry's own
-directory, falling back to absolute only when relativization raises. The lowercase absolute
-entries are not written by this lane.
-
-Nothing reads the difference: registry lookups lowercase both sides before comparing
-(`is_protected`, `ensure_admin`), and a path is resolved as `registry_dir / entry_path`,
-which pathlib returns unchanged when the entry is already absolute. It is cosmetic — two
-shapes a reader sees and no code does. **Normalising is not done here**, and
-`sync-registry` does not touch casing.
+A registry written before this rule can still hold capital rows beside lowercase ones. Spawn
+reads such a registry by folding case on both sides. The duplicate guards in `create` and
+`add_to_registry` treat `FLOW` and `flow` as one agent, so no writer adds a second row
+for a name already present in the other case. Spawn's writers leave an existing capital row's
+name as they find it; only `repair --rename` rewrites a name, and it writes lowercase.
 
 ---
 

@@ -29,6 +29,11 @@ PyPI version — not the changelog header.
 - **devpulse: `release-notify` skips an address that has no mailbox** (2026-11-22). A passport that says manager but whose address @ai_mail does not know printed a FAILED row and failed the command on every release. It now reads "skipped, no mailbox" and does not fail the run; any other send failure still does.
 - **devpulse: the watchdog's diagnostics go through the logger** (2026-11-22). The wire, the timer and the agent watch each wrote progress and sweep lines to stderr through a private helper; the three helpers are gone and the lines are in the prax log. The one notice a person must act on at arm time, a wire armed behind a pipe or redirect, still prints on stderr. stdout, the wake channel, is unchanged.
 - **devpulse: a refused `watchdog timer` duration prints its error only** (2026-11-21). The router read the handler's answer as "not my command" and added "Unknown command".
+- **spawn: a name differing only in case is a duplicate** (2026-11-22). `create` and `add_to_registry` compared names exactly, so `FLOW` could be registered beside `flow`. Both guards fold case.
+
+### Changed
+
+- **spawn: the system stores an agent's name in lowercase** (2026-11-22). Every row spawn writes (`create`, adopt, `add_to_registry`, `sync-registry --fix`, `--rebuild`, `repair --rename`) holds the name in lowercase, and `normalize_branch_name` defaults to lowercase. In the citizen template the capital name token stays in markdown only; the Python files, the dashboard and the birth certificate take the lowercase one. Rows already in a registry are not rewritten by this change. Documents may still write a name with capitals: they are prose, not read by the runtime.
 
 ## [2026-11-21] — v2.8.41: a chaos round against the fleet and its cures, the watchdog waits for the mail, the docs catch up with the code
 

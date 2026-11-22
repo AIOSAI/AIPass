@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_contracts.py
 # Description: Tests for return types, exceptions, data structures, and init
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-27
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/core.py's mint contract and apps/handlers/json/json_handler.py's return/exception types."""
@@ -98,7 +98,7 @@ class TestDataStructureContracts:
         result = spawn_agent(str(target), registry_path=tmp_path.resolve() / "AIPASS_REGISTRY.json")
         assert isinstance(result, dict)
         assert result["success"] is True, result.get("error")
-        assert result["branch_name"] == "INIT_TEST", result["branch_name"]
+        assert result["branch_name"] == "init_test", result["branch_name"]
         assert Path(result["path"]) == target, result["path"]
         assert result["files_copied"] == expected_files_copied, result["files_copied"]
         assert result["validation_issues"] == [], result["validation_issues"]

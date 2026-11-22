@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.4.0
+# Version: 1.4.2
 # Created: 2026-03-05
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/core.py (spawn_agent) and apps/handlers/registry.py."""
@@ -43,6 +43,8 @@ from aipass.spawn.apps.handlers.registry import (
     save_registry,
     get_next_citizen_number,
 )
+from aipass.spawn.apps.handlers.repair_ops import rename_branch
+from aipass.spawn.apps.handlers.sync_registry_ops import sync_registry
 from aipass.spawn.apps.modules.core import handle_command
 from aipass.spawn.apps.spawn import handle_create
 
@@ -164,6 +166,18 @@ class TestRegistry:
         result = add_to_registry(tmp_registry, "X", str(branch_path), "W", "@x")
         assert result is False
 
+    @pytest.mark.parametrize("shape", ["list", "dict"])
+    def test_a_name_differing_only_in_case_is_a_duplicate(self, tmp_path, tmp_registry, shape):
+        """A mixed registry holds FLOW and flow as one agent. Mutant: the guard compares exact case -> red."""
+        branch_path = tmp_path / "flow"
+        branch_path.mkdir()
+        row = {"name": "FLOW", "path": "flow"}
+        branches = [row] if shape == "list" else {"FLOW": row}
+        tmp_registry.write_text(json.dumps({"metadata": {}, "branches": branches}), encoding="utf-8")
+
+        assert add_to_registry(tmp_registry, "flow", str(branch_path), "W", "@flow") is False
+        assert len(json.loads(tmp_registry.read_text(encoding="utf-8"))["branches"]) == 1
+
 
 class TestSpawnAgent:
     def test_full_spawn(self, tmp_agent, tmp_registry):
@@ -174,7 +188,7 @@ class TestSpawnAgent:
             registry_path=str(tmp_registry),
         )
         assert result["success"] is True
-        assert result["branch_name"] == "TEST_AGENT"
+        assert result["branch_name"] == "test_agent"
         assert result["files_copied"] > 0
         assert result["registry_updated"] is True
         assert result["validation_issues"] == []
@@ -383,6 +397,16 @@ class TestMintRefusals:
         assert "already registered" in result["error"]
         assert not tmp_agent.exists()
 
+    @pytest.mark.parametrize("stored", ["test_agent", "TEST_AGENT"])
+    def test_a_name_registered_in_either_case_refuses_before_any_copy(self, tmp_path, tmp_agent, tmp_registry, stored):
+        """The pre-copy guard ignores case. Mutant: it compares exact case -> red on the other spelling."""
+        add_to_registry(tmp_registry, stored, str(tmp_path / "elsewhere"), "W", "@test_agent")
+
+        result = spawn_agent(str(tmp_agent), registry_path=str(tmp_registry))
+
+        assert "already registered" in result["error"]
+        assert not tmp_agent.exists()
+
     def test_a_failed_registry_add_is_an_error_not_a_success(self, tmp_path, tmp_agent, tmp_registry, monkeypatch):
         real_add = mint_ops.add_to_registry
 
@@ -409,7 +433,7 @@ class TestMintRefusals:
         assert result["registry_path"] == str(registry)
         passport = json.loads((tmp_path / "newbie" / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["citizenship"]["registry_id"] == "project-credential"
-        assert [b["name"] for b in load_registry(registry)["branches"]] == ["NEWBIE"]
+        assert [b["name"] for b in load_registry(registry)["branches"]] == ["newbie"]
 
     def test_a_retry_after_an_incomplete_mint_refuses_instead_of_adopting(self, tmp_path, tmp_registry):
         template = tmp_path / "tmpl"
@@ -666,7 +690,7 @@ class TestCreateOverALiveAgent:
         result = spawn_agent(str(target), registry_path=str(reg))
 
         assert result["success"] is True and result["adopted"] is True
-        assert [b["name"] for b in load_registry(reg)["branches"]] == ["PROBE"]
+        assert [b["name"] for b in load_registry(reg)["branches"]] == ["probe"]
 
 
 BAD_NAMES = ["probe bad", "ProbeCap", "probé", "p" * 200, "-probe_dash"]
@@ -701,3 +725,41 @@ class TestBranchNameRule:
         assert BRANCH_NAME_RULE in result["error"]
         assert _tree(tmp_path) == before and reg.read_bytes() == reg_before
         assert target.exists() is (lane != "mint")
+
+
+class TestMixedRegistry:
+    """Until the conversion runs, a registry holds capital rows beside lowercase ones; every writer must hold."""
+
+    def test_mint_adopt_sync_and_rename_on_a_mixed_registry(self, tmp_path):
+        """Each writer adds lowercase, none doubles the capital row, and the capital row keeps its flags.
+
+        Mutant: a writer stores capitals again, or a duplicate guard compares exact case -> red."""
+        project = tmp_path / "mixed"
+        reg = project / "MIXED_REGISTRY.json"
+        capital = {"name": "KEEPER", "path": "keeper", "registry_id": "cid-cap", "owner": True, "admin": True}
+        (project / "keeper" / ".trinity").mkdir(parents=True)
+        (project / "keeper" / ".trinity" / "passport.json").write_text(
+            json.dumps({"citizenship": {"citizen_id": "cid-cap"}}), encoding="utf-8"
+        )
+        reg.write_text(json.dumps({"metadata": {"id": "cred"}, "branches": [capital]}), encoding="utf-8")
+        for seat in ("adoptee", "stray"):
+            (project / seat / ".trinity").mkdir(parents=True)
+            (project / seat / ".trinity" / "passport.json").write_text(
+                json.dumps({"identity": {"citizen_class": "specialist", "purpose": "Live agent"}}), encoding="utf-8"
+            )
+
+        def rows():
+            return {r["name"]: r for r in json.loads(reg.read_text(encoding="utf-8"))["branches"]}
+
+        assert spawn_agent(str(project / "fresh"), registry_path=str(reg))["success"] is True
+        assert "already registered" in spawn_agent(str(project / "other" / "keeper"), registry_path=str(reg))["error"]
+        assert spawn_agent(str(project / "adoptee"), registry_path=str(reg))["adopted"] is True
+        assert sync_registry(fix=True, registry_path=reg)["fixed"] is True
+        assert set(rows()) == {"KEEPER", "fresh", "adoptee", "stray"}
+
+        shutil.move(str(project / "keeper"), str(project / "kept"))
+        assert rename_branch("@keeper", "@kept", registry_path=reg, dry_run=False)["success"] is True
+
+        assert set(rows()) == {"kept", "fresh", "adoptee", "stray"}
+        kept = rows()["kept"]
+        assert (kept["path"], kept["registry_id"], kept["owner"], kept["admin"]) == ("kept", "cid-cap", True, True)

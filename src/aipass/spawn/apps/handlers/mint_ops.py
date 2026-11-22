@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mint_ops.py
 # Description: The mint of a new citizen from the template, step by step
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-09-28
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """The mint body: a validated target becomes a registered citizen."""
@@ -186,7 +186,6 @@ def mint_citizen(
 ) -> dict:
     """Mint a citizen at a target that does not exist yet, from template."""
     folder_name = get_branch_name(target)
-    branch_upper = normalize_branch_name(folder_name, "upper")
     branch_lower = normalize_branch_name(folder_name, "lower")
     detected_profile = profile or detect_profile(target)
 
@@ -202,8 +201,10 @@ def mint_citizen(
     except ValueError:
         logger.warning("[spawn] Mint refused: %s is outside registry %s", target, reg_path)
         return error_result(f"{target} is outside the project of registry {reg_path}; nothing was written.")
-    if any(b.get("name") == branch_upper for b in branches_as_list(load_registry(reg_path).get("branches", []))):
-        return error_result(f"{branch_upper} is already registered in {reg_path}; nothing was written.")
+    if any(
+        b.get("name", "").lower() == branch_lower for b in branches_as_list(load_registry(reg_path).get("branches", []))
+    ):
+        return error_result(f"{branch_lower} is already registered in {reg_path}; nothing was written.")
     citizen_number = get_next_citizen_number(reg_path)
 
     # Resolved before the copy: the passport is written before the registry, so both must carry this id.
@@ -257,7 +258,7 @@ def mint_citizen(
         try:
             arrival_record["first_wake"] = stamp_onboarding(target, arrival)
         except OSError as e:
-            logger.warning("[spawn] First wake not stamped for %s: %s", branch_upper, e)
+            logger.warning("[spawn] First wake not stamped for %s: %s", branch_lower, e)
             arrival_record["first_wake"] = f"not stamped: {e}"
 
     regenerate_template_registry(target)
@@ -270,7 +271,7 @@ def mint_citizen(
     # Verified before the registry write, so a refusal has nothing to roll back; the partial tree stays.
     missing = verify_mint(template, target, replacements, branch_lower)
     if missing:
-        json_handler.log_operation("mint_refused", data={"branch": branch_upper, "missing": missing})
+        json_handler.log_operation("mint_refused", data={"branch": branch_lower, "missing": missing})
         shown = ", ".join(missing[:12])
         if len(missing) > 12:
             shown += f", +{len(missing) - 12} more"
@@ -300,7 +301,7 @@ def mint_citizen(
         logger.warning("[spawn] %s", seed_issues[0])
     if seed_record["error"]:
         refusal = error_result(
-            f"BIRTH REFUSED: the passport vault for {branch_upper} could not be written ({seed_record['error']}). "
+            f"BIRTH REFUSED: the passport vault for {branch_lower} could not be written ({seed_record['error']}). "
             f"Nothing was registered; the tree is left at {target}."
         )
         logger.error("[spawn] %s", refusal["error"])
@@ -322,7 +323,7 @@ def mint_citizen(
     registry_branch_path = target.relative_to(reg_path.parent).as_posix()
     registry_updated = add_to_registry(
         reg_path,
-        branch_upper,
+        branch_lower,
         registry_branch_path,
         detected_profile,
         f"@{branch_lower}",
@@ -333,7 +334,7 @@ def mint_citizen(
 
     if not registry_updated:
         return error_result(
-            f"Registry add failed for {branch_upper} in {reg_path}: the tree at {target} is minted but NOT registered."
+            f"Registry add failed for {branch_lower} in {reg_path}: the tree at {target} is minted but NOT registered."
         )
 
     ensure_project_has_owner(reg_path)
@@ -349,7 +350,7 @@ def mint_citizen(
             try:
                 arrival_record[name] = stamp()
             except (OSError, RuntimeError) as e:
-                logger.warning("[spawn] %s not stamped for %s: %s", name, branch_upper, e)
+                logger.warning("[spawn] %s not stamped for %s: %s", name, branch_lower, e)
                 arrival_record[name] = f"not stamped: {e}"
 
     placeholder_issues = [f"Unreplaced {sorted(names)} in {path}" for path, names in validate_no_placeholders(target)]
@@ -358,7 +359,7 @@ def mint_citizen(
 
     logger.info(
         "[spawn] BORN %s at %s (class %s, citizen %s, receipt %s)",
-        branch_upper,
+        branch_lower,
         target,
         resolved_class,
         citizen_number,
@@ -367,7 +368,7 @@ def mint_citizen(
     json_handler.log_operation(
         "branch_created",
         data={
-            "branch": branch_upper,
+            "branch": branch_lower,
             "citizen_class": resolved_class,
             "receipt": receipt_result.get("receipt", {}).get("template_versions", {}),
         },
@@ -375,7 +376,7 @@ def mint_citizen(
 
     return {
         "success": True,
-        "branch_name": branch_upper,
+        "branch_name": branch_lower,
         "path": str(target),
         "files_copied": len([c for c in copied if "(dir)" not in c]),
         "dirs_created": len([c for c in copied if "(dir)" in c]),
