@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: deliver.py
 # Description: Delivery — one drone call per manager, one commons thread, one stamp
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-09
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """Delivery and the per-version stamp (DPLAN-0335 leg 1).
@@ -121,6 +121,17 @@ def send_email(address: str, subject: str, body: str) -> tuple[bool, str]:
     """Send one release mail through ai_mail: ``email``, not ``dispatch``, because this is news, not a task."""
     json_handler.log_operation("release_notify_email", {"to": address}, module_name=MODULE_NAME)
     return _run_drone(["@ai_mail", "email", address, subject, body])
+
+
+# ai_mail refuses an address with no mailbox here with this phrase (_describe_unresolved_address);
+# any other failure (timeout, drone missing, delivery error) is a real failure, not a skip.
+# shortcut: keys on ai_mail's reason wording, re-check if ai_mail reworders that refusal.
+NO_MAILBOX_MARKER = "Unknown branch email"
+
+
+def is_no_mailbox(reason: str) -> bool:
+    """True when ai_mail refused the send because the address has no mailbox, not because delivery failed."""
+    return NO_MAILBOX_MARKER in (reason or "")
 
 
 def post_commons(subject: str, body: str) -> tuple[bool, str]:

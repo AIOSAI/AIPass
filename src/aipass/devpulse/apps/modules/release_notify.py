@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: release_notify.py
 # Description: Release Notify Module — release mail fan-out to project managers
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-09
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -26,6 +26,7 @@ from aipass.devpulse.apps.handlers.release_notify.compose import (
 from aipass.devpulse.apps.handlers.release_notify.deliver import (
     COMMONS_ROOM,
     already_notified,
+    is_no_mailbox,
     load_state,
     post_commons,
     record_notified,
@@ -176,6 +177,9 @@ def _fan_out(subject: str, body: str, managers: list[dict]) -> tuple[list[str], 
         if ok:
             sent.append(address)
             rows.append((address, entry["name"], "sent"))
+        elif is_no_mailbox(reason):
+            # No mailbox here is not a failure: it must not fail the run (a runtime agent's address, @seed).
+            rows.append((address, entry["name"], "skipped, no mailbox"))
         else:
             failed.append(address)
             rows.append((address, entry["name"], f"FAILED — {reason}"))
