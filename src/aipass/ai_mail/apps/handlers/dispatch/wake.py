@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.12.3
+# Version: 3.12.4
 # Created: 2026-03-02
 # Modified: 2026-11-22
 # =============================================
@@ -105,7 +105,7 @@ FABLE_GRANT_DEFAULT: frozenset[str] = frozenset({"@devpulse"})
 FABLE_GRANT_KEY = "fable_allowed"
 
 # The marking tmux cannot half-apply: a person deciding whether to kill a window reads it.
-DAEMON_SESSION_PREFIX = "AIPASS-DAEMON-WAKE-"
+DAEMON_SESSION_PREFIX = "aipass-daemon-wake-"
 
 # dispatch.py._orchestrate_dispatch_send bypasses this check.
 WAKE_BLOCKLIST: frozenset[str] = frozenset({"@devpulse"})

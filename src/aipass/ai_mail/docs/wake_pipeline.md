@@ -98,7 +98,7 @@ permission mode has tools denied with nobody present to approve them.
 daemon work from a leftover session (the manager-interactive lane is not in the dispatch
 register). Two markings:
 
-- **The session name**, `AIPASS-DAEMON-WAKE-<branch>-<HHMMSS>` — guaranteed, because
+- **The session name**, `aipass-daemon-wake-<branch>-<HHMMSS>` — guaranteed, because
   tmux either creates the session under that name or `new-session` already failed.
   Loud on purpose: it is read by a person deciding whether to kill a window.
 - **A tmux user option**, `@aipass_daemon_wake`, carrying branch/sender/start time —

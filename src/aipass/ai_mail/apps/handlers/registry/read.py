@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: read.py
 # Description: Registry Read Handler
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2025-11-15
 # Modified: 2026-11-22
 # =============================================
@@ -101,7 +101,7 @@ def _derive_email_from_branch_name(branch_name: str) -> str:
         email_part = branch_name.split(".")[-1].lower()
     elif " " in branch_name:
         email_part = branch_name.split()[0].lower()
-    elif "-" in branch_name and branch_name.split("-")[0] == "AIPASS":
+    elif "-" in branch_name and branch_name.split("-")[0].lower() == "aipass":
         email_part = branch_name.split("-", 1)[1].lower()
     else:
         email_part = branch_name.split("-")[0].lower()

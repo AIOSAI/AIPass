@@ -22,6 +22,8 @@ the worst failure shape mail has, because the sender believes it was delivered.
   raises `MarkupError` that aborts the whole listing.
 - **Fail honest** — a row that still cannot render is reprinted raw behind a marker, and
   an unreadable `sent/` file lists as a placeholder. Never a silent skip.
+- **Bodies print with `highlight=False`** — Rich's highlighter regexes go quadratic on one
+  long token: a 100,000-character body with no space took over two minutes to `view`.
 
 ## Broadcast Costs What It Delivers, Not More
 
@@ -135,6 +137,25 @@ From line names has to be who receives the reply. The branch whose send failed s
 in the body, as evidence, not as a route.
 
 
+## What Is Refused Before Anything Is Written
+
+- **An empty or whitespace subject**, and a leftover `--flag` where the subject belongs
+  (`send_args.py`): the usage line, nothing sent.
+- **A wrong-shaped mailbox** — `inbox.json` holding a non-list/non-object, `{}`, or an
+  `inbox`/`messages` value that is not a list (`inbox_ops.migrate_inbox_format`). Reading
+  and both delivery lanes refuse it, naming the file; the file stays byte-identical. A
+  legacy list or `{"inbox": [...]}` still migrates.
+- **A recipient with no branch folder, or no `.trinity/passport.json`** — delivery will
+  not provision a mailbox there (`delivery.py`): a mailbox with no passport beside it is
+  a ghost that spawn reads as a damaged agent.
+- **`close all <anything>` and `close --all`** refuse with the usage; so does
+  `contacts <anything>`.
+
+`from_name` is stored in lowercase on every path (sent record, both delivery lanes,
+reply), whatever the caller passes. Older mail keeps what it holds; the alias lookup in
+`format.py` folds case, so a capital `from_name` still matches its registry row.
+
+
 ## Email Lifecycle
 
 Messages follow a 3-state model:
@@ -145,7 +166,9 @@ new → opened → closed
 
 - **new** — Delivered to inbox, never viewed
 - **opened** — Viewed by recipient, awaiting action
-- **closed** — Replied or dismissed, archived automatically
+- **closed** — Replied or dismissed, archived automatically to `deleted/`. `view`, `reply`
+  and `close` on a closed id answer `Message <id> is already closed` while its `deleted/`
+  file exists; once purged it is `Message not found`.
 
 Each branch's mailbox lives at `<branch_path>/.ai_mail.local/inbox.json`. Sent copies go to `.ai_mail.local/sent/`. File locking (`fcntl`) protects concurrent inbox writes.
 

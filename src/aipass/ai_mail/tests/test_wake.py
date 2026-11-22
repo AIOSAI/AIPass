@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.6.3
+# Version: 1.6.4
 # Created: 2026-03-29
 # Modified: 2026-11-22
 # =============================================
@@ -943,7 +943,7 @@ class TestDaemonSessionMarking:
         new_session = [c for c in calls["tmux"] if c[1] == "new-session"][0]
         session = new_session[new_session.index("-s") + 1]
         assert not session.startswith("daemon-"), "this is the name a human already killed"
-        assert "AIPASS" in session, "the name must say a machine started this, not a person"
+        assert session.startswith("aipass-daemon-wake-testbranch-"), "a machine started this, not a person"
 
     def test_marking_lands_before_the_agent_starts(self, tmp_path, monkeypatch):
         """A window is killable from the moment it exists, so marking precedes send-keys."""
