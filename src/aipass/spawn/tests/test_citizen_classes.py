@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_citizen_classes.py
 # Description: Integration tests for citizen class system
-# Version: 1.3.5
+# Version: 1.3.6
 # Created: 2026-03-07
 # Modified: 2026-11-22
 # =============================================
@@ -565,7 +565,7 @@ class TestAgentScaffoldContent:
         prompt = target / ".aipass" / "aipass_local_prompt.md"
         assert prompt.exists()
         content = prompt.read_text(encoding="utf-8")
-        assert "PROMPT_AGENT" in content
+        assert "prompt_agent" in content
         assert len(content) > 100
 
     def test_created_agent_passport_has_role(self, tmp_path):

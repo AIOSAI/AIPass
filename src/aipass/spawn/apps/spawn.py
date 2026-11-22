@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.4.3
+# Version: 1.4.4
 # Created: 2026-03-05
 # Modified: 2026-11-22
 # =============================================
@@ -20,7 +20,7 @@ from aipass.cli import console, header, error, warning, reset_command_state, res
 def print_help():
     """Display Rich-formatted help."""
     console.print()
-    header("SPAWN - Branch Lifecycle Manager")
+    header("spawn - Branch Lifecycle Manager")
     console.print()
     console.print("[dim]Create, update, and manage AIPass branches with class-scoped templates[/dim]")
     console.print()
@@ -397,7 +397,7 @@ def main():
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print("SPAWN v1.0.0")
+        console.print("spawn v1.0.0")
         return 0
 
     command = args[0]
@@ -482,10 +482,10 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
-        logger.warning("SPAWN interrupted by user (KeyboardInterrupt)")
+        logger.warning("spawn interrupted by user (KeyboardInterrupt)")
         console.print("\n\nOperation cancelled by user")
         sys.exit(0)
     except Exception as e:
-        logger.error(f"SPAWN entry point error: {e}", exc_info=True)
+        logger.error(f"spawn entry point error: {e}", exc_info=True)
         console.print(f"\nError: {e}")
         sys.exit(1)

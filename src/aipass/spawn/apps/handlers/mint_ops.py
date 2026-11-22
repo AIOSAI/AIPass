@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: mint_ops.py
 # Description: The mint of a new citizen from the template, step by step
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-09-28
 # Modified: 2026-11-22
 # =============================================
@@ -163,7 +163,7 @@ def live_row_refusal(target: Path, registry_path) -> str:
     row = row_at(reg_path, target) if reg_path else None
     if reg_path is None or row is None:
         return ""
-    name = normalize_branch_name(row.get("name") or get_branch_name(target), "lower")
+    name = normalize_branch_name(row.get("name") or get_branch_name(target))
     return (
         f"REFUSED: {target} is already registered as @{name} in {reg_path}; create would rewrite a live "
         f"agent, so nothing was written. To bring its scaffold up to the template: "
@@ -186,7 +186,7 @@ def mint_citizen(
 ) -> dict:
     """Mint a citizen at a target that does not exist yet, from template."""
     folder_name = get_branch_name(target)
-    branch_lower = normalize_branch_name(folder_name, "lower")
+    branch_lower = normalize_branch_name(folder_name)
     detected_profile = profile or detect_profile(target)
 
     # The registry must already exist above the target or be named explicitly; a mint never invents one.

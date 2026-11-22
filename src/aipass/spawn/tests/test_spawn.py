@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.4.3
+# Version: 1.4.4
 # Created: 2026-03-05
 # Modified: 2026-11-22
 # =============================================
@@ -98,11 +98,9 @@ class TestMetadata:
     def test_get_branch_name(self, tmp_path):
         assert get_branch_name(str(tmp_path / "my_agent")) == "my_agent"
 
-    def test_normalize_upper(self):
-        assert normalize_branch_name("my-agent", "upper") == "MY_AGENT"
-
-    def test_normalize_lower(self):
-        assert normalize_branch_name("My-Agent", "lower") == "my_agent"
+    def test_normalize_is_the_stored_lowercase_form(self):
+        """Mutant: the capital case comes back -> red."""
+        assert normalize_branch_name("My-Agent") == "my_agent"
 
     def test_detect_profile_default(self, tmp_path):
         assert detect_profile(tmp_path / "test") == "AIPass Workshop"
@@ -111,7 +109,7 @@ class TestMetadata:
 class TestPlaceholders:
     def test_build_replacements(self, tmp_path):
         r = build_replacements_dict(tmp_path / "x", "my_agent", role="Tester")
-        assert r["BRANCHNAME"] == "MY_AGENT"
+        assert r["BRANCHNAME"] == "my_agent"
         assert r["branchname"] == "my_agent"
         assert r["ROLE"] == "Tester"
 

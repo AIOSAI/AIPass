@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for CLI routing and help output
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-03-27
 # Modified: 2026-11-22
 # =============================================
@@ -341,7 +341,7 @@ class TestPrintHelp:
 
         print_help()
         out = capsys.readouterr().out
-        assert "SPAWN - Branch Lifecycle Manager" in out
+        assert "spawn - Branch Lifecycle Manager" in out
         assert "drone @spawn create" in out
 
 

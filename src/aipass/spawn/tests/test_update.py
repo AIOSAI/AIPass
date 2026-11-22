@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_update.py
 # Description: Tests for spawn update orchestrator
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-07
-# Modified: 2026-11-09
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
@@ -550,13 +550,25 @@ class TestMarkdownIsReportedAndNeverWritten:
         self, template_dir, branch_dir, mock_registry
     ):
         """Rendered, not raw: the comparison resolves placeholders first."""
-        (branch_dir / "README.md").write_text("# TEST_BRANCH\nTemplate readme\n", encoding="utf-8")
+        (branch_dir / "README.md").write_text("# test_branch\nTemplate readme\n", encoding="utf-8")
 
         result = self._update(template_dir, mock_registry)
 
         assert self._states(result)["README.md"] == "matches"
         assert result["md_differs"] == 0
         assert result["md_matches"] == 1
+
+    def test_a_readme_rendered_with_the_old_capital_fill_is_reported_and_never_rewritten(
+        self, template_dir, branch_dir, mock_registry
+    ):
+        """The fill went lowercase; a branch born before keeps its title. Mutant: apply rewrites .md -> red."""
+        old = "# TEST_BRANCH\nTemplate readme\n"
+        (branch_dir / "README.md").write_text(old, encoding="utf-8")
+
+        result = self._update(template_dir, mock_registry, dry_run=False)
+
+        assert self._states(result)["README.md"] == "differs"
+        assert (branch_dir / "README.md").read_text(encoding="utf-8") == old
 
     def test_a_missing_md_is_added_and_reports_as_absent(self, template_dir, branch_dir, mock_registry):
         """A missing file is still an addition — the report names why it was written."""
@@ -565,7 +577,7 @@ class TestMarkdownIsReportedAndNeverWritten:
         result = self._update(template_dir, mock_registry, dry_run=False)
 
         assert self._states(result)["README.md"] == "absent"
-        assert (branch_dir / "README.md").read_text(encoding="utf-8") == "# TEST_BRANCH\nTemplate readme\n"
+        assert (branch_dir / "README.md").read_text(encoding="utf-8") == "# test_branch\nTemplate readme\n"
 
     def test_an_apply_never_rewrites_an_existing_md(self, template_dir, branch_dir, mock_registry):
         """--apply is the dangerous world, so the pin lives there: byte-identical after."""

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: repair_ops.py
 # Description: Repair handler — move branches, update registry paths, clean pollution
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-05-15
 # Modified: 2026-11-22
 # =============================================
@@ -546,7 +546,7 @@ def not_a_project(path, reason: str) -> str:
     row = row_at(reg_path, path) if reg_path else None
     if reg_path is None or row is None:
         return f"{path} is not a project or agent: {reason}"
-    name = normalize_branch_name(row.get("name", path.name), "lower")
+    name = normalize_branch_name(row.get("name", path.name))
     if not (path / ".trinity" / "passport.json").exists():
         return f"@{name} at {path}: Damaged: {DAMAGED_STATE}; {damaged_cure(path, name)}"
     return f"{path} is agent @{name}, not a project root; repair scans a project: drone @spawn repair {reg_path.parent}"
@@ -591,7 +591,7 @@ def repair_project(project_path, dry_run=False):
                 }
             )
         elif not (abs_path / ".trinity" / "passport.json").exists():
-            name = normalize_branch_name(entry.get("name", "?"), "lower")
+            name = normalize_branch_name(entry.get("name", "?"))
             results["registry_mismatches"].append(
                 {
                     "branch": entry.get("name", "?"),

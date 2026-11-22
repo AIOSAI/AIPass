@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: adoption_ops.py
 # Description: The target-exists lane — adopt a passported directory, or birth one from its tracked seed
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-08-28
 # Modified: 2026-11-22
 # =============================================
@@ -50,7 +50,7 @@ def birth_from_seed(target, seed_file, purpose, profile, registry_path):
 
     An invalid seed is refused with nothing written to disk.
     """
-    branch_lower = normalize_branch_name(get_branch_name(target), "lower")
+    branch_lower = normalize_branch_name(get_branch_name(target))
     reg_path = Path(registry_path) if registry_path else find_registry(target.parent)
     if reg_path is None:
         return error_result(f"Cannot birth {target} from its passport vault: no *_REGISTRY.json found above it")
@@ -100,7 +100,7 @@ def adopt_existing(target, purpose, profile, registry_path, citizen_id="", crede
     credential: the registry_id already stamped into the passport, for a registry created by this add.
     """
     folder_name = get_branch_name(target)
-    branch_lower = normalize_branch_name(folder_name, "lower")
+    branch_lower = normalize_branch_name(folder_name)
     detected_profile = profile or detect_profile(target)
 
     reg_path = Path(registry_path) if registry_path else find_registry(target.parent)

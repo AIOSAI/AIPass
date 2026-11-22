@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: placeholders.py
 # Description: Placeholder replacement engine
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-03-05
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Placeholder replacement engine for agent templates."""
@@ -79,7 +79,6 @@ def resolve_relative_path(target_dir, registry_path=None) -> str:
 
 def build_replacements_dict(target_dir, branch_name, **overrides):
     """Build the full placeholder -> value mapping."""
-    upper = branch_name.upper().replace("-", "_")
     lower = branch_name.lower().replace("-", "_")
     now = datetime.now()
 
@@ -100,7 +99,8 @@ def build_replacements_dict(target_dir, branch_name, **overrides):
             registry_id = data.get("metadata", {}).get("id", "")
 
     replacements = {
-        "BRANCHNAME": upper,
+        # The system speaks lowercase: the old capital token fills like {{BRANCH}}, markdown included.
+        "BRANCHNAME": lower,
         "branchname": lower,
         "BRANCH": lower,
         "DATE": now.strftime("%Y-%m-%d"),

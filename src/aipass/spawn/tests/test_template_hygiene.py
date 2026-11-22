@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_template_hygiene.py
 # Description: Canaries for what the shipped templates are allowed to contain
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-13
-# Modified: 2026-11-20
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for the shipped templates under templates/citizen/ and apps/handlers/file_ops.py's copy engine."""
@@ -321,10 +321,10 @@ class TestExpectedMintPaths:
         assert lines[1] == "# Docs"
         assert len(lines) == 3, f"the index carries more than its one purpose line: {lines[2:]}"
         assert not lines[2].startswith(NOT_PROSE), f"the purpose line is not prose: {lines[2]!r}"
-        assert "{{" not in lines[2] and "INDEXED" in lines[2], "the branch placeholder was not rendered"
+        assert "{{" not in lines[2] and "indexed" in lines[2], "the branch placeholder was not rendered"
 
     def test_a_newborns_readme_has_the_fleet_shape(self, tmp_path):
-        """H1 the branch in capitals, sentry's eight sections in order, a dated foot between rules.
+        """H1 the branch in lowercase, sentry's eight sections in order, a dated foot between rules.
 
         The section list is read from sentry's readme_check at assert time, never copied here.
         """
@@ -338,7 +338,7 @@ class TestExpectedMintPaths:
         assert "{{" not in readme, "the newborn README still carries unrendered placeholders"
         lines = [line.strip() for line in readme.splitlines() if line.strip()]
 
-        assert [line for line in lines if line.startswith("# ")] == ["# SHAPED"]
+        assert [line for line in lines if line.startswith("# ")] == ["# shaped"]
         sections = [line[3:] for line in lines if line.startswith("## ")]
         assert sections == _sentry_readme_sections(), f"off sentry's README shape: {sections}"
 
