@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: templates.py
 # Description: Gold-source template lane — spawn scaffold propagation, receipt status, and the bump site
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-02-14
 # Modified: 2026-11-22
 # =============================================
@@ -139,7 +139,7 @@ def _run_spawn_push(dry_run: bool) -> None:
     files_modified = result.get("files_modified", 0)
 
     if files_modified == 0 and not result.get("changes"):
-        console.print("[green]>[/green] Spawn templates already up to date")
+        console.print("[green]>[/green] spawn templates already up to date")
     else:
         verb = "would update" if dry_run else "updated"
         console.print(f"[green]>[/green] {sets_updated}/{len(sets_found)} sets {verb}, {files_modified} files")

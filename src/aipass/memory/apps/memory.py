@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: memory.py
 # Description: Entry point CLI for drone @memory
-# Version: 1.3.3
+# Version: 1.3.4
 # Created: 2026-03-08
 # Modified: 2026-11-22
 # =============================================
@@ -68,12 +68,12 @@ def print_help():
     console.print()
 
     what_content = (
-        "Memory is the [bold]central memory archive[/bold] that:\n\n"
+        "memory is the [bold]central memory archive[/bold] that:\n\n"
         "  [green]>[/green] Provides semantic search across all branch memories\n"
         "  [green]>[/green] Archives memories when branches hit rollover limits"
     )
     console.print(
-        Panel(what_content, title="[bold cyan]What is Memory?[/bold cyan]", border_style="dim", box=box.ROUNDED)
+        Panel(what_content, title="[bold cyan]What is memory?[/bold cyan]", border_style="dim", box=box.ROUNDED)
     )
     console.print()
 
@@ -131,7 +131,7 @@ def print_help():
 
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
-    console.print("  [bold]Via Drone (recommended):[/bold]")
+    console.print("  [bold]Via drone (recommended):[/bold]")
     console.print('    [dim]drone @memory search "performance patterns"[/dim]')
     console.print("    [dim]drone @memory rollover status[/dim]")
     console.print("    [dim]drone @memory rollover run[/dim]")
