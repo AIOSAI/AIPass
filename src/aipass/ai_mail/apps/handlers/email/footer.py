@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: footer.py
 # Description: Email Footer Handler
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-01-29
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -18,6 +18,7 @@ STANDARD_FOOTER = """
 
 ⚠️ TASK CHECKLIST (before marking complete):
 □ SENTRY CHECK → drone @sentry audit @branch (80%+)
+□ UPDATE DOCS → Your README and every docs/ page that describes what you changed
 □ UPDATE MEMORIES → Your .trinity/local.json records this work
 □ CLOSE YOUR PLAN → drone @flow close <your_plan_id> — any type, once finished; a master once all its phases are.
 □ EMAIL SENDER → drone @ai_mail email @<sender> "Subject" "Summary"

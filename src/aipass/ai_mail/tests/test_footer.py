@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_footer.py
 # Description: Tests for email footer handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-25
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/email/footer.py."""
@@ -36,6 +36,7 @@ def test_get_footer_contains_checklist():
     result = mod.get_footer()
     assert "TASK CHECKLIST" in result
     assert "SENTRY CHECK" in result
+    assert "UPDATE DOCS" in result
     assert "UPDATE MEMORIES" in result
     assert "CLOSE YOUR PLAN" in result
     assert "EMAIL SENDER" in result
