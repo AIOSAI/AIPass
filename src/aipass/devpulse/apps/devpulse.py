@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: devpulse.py
 # Description: Entry point for devpulse branch — auto-discovers modules
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-03-07
-# Modified: 2026-10-22
+# Modified: 2026-11-22
 # =============================================
 
 """
-DEVPULSE Branch - Main Orchestrator
+devpulse branch - main orchestrator
 """
 
 import difflib
@@ -43,7 +43,7 @@ def discover_modules() -> list[Any]:
             module = importlib.import_module(module_name)
         except Exception as e:
             # Said on stderr, not only logged: a swallowed import error read as "Unknown command" at the prompt.
-            logger.error(f"[DEVPULSE] Failed to load module {module_name}: {e}")
+            logger.error(f"[devpulse] Failed to load module {module_name}: {e}")
             warning(f"module {file_path.stem} failed to load: {type(e).__name__}: {e}")
             continue
         if hasattr(module, "handle_command"):
@@ -55,7 +55,7 @@ def discover_modules() -> list[Any]:
 def print_introspection():
     """Print branch introspection — discovered modules and capabilities."""
     modules = discover_modules()
-    console.print("[bold cyan]DEVPULSE[/bold cyan] — Orchestration Hub")
+    console.print("[bold cyan]devpulse[/bold cyan] — Orchestration Hub")
     console.print("[dim]The user's primary collaborator — design, plan, dispatch, track[/dim]")
     console.print(f"  Modules discovered: {len(modules)}")
     for module in modules:
@@ -69,7 +69,7 @@ def print_introspection():
 def print_help():
     """Print CLI help — usage instructions and available commands."""
     modules = discover_modules()
-    console.print("[bold cyan]DEVPULSE[/bold cyan] — Usage")
+    console.print("[bold cyan]devpulse[/bold cyan] — Usage")
     console.print()
     console.print("  drone @devpulse <command> \\[args...]")
     console.print()
@@ -99,7 +99,7 @@ def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
         except Exception as e:
             # A module that RAISED is a defect in that module, not an unknown command: say so, not "Unknown".
             name = module.__name__.split(".")[-1]
-            logger.error(f"[DEVPULSE] Module {name} error on '{command}': {e}")
+            logger.error(f"[devpulse] Module {name} error on '{command}': {e}")
             error(
                 f"{name} failed on '{command}': {type(e).__name__}: {e}",
                 suggestion=f"A defect in the {name} module, not an unknown command. Run: drone @devpulse {name} --help",

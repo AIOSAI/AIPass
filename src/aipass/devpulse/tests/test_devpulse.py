@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_devpulse.py
 # Description: Tests for devpulse.py CLI routing, introspection, and resilience
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-05-15
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/devpulse.py and the routing of apps/modules/release_notify.py."""
@@ -94,7 +94,7 @@ class TestCLIRouting:
         with patch("sys.argv", ["devpulse"]):
             devpulse_module.main()
         out = capsys.readouterr().out
-        assert "DEVPULSE — Orchestration Hub" in out
+        assert "devpulse — Orchestration Hub" in out
         assert "Run 'drone @devpulse --help' for usage information" in out
 
     @patch.object(devpulse_module, "print_introspection")
