@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: activity_report.py
 # Description: Branch Activity Report Generator Module
-# Version: 0.6.0
+# Version: 0.6.1
 # Created: 2026-01-30
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -115,16 +115,16 @@ def _print_branch_health_help() -> None:
     console.print("=" * 60)
     console.print()
     console.print("USAGE:")
-    console.print("  drone @daemon branch-health DRONE")
-    console.print("  daemon branch-health FLOW")
-    console.print("  daemon branch-health SENTRY --hours 48")
+    console.print("  drone @daemon branch-health drone")
+    console.print("  daemon branch-health flow")
+    console.print("  daemon branch-health sentry --hours 48")
     console.print()
     console.print("DESCRIPTION:")
     console.print("  Deep dive report for a single branch.")
     console.print("  Shows all file changes, memory health, and specific recommendations.")
     console.print()
     console.print("OPTIONS:")
-    console.print("  <branch_name>      Required - branch name (e.g., DRONE, FLOW, SENTRY)")
+    console.print("  <branch_name>      Required - branch name (e.g., drone, flow, sentry)")
     console.print("  --hours N, -t N    Time window in hours (default: 24)")
     console.print("  --help, -h         Show this help message")
     console.print()
@@ -151,7 +151,7 @@ def _render_entry_health(branch_name: str) -> str:
         from aipass.memory import get_branch_health
     # OSError too: a cross-branch import can fail on the filesystem, not only on absence.
     except (ImportError, OSError) as e:
-        logger.warning("[DAEMON] activity_report: @memory health API unavailable: %s", e)
+        logger.warning("[daemon] activity_report: @memory health API unavailable: %s", e)
         lines.append(f"  {SYMBOL_WARNING} UNAVAILABLE - @memory health API not importable: {e}")
         return "\n".join(lines)
 
@@ -159,7 +159,7 @@ def _render_entry_health(branch_name: str) -> str:
 
     if not health.get("success"):
         reason = health.get("error", "unknown error")
-        logger.warning("[DAEMON] activity_report: entry health refused for %s: %s", branch_name, reason)
+        logger.warning("[daemon] activity_report: entry health refused for %s: %s", branch_name, reason)
         lines.append(f"  {SYMBOL_WARNING} {reason}")
         return "\n".join(lines)
 
@@ -228,7 +228,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         hours = _parse_hours_arg(args)
         report = generate_activity_report(since_hours=hours, verbosity="normal")
         console.print(report)
-        logger.info("[DAEMON] activity_report: Activity summary generated")
+        logger.info("[daemon] activity_report: Activity summary generated")
         return True
 
     if command == "activity":
@@ -242,7 +242,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         hours = _parse_hours_arg(args)
         report = generate_activity_report(since_hours=hours, verbosity="normal")
         console.print(report)
-        logger.info("[DAEMON] activity_report: Activity summary generated")
+        logger.info("[daemon] activity_report: Activity summary generated")
         return True
 
     if command == "activity-report":
@@ -269,7 +269,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         else:
             report = generate_activity_report(since_hours=hours, verbosity="detailed")
             console.print(report)
-        logger.info("[DAEMON] activity_report: Detailed report generated")
+        logger.info("[daemon] activity_report: Detailed report generated")
         return True
 
     if command == "branch-health":
@@ -335,7 +335,7 @@ def _handle_branch_health(args: List[str]) -> bool:
     report = generate_branch_report(resolved, since_hours=hours)
     console.print(report)
     console.print(_render_entry_health(resolved))
-    logger.info("[DAEMON] activity_report: Branch health report generated for %s", resolved)
+    logger.info("[daemon] activity_report: Branch health report generated for %s", resolved)
     return True
 
 

@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Entry point CLI for drone @daemon
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-08
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """
-DAEMON Branch - Main Orchestrator
+daemon Branch - Main Orchestrator
 """
 
 import sys
@@ -61,7 +61,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
             sys.exit(1)
         # Modules refuse unowned verbs before any work, so this exception is the owner's: stop.
         except Exception as e:
-            logger.error(f"[DAEMON] Module {module.__name__} error: {e}", exc_info=True)
+            logger.error(f"[daemon] Module {module.__name__} error: {e}", exc_info=True)
             error(f"{command} failed: {e}")
             sys.exit(1)
 
@@ -71,7 +71,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 def print_introspection(modules: List[Any]):
     """Display discovered modules when run without arguments"""
     console.print()
-    console.print("[bold cyan]DAEMON - Branch Management System[/bold cyan]")
+    console.print("[bold cyan]daemon - Branch Management System[/bold cyan]")
     console.print()
     console.print("[dim]Module orchestration[/dim]")
     console.print()
@@ -97,7 +97,7 @@ def print_introspection(modules: List[Any]):
 def print_help(modules: List[Any]):
     """Display Rich-formatted help"""
     console.print()
-    _header("DAEMON - Branch Management System")
+    _header("daemon - Branch Management System")
     console.print()
 
     console.print("[dim]Module orchestration[/dim]")
@@ -118,11 +118,11 @@ def print_help(modules: List[Any]):
     console.print()
 
     _COMMAND_HELP = [
-        ("update", "Returns digest of DAEMON activity for check-ins."),
+        ("update", "Returns digest of daemon activity for check-ins."),
         ("queue", "Unified job queue view (--json for frozen schema)."),
         ("activity", "Quick 24-hour activity summary."),
         ("activity-report", "Full detailed activity report (--json for raw)."),
-        ("branch-health", "Single branch deep dive (e.g., branch-health DAEMON)."),
+        ("branch-health", "Single branch deep dive (e.g., branch-health daemon)."),
         ("run", "One scheduler tick: discover .daemon/ jobs, fire due ones."),
         ("rotation", "Steward rotation — roster, whose turn is next, recent turns."),
         ("inbox-sweep", "Wake branches sitting on mail unread past 24h."),
@@ -145,7 +145,7 @@ def print_help(modules: List[Any]):
     console.print("    [dim]drone @daemon update[/dim]                            [dim]# Status digest[/dim]")
     console.print("    [dim]drone @daemon activity[/dim]                          [dim]# Quick 24h summary[/dim]")
     console.print("    [dim]drone @daemon activity-report --json[/dim]            [dim]# Full report (raw)[/dim]")
-    console.print("    [dim]drone @daemon branch-health DAEMON[/dim]              [dim]# Single branch dive[/dim]")
+    console.print("    [dim]drone @daemon branch-health daemon[/dim]              [dim]# Single branch dive[/dim]")
     console.print()
     console.print("  [yellow]Scheduler:[/yellow]")
     console.print("    [dim]drone @daemon queue[/dim]                             [dim]# View pending jobs[/dim]")
@@ -179,7 +179,7 @@ def main():
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print("DAEMON v1.1.0")
+        console.print("daemon v1.1.0")
         return 0
 
     if args[0] in ["--help", "-h", "help"]:
@@ -201,7 +201,7 @@ def main():
 
     handled = route_command(command, remaining_args, modules)
     if handled:
-        logger.info("[DAEMON] Command routed successfully: %s", command)
+        logger.info("[daemon] Command routed successfully: %s", command)
     else:
         console.print()
         error(f"Unknown command: {command}", suggestion="Run 'drone @daemon --help' for available commands")
@@ -213,10 +213,10 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
-        logger.warning("DAEMON operation cancelled by user (KeyboardInterrupt)")
+        logger.warning("daemon operation cancelled by user (KeyboardInterrupt)")
         console.print("\n\nOperation cancelled by user")
         sys.exit(0)
     except Exception as e:
-        logger.error(f"DAEMON entry point error: {e}", exc_info=True)
+        logger.error(f"daemon entry point error: {e}", exc_info=True)
         console.print(f"\nError: {e}")
         sys.exit(1)

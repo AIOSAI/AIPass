@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: update.py
-# Description: DAEMON Status Digest Module
-# Version: 1.1.0
+# Description: daemon Status Digest Module
+# Version: 1.1.1
 # Created: 2026-01-29
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """
-Returns digest of DAEMON activity for check-ins.
+Returns digest of daemon activity for check-ins.
 """
 
 import sys
@@ -39,7 +39,7 @@ def print_introspection():
     console.print()
     console.print("[bold cyan]update Module[/bold cyan]")
     console.print()
-    console.print("[dim]Returns digest of DAEMON activity for check-ins[/dim]")
+    console.print("[dim]Returns digest of daemon activity for check-ins[/dim]")
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  handlers/update/")
@@ -52,7 +52,7 @@ def print_introspection():
 def _print_digest(inbox_data: Dict[str, Any]) -> None:
     """Print formatted digest to console."""
     console.print()
-    _header("DAEMON Status Digest")
+    _header("daemon Status Digest")
     console.print()
 
     messages: List[Dict[str, Any]] = inbox_data.get("messages", [])
@@ -90,7 +90,7 @@ def _print_digest(inbox_data: Dict[str, Any]) -> None:
 def print_help() -> None:
     """Display help using Rich formatted output."""
     console.print()
-    _header("Update Module - DAEMON Status Digest")
+    _header("Update Module - daemon Status Digest")
     console.print()
 
     console.print("[yellow]USAGE:[/yellow]")
@@ -99,7 +99,7 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]DESCRIPTION:[/yellow]")
-    console.print("  Returns a digest of DAEMON activity for check-ins.")
+    console.print("  Returns a digest of daemon activity for check-ins.")
     console.print()
     console.print("  Gathers and displays:")
     console.print("    - Inbox status (total, unread, opened)")
@@ -126,11 +126,11 @@ def handle_command(command: str, args: list) -> bool:
         json_handler.log_operation("update_digest")
         _print_digest(load_inbox())
 
-        logger.info("[DAEMON] Update digest generated successfully")
+        logger.info("[daemon] Update digest generated successfully")
         return True
 
     except Exception as e:
-        logger.error(f"[DAEMON] Error generating update digest: {e}", exc_info=True)
+        logger.error(f"[daemon] Error generating update digest: {e}", exc_info=True)
         error(f"Error: {e}")
         # SystemExit, not a return: True is the success answer, and the router's
         # `except Exception` would turn a False or a re-raise into "Unknown command".
