@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.19.0
+# Version: 1.20.0
 # Created: 2026-03-17
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -195,29 +195,16 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     cmd: str = command
     if cmd == "tag" and (not args or args[0] == "--list"):
         cmd = "tag-list"
-    from aipass.drone.apps.plugins.devpulse_ops.auth import (
-        GH_SUBCOMMANDS,
-        ISSUE_CONTRIBUTE,
-        NoPassportError,
-        gh_access_key,
-        verify_git_access,
-    )
+    from aipass.drone.apps.plugins.devpulse_ops.auth import ISSUE_CONTRIBUTE, NoPassportError, verify_git_access
 
-    if command in _GH_PASSTHROUGH_COMMANDS:
-        # An unknown subcommand is refused here, before the gate and before gh.
-        gh_key = gh_access_key(command, args)
+    if command in (*_GH_PASSTHROUGH_COMMANDS, *_CHORE_COMMANDS):
+        # A subcommand in no row of the table is refused here, for every seat, before the gate and gh.
+        gh_key, refusal = _table_key(command, args)
         if gh_key is None:
-            table = GH_SUBCOMMANDS[command]
-            message = (
-                f"Unknown subcommand for '{command}': '{args[0]}'. "
-                f"Reads: {', '.join(table['read'])}. Owner only: {', '.join(table['write'])}."
-            )
-            return {"stdout": "", "stderr": message, "exit_code": 1}
+            return {"stdout": "", "stderr": refusal, "exit_code": 1}
         cmd = gh_key
     elif command == "remote" and args[:1] == ["set"]:
         cmd = "remote-write"
-    elif command in _CHORE_COMMANDS:
-        cmd = gh_access_key(command, args) or command
     try:
         caller = verify_git_access(cmd)
     except PermissionError as exc:
@@ -339,6 +326,18 @@ def _refuse_repo_door(verdict: repo_door.AdminVerdict, flag: repo_door.RepoFlag,
     return {"stdout": "", "stderr": reason, "exit_code": 1}
 
 
+def _table_key(command: str, args: list[str]) -> tuple[str | None, str]:
+    """The tier key a gh or chore subcommand asks the gate for, or (None, its refusal) when no row names it.
+
+    The chore handlers strip --json from any slot before reading the subcommand, so the key does too.
+    """
+    from aipass.drone.apps.plugins.devpulse_ops.auth import gh_access_key, no_row_refusal
+
+    keyed = args if command in _GH_PASSTHROUGH_COMMANDS else strip_json_flag(args)
+    key = gh_access_key(command, keyed)
+    return (key, "") if key is not None else (None, no_row_refusal(command, keyed[0]))
+
+
 def _handle_repo_door(command: str, flag: repo_door.RepoFlag) -> dict:
     """Run one verb in another repo through the admin seat's door.
 
@@ -355,6 +354,10 @@ def _handle_repo_door(command: str, flag: repo_door.RepoFlag) -> dict:
         return init_handler.init_repo(verdict.caller, flag, lock_handler.find_repo_root())
     if command not in repo_door.DOOR_VERBS:
         return _refuse_repo_door(verdict, flag, verb, repo_door.REFUSE_VERB.format(verb=command))
+    if command in _CHORE_COMMANDS:
+        key, refusal = _table_key(command, flag.args)
+        if key is None:
+            return _refuse_repo_door(verdict, flag, verb, refusal)
     target = repo_door.resolve_repo(flag.path, lock_handler.find_repo_root())
     if target.root is None:
         return _refuse_repo_door(verdict, flag, verb, target.refusal)

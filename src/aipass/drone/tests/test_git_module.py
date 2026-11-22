@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
 # Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack, release
-# Version: 1.6.2
+# Version: 1.6.3
 # Created: 2026-04-21
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/git_module.py: command routing, help, the auth gate and the verbs it fronts."""
@@ -30,7 +30,7 @@ from aipass.drone.apps.handlers.git import (
     release_handler,
     untrack_handler,
 )
-from aipass.drone.apps.plugins.devpulse_ops.auth import GIT_ACCESS_TIERS
+from aipass.drone.apps.plugins.devpulse_ops.auth import GIT_ACCESS_TIERS, no_row_refusal
 from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
 from aipass.drone.apps.modules.git_module import (
     DRONE_MODULE,
@@ -1232,7 +1232,7 @@ class TestReleaseList:
             (["list", "--limit", "0"], release_handler.REFUSE_LIMIT.format(value="0")),
             (["list", "--since"], release_handler.REFUSE_NO_VALUE.format(flag="--since")),
             (["list", "--draft"], release_handler.REFUSE_FLAG.format(arg="--draft")),
-            (["create", "v9"], release_handler.REFUSE_SUB.format(sub="create")),
+            (["create", "v9"], no_row_refusal("release", "create")),
             ([], release_handler.USAGE),
         ],
         ids=["slug", "limit", "no-value", "flag", "write", "bare"],

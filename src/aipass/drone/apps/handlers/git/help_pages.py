@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.14.0
+# Version: 1.14.1
 # Created: 2026-10-04
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -466,7 +466,7 @@ def page(command: str | None = None) -> str:
         "  alerts dismiss <n> --reason R --comment 'text'  Dismiss a code-scanning alert\n"
         "  alerts reopen <n>      Put a dismissed code-scanning alert back to open\n"
         "  remote set <name> <url>  Add or re-point a remote at a github.com repo (https or ssh)\n"
-        "  A gh subcommand in neither list is refused, never passed to gh.\n"
+        "  A gh or chore subcommand in neither list is refused before its handler and gh.\n"
         "CI cure (the one citizen whose registry entry carries ci_cure: true):\n"
         "  ci-cure <run_id> @<owner> <msg> <path ...>  Commit a CI cure on dev, push dev\n"
         "                         (paths under src/aipass/<owner>/ or CHANGELOG.md; ci-cure --help)\n"

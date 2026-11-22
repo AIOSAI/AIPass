@@ -70,6 +70,16 @@ anything it cannot find in a tier as `Unknown git command`, so registering a ver
 a handler does not make it callable. `test_every_registered_command_holds_a_tier` asserts that
 every registered verb holds a tier.
 
+**A subcommand in neither row is refused before its handler, for every seat.** The gh passthroughs
+(`issue`, `run`, `workflow`) and drone's GitHub chores (`release`, `label`, `alerts`) carry a read
+row and a write row in `auth.py` (`GH_SUBCOMMANDS`, `CHORE_SUBCOMMANDS`): a read asks the gate for
+the command, a write for `<command>-write`. A subcommand neither row names never reaches the gate,
+the handler or gh, and the admin seat's `--repo` door refuses it too. The refusal names the
+subcommand and both rows, and says the cure is a row in the table: no flag, env or seat opens it.
+A chore's subcommand is read with `--json` stripped from any slot, as its handler reads it.
+`test_every_subcommand_a_chore_handler_answers_holds_a_row` reads each chore handler's own dispatch
+and fails when it answers a subcommand no row names, so a forgotten row is caught at test time.
+
 ---
 
 ## Two refusal species — authority vs capability

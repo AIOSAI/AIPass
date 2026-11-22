@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.15.2
+# Version: 1.16.0
 # Created: 2026-03-30
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -111,7 +111,7 @@ GH_SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
     "workflow": {"read": ("list", "view"), "write": ("disable", "enable", "run")},
 }
 
-# drone's own GitHub chores, gated the same way; an unknown subcommand is the handler's to refuse.
+# drone's own GitHub chores, gated the same way: a subcommand in neither row is refused before its handler.
 CHORE_SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
     "release": {"read": ("list",), "write": ("edit",)},
     "label": {"read": ("list",), "write": ("create",)},
@@ -123,6 +123,13 @@ CHORE_SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
 CONTRIBUTE_SUBCOMMANDS = ("create", "comment")
 ISSUE_CONTRIBUTE = "issue-contribute"
 _GH_REPO_FLAGS = ("-R", "--repo")
+
+# Printed exactly. The table is the only door, so the cure for a missing subcommand is its row.
+REFUSE_NO_ROW = (
+    "Unknown subcommand for '{command}': '{sub}'. It is in no row of drone's git permission table, "
+    "so no seat runs it. Reads: {reads}. Owner only: {writes}. A subcommand drone should serve needs "
+    "its row in apps/plugins/devpulse_ops/auth.py; no flag, env or seat opens it."
+)
 
 
 def gh_repo_value(args: list[str]) -> str | None:
@@ -152,6 +159,14 @@ def gh_access_key(command: str, args: list[str]) -> str | None:
     if args[0] in table["write"]:
         return f"{command}-write"
     return None
+
+
+def no_row_refusal(command: str, sub: str) -> str:
+    """The refusal for *sub*, a subcommand of the gh passthrough or chore *command* that no row names."""
+    table = GH_SUBCOMMANDS.get(command) or CHORE_SUBCOMMANDS[command]
+    return REFUSE_NO_ROW.format(
+        command=command, sub=sub, reads=", ".join(table["read"]), writes=", ".join(table["write"])
+    )
 
 
 # The registry entry fields that grant a tier; ci_cure must sit on exactly one entry.

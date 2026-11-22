@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_gh_door.py
 # Description: Tests for the gh passthrough verbs, release edit, restore and the external-repo door (--repo)
-# Version: 1.9.2
+# Version: 1.9.3
 # Created: 2026-10-08
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/git/repo_door.py, the gh verbs and release edit of apps/modules/git_module.py."""
@@ -22,10 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.drone.apps.plugins.devpulse_ops.auth import (
-    GIT_ACCESS_TIERS,
-    verify_git_access,
-)
+from aipass.drone.apps.plugins.devpulse_ops.auth import GIT_ACCESS_TIERS, no_row_refusal, verify_git_access
 from aipass.drone.apps.handlers.git import release_handler, repo_door, restore_handler, untrack_handler
 from aipass.drone.apps.modules.git_module import get_help, get_introspective, handle_command
 
@@ -1327,6 +1324,19 @@ class TestChoresThroughTheDoor:
             "AIOSAI/ext",
             "@devpulse",
         )
+
+    def test_a_chore_subcommand_in_no_row_is_refused_at_the_door_and_recorded(
+        self, github_world: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """Mutant: the door skips the table — the admin seat reaches the handler with an unrowed verb."""
+        calls: list = []
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = _chore("label", ["delete", "ci", "--repo", "projects/ext"], {}, calls)
+
+        assert result == {"stdout": "", "stderr": no_row_refusal("label", "delete"), "exit_code": 1}
+        assert calls == []
+        assert [(row["verb"], row["outcome"]) for row in _ledger(tmp_path)] == [("label", "refused")]
 
     def test_release_edit_takes_the_external_repos_own_changelog(self, github_world: dict[str, Path]) -> None:
         ext = github_world["ext"]
