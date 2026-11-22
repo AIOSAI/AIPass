@@ -46,6 +46,8 @@ Two properties keep that safe rather than merely cautious:
 - **Processed hashes are persisted either way.** They are what stops a re-covered
   window from re-dispatching errors already handled. Holding the cursor back
   while dropping the hashes would turn one abort into a duplicate storm.
+  A hash is `md5(module:message)[:8]` with a leading agent tag folded the way
+  the registry folds it, so `[hooks] x` and `[HOOKS] x` count as one error.
 - **The cost of holding it back is bounded by `MAX_LOOKBACK_HOURS`** (24), so the worst
   case is a 24-hour window instead of a one-minute one. A full-window scan costs tens of
   milliseconds more than a short one, which is why a permanently oversized file can be

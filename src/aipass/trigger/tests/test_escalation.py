@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_escalation.py
 # Description: Tests for the escalation lane's signature, counting, windows, gates and state file
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-08
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/escalation.py — the repeat signature, counting, windows, gates and state file."""
@@ -234,6 +234,20 @@ class TestSignatureFragmentation:
         first = lane.compute_signature("WARNING", "prax", "queue", "20 events were skipped")
         second = lane.compute_signature("WARNING", "prax", "queue", "37 events were skipped")
         assert first == second
+
+    def test_agent_tag_case_does_not_fork_the_signature(self, lane, monkeypatch, tmp_path) -> None:
+        """[hooks] and [HOOKS] are one agent's tag, so one repeat signature; so are [hooks:codex] and [HOOKS:codex]."""
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        hooks = {"name": "HOOKS", "status": "active", "path": "src/aipass/hooks"}
+        registry.write_text(json.dumps({"branches": [hooks]}), encoding="utf-8")
+        monkeypatch.setattr(lane, "BRANCH_REGISTRY_FILE", registry)
+        lane._branch_names_cache = (0.0, None)
+
+        def sign(tag: str) -> str:
+            return lane.compute_signature("ERROR", "hooks", "engine", f"{tag} config unreadable")
+
+        assert sign("[hooks]") == sign("[HOOKS]") == sign("[Hooks]")
+        assert sign("[hooks:codex]") == sign("[HOOKS:codex]")
 
     def test_registry_names_are_reread_after_the_ttl(self, lane, monkeypatch, tmp_path) -> None:
         """A newly spawned citizen collapses without restarting the watcher.

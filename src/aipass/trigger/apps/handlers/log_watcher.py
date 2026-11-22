@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Branch log watcher event producer for error detection
-# Version: 2.16.0
+# Version: 2.17.0
 # Created: 2026-02-02
 # Modified: 2026-11-22
 # =============================================
@@ -22,7 +22,7 @@ from aipass.trigger.apps.config import TRIGGER_STATE_ROOT, AIPASS_PKG_ROOT, atom
 from aipass.drone import resolve_aipass_home
 from aipass.memory import fleet_branches
 from aipass.trigger.apps.handlers.json import json_handler
-from aipass.trigger.apps.handlers.error_registry import report as registry_report
+from aipass.trigger.apps.handlers.error_registry import fold_agent_tag, report as registry_report
 
 from aipass.prax import logger
 from aipass.prax import get_system_logs_dir, log_backup_count
@@ -213,8 +213,8 @@ def is_stale_entry(timestamp_str: str) -> bool:
 
 
 def generate_error_hash(source_module: str, message: str) -> str:
-    """Generate hash for error deduplication."""
-    content = f"{source_module}:{message}"
+    """Generate hash for error deduplication; the case of a leading agent tag never splits one."""
+    content = f"{source_module}:{fold_agent_tag(message)}"
     return hashlib.md5(content.encode()).hexdigest()[:8]
 
 

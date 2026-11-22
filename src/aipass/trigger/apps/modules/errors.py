@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: errors.py
 # Description: Error registry management module for Medic v2 commands
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-02-13
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -14,7 +14,7 @@ error registry. Provides visibility into all tracked errors with
 fingerprinting, counts, and status tracking.
 
 Commands: list, detail, suppress, unsuppress, resolve, clear-resolved, stats, circuit-breaker
-Public API: report_error() for cross-branch push reporting (Drone calls this)
+Public API: report_error() for cross-branch push reporting (drone calls this)
 Phase 5: Suppress triggers source fix pipeline (email + fix status tracking)
 Suppress silences dispatch outright (compass #219) — unsuppress restores it
 Architecture: Module orchestrates, error_registry handler manages data
@@ -133,7 +133,7 @@ def print_help() -> None:
     console.rule("COMMANDS")
     console.print()
     console.print("  [bold]list[/bold]               List tracked errors (default)")
-    console.print("                       [dim]--status=new --component=FLOW --severity=high --limit=20[/dim]")
+    console.print("                       [dim]--status=new --component=flow --severity=high --limit=20[/dim]")
     console.print("  [bold]detail[/bold] <id>         Show full details for an error entry")
     # \[reason] is escaped — Rich would otherwise eat the brackets as a style tag.
     console.print("  [bold]suppress[/bold] <id> \\[reason]  Silence it — no dispatch while suppressed")
@@ -148,7 +148,7 @@ def print_help() -> None:
     console.print()
     console.rule("EXAMPLES")
     console.print()
-    console.print("  drone @trigger errors list --status=new --component=FLOW")
+    console.print("  drone @trigger errors list --status=new --component=flow")
     console.print("  drone @trigger errors detail a1b2c3d4")
     console.print("  drone @trigger errors suppress a1b2c3d4 known startup issue")
     console.print("  drone @trigger errors unsuppress a1b2c3d4")
@@ -257,7 +257,7 @@ def _cmd_list(console, args: list) -> bool:
             e.get("id", "?"),
             e.get("fingerprint", "?")[:8],
             e.get("error_type", "?"),
-            e.get("component", "?"),
+            str(e.get("component", "?")).lower(),
             str(e.get("count", 0)),
             f"[{svc}]{sev}[/{svc}]",
             f"[{sc}]{st}[/{sc}]",
@@ -303,7 +303,7 @@ def _cmd_detail(console, args: list) -> bool:
         f"  [bold]ID:[/bold]              {entry.get('id', '?')}",
         f"  [bold]Fingerprint:[/bold]     {entry.get('fingerprint', '?')}",
         f"  [bold]Error Type:[/bold]      {entry.get('error_type', '?')}",
-        f"  [bold]Component:[/bold]       {entry.get('component', '?')}",
+        f"  [bold]Component:[/bold]       {str(entry.get('component', '?')).lower()}",
         f"  [bold]Severity:[/bold]        [{svc}]{sev}[/{svc}]",
         f"  [bold]Status:[/bold]          [{sc}]{st}[/{sc}]",
         f"  [bold]Count:[/bold]           {entry.get('count', 0)}",

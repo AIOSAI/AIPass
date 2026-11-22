@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_log_watcher.py
 # Description: Unit tests for the branch log watcher's parsing, detection and line pipeline
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-04-03
 # Modified: 2026-11-22
 # =============================================
@@ -73,6 +73,14 @@ class TestGenerateErrorHash:
         """Hash matches the first 8 chars of MD5(module:message)."""
         expected = hashlib.md5("mymod:mymsg".encode()).hexdigest()[:8]
         assert lw.generate_error_hash("mymod", "mymsg") == expected
+
+    def test_agent_tag_case_never_splits_a_catch_up_hash(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """[hooks] x and [HOOKS] x are one error to catch-up, so they count together toward the count-of-two gate."""
+        census = MagicMock(return_value={"@hooks": {}})
+        monkeypatch.setattr("aipass.trigger.apps.handlers.events.error_detected._get_registered_emails", census)
+        minted = hashlib.md5("engine:[HOOKS] x".encode()).hexdigest()[:8]
+        assert lw.generate_error_hash("engine", "[hooks] x") == minted
+        assert lw.generate_error_hash("engine", "[HOOKS] x") == minted
 
 
 class TestDetectBranchFromPath:

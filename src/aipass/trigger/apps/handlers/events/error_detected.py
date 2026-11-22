@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.16.0
+# Version: 2.16.1
 # Created: 2026-02-10
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -243,7 +243,7 @@ DECISION TREE:
 - CRITICAL (data loss risk, security, system stability):
   -> STOP immediately, escalate to @devpulse with full context
 
-SENTRY STANDARDS REMINDER:
+Standards reminder (@sentry):
 - Any code changes made during this investigation MUST follow Sentry standards
 - After fixing, run: drone @sentry checklist <modified_file>
 - Fixes scoring below 80% on Sentry audit should NOT be shipped - clean up first

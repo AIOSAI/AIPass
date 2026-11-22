@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: error_registry.py
 # Description: Structured error tracking and registry for Medic v2
-# Version: 2.12.0
+# Version: 2.13.0
 # Created: 2026-02-13
 # Modified: 2026-11-22
 # =============================================
@@ -34,6 +34,7 @@ VALID_FIX_STATUSES = ("none", "pending_fix", "fix_requested", "fix_confirmed")
 
 # A line's own identity: fault[KEY], KEY holding no whitespace and no closing bracket. Hooks pins this text.
 FAULT_MARKER: re.Pattern = re.compile(r"fault\[([^\s\]]+)\]")
+LEADING_TAG: re.Pattern = re.compile(r"\[([A-Za-z][A-Za-z0-9_]*)(?=[\]:])")
 
 # Breaker policy: counts would-be mails, never log lines.
 RECIPIENT_CAP = 5
@@ -372,10 +373,32 @@ def normalize_message(message: str) -> str:
     return normalized
 
 
+def fold_agent_tag(text: str) -> str:
+    """
+    Upper-case a leading [agent] or [agent:word] tag when agent is a registered citizen; any other text is returned as is.
+
+    Only agent names fold: module tags such as [registry_scope] were minted lowercase and must keep their hash.
+    """
+    match = LEADING_TAG.match(text)
+    if not match:
+        return text
+    from aipass.trigger.apps.handlers.events.error_detected import _get_registered_emails
+
+    try:
+        agents = _get_registered_emails()
+    except RuntimeError as exc:
+        logger.warning("agent tag left unfolded, the census is unreadable: %s", exc)
+        return text
+    name = match.group(1)
+    if f"@{name.lower()}" not in agents:
+        return text
+    return f"[{name.upper()}{text[match.end() :]}"
+
+
 def compute_fingerprint(error_type: str, normalized_msg: str, component: str) -> str:
-    """Compute a SHA1 fingerprint for error deduplication; the component's case never splits a fingerprint."""
+    """Compute a SHA1 fingerprint for error deduplication; the case of the component or an agent tag never splits one."""
     # Folded to the case the registry was minted in, so stored rows and their suppressions keep their identity.
-    content = f"{error_type}:{normalized_msg}:{component.upper()}"
+    content = f"{error_type}:{fold_agent_tag(normalized_msg)}:{component.upper()}"
     return hashlib.sha1(content.encode("utf-8")).hexdigest()
 
 
@@ -589,7 +612,8 @@ def get_stats() -> dict:
             status = entry.get("status", "unknown")
             by_status[status] = by_status.get(status, 0) + 1
 
-            component = entry.get("component", "unknown")
+            # Stored rows carry either case of one agent's name; stats count the agent once.
+            component = str(entry.get("component", "unknown")).lower()
             by_component[component] = by_component.get(component, 0) + 1
 
             severity = entry.get("severity", "unknown")

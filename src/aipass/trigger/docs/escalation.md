@@ -40,6 +40,8 @@ Digests are **email, never dispatch** (`auto_execute=False`). The default recipi
 | Declared citizen names (core, resident, external) from memory's door, anchored at `AIPASS_REGISTRY.json` (TTL-cached) | `<branch>` | "latest: log from SENTRY" and "from PRAX" are one queue-full condition, not two |
 | Any `@handle`, registered or not | `<branch>` | An unregistered name must not fragment what the registered ones unify |
 
+Citizen names match in any case, so a `[hooks]` tag and a `[HOOKS]` tag give one signature.
+
 The placeholder is `<id>` on purpose — the same token the registry normalizer emits for 3+ digits. A different token would make the two passes disagree at the 100 boundary, and `99 events` / `101 events` would keep minting separate signatures.
 
 **Digest body carries the investigation:** signature, level, branch, module, occurrences in window, lifetime count, first/last seen, log file path, why it escalated, and the last N sample lines.

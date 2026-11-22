@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_error_registry.py
 # Description: Unit tests for the error_registry handler
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-03-24
 # Modified: 2026-11-22
 # =============================================
@@ -25,6 +25,7 @@ from pathlib import Path
 # Bound as `er`, the name every test uses, so a reach into a private name
 # stays visible to the audit (through_the_command resolves import bindings).
 import aipass.trigger.apps.handlers.error_registry as er
+from aipass.trigger.apps.handlers.events import error_detected
 
 
 @pytest.fixture(autouse=True)
@@ -74,6 +75,54 @@ def test_component_case_never_splits_a_fingerprint() -> None:
     minted = hashlib.sha1(b"ImportError:no module named foo:FLOW").hexdigest()
     assert er.compute_fingerprint("ImportError", "no module named foo", "flow") == minted
     assert er.compute_fingerprint("ImportError", "no module named foo", "FLOW") == minted
+
+
+@pytest.fixture
+def _census(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Make hooks and sentry the registered citizens the tag fold reads."""
+    census = MagicMock(return_value={"@hooks": {}, "@sentry": {}})
+    monkeypatch.setattr(error_detected, "_get_registered_emails", census)
+    return census
+
+
+@pytest.mark.usefixtures("_census")
+@pytest.mark.parametrize("tag", ["[hooks]", "[Hooks]", "[HOOKS]"])
+def test_agent_tag_case_never_splits_a_fingerprint(tag: str) -> None:
+    """A leading agent tag in any case lands on the row minted under its capital form."""
+    import hashlib
+
+    minted = hashlib.sha1(b"Error:[HOOKS] config unreadable:HOOKS").hexdigest()
+    assert er.compute_fingerprint("Error", f"{tag} config unreadable", "hooks") == minted
+
+
+@pytest.mark.usefixtures("_census")
+def test_agent_tag_with_a_provider_suffix_folds_the_name_only() -> None:
+    """[hooks:codex] folds its agent name to [HOOKS:codex], the form the registry holds."""
+    import hashlib
+
+    minted = hashlib.sha1(b"Error:[HOOKS:codex] hook failed:HOOKS").hexdigest()
+    assert er.compute_fingerprint("Error", "[hooks:codex] hook failed", "HOOKS") == minted
+
+
+@pytest.mark.usefixtures("_census")
+def test_module_tag_keeps_its_minted_lowercase() -> None:
+    """[registry_scope] names no citizen, so it hashes as written and its stored rows keep their identity."""
+    import hashlib
+
+    minted = hashlib.sha1(b"Error:[registry_scope] out of scope:SPAWN").hexdigest()
+    assert er.compute_fingerprint("Error", "[registry_scope] out of scope", "SPAWN") == minted
+
+
+def test_an_unreadable_census_leaves_the_tag_unfolded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no census the tag hashes as written and the warning names why."""
+    import hashlib
+
+    log = MagicMock()
+    monkeypatch.setattr(er, "logger", log)
+    monkeypatch.setattr(error_detected, "_get_registered_emails", MagicMock(side_effect=RuntimeError("gone")))
+    written = hashlib.sha1(b"Error:[hooks] x:HOOKS").hexdigest()
+    assert er.compute_fingerprint("Error", "[hooks] x", "HOOKS") == written
+    assert "census is unreadable" in log.warning.call_args.args[0]
 
 
 def test_different_component_produces_different_fingerprint() -> None:
@@ -727,12 +776,12 @@ def test_get_stats_counts_correctly(tmp_path: Path) -> None:
 
     er.report("ImportError", "missing x", "FLOW", severity="high")
     er.report("IOError", "disk full", "BACKUP", severity="low")
-    er.report("TimeoutError", "timed out", "FLOW", severity="high")
+    er.report("TimeoutError", "timed out", "flow", severity="high")
 
     stats = er.get_stats()
     assert stats["total"] == 3
-    assert stats["by_component"].get("FLOW") == 2
-    assert stats["by_component"].get("BACKUP") == 1
+    # Both cases of one agent count once, printed lowercase.
+    assert stats["by_component"] == {"flow": 2, "backup": 1}
     assert stats["by_severity"].get("high") == 2
     assert stats["by_severity"].get("low") == 1
 
