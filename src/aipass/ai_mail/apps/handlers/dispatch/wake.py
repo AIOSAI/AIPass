@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.12.2
+# Version: 3.12.3
 # Created: 2026-03-02
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -861,6 +861,8 @@ def wake_branch(
         "rows for a file) and the test template for tests "
         "(src/aipass/sentry/templates/test_template_v1.md); build to them; run the "
         "checklist last, to find what you missed. "
+        "Before you report done: bring your README and every docs/ page that describes "
+        "what you changed up to date. "
         "IMPORTANT: run any sub-agents synchronously (foreground) and wait for them to "
         "finish before ending your turn — headless dispatch kills orphaned background "
         "work after 600s with no reply sent."

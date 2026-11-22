@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.6.1
+# Version: 1.6.2
 # Created: 2026-03-29
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's wake_branch: the spawn, session pointer, model, provider and marking."""
@@ -539,6 +539,7 @@ class TestWakeBranch:
         assert "src/aipass/sentry/templates/test_template_v1.md" in prompt
         assert spec_at < prompt.find("IMPORTANT: run any sub-agents")
         assert prompt.find("checklist last") > spec_at
+        assert prompt.find("every docs/ page") > prompt.find("checklist last")
 
     def test_spawn_file_not_found(self, tmp_path, monkeypatch):
         """FileNotFoundError during Popen -> fail step."""
