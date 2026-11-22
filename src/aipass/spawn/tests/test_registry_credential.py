@@ -467,6 +467,21 @@ def _tree(project):
 class TestRebuildRegistry:
     """rebuild_registry: a corrupt registry is rebuilt from the passports on disk, its bytes kept aside."""
 
+    def test_a_rebuilt_row_has_the_name_and_path_create_wrote(self, tmp_path):
+        """One row writer: rebuild goes through the code create uses, so name case and path form match.
+
+        Mutant: rebuild writes the folder name or an absolute path -> red."""
+        project = tmp_path / "brandnew"
+        project.mkdir()
+        reg = project / "AIPASS_REGISTRY.json"
+        assert spawn_agent(str(project / "src" / "brandnew" / "widget"), registry_path=str(reg)).get("success")
+        [created] = [(r["name"], r["path"]) for r in json.loads(reg.read_text(encoding="utf-8"))["branches"]]
+        reg.write_bytes(b"")
+
+        assert sync_registry_ops.rebuild_registry(reg, confirm=True)["refused"] is None
+
+        assert [(r["name"], r["path"]) for r in json.loads(reg.read_text(encoding="utf-8"))["branches"]] == [created]
+
     @pytest.mark.parametrize("shape", sorted(CORRUPT_SHAPES))
     def test_a_preview_writes_nothing_and_names_every_citizen(self, tmp_path, shape):
         reg, citizens = _passported_project(tmp_path)
