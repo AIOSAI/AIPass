@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: new_project.py
 # Description: aipass new — create projects inside the AIPass installation
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-07-17
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -204,14 +204,14 @@ def handle_command(command: str, args: list[str]) -> bool:
         elif no_agent is None:
             no_agent = False
     except KeyboardInterrupt:
-        logger.info("[AIPASS] new project cancelled at a prompt: %s", name)
+        logger.info("[aipass] new project cancelled at a prompt: %s", name)
         error("Cancelled — no project created.")
         sys.exit(130)
 
     try:
         result = create_project(name, template, no_agent)
     except (RuntimeError, ValueError) as e:
-        logger.warning("[AIPASS] new project failed: %s", e)
+        logger.warning("[aipass] new project failed: %s", e)
         error(str(e))
         sys.exit(1)
 
@@ -231,7 +231,7 @@ def handle_command(command: str, args: list[str]) -> bool:
         "new_project_create",
         {"name": name, "template": template, "target": result["target"]},
     )
-    logger.info("[AIPASS] new project: %s (%s) at %s", name, template, result["target"])
+    logger.info("[aipass] new project: %s (%s) at %s", name, template, result["target"])
 
     if result["agent_created"] and sys.stdin.isatty():
         from aipass.aipass.apps.handlers.handoff_platform import (

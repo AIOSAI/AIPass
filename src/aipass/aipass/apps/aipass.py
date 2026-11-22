@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: aipass.py
-# Description: AIPASS branch entry point — thin command router
-# Version: 0.6.0
+# Description: aipass branch entry point — thin command router
+# Version: 0.6.1
 # Created: 2026-04-16
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """
-AIPASS Branch - Main Orchestrator
+aipass Branch - Main Orchestrator
 """
 
 import sys
@@ -25,10 +25,10 @@ except ModuleNotFoundError:  # pragma: no cover — Python 3.10
     try:
         import tomli as tomllib  # type: ignore[no-redef]
 
-        logger.info("[AIPASS] tomllib unavailable (Python 3.10), using tomli")
+        logger.info("[aipass] tomllib unavailable (Python 3.10), using tomli")
     except ModuleNotFoundError:
         tomllib = None  # type: ignore[assignment]
-        logger.info("[AIPASS] tomllib/tomli unavailable, pyproject version read disabled")
+        logger.info("[aipass] tomllib/tomli unavailable, pyproject version read disabled")
 
 
 _PUBLIC_COMMANDS = {
@@ -49,7 +49,7 @@ def _pyproject_version(start: Path) -> str | None:
     Editable installs freeze metadata at install time; the repo tree is the live version.
     """
     if tomllib is None:
-        logger.info("[AIPASS] tomllib/tomli unavailable, skipping pyproject version read")
+        logger.info("[aipass] tomllib/tomli unavailable, skipping pyproject version read")
         return None
 
     for parent in start.resolve().parents:
@@ -59,7 +59,7 @@ def _pyproject_version(start: Path) -> str | None:
         try:
             data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
         except (OSError, tomllib.TOMLDecodeError) as e:
-            logger.warning(f"[AIPASS] Could not parse {pyproject}: {e}")
+            logger.warning(f"[aipass] Could not parse {pyproject}: {e}")
             continue
         project = data.get("project", {})
         # Name guard: nested projects carry their own pyproject — keep walking
@@ -84,7 +84,7 @@ def _resolve_version() -> str:
     try:
         return _installed_version()
     except importlib.metadata.PackageNotFoundError:
-        logger.info("[AIPASS] No repo pyproject.toml and no package metadata, version unknown")
+        logger.info("[aipass] No repo pyproject.toml and no package metadata, version unknown")
         return "unknown"
 
 
@@ -121,7 +121,7 @@ def discover_modules() -> List[Any]:
             if hasattr(module, "handle_command"):
                 modules.append(module)
         except Exception as e:
-            logger.error(f"[AIPASS] Failed to load module {module_name}: {e}")
+            logger.error(f"[aipass] Failed to load module {module_name}: {e}")
             _import_failures[file_path.stem] = e
 
     return modules
@@ -130,7 +130,7 @@ def discover_modules() -> List[Any]:
 def print_introspection(modules: List[Any] | None = None) -> None:
     """Bare invocation — title, purpose, public commands, --help pointer."""
     console.print()
-    console.print("[bold cyan]AIPASS — machine concierge[/bold cyan]")
+    console.print("[bold cyan]aipass — machine concierge[/bold cyan]")
     console.print("[dim]Host and OS diagnosis, doctor, installer, fleet health.[/dim]")
     console.print()
 
@@ -157,7 +157,7 @@ def print_introspection(modules: List[Any] | None = None) -> None:
 def print_help(modules: List[Any] | None = None) -> None:
     """Full help — usage, commands, examples."""
     console.print()
-    console.print("[bold cyan]AIPASS — machine concierge[/bold cyan]")
+    console.print("[bold cyan]aipass — machine concierge[/bold cyan]")
     console.print("[dim]Host and OS diagnosis, doctor, installer, fleet health.[/dim]")
     console.print()
 
@@ -262,7 +262,7 @@ def main():
             return resolve_exit(True)
     except Exception as e:
         error(f"'{command}' crashed: {e}")
-        _log_crash(f"[AIPASS] '{command}' traceback")
+        _log_crash(f"[aipass] '{command}' traceback")
         return 1
 
     if command.startswith("@"):

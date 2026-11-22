@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adopt.py
 # Description: aipass adopt — bring an existing directory anywhere on disk into AIPass
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-07-20
-# Modified: 2026-11-08
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -146,7 +146,7 @@ def handle_command(command: str, args: list[str]) -> bool:
     try:
         result = adopt_project(target_path, no_agent=no_agent, dry_run=dry_run, mode=mode, citizen=citizen)
     except RuntimeError as e:
-        logger.warning("[AIPASS] adopt failed: %s", e)
+        logger.warning("[aipass] adopt failed: %s", e)
         error(str(e))
         sys.exit(1)
 
@@ -179,5 +179,5 @@ def handle_command(command: str, args: list[str]) -> bool:
         "adopt_project",
         {"name": result["name"], "target": result["target"], "dry_run": dry_run},
     )
-    logger.info("[AIPASS] adopt: %s at %s (dry_run=%s)", result["name"], result["target"], dry_run)
+    logger.info("[aipass] adopt: %s at %s (dry_run=%s)", result["name"], result["target"], dry_run)
     return True
