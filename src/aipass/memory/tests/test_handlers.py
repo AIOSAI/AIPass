@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_handlers.py
 # Description: Handler-layer tests — rollover extractor, normalize and the todos operational schema
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-04-01
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/rollover/extractor.py and schema/normalize.py."""
@@ -82,21 +82,21 @@ class TestDerivebranchAndType:
         ext, _ = _import_extractor(monkeypatch)
         p = tmp_path / "devpulse" / ".trinity" / "local.json"
         branch, mtype = ext._derive_branch_and_type(p)
-        assert branch == "DEVPULSE"
+        assert branch == "devpulse"
         assert mtype == "local"
 
     def test_trinity_path_observations(self, monkeypatch, tmp_path):
         ext, _ = _import_extractor(monkeypatch)
         p = tmp_path / "memory" / ".trinity" / "observations.json"
         branch, mtype = ext._derive_branch_and_type(p)
-        assert branch == "MEMORY"
+        assert branch == "memory"
         assert mtype == "observations"
 
     def test_legacy_dotted_path(self, monkeypatch, tmp_path):
         ext, _ = _import_extractor(monkeypatch)
         p = tmp_path / "some" / "path" / "DEVPULSE.local.json"
         branch, mtype = ext._derive_branch_and_type(p)
-        assert branch == "DEVPULSE"
+        assert branch == "devpulse"
         assert mtype == "local"
 
 

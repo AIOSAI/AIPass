@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_plans_processor.py
 # Description: Tests for the plans_processor handler — chunking, manifest, memory python and process_plans
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-04-26
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/intake/plans_processor.py."""
@@ -653,6 +653,27 @@ class TestProcessPlans:
         assert result["success"] is True
         assert result["files_processed"] == 0
         assert "already processed" in result.get("reason", "")
+
+    def test_the_stored_branch_label_is_lowercase(self, monkeypatch, tmp_path):
+        """The label becomes the id prefix and the collection's metadata: new rows carry the lowercase name."""
+        mod = plans_processor
+        plans_dir = tmp_path / "plans"
+        plans_dir.mkdir()
+        (plans_dir / "p.md").write_text("## Objective\n" + "An objective long enough to be one chunk.\n", "utf-8")
+        self._mock_config(monkeypatch, mod, {"enabled": True, "path": str(plans_dir), "supported_extensions": [".md"]})
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
+        monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", tmp_path / "manifest.json")
+        monkeypatch.setattr(mod, "json_handler", MagicMock())
+        sent = []
+
+        def lane(script, payload, **kwargs):
+            sent.append(payload)
+            return {"success": True, "embeddings": [[0.1]] * len(payload.get("texts", [])), "stored": 1}
+
+        monkeypatch.setattr(mod, "run_json", lane)
+
+        assert mod.process_plans()["files_processed"] == 1
+        assert [p["branch"] for p in sent if "branch" in p] == ["flow"]
 
     def test_process_plans_success(self, monkeypatch, tmp_path):
         mod = plans_processor

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: tests/test_orchestrator_exec.py
 # Description: Tests for the orchestrator execute_rollover pipeline
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-04-26
 # Modified: 2026-11-22
 # Category: memory/tests
@@ -710,7 +710,7 @@ class TestAnEditDuringStorageSurvivesTheTrim:
             local.write_text(json.dumps(data, indent=2), encoding="utf-8")
             return {"success": True, "collection": "c", "total_vectors": 1}
 
-        trigger = MagicMock(file_path=local, branch="STANDIN", memory_type="local")
+        trigger = MagicMock(file_path=local, branch="standin", memory_type="local")
         monkeypatch.setattr(
             orchestrator, "detector", MagicMock(check_all_branches=lambda: {"success": True, "triggers": [trigger]})
         )
@@ -730,7 +730,7 @@ class TestAnEditDuringStorageSurvivesTheTrim:
         assert [t["number"] for t in after["todos"]] == [385, *pad]
         assert after["todos_meta"] == "pad of 10 - next #386"
         assert [s["number"] for s in after["sessions"]] == list(range(734, 724, -1))
-        no_local_store.assert_called_once_with("STANDIN")
+        no_local_store.assert_called_once_with("standin")
 
 
 class TestWhatARealRolloverArchives:
@@ -754,7 +754,7 @@ class TestWhatARealRolloverArchives:
             stored.extend((m.get("entry_number"), d) for m, d in zip(kwargs["metadatas"], kwargs["documents"]))
             return {"success": True, "collection": "c", "total_vectors": len(stored)}
 
-        trigger = MagicMock(file_path=local, branch="STANDIN", memory_type="local")
+        trigger = MagicMock(file_path=local, branch="standin", memory_type="local")
         trigger.__str__ = MagicMock(return_value="standin.local (18/15 sessions)")
         monkeypatch.setattr(
             orchestrator, "detector", MagicMock(check_all_branches=lambda: {"success": True, "triggers": [trigger]})

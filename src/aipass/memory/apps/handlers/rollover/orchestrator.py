@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: orchestrator.py
 # Description: Rollover Orchestration Handler
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-08
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -84,7 +84,7 @@ def local_store_lookup(branch_name: str) -> tuple[Path | None, str | None]:
         return None, LOCAL_STORE_REGISTRY_UNREADABLE
 
     for branch in registry:
-        if branch.get("name", "").upper() == branch_name.upper():
+        if branch.get("name", "").lower() == branch_name.lower():
             branch_path = Path(branch.get("path", ""))
             if branch_path.exists():
                 chroma_path = branch_path / ".chroma"

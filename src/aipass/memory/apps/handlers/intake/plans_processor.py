@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: plans_processor.py
 # Description: Plan Archival Vectorization Handler
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-03-12
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -205,7 +205,7 @@ def _store_vectors(embeddings, documents, metadatas, collection_name="flow_plans
     """Store vectors via subprocess."""
     input_data = {
         "operation": "store_vectors",
-        "branch": "FLOW",
+        "branch": "flow",
         "memory_type": collection_name,
         "embeddings": embeddings,
         "documents": documents,

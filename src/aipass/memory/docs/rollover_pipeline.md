@@ -39,7 +39,9 @@ detector.check_all_branches()        # scan AIPASS_REGISTRY.json + external regi
 ```
 
 A refused embed or store leaves the live file untouched; the next run upserts the same content-hash
-IDs, so a retry never duplicates. The watcher skips the rollover outright when the store's
+IDs, so a retry never duplicates. An ID is `<branch>_<type>_<hash>` with the branch label in
+lowercase; rows stored before that carry a capitalised label and stay as they are, so a text stored
+under both labels holds two rows. The watcher skips the rollover outright when the store's
 dependencies are missing.
 
 `commit_trimmed()` re-reads the file before it writes. Storage takes seconds, and the owner may edit

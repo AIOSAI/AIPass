@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: search.py
 # Description: Search Orchestration Module
-# Version: 0.7.0
+# Version: 0.7.1
 # Created: 2025-11-27
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -94,7 +94,7 @@ def _option_problem(flag: str, value: str) -> str | None:
             return f"--n needs a whole number of results, 1 or more, got {value!r}"
         return None
     if not _NAME_RE.fullmatch(value):
-        what = "a branch name (e.g. SENTRY)" if flag == "--branch" else "a memory type (e.g. observations, local)"
+        what = "a branch name (e.g. sentry)" if flag == "--branch" else "a memory type (e.g. observations, local)"
         return f"{flag} needs {what}: a letter or digit, then letters, digits, _ or -, got {value!r}"
     return None
 
@@ -114,7 +114,7 @@ def print_help() -> None:
     console.print("  [cyan]help[/cyan]                Show this help message")
     console.print()
     console.print("[bold]OPTIONS:[/bold]")
-    console.print("  [cyan]--branch BRANCH[/cyan]    Filter by branch (e.g., SENTRY, CLI)")
+    console.print("  [cyan]--branch BRANCH[/cyan]    Filter by branch (e.g., sentry, cli)")
     console.print("  [cyan]--type TYPE[/cyan]        Filter by memory type (observations, local)")
     console.print("  [cyan]--n N[/cyan]              Number of results (default: 5)")
     console.print()
@@ -123,7 +123,7 @@ def print_help() -> None:
     console.print('  [dim]drone @memory search "performance patterns"[/dim]')
     console.print()
     console.print("  # Search specific branch")
-    console.print('  [dim]drone @memory search "registry bugs" --branch SENTRY[/dim]')
+    console.print('  [dim]drone @memory search "registry bugs" --branch sentry[/dim]')
     console.print()
     console.print("  # Search specific memory type")
     console.print('  [dim]drone @memory search "collaboration" --type observations --n 10[/dim]')
@@ -195,7 +195,7 @@ def show_search_results(
         similarity = item.get("similarity", 0)
 
         parts = collection.split("_")
-        branch_name = parts[0].upper() if parts else "UNKNOWN"
+        branch_name = parts[0] if parts else "unknown"
         mem_type = parts[1] if len(parts) > 1 else "unknown"
 
         # Entry identity first: a recovered entry is named, not matched on text that may not stay unique.
@@ -269,7 +269,7 @@ def print_introspection() -> None:
 
     console.print("[yellow]Next:[/yellow]")
     console.print('  [green]drone @memory search "your query"[/green]              [dim]# Semantic search[/dim]')
-    console.print('  [green]drone @memory search "query" --branch SENTRY[/green]     [dim]# Filter by branch[/dim]')
+    console.print('  [green]drone @memory search "query" --branch sentry[/green]     [dim]# Filter by branch[/dim]')
     console.print("  [green]drone @memory search --help[/green]                    [dim]# Full usage guide[/dim]")
     console.print()
 
