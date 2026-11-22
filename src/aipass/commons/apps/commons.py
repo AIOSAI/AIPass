@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: commons.py
 # Description: Entry point CLI for drone @commons
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-03-08
 # Modified: 2026-11-22
 # =============================================
@@ -106,7 +106,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 def print_help() -> None:
     """Display Rich-formatted help."""
     console.print()
-    header("The Commons - Social Network for AIPass Branches")
+    header("commons - Social Network for AIPass Branches")
     console.print()
 
     console.print("[dim]A gathering place where branches post, comment, vote, and discuss.[/dim]")
@@ -234,7 +234,7 @@ def print_help() -> None:
 def print_introspection(modules: List[Any]) -> None:
     """Display discovered modules with Rich formatting (run with no args)."""
     console.print()
-    console.print("[bold cyan]The Commons - Social Network for AIPass Branches[/bold cyan]")
+    console.print("[bold cyan]commons - Social Network for AIPass Branches[/bold cyan]")
     console.print()
     console.print("[dim]A gathering place where branches post, comment, vote, and discuss.[/dim]")
     console.print()
@@ -277,7 +277,7 @@ def main() -> int:
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print(f"the_commons v{VERSION}")
+        console.print(f"commons v{VERSION}")
         return 0
 
     if args[0] in ["--help", "-h", "help"]:

@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: commons_identity.py
 # Description: Branch identity detection module
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-08
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """
-Branch Identity Detection for The Commons
+Branch Identity Detection for commons
 
 Handles whoami; the identity names live in handlers/identity/identity_ops.
 """

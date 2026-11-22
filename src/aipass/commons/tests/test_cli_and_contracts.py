@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: test_cli_and_contracts.py - CLI Routing, Contracts, and Infrastructure Tests
 # Description: main()'s help/introspection/exit-code routing, route_command, and the json shim's contracts
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-28
 # Modified: 2026-11-22
 # Category: commons/tests
@@ -398,6 +398,6 @@ def test_the_started_program_restores_the_kernel_default(tmp_path):
     child = _child(code, tmp_path)
 
     assert child.returncode == 0, child.stderr
-    assert f"the_commons v{commons_main.VERSION}" in child.stdout
+    assert f"commons v{commons_main.VERSION}" in child.stdout
     reported = [line for line in child.stderr.splitlines() if line.startswith("SIGPIPE ")]
     assert reported == [f"SIGPIPE {int(signal.SIG_DFL)}"], child.stderr
