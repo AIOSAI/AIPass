@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: validator.py
 # Description: Skill validation module
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-08
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Skill validator module."""
@@ -72,7 +72,7 @@ def validate_skill(skill_metadata):
 
 def print_validate_help():
     """Print the usage page for this verb."""
-    console.print("Skills Validate - Check a skill's requirements")
+    console.print("skills Validate - Check a skill's requirements")
     console.print()
     console.print("Usage:")
     console.print("  drone @skills validate <name>    Report whether the skill's requirements are met")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: skills.py
 # Description: Entry point CLI for drone @skills
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-08
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Skills system entry point."""
@@ -20,7 +20,7 @@ if _script_dir in sys.path:
 from aipass.prax import logger
 from aipass.cli import console, escape
 
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 
 
 def _header_description(path):
@@ -78,7 +78,7 @@ def handle_command(command, args=None):
         return True
 
     if command in ("--version", "-V"):
-        console.print(f"SKILLS v{VERSION}")
+        console.print(f"skills v{VERSION}")
         return True
 
     module_name = _ROUTES.get(command)
@@ -95,7 +95,7 @@ def handle_command(command, args=None):
 
 def print_help():
     """Print skills help text."""
-    console.print("Skills - Capability framework for AI agents")
+    console.print("skills - Capability framework for AI agents")
     console.print()
     console.print("Usage:")
     console.print("  drone @skills <command> \\[args]")

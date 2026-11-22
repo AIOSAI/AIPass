@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Find skills across search paths
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-07
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Skill discovery module."""
@@ -80,7 +80,7 @@ def discover_all():
 
 def print_list_help():
     """Print the usage page for this verb."""
-    console.print("Skills List - Show every discovered skill")
+    console.print("skills List - Show every discovered skill")
     console.print()
     console.print("Usage:")
     console.print("  drone @skills list    List project, global and built-in skills, OFF ones marked")

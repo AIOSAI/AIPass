@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: creator.py
 # Description: Scaffold new skills from templates
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-07
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Skill creator module."""
@@ -46,7 +46,7 @@ def handle_command(command: str, args: list) -> bool:
 
 def print_create_help():
     """Print the create usage page: flags and what each tier writes."""
-    console.print("Skills Create - Scaffold a new skill from a template")
+    console.print("skills Create - Scaffold a new skill from a template")
     console.print()
     console.print("Usage:")
     console.print("  drone @skills create <name>                Create a markdown-only skill")

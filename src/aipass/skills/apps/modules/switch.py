@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: switch.py
 # Description: Per-skill off-switch — on, off, and status
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-18
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Skill off-switch module."""
@@ -56,7 +56,7 @@ def handle_command(command: str, args: list) -> bool:
 
 def print_switch_help():
     """Print the usage page for on, off and switch."""
-    console.print("Skills Switch - Disconnect and reconnect a skill")
+    console.print("skills Switch - Disconnect and reconnect a skill")
     console.print()
     console.print("Usage:")
     console.print("  drone @skills off <name> \\[reason]    Switch a skill off, stop its processes")

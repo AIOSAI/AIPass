@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_creator.py
 # Description: Tests for creator module orchestration layer
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-03
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/creator.py — routing, the create_skill wrapper and introspection."""
@@ -28,7 +28,7 @@ class TestHandleCommand:
     def test_a_help_flag_after_the_name_prints_usage_and_scaffolds_nothing(self, tmp_path, monkeypatch, capsys):
         monkeypatch.chdir(tmp_path)
         assert handle_command("create", ["test-skill", "--help"]) is True
-        assert "Skills Create - Scaffold a new skill from a template" in capsys.readouterr().out
+        assert "skills Create - Scaffold a new skill from a template" in capsys.readouterr().out
         assert not (tmp_path / ".aipass").exists()
 
     def test_create_with_valid_name(self, tmp_path, monkeypatch, capsys, bus_recorder):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: loader.py
 # Description: Load SKILL.md and handlers; the info command
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-07
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Skill loader module."""
@@ -117,7 +117,7 @@ def _switch_notice(name):
 
 def print_info_help():
     """Print the usage page for this verb."""
-    console.print("Skills Info - Show one skill")
+    console.print("skills Info - Show one skill")
     console.print()
     console.print("Usage:")
     console.print("  drone @skills info <name>    Print a skill's metadata and SKILL.md body")
