@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: register.py
 # Description: Register module — adds a project to backup and creates .backup/
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-17
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """Register Module — register a project for backup and scaffold its .backup/."""
@@ -32,7 +32,7 @@ def resolve_project(target: str) -> str | None:
         path = _lookup_project(name)
         if path:
             return path
-        logger.warning(f"[BACKUP] Project '@{name}' not found in registry")
+        logger.warning(f"[backup] Project '@{name}' not found in registry")
         return None
 
     candidate = resolve_caller_path(target)

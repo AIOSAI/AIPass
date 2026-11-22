@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_cli_routing.py
 # Description: Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-06-12
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries."""
@@ -226,7 +226,7 @@ class TestPrintHelp:
 
         entry.print_help()
 
-        assert titles == ["BACKUP — project backup & drive sync"]
+        assert titles == ["backup — project backup & drive sync"]
 
         out, err = capsys.readouterr()
         assert err == "", f"the help page wrote to stderr: {err!r}"

@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: backup.py
-# Description: BACKUP Branch — main orchestrator with auto-discovery
-# Version: 1.5.0
+# Description: backup Branch — main orchestrator with auto-discovery
+# Version: 1.5.1
 # Created: 2026-04-16
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
-"""BACKUP Branch - Main Orchestrator"""
+"""backup Branch - Main Orchestrator"""
 
 import importlib
 import os
@@ -27,7 +27,7 @@ MODULES_DIR = Path(__file__).parent / "modules"
 def print_introspection(modules: list[Any]) -> None:
     """Display discovered modules — the bare self-map (run with no args)."""
     console.print()
-    console.print(f"[bold cyan]BACKUP[/bold cyan] v{VERSION} — project backup & drive sync")
+    console.print(f"[bold cyan]backup[/bold cyan] v{VERSION} — project backup & drive sync")
     console.print()
     console.print(f"[bold dim]Discovered Modules:[/bold dim] {len(modules)}")
     console.print()
@@ -43,7 +43,7 @@ def print_introspection(modules: list[Any]) -> None:
 def print_help() -> None:
     """Display the curated Rich-formatted command reference."""
     console.print()
-    header("BACKUP — project backup & drive sync")
+    header("backup — project backup & drive sync")
     console.print()
     console.print("[dim]Snapshot and sync project backups to a local store or remote drive.[/dim]")
     console.print()
@@ -145,7 +145,7 @@ def discover_modules() -> list[Any]:
             if hasattr(module, "handle_command"):
                 modules.append(module)
         except Exception as e:
-            logger.error(f"[BACKUP] Failed to load module {module_name}: {e}")
+            logger.error(f"[backup] Failed to load module {module_name}: {e}")
 
     return modules
 
@@ -162,7 +162,7 @@ def route_command(command: str, args: list[str], modules: list[Any]) -> tuple[bo
             if module.handle_command(command, args):
                 return True, None
         except Exception as e:
-            logger.error(f"[BACKUP] Module {module.__name__} error: {e}")
+            logger.error(f"[backup] Module {module.__name__} error: {e}")
             if failure is None:
                 failure = f"{module.__name__}: {e}"
     return False, failure
