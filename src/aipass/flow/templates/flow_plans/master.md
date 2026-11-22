@@ -131,7 +131,7 @@ drone @sentry checklist <file>           # 10-point check on file
 drone @sentry audit aipass @branch       # Full branch audit (before master close)
 drone @sentry --help                     # Full help
 
-# AI_Mail - Status updates
+# ai_mail - Status updates
 drone @ai_mail email @devpulse "Subject" "Message"
 drone @ai_mail inbox                   # Check your inbox
 drone @ai_mail --help                  # Full help

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for flow's entry point routing, help and introspection
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-04
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/flow.py, the CLI entry point."""
@@ -51,7 +51,7 @@ def test_print_introspection_renders_identity_and_help_pointer(capsys, stub_modu
     branch_entry.print_introspection([stub_module])
 
     out = capsys.readouterr().out
-    assert "Flow" in out
+    assert "flow - PLAN Management System" in out
     assert "Discovered Modules:" in out
     assert "--help" in out
 
@@ -88,7 +88,7 @@ def test_version_flag_prints_version(monkeypatch, capsys, flag):
     assert _run(monkeypatch, [flag]) == 0
 
     out = capsys.readouterr().out
-    assert "FLOW" in out
+    assert "flow v" in out
 
 
 def test_route_command_returns_true_for_known_command(stub_module):

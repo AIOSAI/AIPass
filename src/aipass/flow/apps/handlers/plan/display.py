@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: Plan Display Handler
-# Version: 0.3.1
+# Version: 0.3.2
 # Created: 2025-11-15
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -31,10 +31,11 @@ def display_plan_created(
 ) -> str:
     """Format plan creation success messages"""
     plan_id = f"{prefix}-{plan_num:0{digits}d}"
+    # Escaped: Rich reads a lowercase [flow] as a style tag and swallows it.
     lines = [
-        f"[FLOW] Created {plan_id} in {relative_location}",
-        f"[FLOW] Template: {template_type}",
-        f"[FLOW] Subject: {subject}",
+        f"\\[flow] Created {plan_id} in {relative_location}",
+        f"\\[flow] Template: {template_type}",
+        f"\\[flow] Subject: {subject}",
     ]
     json_handler.log_operation(
         "plan_displayed", {"plan_id": plan_id, "location": relative_location, "template": template_type}
