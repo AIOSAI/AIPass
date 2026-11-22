@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_timer_install.py
 # Description: Tests for the timer_install module (systemd user timer installer)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-06-25
 # Modified: 2026-11-21
 # =============================================
@@ -20,7 +20,7 @@ from unittest.mock import call, patch
 import sys
 from pathlib import Path
 
-from aipass.ai_mail import resolve_verified_caller
+import aipass
 from aipass.daemon.apps.modules.timer_install import (
     handle_command,
     HANDLED_COMMANDS,
@@ -32,14 +32,10 @@ TI = "aipass.daemon.apps.modules.timer_install"
 
 @pytest.fixture(autouse=True)
 def _admin_seat(monkeypatch):
-    """Every verb runs stamped as @devpulse holding the grant; TestSeat stamps another caller.
-
-    Only the grant's key legs are stood in (the edge: devpulse's signing key); the seat is the real rail's read.
-    """
+    """Every verb runs stamped as @devpulse; TestSeat stamps another caller or none. The seat is the real rail's read."""
     monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
     monkeypatch.delenv("AIPASS_CALLER_IDENTITY_SOURCE", raising=False)
     monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
-    monkeypatch.setattr(f"{TI}.is_verified_admin_caller", lambda: resolve_verified_caller() == "@devpulse")
 
 
 def _units(directory: Path) -> tuple:
@@ -527,7 +523,36 @@ class TestNoRealHomeWrites:
 
 
 class TestSeat:
-    """The timer wakes the whole fleet: only the verified admin seat installs or removes it."""
+    """The timer wakes the whole fleet: only the admin seat installs or removes it, lit admin lane or not."""
+
+    @pytest.mark.parametrize("verb", sorted(HANDLED_COMMANDS))
+    def test_the_admin_seat_runs_the_verb_with_the_admin_lane_dark(self, verb, monkeypatch, tmp_path):
+        """A fresh install's lane is dark and cannot be lit: the grant gate refused @devpulse too (FPLAN-1163)."""
+
+        def admin_lane(*_args):
+            raise AssertionError("the seat gate read the admin lane, which a fresh install cannot light")
+
+        monkeypatch.setattr(f"{TI}.is_verified_admin_caller", admin_lane, raising=False)
+        unit_dir = tmp_path / "_sealed_unit_dir"
+        unit_dir.mkdir()
+        _units(unit_dir)
+        with patch(f"{TI}._run_systemctl", return_value=True) as systemctl:
+            assert _exit_of(verb) == 0
+        systemctl.assert_called()
+
+    @pytest.mark.parametrize("verb", sorted(HANDLED_COMMANDS))
+    def test_no_seat_is_refused_and_told_to_run_it_from_the_admin_seats_folder(
+        self, verb, monkeypatch, tmp_path, capsys
+    ):
+        monkeypatch.delenv("AIPASS_CALLER_BRANCH")
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+        with patch(f"{TI}._run_systemctl") as systemctl:
+            assert _exit_of(verb) == 1
+        systemctl.assert_not_called()
+        err = " ".join(capsys.readouterr().err.split())
+        assert f"{verb} refused: no AIPass seat ran it: the daemon-tick timer" in err
+        assert f"cd {Path(aipass.__file__).parent / 'devpulse'} && drone @daemon {verb}" in err
+        assert "drone @ai_mail email" not in err
 
     @pytest.mark.parametrize("verb", sorted(HANDLED_COMMANDS))
     def test_another_seat_is_refused_naming_who_to_ask_and_nothing_moves(self, verb, monkeypatch, tmp_path, capsys):
@@ -547,7 +572,7 @@ class TestSeat:
         def rail_down():
             raise RuntimeError("registry unreadable")
 
-        monkeypatch.setattr(f"{TI}.is_verified_admin_caller", rail_down)
+        monkeypatch.setattr(f"{TI}.resolve_verified_caller", rail_down)
         with patch(f"{TI}._run_systemctl") as systemctl, pytest.raises(RuntimeError, match="registry unreadable"):
             handle_command("install-timer", [])
         systemctl.assert_not_called()

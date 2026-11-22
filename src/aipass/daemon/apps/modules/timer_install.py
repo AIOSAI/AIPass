@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: timer_install.py
 # Description: Idempotent systemd user timer installer for daemon scheduler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-06-25
 # Modified: 2026-11-21
 # =============================================
@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from aipass.prax import logger
-from aipass.ai_mail import is_verified_admin_caller, resolve_verified_caller
+from aipass.ai_mail import resolve_verified_caller
 from aipass.cli import console, error
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
@@ -66,7 +66,7 @@ def print_help():
     console.print("  Then reloads systemd and enables+starts the timer.")
     console.print("  Idempotent — safe to run multiple times.")
     console.print("  An install that cannot enable the timer puts the unit folder back as it was.")
-    console.print(f"  The verified admin seat ({ADMIN_SEAT}) only: the timer wakes the whole fleet.")
+    console.print(f"  The admin seat ({ADMIN_SEAT}) only, run from its folder: the timer wakes the whole fleet.")
     console.print()
 
 
@@ -110,18 +110,24 @@ def _run_systemctl(*args: str, not_loaded_ok: bool = False, not_found_ok: bool =
 
 
 def _seat_refusal(command: str) -> str:
-    """'' when the verified admin seat runs *command*, else the refusal naming who to ask.
+    """'' when the admin seat runs *command*, else the refusal naming what to do.
 
+    The seat is the rule, not the admin grant: a fresh install's lane is dark and cannot be lit.
     A rail that raises propagates, so a check that cannot run never reads as granted.
     """
-    if is_verified_admin_caller():
+    caller = resolve_verified_caller()
+    if caller == ADMIN_SEAT:
         return ""
-    caller = resolve_verified_caller() or "an unverified caller"
-    logger.warning("[timer_install] %s refused for %s: not the verified admin seat", command, caller)
+    logger.warning("[timer_install] %s refused for %s: not the admin seat", command, caller or "no seat")
+    reason = (
+        f"the daemon-tick timer wakes the whole fleet, so only the admin seat ({ADMIN_SEAT}) installs or removes it."
+    )
+    if not caller:
+        seat_dir = _DAEMON_ROOT.parent / ADMIN_SEAT.lstrip("@")
+        return f"{command} refused: no AIPass seat ran it: {reason} Run it from that seat: cd {seat_dir} && drone @daemon {command}"
     return (
-        f"{command} refused for {caller}: the daemon-tick timer wakes the whole fleet, so only the verified "
-        f"admin seat ({ADMIN_SEAT}) installs or removes it. Ask: drone @ai_mail email {ADMIN_SEAT} "
-        f'"{command}" "why the timer should change"'
+        f"{command} refused for {caller}: {reason} "
+        f'Ask: drone @ai_mail email {ADMIN_SEAT} "{command}" "why the timer should change"'
     )
 
 

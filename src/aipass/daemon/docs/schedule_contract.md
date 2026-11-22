@@ -15,9 +15,12 @@ Each citizen owns its schedule at `<branch>/.daemon/schedule.json`. The daemon d
 `Type=oneshot`, running `python3 -m aipass.daemon.apps.daemon run` once and exiting. Between ticks
 there is no daemon process at all.
 
-The timer wakes the whole fleet, so `install-timer` and `uninstall-timer` run for the verified admin
-seat (@devpulse) only, read through @ai_mail's verified-caller rail. Any other caller is refused by
-name, with the mail to send. An install that cannot reload, enable or start the timer puts the unit
+The timer wakes the whole fleet, so `install-timer` and `uninstall-timer` run for the admin seat
+(@devpulse) only: run them from the devpulse branch folder, where drone stamps that seat. The caller is
+read through @ai_mail's verified-caller rail. The seat alone is the rule, so the verbs work whether or
+not the machine's admin lane is lit: a fresh install's lane is dark and cannot be lit. Any other seat
+is refused by name, with the mail to send. A caller with no seat (a terminal outside every branch) is
+refused with the `cd <devpulse folder> && drone @daemon <verb>` line to run instead. An install that cannot reload, enable or start the timer puts the unit
 folder back as it was: units it copied are removed and units that stood before get their old bytes back.
 On a host with no `systemctl`, nothing runs the units, so `uninstall-timer` removes them and exits 0.
 
