@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: feedback.py
 # Description: Feedback Module — command routing for devpulse feedback mailbox
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-11
-# Modified: 2026-10-22
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -31,7 +31,7 @@ from aipass.devpulse.apps.handlers.json import json_handler
 console = err_console
 
 HELP_TEXT = """\
-[bold cyan]feedback[/bold cyan] — DevPulse personal feedback mailbox
+[bold cyan]feedback[/bold cyan] — devpulse personal feedback mailbox
 
 [bold]Usage:[/bold]
   feedback                        Inbox summary (count, unread)
@@ -70,7 +70,7 @@ def print_introspection() -> None:
     """Display module introspection info."""
     console.print()
     console.print("[bold cyan]feedback Module[/bold cyan]")
-    console.print("[dim]DevPulse personal feedback mailbox. Receives cross-project[/dim]")
+    console.print("[dim]devpulse personal feedback mailbox. Receives cross-project[/dim]")
     console.print("[dim]feedback messages from any agent via drone routing.[/dim]")
     console.print()
     console.print("[yellow]Subcommands:[/yellow] [cyan]inbox, view, reply, send, clear[/cyan]")

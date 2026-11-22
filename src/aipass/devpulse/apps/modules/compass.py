@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: compass.py
 # Description: Compass Module — drone command for devpulse's rated decision store
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-06-16
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -95,7 +95,7 @@ def print_introspection() -> None:
     """Display module introspection info."""
     console.print()
     console.print("[bold cyan]compass Module[/bold cyan]")
-    console.print("[dim]Devpulse rated decision store. The truth-store of choices —[/dim]")
+    console.print("[dim]devpulse rated decision store. The truth-store of choices —[/dim]")
     console.print("[dim]each decision rated; the rating is the signal at a fork.[/dim]")
     console.print()
     console.print("[yellow]Subcommands:[/yellow] [cyan]add, query, stats, rate, archive, note, review[/cyan]")
