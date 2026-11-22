@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: branch_detection.py
 # Description: Branch Auto-Detection Handler
-# Version: 1.4.2
+# Version: 1.4.3
 # Created: 2025-11-18
 # Modified: 2026-11-22
 # =============================================
@@ -336,7 +336,7 @@ if __name__ == "__main__":
     console.print("BRANCH AUTO-DETECTION HANDLER")
     console.print("=" * 70)
     console.print("\nPURPOSE:")
-    console.print("  Detects which branch is calling AI_MAIL based on PWD/CWD")
+    console.print("  Detects which branch is calling ai_mail based on PWD/CWD")
     console.print("  Walks up directory tree to find branch root")
     console.print()
     console.print("FUNCTIONS PROVIDED:")

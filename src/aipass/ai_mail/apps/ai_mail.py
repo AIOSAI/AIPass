@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ai_mail.py
 # Description: Entry point CLI for drone @ai_mail — inter-branch email system
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-08
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -33,7 +33,7 @@ MODULES_DIR = MODULE_ROOT / "modules"
 def print_help():
     """Print drone-compliant help output with Rich markup"""
     console.print()
-    console.print("[bold cyan]AI_MAIL — Email system for branch communication[/bold cyan]")
+    console.print("[bold cyan]ai_mail — Email system for branch communication[/bold cyan]")
     console.print()
 
     console.print("[yellow]COMMANDS:[/yellow]")
@@ -77,7 +77,7 @@ def print_help():
 def print_introspection():
     """Display discovered modules only (sentry pattern)"""
     console.print()
-    console.print("[bold cyan]AI_Mail - Branch Communication System[/bold cyan]")
+    console.print("[bold cyan]ai_mail - Branch Communication System[/bold cyan]")
     console.print()
     console.print("[dim]Email system for branch-to-branch communication[/dim]")
     console.print()
@@ -166,7 +166,7 @@ def main():
             return 0
 
         if args[0] in ["--version", "-V"]:
-            console.print("AI_MAIL v2.0.0")
+            console.print("ai_mail v2.0.0")
             return 0
 
         if args[0] in ["--help", "-h", "help"]:

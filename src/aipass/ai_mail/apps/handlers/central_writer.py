@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: central_writer.py
-# Description: AI_MAIL Central File Writer
-# Version: 1.4.0
+# Description: ai_mail Central File Writer
+# Version: 1.4.1
 # Created: 2025-11-27
 # Modified: 2026-11-22
 # =============================================
@@ -168,7 +168,7 @@ if __name__ == "__main__":
     console = Console()
 
     console.print()
-    console.print(Panel.fit("[bold cyan]AI_MAIL Central Writer[/bold cyan]", border_style="bright_blue"))
+    console.print(Panel.fit("[bold cyan]ai_mail Central Writer[/bold cyan]", border_style="bright_blue"))
     console.print()
 
     try:

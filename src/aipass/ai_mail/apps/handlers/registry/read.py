@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: read.py
 # Description: Registry Read Handler
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2025-11-15
-# Modified: 2026-11-08
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -350,7 +350,7 @@ if __name__ == "__main__":
     from aipass.cli import console
 
     console.print("\n" + "=" * 70)
-    console.print("AI_MAIL HANDLER: registry/read.py")
+    console.print("ai_mail HANDLER: registry/read.py")
     console.print("=" * 70)
     console.print("\nRegistry Read Handler")
     console.print()
