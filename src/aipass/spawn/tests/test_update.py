@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_update.py
 # Description: Tests for spawn update orchestrator
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-11-22
+# Modified: 2026-11-23
 # =============================================
 
 """Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
@@ -20,7 +20,7 @@ import pytest
 from aipass.spawn.apps.handlers.update_ignore import UpdateIgnoreUnreadable, read_ignore
 from aipass.spawn.apps.handlers.update_ops import update_all, update_branch
 from aipass.spawn.apps.modules.update import handle_update
-from aipass.spawn.tests.conftest import external_fleet
+from aipass.spawn.tests.conftest import external_fleet, write_registry
 
 
 @pytest.fixture
@@ -1117,6 +1117,49 @@ class TestUpdateAll:
         assert list(results) == ["grow"]
         assert results["grow"]["success"] is True, results["grow"]["errors"]
         assert not (grow / "README.md").exists(), "a dry run wrote into the external citizen"
+
+
+class TestOneNameResolvesThroughTheFleet:
+    """update @name with no registry: the cwd's registry, then every registry memory's door answers."""
+
+    @pytest.fixture
+    def fleet(self, tmp_path, template_dir):
+        home, grow = external_fleet(tmp_path)
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=home / "AIPASS_REGISTRY.json"),
+            patch("aipass.spawn.apps.handlers.update_ops.aipass_home", return_value=home),
+        ):
+            yield home, grow
+
+    def test_a_citizen_at_a_declared_root_resolves_and_dry_runs(self, fleet):
+        """Mutant: the lookup reads the cwd's registry only -> 'not found' -> red."""
+        _, grow = fleet
+
+        result = update_branch("grow", dry_run=True)
+
+        assert result["success"] is True, result["errors"]
+        assert result["additions"] > 0
+        assert not (grow / "README.md").exists(), "a dry run wrote into the project citizen"
+
+    def test_a_name_in_two_registries_is_refused_and_both_are_named(self, fleet):
+        """Mutant: the first registry found wins -> red."""
+        home, grow = fleet
+        write_registry(home / "AIPASS_REGISTRY.json", {"grow": "src/aipass/grow"})
+
+        result = update_branch("grow", dry_run=True)
+
+        assert result["success"] is False
+        assert "in 2 registries, refused by name" in result["errors"][0]
+        assert "AIPASS_REGISTRY.json" in result["errors"][0] and "EXT_REGISTRY.json" in result["errors"][0]
+        assert not (grow / "README.md").exists()
+
+    def test_a_name_found_nowhere_says_where_it_looked(self, fleet):
+        """Mutant: the old bare 'not found in registry' sentence -> red."""
+        result = update_branch("nobody", dry_run=True)
+
+        looked = "AIPASS_REGISTRY.json, 0 project registries, 1 declared root"
+        assert result["errors"] == [f"Branch 'nobody' not found in {looked}"]
 
 
 class TestHandleUpdate:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update.py
 # Description: Update orchestrator — thin CLI layer for branch updates
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-23
 # =============================================
 
 """Update orchestrator for branch lifecycle management.
@@ -70,6 +70,9 @@ def handle_update(args: list[str]) -> int:
         console.print("  [green]--apply[/green]           Execute changes (default is preview-only)")
         console.print("  [green]--dry-run[/green]         Preview changes without modifying files [dim](default)[/dim]")
         console.print("  [green]--trace[/green]           Enable verbose logging")
+        console.print()
+        console.print("  [dim]@branch looks in the registry above the cwd, then core, residents and declared[/dim]")
+        console.print("  [dim]roots; a name in two registries is refused. --all walks the same fleet.[/dim]")
         console.print()
         console.print("  [dim]A branch may protect its own files from update with a .updateignore at its[/dim]")
         console.print("  [dim]root — one pattern per line, e.g. .trinity/passport.json or docs.local/[/dim]")

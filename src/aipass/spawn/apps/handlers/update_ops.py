@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.7.1
+# Version: 2.8.0
 # Created: 2026-03-07
-# Modified: 2026-11-17
+# Modified: 2026-11-23
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from aipass.memory import find_repo_root
+from aipass.memory import declared_roots, find_repo_root
 from aipass.prax import logger
 
 from aipass.spawn.apps.handlers.json_merge import backup_json, deep_merge
@@ -29,7 +29,13 @@ from aipass.spawn.apps.handlers.meta_ops import (
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES, copy_undecodable
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
-from aipass.spawn.apps.handlers.registry import find_registry, fleet_rows, load_registry, branches_as_list
+from aipass.spawn.apps.handlers.registry import (
+    aipass_home,
+    branches_as_list,
+    find_registry,
+    fleet_rows,
+    load_registry,
+)
 from aipass.spawn.apps.handlers.update_ignore import IGNORE_NAME, is_ignored, read_ignore
 from aipass.spawn.apps.handlers.json import json_handler
 
@@ -106,10 +112,19 @@ def update_branch(
     md_detail: list[dict] = []
     gitignore_state: str | None = None
 
-    registry_path = Path(registry_path) if registry_path else find_registry()
-    branch_dir = _resolve_branch_path(branch_name, registry_path) if registry_path else None
-    if branch_dir is None or registry_path is None:
-        return _result(branch_name, False, counts, [f"Branch '{branch_name}' not found in registry"], dry_run)
+    if registry_path:
+        registry_path = Path(registry_path)
+    else:
+        registry_path, refusal = resolve_citizen_registry(branch_name)
+        if registry_path is None:
+            return _result(branch_name, False, counts, [refusal], dry_run)
+    branch_dir = _resolve_branch_path(branch_name, registry_path)
+    if branch_dir is None:
+        return _result(branch_name, False, counts, [f"Branch '{branch_name}' not found in {registry_path}"], dry_run)
+    # A row path climbing out of its project would aim the writes at a directory no registry seals.
+    if not branch_dir.is_relative_to(registry_path.parent.resolve()):
+        refusal = f"Branch '{branch_name}' resolves to {branch_dir}, outside its project {registry_path.parent}"
+        return _result(branch_name, False, counts, [refusal], dry_run)
     if not branch_dir.is_dir():
         return _result(branch_name, False, counts, [f"Branch directory does not exist: {branch_dir}"], dry_run)
 
@@ -388,6 +403,36 @@ def _read_identity(branch_dir: Path) -> dict:
         return {**identity, "citizen_class": resolve_template_class(identity)}
     except ValueError as e:
         raise ValueError(f"{e} (passport: {passport_path})") from e
+
+
+def resolve_citizen_registry(branch_name: str) -> tuple[Path | None, str]:
+    """(registry, "") for the one registry naming branch_name; (None, refusal) when none or several do.
+
+    Looked in: the registry above the cwd, then every citizen memory's door answers (core, residents,
+    declared roots), the door adopt-citizen walks."""
+    name = branch_name.lower()
+    home = aipass_home()
+    hits: dict[Path, Path] = {}
+    local = find_registry()
+    local_dir = _resolve_branch_path(name, local) if local is not None else None
+    if local is not None and local_dir is not None:
+        hits[local.resolve()] = local_dir
+    for citizen in fleet_rows(home):
+        registry = citizen["registry_path"]
+        if citizen["name"].lower() == name and registry is not None:
+            hits.setdefault(Path(registry).resolve(), Path(citizen["path"]))
+    if len(hits) == 1:
+        return next(iter(hits)), ""
+    if hits:
+        found = "; ".join(f"{path} ({registry.name})" for registry, path in sorted(hits.items()))
+        return None, f"Branch '{name}' is in {len(hits)} registries, refused by name; nothing written: {found}"
+    residents = len(list((home / "projects").glob("*/*_REGISTRY.json")))
+    roots = len(declared_roots(home))
+    return None, (
+        f"Branch '{name}' not found in AIPASS_REGISTRY.json, "
+        f"{residents} project {'registry' if residents == 1 else 'registries'}, "
+        f"{roots} declared root{'' if roots == 1 else 's'}"
+    )
 
 
 def _resolve_branch_path(branch_name: str, registry_path: Path | str | None = None) -> Path | None:
