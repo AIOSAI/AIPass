@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: search.py
 # Description: Search Orchestration Module
-# Version: 0.8.0
+# Version: 0.8.1
 # Created: 2025-11-27
 # Modified: 2026-11-23
 # =============================================
@@ -109,7 +109,9 @@ def handle_command(command: str, args: List[str]) -> bool:
                 f"[yellow]@{store['branch']}:[/yellow] no local store at {store['db_path']} - nothing has rolled yet"
             )
             return True
-        show_search_results(query, memory_type=memory_type, n_results=n_results, db_path=store["db_path"])
+        show_search_results(
+            query, memory_type=memory_type, n_results=n_results, db_path=store["db_path"], owner=store.get("owner")
+        )
         return True
 
     return False
@@ -181,6 +183,7 @@ def show_search_results(
     memory_type: str | None = None,
     n_results: int = 5,
     db_path: Path | None = None,
+    owner: str | None = None,
 ) -> bool:
     """Execute semantic search via handler and display results with Rich; ``db_path`` None is the global store."""
     console.print()
@@ -199,7 +202,7 @@ def show_search_results(
 
     try:
         result = _handler_execute_search(
-            query=query, branch=branch, memory_type=memory_type, n_results=n_results, db_path=db_path
+            query=query, branch=branch, memory_type=memory_type, n_results=n_results, db_path=db_path, owner=owner
         )
     except Exception as exc:
         logger.error(f"[search] Handler raised exception: {exc}")

@@ -21,7 +21,7 @@ lane: where a todo goes, when, and what refuses.
 | **Shape** | `{number, date, task, priority?}` — no `status`. What is on the pad is the status; done = deleted. |
 | **Pad count** | `rollover.defaults.local.todos.count` — **10** — resolved per branch by `config_loader.get_todos_count` (a `per_branch.<b>.local` block without a todos count falls back to the default). `config get` shows it; `config set` refuses `todos` in v1. No verb reads it as a literal. |
 | **Task cap** | `entry_limits.entry_types.todos.max_chars` — **100**, draft to 80. |
-| **Backlog** | `<repo_root>/.backup/todo/<branch_dir>/backlog.json`, keyed by the branch DIRECTORY name. Two in-scope branches sharing a directory name are refused by name. |
+| **Backlog** | `<project root>/.backup/todo/<branch_dir>/backlog.json`, keyed by the branch DIRECTORY name. The project root is the AIPass root for core and resident branches, and a declared external's own root (the folder holding its `*_REGISTRY.json`) for an external; paths display relative to that root. Two in-scope branches sharing a directory name are refused by name. |
 | **Vectors** | Never. File only — no embedding, no ChromaDB, no subprocess. |
 
 ---

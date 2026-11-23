@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tab_renderer.py
 # Description: Config-generated state-tabs for .trinity memory files
-# Version: 1.7.1
+# Version: 1.7.2
 # Created: 2026-06-25
-# Modified: 2026-11-18
+# Modified: 2026-11-23
 # =============================================
 
 """
@@ -94,7 +94,13 @@ def todo_context(
     """
     if not branch_dir:
         return {"branch_dir": None, "next_number": None}
-    state = backlog if backlog is not None else todo_roll.read_backlog(todo_roll.backlog_path_for(branch_dir))
+    if backlog is None:
+        try:
+            backlog = todo_roll.read_backlog(todo_roll.backlog_path_for(branch_dir))
+        except todo_roll.registry_scope.RegistryUnreadable as exc:
+            logger.warning(f"[tab_renderer] @{branch_dir} backlog not located: {exc}")
+            backlog = {"error": f"backlog not located: {exc}"}
+    state = backlog
     if state.get("error") or not isinstance(pad, list):
         logger.info(
             f"[tab_renderer] @{branch_dir} todos tab: next number unknown ({state.get('error') or 'pad not a list'})"

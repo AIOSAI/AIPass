@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: query_executor.py
 # Description: Search Query Execution Handler
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-03-08
 # Modified: 2026-11-23
 # =============================================
@@ -19,6 +19,9 @@ from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.apps.handlers.rollover import orchestrator, todo_roll
 from aipass.memory.apps.handlers.storage.lane import CHROMA_SUBPROCESS_SCRIPT, EMBED_SUBPROCESS_SCRIPT, run_json
+
+# The store chroma_subprocess writes when handed no db_path.
+_GLOBAL_STORE = (Path(CHROMA_SUBPROCESS_SCRIPT).resolve().parent.parent.parent.parent / ".chroma").resolve()
 
 MIN_SIMILARITY_THRESHOLD = 0.40
 
@@ -42,8 +45,9 @@ def search_vectors_subprocess(
     memory_type: str | None = None,
     n_results: int = 5,
     db_path: str | Path | None = None,
+    owner: str | None = None,
 ) -> dict:
-    """Search vectors via subprocess (db_path None means the global store)."""
+    """Search vectors via subprocess (db_path None means the global store; ``owner`` narrows a shared store)."""
     input_data = {
         "operation": "search_vectors",
         "query_embedding": query_embedding,
@@ -51,6 +55,7 @@ def search_vectors_subprocess(
         "memory_type": memory_type,
         "n_results": n_results,
         "db_path": str(db_path) if db_path else None,
+        "owner": owner,
     }
 
     return run_json(CHROMA_SUBPROCESS_SCRIPT, input_data, timeout=60, label="Search operation")
@@ -116,13 +121,17 @@ def _fetch_plan_by_metadata(plan_id: str, n_results: int, db_path: Path | None =
     return data.get("results", [])
 
 
-def _pin_plan_id_matches(query: str, filtered: list, n_results: int, db_path: Path | None = None) -> list:
-    """Pin exact plan-ID matches (fetched by metadata, not similarity) to the top of results."""
+def _pin_plan_id_matches(
+    query: str, filtered: list, n_results: int, db_path: Path | None = None, owner: str | None = None
+) -> list:
+    """Pin exact plan-ID matches (fetched by metadata, not similarity) to the top; ``owner`` keeps only its own."""
     plan_id = _extract_plan_id(query)
     if not plan_id:
         return filtered
 
     exact = _fetch_plan_by_metadata(plan_id, n_results, db_path)
+    if exact and owner:
+        exact = [r for r in exact if (r.get("metadata") or {}).get("branch") == owner]
     if not exact:
         return filtered
 
@@ -156,7 +165,9 @@ def caller_local_store() -> Dict[str, Any]:
     db_path, reason = orchestrator.local_store_lookup(name, create=False)
     if db_path is None:
         return {"refusal": f"search reads your own branch's store and @{name} has none in the memory scope ({reason})"}
-    return {"branch": name, "db_path": db_path}
+    # The global store is also @memory's local one: its seat reads only its own rows there.
+    owner = name if Path(db_path).resolve() == _GLOBAL_STORE else None
+    return {"branch": name, "db_path": db_path, "owner": owner}
 
 
 def execute_search(
@@ -165,8 +176,9 @@ def execute_search(
     memory_type: str | None = None,
     n_results: int = 5,
     db_path: Path | None = None,
+    owner: str | None = None,
 ) -> Dict[str, Any]:
-    """Execute semantic search: encode query, search vectors, filter results; ``db_path`` None is the global store."""
+    """Encode, search, filter; ``db_path`` None is the global store, ``owner`` narrows a shared one to its rows."""
     embed_result = encode_query_subprocess(query)
 
     if not embed_result["success"]:
@@ -182,7 +194,12 @@ def execute_search(
     logger.info(f"[search] Encoded query to {len(query_embedding)}-dim vector")
 
     search_result = search_vectors_subprocess(
-        query_embedding=query_embedding, branch=branch, memory_type=memory_type, n_results=n_results, db_path=db_path
+        query_embedding=query_embedding,
+        branch=branch,
+        memory_type=memory_type,
+        n_results=n_results,
+        db_path=db_path,
+        owner=owner,
     )
 
     if not search_result["success"]:
@@ -202,7 +219,7 @@ def execute_search(
 
     filtered_results = _filter_results(raw_results, n_results)
 
-    filtered_results = _pin_plan_id_matches(query, filtered_results, n_results, db_path)
+    filtered_results = _pin_plan_id_matches(query, filtered_results, n_results, db_path, owner)
 
     logger.info(f"[search] Filtered to {len(filtered_results)} relevant results")
 

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_search.py
 # Description: Tests for the search orchestration module
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-24
 # Modified: 2026-11-23
 # =============================================
@@ -92,7 +92,7 @@ class TestHandleCommandRouting:
         result = search_mod.handle_command("search", ["hello", "world"])
 
         assert result is True
-        mock_show.assert_called_once_with("hello world", memory_type=None, n_results=5, db_path=_LOCAL)
+        mock_show.assert_called_once_with("hello world", memory_type=None, n_results=5, db_path=_LOCAL, owner=None)
 
     def test_unknown_command_returns_false(self, monkeypatch):
         """An unrecognised command should return False."""
@@ -110,7 +110,7 @@ class TestHandleCommandRouting:
 
         assert result is True
         mocks["execute_search"].assert_called_once_with(
-            query="some query", branch=None, memory_type=None, n_results=5, db_path=_LOCAL
+            query="some query", branch=None, memory_type=None, n_results=5, db_path=_LOCAL, owner=None
         )
         mocks["error"].assert_not_called()
 
@@ -206,7 +206,7 @@ class TestHandleCommandArgParsing:
 
         search_mod.handle_command("search", ["test", "--type", "observations"])
 
-        mock_show.assert_called_once_with("test", memory_type="observations", n_results=5, db_path=_LOCAL)
+        mock_show.assert_called_once_with("test", memory_type="observations", n_results=5, db_path=_LOCAL, owner=None)
 
     def test_n_option_parsed(self, monkeypatch):
         """--n value should override the default n_results."""
@@ -216,7 +216,7 @@ class TestHandleCommandArgParsing:
 
         search_mod.handle_command("search", ["test", "--n", "10"])
 
-        mock_show.assert_called_once_with("test", memory_type=None, n_results=10, db_path=_LOCAL)
+        mock_show.assert_called_once_with("test", memory_type=None, n_results=10, db_path=_LOCAL, owner=None)
 
     def test_all_options_combined(self, monkeypatch):
         """All options together should be correctly parsed."""
@@ -345,7 +345,7 @@ class TestSearchIsLocalByDefault:
         mocks["error"].assert_not_called()
         mocks["store"].assert_not_called()
         mocks["execute_search"].assert_called_once_with(
-            query="q", branch=None, memory_type=None, n_results=5, db_path=None
+            query="q", branch=None, memory_type=None, n_results=5, db_path=None, owner=None
         )
 
     def test_the_global_form_refuses_another_seat_with_exit_2(self, monkeypatch, capsys):
@@ -369,7 +369,7 @@ class TestSearchIsLocalByDefault:
         search_mod.handle_command("search", ["global", "q", "--branch", "@wren", "--type", "local"])
 
         mocks["execute_search"].assert_called_once_with(
-            query="q", branch="wren", memory_type="local", n_results=5, db_path=None
+            query="q", branch="wren", memory_type="local", n_results=5, db_path=None, owner=None
         )
 
     @pytest.mark.parametrize(
@@ -518,7 +518,7 @@ class TestShowSearchResults:
 
         assert result is True
         mocks["execute_search"].assert_called_once_with(
-            query="test query", branch=None, memory_type=None, n_results=5, db_path=None
+            query="test query", branch=None, memory_type=None, n_results=5, db_path=None, owner=None
         )
 
     def test_failed_search_returns_false(self, monkeypatch):
@@ -556,7 +556,7 @@ class TestShowSearchResults:
         search_mod.show_search_results("q", branch="SENTRY", memory_type="local", n_results=3)
 
         mocks["execute_search"].assert_called_once_with(
-            query="q", branch="SENTRY", memory_type="local", n_results=3, db_path=None
+            query="q", branch="SENTRY", memory_type="local", n_results=3, db_path=None, owner=None
         )
 
     def test_handler_timeout_returns_false(self, monkeypatch):

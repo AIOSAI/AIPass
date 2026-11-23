@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: write_fence.py
 # Description: The one fence on memory's writes — services write where they serve: the AIPass root and declared external branches
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-18
 # Modified: 2026-11-23
 # =============================================
@@ -30,12 +30,14 @@ def outside_root(target: Path, root: Path) -> str | None:
 
 
 def _in_declared_branch(target: Path, home: Path) -> bool:
-    """Is resolved *target* a declared external branch directory, or under one?"""
+    """Is resolved *target* in a declared external branch, or in that branch's own todo backlog dir?"""
     from aipass.memory.apps.handlers.monitor import registry_scope
+    from aipass.memory.apps.handlers.rollover import todo_roll
 
     for item in registry_scope.external_branches(home):
-        branch = Path(item["path"]).resolve()
-        if target == branch or branch in target.parents:
+        backups = todo_roll.project_root_of(item["path"], home) / todo_roll.BACKUP_DIR
+        allowed = [Path(item["path"]).resolve(), (backups / todo_roll.TODO_DIR / item["name"]).resolve()]
+        if any(target == spot or spot in target.parents for spot in allowed):
             return True
     return False
 

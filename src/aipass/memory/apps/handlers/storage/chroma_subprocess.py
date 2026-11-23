@@ -390,11 +390,15 @@ def _branch_collections(collection_names, branch):
     ]
 
 
-def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5, db_path=None):
-    """Search for similar vectors."""
+def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5, db_path=None, owner=None):
+    """Search for similar vectors; ``owner`` reads only that citizen's rows of a shared store (its own collections
+    and the ``flow_plans`` chunks tagged with its branch)."""
     client = _get_client(db_path)
 
-    if branch and memory_type:
+    if owner:
+        names = [col.name for col in client.list_collections()]
+        collection_names = _branch_collections(names, owner) + [c for c in names if c == "flow_plans"]
+    elif branch and memory_type:
         collection_names = [f"{branch.lower()}_{memory_type.lower()}"]
     else:
         all_collections = client.list_collections()
@@ -412,7 +416,8 @@ def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5,
     for cname in collection_names:
         try:
             collection = client.get_collection(cname, embedding_function=None)
-            results = collection.query(query_embeddings=[query_embedding], n_results=n_results)
+            mine = {"where": {"branch": owner}} if owner and cname == "flow_plans" else {}
+            results = collection.query(query_embeddings=[query_embedding], n_results=n_results, **mine)
             if results["documents"] and results["documents"][0]:
                 for i, doc in enumerate(results["documents"][0]):
                     all_results.append(
@@ -478,6 +483,7 @@ def main(stdin: TextIO | None = None):
                 memory_type=input_data.get("memory_type"),
                 n_results=input_data.get("n_results", 5),
                 db_path=input_data.get("db_path"),
+                owner=input_data.get("owner"),
             )
         elif operation == "check_plan":
             result = _check_plan(plan_label=input_data.get("plan_label"), db_path=input_data.get("db_path"))

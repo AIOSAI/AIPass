@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_handlers_fence.py
-# Description: The handlers fence (foreign importer refused, kin and door pass) and the write fence (where services write)
-# Version: 1.1.0
+# Description: The handlers fence (foreign importer refused, kin and door pass) and the write fence
+# Version: 1.1.1
 # Created: 2026-10-08
 # Modified: 2026-11-23
 # =============================================
 
-"""Tests for apps/handlers/__init__.py, the import fence, in a fresh interpreter per case; and apps/handlers/write_fence.py."""
+"""Tests for apps/handlers/__init__.py (the import fence, a fresh interpreter per case) and write_fence.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that apps/handlers/__init__.py parses and imports
@@ -116,6 +116,13 @@ class TestServicesWriteWhereTheyServe:
             assert write_fence.fence_write(branch / ".trinity" / "local.json", lane="probe") is None
             assert write_fence.fence_write(branch / ".chroma", lane="probe") is None
 
+    def test_an_externals_own_backlog_passes_and_nothing_else_in_its_project(self, declared_externals):
+        """An external's todo backlog lives in its own project; the fence admits that one directory, no wider."""
+        for root, name in ((declared_externals.wren.parent, "wren"), (declared_externals.seed, "grow")):
+            assert write_fence.fence_write(root / ".backup/todo" / name / "backlog.json", lane="probe") is None
+            for wider in (root / ".backup/todo/other/backlog.json", root / ".backup/other.json"):
+                assert "or any declared external branch" in str(write_fence.fence_write(wider, lane="probe"))
+
     def test_the_root_still_passes(self, declared_externals):
         """Positive control: admitting externals does not narrow the home root."""
         assert write_fence.fence_write(declared_externals.home / "src" / "x" / "local.json", lane="probe") is None
@@ -131,7 +138,7 @@ class TestServicesWriteWhereTheyServe:
         assert "never write one" not in refusal
 
     def test_a_declared_root_outside_its_branches_is_refused(self, declared_externals):
-        """The declaration admits the root's BRANCHES: its registry, a sibling directory and the root itself stay out."""
+        """The declaration admits the root's BRANCHES: its registry, a sibling dir and the root itself stay out."""
         seed = declared_externals.seed
         for target in (seed, seed / "SEED_REGISTRY.json", seed / "src" / "other" / "local.json", seed / "src" / "grow"):
             assert SERVED_RULE in (write_fence.fence_write(target, lane="probe") or ""), target

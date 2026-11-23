@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_rollover_pipeline_todo.py
 # Description: Rollover pipeline - the todo pad rolls to a backlog file, the backlog trim and restore
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
 # Modified: 2026-11-23
 # Category: memory/tests
@@ -921,7 +921,7 @@ class TestTodoRestore:
 
 
 class TestAnExternalPadRolls:
-    """`rollover run --branch @wren` resolves a declared external, and its pad rolls into home's .backup/todo/."""
+    """`rollover run --branch @wren` resolves a declared external, and its pad rolls into its OWN project's .backup/todo/."""
 
     @pytest.fixture
     def tr(self, tmp_path, monkeypatch, declared_externals):
@@ -936,7 +936,12 @@ class TestAnExternalPadRolls:
 
         assert (wren["error"], wren["path"]) == (None, declared_externals.wren)
         assert (grow["error"], grow["path"]) == (None, declared_externals.grow)
-        assert wren["backlog"] == declared_externals.home / ".backup" / "todo" / "wren" / "backlog.json"
+        assert wren["backlog"] == declared_externals.wren.parent / ".backup" / "todo" / "wren" / "backlog.json"
+        assert grow["backlog"] == declared_externals.seed / ".backup" / "todo" / "grow" / "backlog.json"
+        assert (wren["backlog_display"], grow["backlog_display"]) == (
+            ".backup/todo/wren/backlog.json",
+            ".backup/todo/grow/backlog.json",
+        )
 
     def test_the_external_pad_rolls_and_is_pruned(self, tr, declared_externals):
         local = _mint_pad(declared_externals.wren.parent, [_todo(n) for n in range(1, 13)], name="wren")

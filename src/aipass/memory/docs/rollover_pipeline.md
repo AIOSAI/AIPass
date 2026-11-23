@@ -157,8 +157,9 @@ A write is admitted when its **resolved** path is the AIPass root or under it, o
 directory of a declared root or under one (`registry_scope.external_branches()`: a row in that
 root's registry with a passport on disk). Nothing else. Containment is judged on resolved paths,
 never `startswith`, so `/x/aipass_other` is not inside `/x/aipass` and a symlink cannot carry a write
-out. A declared root's own files and directories outside its branches stay refused, and so does a
-listed branch with no passport.
+out. The one admitted path outside a branch directory is that branch's own todo backlog directory in
+its project, `<declared root>/.backup/todo/<branch>/`. A declared root's other files and directories
+stay refused, and so does a listed branch with no passport.
 
 A refusal is an ERROR naming the lane, the path and the root, and a `write_fence_refused` line in
 the operation log. A root that resolves to the filesystem root fences nothing, so it admits nothing,
@@ -180,8 +181,9 @@ outright, since two pads would merge into one backlog.
 
 A declared external rolls like a core branch: its files are trimmed in place, its entries are stored
 in its own `<branch>/.chroma` and in the global store, its todo pad rolls to
-`.backup/todo/<branch>/backlog.json` under the AIPass root, and its frame, tabs and template receipt
-are written in its own `.trinity/`.
+`.backup/todo/<branch>/backlog.json` under its own project root (the declared root holding its
+registry), never the AIPass root, and its frame, tabs and template receipt are written in its own
+`.trinity/`.
 
 ## Plans land in both stores
 
@@ -204,7 +206,8 @@ idempotent.
 into each write-scope branch's local store: `<branch>_local`, `<branch>_observations` and the
 `flow_plans` chunks it owns. A chunk's owner is its `branch` tag. An untagged chunk uses its
 `project` with the Branch line in any chunk of the same file, or in the archived file itself. A
-chunk with no `project` tag has no owner and stays global only. Rows are copied as stored (ids,
+chunk with no `project` tag whose `source_file` is in the AIPass archive is project AIPass; any other
+untagged chunk has no owner, stays global only and is logged once per file. Rows are copied as stored (ids,
 embeddings, documents, metadatas), with no re-embedding and no renaming, so a capitalised
 `FLOW_plans_...` id stays as it is. `add_missing` never touches an id the local store already holds,
 so a re-run adds nothing.

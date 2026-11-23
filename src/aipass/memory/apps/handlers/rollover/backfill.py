@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: backfill.py
 # Description: Backfill Handler: copy each citizen's own rows from the global store into its local .chroma
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-23
 # Modified: 2026-11-23
 # =============================================
@@ -51,7 +51,8 @@ def _plan_owners(plans: Dict[str, Any]) -> List[str | None]:
     """Per global plan chunk, the resolved path of the citizen that owns it, or None.
 
     The ``branch`` tag first, then a Branch line in any chunk of the same file, then the archived file,
-    always resolved inside the chunk's ``project``. A chunk with no ``project`` tag has no owner.
+    always resolved inside the chunk's ``project``. An untagged chunk whose file sits in the AIPass
+    archive is project AIPass; any other untagged chunk has no owner and is logged once per file.
     """
     root = plans_processor._find_repo_root()
     plans_dir = config_loader.section("plans").get("path", ".backup/processed_plans")
@@ -65,7 +66,11 @@ def _plan_owners(plans: Dict[str, Any]) -> List[str | None]:
     resolved: Dict[tuple, str | None] = {}
     for (project, source), rows in groups.items():
         if not project:
-            continue
+            host_archive = archives.get(root.name)
+            if not (host_archive and source and Path(source).name == source and (host_archive / source).is_file()):
+                logger.info(f"[backfill] {source}: no project tag and not in the AIPass archive - stays global only")
+                continue
+            project = root.name
         metas = [plans["metadatas"][i] or {} for i in rows]
         value = next((m["branch"] for m in metas if m.get("branch")), None)
         lines = (plans_processor.branch_line(plans["documents"][i] or "") for i in rows)

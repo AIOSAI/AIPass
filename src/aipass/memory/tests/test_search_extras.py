@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: tests/test_search_extras.py
 # Description: Tests for search query_executor subprocess encoding and vector search
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-25
 # Modified: 2026-11-23
 # Category: memory/tests
@@ -283,14 +283,14 @@ class TestTheCallersOwnStore:
     def test_the_verified_caller_names_its_store_and_nothing_is_created(self, monkeypatch, tmp_path):
         wren = self._fleet(monkeypatch, tmp_path, "@wren")
 
-        assert query_executor.caller_local_store() == {"branch": "wren", "db_path": wren / ".chroma"}
+        assert query_executor.caller_local_store() == {"branch": "wren", "db_path": wren / ".chroma", "owner": None}
         assert not (wren / ".chroma").exists()
 
     def test_with_no_verified_caller_the_cwd_branch_answers(self, monkeypatch, tmp_path):
         wren = self._fleet(monkeypatch, tmp_path, "")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(wren / "sub"))
 
-        assert query_executor.caller_local_store() == {"branch": "wren", "db_path": wren / ".chroma"}
+        assert query_executor.caller_local_store() == {"branch": "wren", "db_path": wren / ".chroma", "owner": None}
 
     def test_neither_is_refused_in_one_sentence(self, monkeypatch, tmp_path):
         self._fleet(monkeypatch, tmp_path, "")
@@ -314,6 +314,42 @@ class TestTheCallersOwnStore:
         monkeypatch.setattr(caller_gate, "verified_caller", dark)
 
         assert "rail is unavailable (ImportError('no ai_mail'))" in query_executor.caller_local_store()["refusal"]
+
+
+class TestMemorysLocalSearchIsItsOwnRowsOnly:
+    """@memory's local store is the global store, so its seat searches as owner: never another branch's row."""
+
+    def test_the_seat_whose_store_is_the_global_one_searches_as_its_owner(self, monkeypatch, tmp_path):
+        home = tmp_path / "memory"
+        home.mkdir()
+        monkeypatch.setattr(detector, "write_scope", lambda: [{"name": "memory", "path": str(home)}])
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: ("@memory", False))
+        monkeypatch.setattr(query_executor, "_GLOBAL_STORE", (home / ".chroma").resolve())
+
+        assert query_executor.caller_local_store()["owner"] == "memory"
+
+    def test_the_owner_reaches_the_store_and_the_pin_keeps_only_its_plans(self, monkeypatch, tmp_path):
+        sent = []
+        pins = [
+            {"id": "mine", "metadata": {"branch": "memory"}, "document": "a", "collection": "flow_plans"},
+            {"id": "wrens", "metadata": {"branch": "wren"}, "document": "b", "collection": "flow_plans"},
+        ]
+
+        def store(script, data, **kwargs):
+            sent.append((data["operation"], data.get("owner")))
+            if data["operation"] == "get_by_source":
+                return {"success": True, "results": [dict(p) for p in pins]}
+            return {"success": True, "results": [], "collections_searched": 2, "total_results": 0}
+
+        monkeypatch.setattr(query_executor, "run_json", store)
+        monkeypatch.setattr(
+            query_executor, "encode_query_subprocess", lambda query: {"success": True, "embedding": [0.0]}
+        )
+
+        found = query_executor.execute_search("FPLAN-1204 lane", db_path=tmp_path, owner="memory")
+
+        assert sent[0] == ("search_vectors", "memory")
+        assert [r["id"] for r in found["results"]] == ["mine"]
 
 
 class TestALocalSearchReadsOnlyItsStore:

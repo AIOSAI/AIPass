@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: tests/test_orchestrator_exec.py
 # Description: Tests for the orchestrator execute_rollover pipeline
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-26
 # Modified: 2026-11-23
 # Category: memory/tests
@@ -881,7 +881,7 @@ def _read(collection, store):
 
 
 class TestTheBackfillCopiesEachCitizensGlobalRowsIntoItsOwnStore:
-    """Global rows reach the local store as stored, once; a dry run counts and writes nothing; other seats are refused."""
+    """Global rows reach the local store as stored, once; a dry run writes nothing; other seats are refused."""
 
     def _world(self, declared_externals, monkeypatch, tmp_path, seat="@memory"):
         world = declared_externals
@@ -972,6 +972,26 @@ class TestTheBackfillCopiesEachCitizensGlobalRowsIntoItsOwnStore:
             "@grow: grow_local copy 0, present 0; grow_observations copy 0, present 0; flow_plans copy 0, present 3"
             in dry["lines"]
         )
+
+    def test_an_untagged_chunk_from_the_aipass_archive_is_aipass_and_finds_its_owner(
+        self, declared_externals, monkeypatch, tmp_path
+    ):
+        """No project tag: a file in AIPass's archive is project AIPass; one in no archive stays global."""
+        world, _ = self._world(declared_externals, monkeypatch, tmp_path)
+        row = {"name": "CANARY", "path": "src/canary", "email": "@canary", "status": "active"}
+        (world.home / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": [row]}), encoding="utf-8")
+        (world.home / "src" / "canary").mkdir(parents=True)
+        archive = world.home / ".backup" / "processed_plans"
+        archive.mkdir(parents=True)
+        (archive / "F6.md").write_text("# Plan\n**Branch**: canary\n", encoding="utf-8")
+        chunk = {"type": "plan", "section": "s", "source_file": "F6.md"}
+        rows = {"ids": ["FLOW_plans_h1"], "embeddings": [[0.9, 0.2, 0.3]], "documents": ["body"], "metadatas": [chunk]}
+        _in_process_chroma(None, {"operation": "add_missing", "collection_name": PLANS, "metadata": {}, **rows})
+
+        result = backfill.backfill_local()
+
+        assert any(line.startswith("@canary:") and "flow_plans copy 1," in line for line in result["lines"]), result
+        assert result["plans_unowned"] == 2
 
     def test_another_seat_is_refused_and_nothing_is_read(self, declared_externals, monkeypatch, tmp_path):
         world, _ = self._world(declared_externals, monkeypatch, tmp_path, seat="@canary")

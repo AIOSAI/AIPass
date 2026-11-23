@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_chroma_source_match.py
 # Description: Tests for source_file matching in the ChromaDB subprocess handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-23
 # Modified: 2026-11-23
 # =============================================
@@ -271,7 +271,8 @@ class _SearchCollection:
         self.name = name
         self.metadata = metadata
 
-    def query(self, query_embeddings=None, n_results=5):
+    def query(self, query_embeddings=None, n_results=5, where=None):
+        self.where = where
         return {
             "documents": [[f"doc in {self.name}"]],
             "metadatas": [[{}]],
@@ -459,3 +460,15 @@ class TestTheBackfillPairCopiesRowsAsStored:
 
         assert (read["success"], read["exists"]) == (True, False)
         assert [read[f] for f in ("ids", "embeddings", "documents", "metadatas")] == [[], [], [], []]
+
+
+class TestAnOwnerReadsOnlyItsRowsOfASharedStore:
+    """The global store is also @memory's local one: its seat reads memory's collections and its own plan chunks."""
+
+    def test_owner_reads_its_collections_and_only_its_tagged_plans(self, store, run):
+        result = run("search_vectors", query_embedding=[0.1], owner="memory")
+
+        assert store.queried == ["memory_pool_docs", "flow_plans"]
+        where = {c.name: getattr(c, "where", "unqueried") for c in store._collections}
+        assert where["flow_plans"] == {"branch": "memory"} and where["memory_pool_docs"] is None
+        assert {r["collection"] for r in result["results"]} == {"memory_pool_docs", "flow_plans"}

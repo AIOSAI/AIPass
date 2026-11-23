@@ -21,7 +21,7 @@ the global store already holds into each local store, once. See
 
 | Form | Store | Who may run it | Filters |
 |---|---|---|---|
-| `drone @memory search <query>` | the caller's own `<branch>/.chroma`, every collection in it | any seat, the admin included | `--type`, `--n` |
+| `drone @memory search <query>` | the caller's own `<branch>/.chroma`, every collection in it (@memory: its own rows only) | any seat, the admin included | `--type`, `--n` |
 | `drone @memory search global <query>` | `memory/.chroma`, every collection | `@memory`'s seat and the verified admin only | `--branch`, `--type`, `--n` |
 
 **Whose store the local form reads.** `query_executor.caller_local_store()` asks the verified-caller
@@ -53,7 +53,9 @@ A store with no `flow_plans` yet answers `exists: false` from `get_by_source`: n
 line, never a warning. A store that fails is still a WARNING.
 
 **The @memory seat's local store is the global store.** `memory/.chroma` is both, so a local search
-from `@memory`'s own seat reads every collection.
+from `@memory`'s own seat searches as owner: its `memory_*` collections and only the `flow_plans`
+chunks tagged `branch: memory`, never another branch's row. `search global` reads the whole store.
+Untagged older plan chunks whose owner is @memory are reached through `search global`.
 
 ---
 
