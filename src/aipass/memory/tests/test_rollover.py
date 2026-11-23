@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_rollover.py
 # Description: Tests for the rollover module's command routing and SUBCOMMANDS
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-23
 # Category: memory/tests
 # =============================================
 
@@ -22,6 +22,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.cli import error as cli_error, reset_command_state, resolve_exit
+from aipass.memory.apps.handlers.cli import caller_gate as real_caller_gate
+from aipass.memory.apps.handlers.rollover import backfill as real_backfill
 from aipass.memory.apps.modules import rollover as rollover_module
 
 
@@ -247,10 +250,10 @@ class TestSubcommands:
         rollover, _ = _import_rollover(monkeypatch)
         assert "check" in rollover.SUBCOMMANDS
 
-    def test_subcommands_are_the_published_four_with_one_line_help(self, monkeypatch):
-        """The map IS the help surface: the four verbs are named, each with a non-empty one-line text."""
+    def test_subcommands_are_the_published_five_with_one_line_help(self, monkeypatch):
+        """The map IS the help surface: the five verbs are named, each with a non-empty one-line text."""
         rollover, _ = _import_rollover(monkeypatch)
-        assert set(rollover.SUBCOMMANDS) == {"run", "status", "check", "push"}
+        assert set(rollover.SUBCOMMANDS) == {"run", "status", "check", "push", "backfill-local"}
         for key, value in rollover.SUBCOMMANDS.items():
             assert value.strip(), f"{key} has no description — --help would print a bare verb"
             assert "\n" not in value, f"{key}'s description spans lines and would break the help table"
@@ -261,6 +264,39 @@ def _record(monkeypatch, module, name):
     calls = []
     monkeypatch.setattr(module, name, lambda *a, **k: calls.append((a, k)))
     return calls
+
+
+class TestBackfillLocal:
+    """`rollover backfill-local` hands --branch and --apply to the handler and prints its lines; a refused seat exits 2."""
+
+    def test_the_flags_reach_the_handler_and_its_lines_are_printed(self, monkeypatch, capsys):
+        rollover, mocks = _import_rollover(monkeypatch)
+        handler = MagicMock()
+        handler.backfill_local.return_value = {"success": True, "lines": ["@wren: wren_local added 1"]}
+        monkeypatch.setattr(rollover, "backfill", handler)
+
+        assert rollover.handle_command("rollover", ["backfill-local", "--apply", "--branch", "@wren"]) is True
+
+        handler.backfill_local.assert_called_once_with("@wren", True)
+        assert "@wren: wren_local added 1" in capsys.readouterr().out
+        mocks["error"].assert_not_called()
+
+    def test_another_seat_gets_the_mail_devpulse_sentence_and_exit_2(self, monkeypatch, capsys):
+        rollover, _ = _import_rollover(monkeypatch)
+        monkeypatch.setattr(rollover, "backfill", real_backfill)
+        monkeypatch.setattr(rollover, "error", cli_error)
+        monkeypatch.setattr(real_caller_gate, "verified_caller", lambda: ("@canary", False))
+        read = MagicMock()
+        monkeypatch.setattr(real_backfill, "run_json", read)
+        reset_command_state()
+
+        assert rollover.handle_command("rollover", ["backfill-local"]) is True
+
+        assert resolve_exit(True) == 2
+        err = " ".join(capsys.readouterr().err.split())
+        assert "rollover backfill-local reads every citizen's global rows into its local store" in err
+        assert "not @canary - mail @devpulse, the verified admin" in err
+        read.assert_not_called()
 
 
 class TestHandleCommand:

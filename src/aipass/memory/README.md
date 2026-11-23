@@ -2,7 +2,7 @@
 
 # MEMORY
 
-**Purpose:** The central memory archive for AIPass. Archives a branch's `.trinity/` entries into searchable vectors when the files outgrow their keep counts, answers semantic queries across every branch's history, holds the entry shape and the character caps the whole fleet writes against, and keeps each branch's todo pad and its backlog.
+**Purpose:** The central memory archive for AIPass. Archives a branch's `.trinity/` entries into searchable vectors when the files outgrow their keep counts, answers semantic queries over each branch's own archived history (and, for @memory and the admin, the global store of every branch), holds the entry shape and the character caps the whole fleet writes against, and keeps each branch's todo pad and its backlog.
 **Module:** `aipass.memory`
 **Created:** 2026-03-07
 
@@ -11,7 +11,8 @@
 ## Quick Start
 
 ```bash
-drone @memory search "query"            # Semantic search across every branch's archived memory
+drone @memory search "query"            # Semantic search of your own branch's local store
+drone @memory search global "query"     # The global store, every branch (@memory and the admin only)
 drone @memory rollover check            # Dry run — what is over its keep count right now
 drone @memory lint fields               # Every .trinity string field by chars, flagged against the shape
 drone @memory push --dry-run            # The trinity push — report what would change, write nothing
@@ -22,10 +23,14 @@ drone @memory push --dry-run            # The trinity push — report what would
 ## What It Does
 
 - **Archives, never trims.** When a `.trinity/` file passes its keep count, rollover vectorizes the
-  oldest entries into the store, and only then removes them from the live file; a store that
+  oldest entries into the branch's own local store and the global store, and only then removes them from the live file; a store that
   refuses leaves the file whole. Absent locally is not gone — `search` recalls it.
-- **Answers across the whole fleet.** One semantic index over every citizen's sessions, learnings and
-  observations, filterable by branch and by memory type.
+- **Answers from your own store.** `search` reads the caller's own `<branch>/.chroma`, filterable by
+  memory type. `search global` reads the one index over every citizen (`memory/.chroma`), filterable by
+  branch and type, for @memory's seat and the verified admin only. Archived plans land in both: the
+  global `flow_plans` and the owner's local one. `rollover backfill-local [--branch @name] [--apply]`
+  copies what the global store already holds into each local store, once (dry run by default, @memory
+  or the admin only).
 - **Owns the entry shape and the caps.** `memory.config.json` publishes the closed field shape — every
   field an entry may carry, its type and its cap — plus the keep counts and the whole-file budgets.
   The write gate, the push, the state tabs and @sentry's startup-budget pack all read those numbers
@@ -84,7 +89,7 @@ a `rollover` module that outgrew one file. A foreign branch imports through one 
 top file: `from aipass.memory import <name>`, each name loaded from its handler on access and never
 cached. `apps/handlers/` holds the implementation,
 grouped one directory per concern: `json/` (the fleet's json shim, the write gate, the caps and the
-closed shape), `rollover/` (the extractor, the normalizer, the todo roll), `templates/` (the trinity
+closed shape), `rollover/` (the extractor, the normalizer, the todo roll, the local-store backfill), `templates/` (the trinity
 push and the gold templates), `tracking/` (line counts and the `*_meta` state tabs), `monitor/`
 (branch discovery and the watcher), `vector/` and `storage/` (embedding and ChromaDB, each in its own
 subprocess), plus `intake/`, `schema/`, `search/` and `governance/`.
@@ -124,7 +129,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ### Provides To
 - Every branch — rollover archival when `.trinity/` files pass their keep counts, semantic search
-  over what was archived, template distribution, and the todo pad and backlog
+  over its own archived memory, template distribution, and the todo pad and backlog
 - `@hooks` — the entry caps, the closed field shape and its refusal reasons, read at the write gate
 - `@sentry` — the `.trinity` caps and whole-file budgets its startup-budget pack scores against
 - `@daemon` — branch health via `apps/modules/health.py`'s `get_branch_health(branch_name)`, because
@@ -137,7 +142,7 @@ absent rather than returning nothing.
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-11-23
 
 ---
 [← Back to AIPass](../../../README.md)

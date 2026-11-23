@@ -3,7 +3,7 @@
 # Description: Todo pad roll-off to .backup/todo/<branch>/backlog.json, file only, verified before the pad is pruned
 # Version: 1.5.0
 # Created: 2026-09-15
-# Modified: 2026-11-21
+# Modified: 2026-11-23
 # =============================================
 
 """Todo Roll Handler (DPLAN-0345 row 1, FPLAN-0590)
@@ -158,16 +158,12 @@ def backlog_path_for(branch_dir: str, backup_root: Path | None = None) -> Path:
 
 
 def in_scope_branches(root: Path | None = None) -> list[dict[str, Any]]:
-    """Core citizens and passport-declared residents, named by directory; no external tier (this lane writes).
+    """Core citizens, passport-declared residents and declared externals, named by directory.
 
     strict: without the core rows a resident sharing a citizen's directory name would win the backlog path.
     """
     base = Path(root) if root is not None else _find_repo_root()
-    return [
-        item
-        for item in registry_scope.fleet_branches(base, name_from="path", strict=True)
-        if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL
-    ]
+    return registry_scope.fleet_branches(base, name_from="path", strict=True)
 
 
 def _no_target(error: str | None = None, reason: str | None = None) -> dict[str, Any]:
@@ -336,7 +332,7 @@ def _write_document(path: Path, document: dict[str, Any]) -> str | None:
 
 
 def _ensure_parent(path: Path) -> str | None:
-    """Create *path*'s directory; returns the failure, or None. Never outside the AIPass root."""
+    """Create *path*'s directory; returns the failure, or None. Fenced by ``write_fence``."""
     refusal = write_fence.fence_write(path, lane="todo_roll")
     if refusal is not None:
         return refusal

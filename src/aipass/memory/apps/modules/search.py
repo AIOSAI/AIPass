@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: search.py
 # Description: Search Orchestration Module
-# Version: 0.7.3
+# Version: 0.8.0
 # Created: 2025-11-27
-# Modified: 2026-11-22
+# Modified: 2026-11-23
 # =============================================
 
 """
@@ -21,12 +21,18 @@ from rich import box
 from aipass.prax import logger
 from aipass.cli import console, error, success, warning
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
 
 from aipass.memory.apps.handlers.search.query_executor import (
+    caller_local_store as _handler_caller_local_store,
     execute_search as _handler_execute_search,
 )
+
+# The one rule for the global form: the FIRST argument is exactly this word.
+# A local query that starts with the word is quoted with what follows it ("global warming").
+GLOBAL_FORM = "global"
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -45,6 +51,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         if wants_help(args):
             print_help()
             return True
+
+        is_global = args[0] == GLOBAL_FORM
+        if is_global:
+            args = args[1:]
 
         query_parts = []
         branch = None
@@ -78,7 +88,28 @@ def handle_command(command: str, args: List[str]) -> bool:
             error("Search query required")
             return True
 
-        show_search_results(query, branch=branch, memory_type=memory_type, n_results=n_results)
+        if is_global:
+            refusal = caller_gate.other_branch_refusal("search global", None, "every citizen's memories", act="reads")
+            if refusal:
+                error(refusal)
+                return True
+            show_search_results(query, branch=branch, memory_type=memory_type, n_results=n_results)
+            return True
+
+        if branch:
+            error("--branch is refused here: your local store holds one citizen, your own branch")
+            return True
+        store = _handler_caller_local_store()
+        if "refusal" in store:
+            logger.warning(f"[search] Refused local search: {store['refusal']}")
+            error(store["refusal"])
+            return True
+        if not store["db_path"].exists():
+            console.print(
+                f"[yellow]@{store['branch']}:[/yellow] no local store at {store['db_path']} - nothing has rolled yet"
+            )
+            return True
+        show_search_results(query, memory_type=memory_type, n_results=n_results, db_path=store["db_path"])
         return True
 
     return False
@@ -107,26 +138,35 @@ def print_help() -> None:
     )
     console.print()
     console.print("[bold]USAGE:[/bold]")
-    console.print("  drone @memory search <query> \\[options]")
+    console.print("  drone @memory search <query> \\[--type TYPE] \\[--n N]")
+    console.print("  drone @memory search global <query> \\[--branch BRANCH] \\[--type TYPE] \\[--n N]")
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
-    console.print("  [cyan]search <query>[/cyan]     Search across all memory collections")
-    console.print("  [cyan]help[/cyan]                Show this help message")
+    console.print("  [cyan]search <query>[/cyan]          Your own branch's local store (<branch>/.chroma)")
+    console.print("  [cyan]search global <query>[/cyan]   The global store (memory/.chroma, every citizen)")
+    console.print("                          [dim]@memory's seat and the verified admin only[/dim]")
+    console.print("  [cyan]help[/cyan]                    Show this help message")
     console.print()
     console.print("[bold]OPTIONS:[/bold]")
-    console.print("  [cyan]--branch BRANCH[/cyan]    Filter by branch (e.g., sentry, cli)")
     console.print("  [cyan]--type TYPE[/cyan]        Filter by memory type (observations, local)")
     console.print("  [cyan]--n N[/cyan]              Number of results (default: 5)")
+    console.print("  [cyan]--branch BRANCH[/cyan]    Global form only: filter by branch (e.g. sentry)")
+    console.print()
+    console.print("[bold]RULES:[/bold]")
+    console.print("  Your branch: the verified caller, else the branch directory you stand in.")
+    console.print("  No local store yet is a state, not an error: 'nothing has rolled yet'.")
+    console.print("  The global form is the first argument, exactly 'global'. To search the word")
+    console.print('  locally, quote it with what follows: [dim]drone @memory search "global warming"[/dim]')
     console.print()
     console.print("[bold]EXAMPLES:[/bold]")
-    console.print("  # Search all branches")
+    console.print("  # Search your own memories")
     console.print('  [dim]drone @memory search "performance patterns"[/dim]')
     console.print()
-    console.print("  # Search specific branch")
-    console.print('  [dim]drone @memory search "registry bugs" --branch sentry[/dim]')
-    console.print()
-    console.print("  # Search specific memory type")
+    console.print("  # Search one memory type")
     console.print('  [dim]drone @memory search "collaboration" --type observations --n 10[/dim]')
+    console.print()
+    console.print("  # Search every citizen's memories, one branch (memory or the admin)")
+    console.print('  [dim]drone @memory search global "registry bugs" --branch sentry[/dim]')
     console.print()
     console.print("[bold]HOW IT WORKS:[/bold]")
     console.print("  1. Convert query to 384-dim embedding (all-MiniLM-L6-v2)")
@@ -136,14 +176,19 @@ def print_help() -> None:
 
 
 def show_search_results(
-    query: str, branch: str | None = None, memory_type: str | None = None, n_results: int = 5
+    query: str,
+    branch: str | None = None,
+    memory_type: str | None = None,
+    n_results: int = 5,
+    db_path: Path | None = None,
 ) -> bool:
-    """Execute semantic search via handler and display results with Rich."""
+    """Execute semantic search via handler and display results with Rich; ``db_path`` None is the global store."""
     console.print()
     console.print(Panel.fit("[bold cyan]memory - Semantic Search[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     console.print(f"[cyan]Query:[/cyan] {query}")
+    console.print(f"[cyan]Store:[/cyan] {f'local {db_path}' if db_path else 'global'}")
     if branch:
         console.print(f"[cyan]Branch:[/cyan] {branch}")
     if memory_type:
@@ -153,7 +198,9 @@ def show_search_results(
     console.print("[dim]Searching... (first run may take 30s for model loading)[/dim]")
 
     try:
-        result = _handler_execute_search(query=query, branch=branch, memory_type=memory_type, n_results=n_results)
+        result = _handler_execute_search(
+            query=query, branch=branch, memory_type=memory_type, n_results=n_results, db_path=db_path
+        )
     except Exception as exc:
         logger.error(f"[search] Handler raised exception: {exc}")
         error(f"Search failed: {exc}")
@@ -253,7 +300,7 @@ def print_introspection() -> None:
     """Display module introspection info (sentry standard)."""
     console.print()
     console.print("[bold cyan]search Module[/bold cyan]")
-    console.print("Orchestrates semantic search across memory collections via vector embeddings and ChromaDB")
+    console.print("Semantic search of the caller's own local store; the global form reads every citizen's")
     console.print()
 
     handlers = _discover_handlers()
@@ -268,7 +315,7 @@ def print_introspection() -> None:
 
     console.print("[yellow]Next:[/yellow]")
     console.print('  [green]drone @memory search "your query"[/green]              [dim]# Semantic search[/dim]')
-    console.print('  [green]drone @memory search "query" --branch sentry[/green]     [dim]# Filter by branch[/dim]')
+    console.print('  [green]drone @memory search "query" --type observations[/green] [dim]# Filter by type[/dim]')
     console.print("  [green]drone @memory search --help[/green]                    [dim]# Full usage guide[/dim]")
     console.print()
 

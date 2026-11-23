@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: query_executor.py
 # Description: Search Query Execution Handler
-# Version: 1.3.0
+# Version: 1.4.1
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-23
 # =============================================
 
 """
@@ -16,6 +16,8 @@ from typing import Dict, Any
 
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.cli import caller_gate
+from aipass.memory.apps.handlers.rollover import orchestrator, todo_roll
 from aipass.memory.apps.handlers.storage.lane import CHROMA_SUBPROCESS_SCRIPT, EMBED_SUBPROCESS_SCRIPT, run_json
 
 MIN_SIMILARITY_THRESHOLD = 0.40
@@ -95,29 +97,32 @@ def _extract_plan_id(query: str) -> str | None:
     return f"{prefix}-{number}"
 
 
-def _fetch_plan_by_metadata(plan_id: str, n_results: int) -> list | None:
-    """Fetch plan chunks by source_file metadata: [] for no match, None (warned) when the store cannot answer."""
+def _fetch_plan_by_metadata(plan_id: str, n_results: int, db_path: Path | None = None) -> list | None:
+    """Plan chunks by source_file: [] for no match or no flow_plans yet, None (warned) when the store cannot answer."""
     skipped = f"[search] Plan metadata fetch failed for {plan_id}"
     input_data = {
         "operation": "get_by_source",
         "collection_name": "flow_plans",
         "source_pattern": plan_id,
         "n_results": n_results,
+        "db_path": str(db_path) if db_path else None,
     }
     data = run_json(CHROMA_SUBPROCESS_SCRIPT, input_data, timeout=30, label="store")
     if not data.get("success"):
         logger.warning(f"{skipped}: {data.get('error', 'store refused')} — exact-ID pin skipped")
         return None
+    if data.get("exists") is False:
+        logger.info(f"[search] No flow_plans in {db_path or 'the global store'} yet — no plan to pin for {plan_id}")
     return data.get("results", [])
 
 
-def _pin_plan_id_matches(query: str, filtered: list, n_results: int) -> list:
+def _pin_plan_id_matches(query: str, filtered: list, n_results: int, db_path: Path | None = None) -> list:
     """Pin exact plan-ID matches (fetched by metadata, not similarity) to the top of results."""
     plan_id = _extract_plan_id(query)
     if not plan_id:
         return filtered
 
-    exact = _fetch_plan_by_metadata(plan_id, n_results)
+    exact = _fetch_plan_by_metadata(plan_id, n_results, db_path)
     if not exact:
         return filtered
 
@@ -131,10 +136,37 @@ def _pin_plan_id_matches(query: str, filtered: list, n_results: int) -> list:
     return (exact + rest)[:n_results]
 
 
+def caller_local_store() -> Dict[str, Any]:
+    """The caller's branch and its local .chroma (which may not exist yet), or the one sentence that refuses.
+
+    The verified-caller rail first, then the branch directory the caller's cwd sits in.
+    """
+    try:
+        caller, _admin = caller_gate.verified_caller()
+    except Exception as exc:  # a dark rail is said, never read as "no caller"
+        logger.warning(f"[search] Verified-caller rail unavailable: {exc!r}")
+        return {"refusal": f"search needs your branch and the verified-caller rail is unavailable ({exc!r})"}
+    name = caller.lstrip("@")
+    if not name:
+        target = todo_roll.resolve_target(None)
+        name = target.get("name") or ""
+        if not name:
+            why = target.get("error") or target.get("reason")
+            return {"refusal": f"search reads your own branch's store and no branch resolves here ({why})"}
+    db_path, reason = orchestrator.local_store_lookup(name, create=False)
+    if db_path is None:
+        return {"refusal": f"search reads your own branch's store and @{name} has none in the memory scope ({reason})"}
+    return {"branch": name, "db_path": db_path}
+
+
 def execute_search(
-    query: str, branch: str | None = None, memory_type: str | None = None, n_results: int = 5
+    query: str,
+    branch: str | None = None,
+    memory_type: str | None = None,
+    n_results: int = 5,
+    db_path: Path | None = None,
 ) -> Dict[str, Any]:
-    """Execute semantic search: encode query, search vectors, filter results."""
+    """Execute semantic search: encode query, search vectors, filter results; ``db_path`` None is the global store."""
     embed_result = encode_query_subprocess(query)
 
     if not embed_result["success"]:
@@ -150,7 +182,7 @@ def execute_search(
     logger.info(f"[search] Encoded query to {len(query_embedding)}-dim vector")
 
     search_result = search_vectors_subprocess(
-        query_embedding=query_embedding, branch=branch, memory_type=memory_type, n_results=n_results
+        query_embedding=query_embedding, branch=branch, memory_type=memory_type, n_results=n_results, db_path=db_path
     )
 
     if not search_result["success"]:
@@ -170,7 +202,7 @@ def execute_search(
 
     filtered_results = _filter_results(raw_results, n_results)
 
-    filtered_results = _pin_plan_id_matches(query, filtered_results, n_results)
+    filtered_results = _pin_plan_id_matches(query, filtered_results, n_results, db_path)
 
     logger.info(f"[search] Filtered to {len(filtered_results)} relevant results")
 

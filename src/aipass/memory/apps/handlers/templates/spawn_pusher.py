@@ -3,7 +3,7 @@
 # Description: Spawn Template Sync Handler
 # Version: 0.2.0
 # Created: 2026-03-15
-# Modified: 2026-10-17
+# Modified: 2026-11-23
 # =============================================
 
 """
@@ -71,7 +71,7 @@ def _read_json(path: Path) -> dict | None:
 
 
 def _write_json(path: Path, data: dict) -> bool:
-    """Write dict as pretty-printed JSON. Returns True on success. Never outside the AIPass root."""
+    """Write dict as pretty-printed JSON. Returns True on success. Fenced by ``write_fence``."""
     if write_fence.fence_write(path, lane="spawn_pusher") is not None:
         return False
     try:

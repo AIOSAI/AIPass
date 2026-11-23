@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: plans_processor.py
 # Description: Plan Archival Vectorization Handler
-# Version: 1.3.3
+# Version: 1.4.0
 # Created: 2026-03-12
-# Modified: 2026-11-22
+# Modified: 2026-11-23
 # =============================================
 
 """
 Plan Archival Vectorization Handler
 
 ML runs in a subprocess on the memory venv's python (venv isolation).
+Each plan is stored in the global store and in its owning citizen's local .chroma.
 """
 
 import hashlib
@@ -24,7 +25,9 @@ from aipass.memory.apps.handlers import repo_root
 from aipass.prax import branch_state_root, logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
-from aipass.memory.apps.handlers.monitor import registry_scope
+from aipass.memory.apps.handlers.monitor import detector, registry_scope
+from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable
+from aipass.memory.apps.handlers.rollover import orchestrator
 from aipass.memory.apps.handlers.storage.lane import CHROMA_SUBPROCESS_SCRIPT, EMBED_SUBPROCESS_SCRIPT, run_json
 
 
@@ -179,16 +182,77 @@ def _is_stale(plan_file: Path, entry: Any, text: str) -> bool:
     return False
 
 
+def _projects(root: Path) -> List[Path]:
+    """The host, each resident project and each declared root: every project whose plans this lane reads."""
+    projects = [root] + [reg.parent for reg in registry_scope.resident_registry_paths(root)]
+    return projects + registry_scope.declared_roots(root)
+
+
 def _archives(plans_dir: str, root: Path) -> List[tuple[str, Path]]:
-    """``(project, archive dir)`` for the host, each resident project and each declared root; absent dirs skipped.
+    """``(project, archive dir)`` for every project in ``_projects``; absent dirs skipped.
 
     An absolute ``plans.path`` names one archive, the host's.
     """
     if Path(plans_dir).is_absolute():
         return [(root.name, Path(plans_dir))]
-    projects = [root] + [reg.parent for reg in registry_scope.resident_registry_paths(root)]
-    projects += registry_scope.declared_roots(root)
-    return [(project.name, project / plans_dir) for project in projects if (project / plans_dir).is_dir()]
+    return [(project.name, project / plans_dir) for project in _projects(root) if (project / plans_dir).is_dir()]
+
+
+_BRANCH_LINE = re.compile(r"^\*\*Branch\*\*:[ \t]*(\S.*?)[ \t]*$", re.MULTILINE)
+
+
+def branch_line(text: str) -> str | None:
+    """The value of a plan's own ``**Branch**:`` line, or None."""
+    match = _BRANCH_LINE.search(text)
+    return match.group(1) if match else None
+
+
+def plan_owner(value: str | None, project: str, root: Path) -> Dict[str, Any] | None:
+    """The write-scope row a Branch line names (a name or a path) inside *project*; None when not exactly one.
+
+    Bounded to the project so a name shared across projects never crosses; a nested resident is its own project.
+    Raises RegistryUnreadable, from ``detector.write_scope``.
+    """
+    if not value:
+        return None
+    projects = [p.resolve() for p in _projects(root)]
+    homes = [p for p in projects if p.name == project]
+    if len(homes) != 1:
+        return None
+    home = homes[0]
+    inner = [p for p in projects if home in p.parents]
+    wanted = Path(value).resolve() if Path(value).is_absolute() else None
+    name = value.lstrip("@").lower()
+    hits = []
+    for row in detector.write_scope():
+        path = Path(row.get("path", "")).resolve()
+        if home not in path.parents or any(p == path or p in path.parents for p in inner):
+            continue
+        if path == wanted if wanted else str(row.get("name", "")).lower() == name:
+            hits.append(row)
+    return hits[0] if len(hits) == 1 else None
+
+
+def _owner_store(text: str, project: str, root: Path, filename: str) -> tuple[str | None, Path | None]:
+    """``(owner name, its local .chroma)`` for a plan, or ``(None, None)`` logged by name: stored globally only."""
+    value = branch_line(text)
+    try:
+        row = plan_owner(value, project, root)
+    except RegistryUnreadable as e:
+        logger.error(f"[plans] {filename}: owner not resolved ({e}) - stored globally only")
+        return None, None
+    if row is None:
+        logger.info(f"[plans] {filename}: Branch {value!r} resolves to no one citizen in {project} - global only")
+        return None, None
+    name = str(row["name"]).lower()
+    # The existing lookup is the fenced path; it matches by name, so it must land on this project's citizen.
+    store, reason = orchestrator.local_store_lookup(name)
+    if store is None or store.resolve() != (Path(row["path"]) / ".chroma").resolve():
+        logger.warning(
+            f"[plans] {filename}: @{name}'s local store not found in {project} ({reason or store}) - global only"
+        )
+        return None, None
+    return name, store
 
 
 def _manifest_key(project: str, plan_file: Path, host: str) -> str:
@@ -201,8 +265,8 @@ def _embed_texts(texts: List[str], timeout: int = 120) -> dict:
     return run_json(EMBED_SUBPROCESS_SCRIPT, {"texts": texts}, timeout=timeout, label="Embedding")
 
 
-def _store_vectors(embeddings, documents, metadatas, collection_name="flow_plans") -> dict:
-    """Store vectors via subprocess."""
+def _store_vectors(embeddings, documents, metadatas, collection_name="flow_plans", db_path=None) -> dict:
+    """Store vectors via subprocess; ``db_path`` None is the global store."""
     input_data = {
         "operation": "store_vectors",
         "branch": "flow",
@@ -210,7 +274,7 @@ def _store_vectors(embeddings, documents, metadatas, collection_name="flow_plans
         "embeddings": embeddings,
         "documents": documents,
         "metadatas": metadatas,
-        "db_path": None,  # global
+        "db_path": str(db_path) if db_path else None,
     }
     return run_json(CHROMA_SUBPROCESS_SCRIPT, input_data, timeout=60, label="Storage")
 
@@ -302,6 +366,7 @@ def process_plans() -> Dict[str, Any]:
             continue
 
         texts = [c["text"] for c in chunks]
+        owner, local_store = _owner_store(text, project, repo_root, plan_file.name)
         metadatas = [
             {
                 "source_file": plan_file.name,
@@ -309,6 +374,7 @@ def process_plans() -> Dict[str, Any]:
                 "section": c["section"],
                 "processed_at": datetime.now().isoformat(),
                 "type": "plan",
+                **({"branch": owner} if owner else {}),
             }
             for c in chunks
         ]
@@ -330,6 +396,16 @@ def process_plans() -> Dict[str, Any]:
             logger.warning(f"[plans] Store failed for {plan_file.name}: {store_result.get('error')}")
             errors.append(f"{plan_file.name}: store error: {store_result.get('error')}")
             continue
+
+        if local_store is not None:
+            local_result = _store_vectors(embeddings, texts, metadatas, collection_name, db_path=local_store)
+            if not local_result.get("success"):
+                # The global write stands; no manifest row, so the next run retries both (same ids, an upsert).
+                logger.warning(
+                    f"[plans] Local store failed for {plan_file.name} (@{owner}): {local_result.get('error')}"
+                )
+                errors.append(f"{plan_file.name}: local store error (@{owner}): {local_result.get('error')}")
+                continue
 
         manifest[key] = _manifest_entry(text)
         _save_manifest(manifest)

@@ -3,7 +3,7 @@
 # Description: Tests for source_file matching in the ChromaDB subprocess handler
 # Version: 1.3.0
 # Created: 2026-08-23
-# Modified: 2026-11-22
+# Modified: 2026-11-23
 # =============================================
 
 """Tests for apps/handlers/storage/chroma_subprocess.py."""
@@ -13,7 +13,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(covered_elsewhere) — _vectorize_and_store(): tests/test_chroma_vectorize.py
-# sentry: no-test-needed(external) — chromadb.PersistentClient behind _get_client(); a fake client stands in here
+# sentry: no-test-needed(external) — chromadb.PersistentClient behind _get_client(); a fake client stands in (the backfill pair runs a real one under tmp_path)
 
 import io
 import json
@@ -225,7 +225,7 @@ class TestPinComposition:
         qe = self._query_executor()
         seen = {}
 
-        def _capture(plan_id, n_results):
+        def _capture(plan_id, n_results, db_path=None):
             seen["plan_id"] = plan_id
             return []
 
@@ -240,7 +240,7 @@ class TestPinComposition:
         collection = _FakeCollection(["TDPLAN-0012_hook.md"])
         monkeypatch.setattr(chroma_subprocess, "_get_client", lambda db_path=None: _FakeClient(collection))
 
-        def _through_handler(plan_id, n_results):
+        def _through_handler(plan_id, n_results, db_path=None):
             answer = run("get_by_source", collection_name="flow_plans", source_pattern=plan_id, n_results=n_results)
             return answer["results"]
 
@@ -285,6 +285,18 @@ class _MissingCollectionClient:
         from chromadb.errors import NotFoundError
 
         raise NotFoundError(f"Collection [{name}] does not exist (fake)")
+
+
+class TestGetBySourceWithNoCollection:
+    """A store nothing has written plans to yet answers with no rows, not with a failure."""
+
+    def test_an_absent_flow_plans_is_a_state_not_a_failure(self, monkeypatch, run):
+        monkeypatch.setattr(chroma_subprocess, "_get_client", lambda db_path=None: _MissingCollectionClient())
+
+        result = run("get_by_source", collection_name="flow_plans", source_pattern="FPLAN-0001")
+
+        assert (result["success"], result["results"], result["exists"]) == (True, [], False)
+        assert "Collection [flow_plans] does not exist (fake)" in result["message"]
 
 
 class TestCheckPlanWithNoCollection:
@@ -415,3 +427,35 @@ class TestTheResultNamesItsOwner:
         result = run("search_vectors", query_embedding=[0.1], branch="ai_mail")
 
         assert [(r["branch"], r["type"]) for r in result["results"]] == [("", "")]
+
+
+class TestTheBackfillPairCopiesRowsAsStored:
+    """read_collection hands back ids, embeddings, documents and metadatas; add_missing never touches a present id."""
+
+    _ROWS = {
+        "ids": ["FLOW_plans_aaa", "flow_plans_bbb"],
+        "embeddings": [[0.5, 0.25, 0.125], [0.75, 0.5, 0.25]],
+        "documents": ["first chunk", "second chunk"],
+        "metadatas": [{"source_file": "F1.md", "project": "AIPass"}, {"source_file": "F2.md", "branch": "wren"}],
+    }
+
+    def test_rows_read_back_as_added_and_a_second_add_adds_nothing(self, run, tmp_path):
+        store = str(tmp_path / "local_chroma")
+        meta = {"branch": "FLOW", "type": "plans", "hnsw:space": "cosine"}
+
+        first = run("add_missing", collection_name="flow_plans", metadata=meta, db_path=store, **self._ROWS)
+        changed = {**self._ROWS, "documents": ["rewritten", "rewritten"]}
+        second = run("add_missing", collection_name="flow_plans", metadata=meta, db_path=store, **changed)
+        read = run("read_collection", collection_name="flow_plans", db_path=store)
+
+        assert (first["added"], first["present"]) == (2, 0)
+        assert (second["added"], second["present"]) == (0, 2)
+        order = sorted(range(2), key=lambda i: read["ids"][i])
+        assert {f: [read[f][i] for i in order] for f in self._ROWS} == self._ROWS
+        assert read["metadata"]["branch"] == "FLOW"
+
+    def test_an_absent_collection_reads_as_a_state(self, run, tmp_path):
+        read = run("read_collection", collection_name="flow_plans", db_path=str(tmp_path / "empty_chroma"))
+
+        assert (read["success"], read["exists"]) == (True, False)
+        assert [read[f] for f in ("ids", "embeddings", "documents", "metadatas")] == [[], [], [], []]

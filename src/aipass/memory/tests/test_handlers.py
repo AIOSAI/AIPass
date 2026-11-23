@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_handlers.py
 # Description: Handler-layer tests — rollover extractor, normalize and the todos operational schema
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-04-01
-# Modified: 2026-11-22
+# Modified: 2026-11-23
 # =============================================
 
 """Tests for apps/handlers/rollover/extractor.py and schema/normalize.py."""
@@ -273,8 +273,8 @@ class TestNormalizeMemoryFile:
         result = norm.normalize_memory_file(tmp_path / "nope.json")
         assert result["success"] is False
 
-    def test_a_file_outside_the_aipass_root_is_read_never_rewritten(self, monkeypatch, tmp_path):
-        """Memory may READ another project: the dry run still reports. It may never WRITE one."""
+    def test_an_undeclared_file_outside_the_aipass_root_is_read_never_rewritten(self, monkeypatch, tmp_path):
+        """A path in no declared root: the dry run still reports, the write is refused."""
         norm, _ = _import_normalize(monkeypatch)
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
         f = tmp_path / "other_root" / "src" / "x" / ".trinity" / "local.json"
@@ -288,6 +288,19 @@ class TestNormalizeMemoryFile:
         assert looked["success"] is True and looked["changes"], "the read half must still work"
         assert result["success"] is False
         assert f.read_bytes() == before
+
+    def test_a_declared_external_file_is_rewritten(self, monkeypatch, declared_externals):
+        """Services write where they serve: @wren and the nested @grow are normalized in place."""
+        norm, _ = _import_normalize(monkeypatch)
+        for branch in (declared_externals.wren, declared_externals.grow):
+            f = branch / ".trinity" / "local.json"
+            self._write_json(f, {"document_metadata": {}, "status": {"health": "healthy"}, "sessions": []})
+            before = f.read_bytes()
+
+            result = norm.normalize_memory_file(f)
+
+            assert result["success"] is True and result["changes"], result
+            assert f.read_bytes() != before
 
     def test_an_unreadable_template_is_a_warning_the_caller_sees(self, monkeypatch, tmp_path):
         """The conformance pass is skipped out loud, never read as "nothing to strip".

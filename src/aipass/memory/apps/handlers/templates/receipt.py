@@ -3,7 +3,7 @@
 # Description: Per-branch .template_version.json receipt writer
 # Version: 1.2.0
 # Created: 2026-08-25
-# Modified: 2026-10-17
+# Modified: 2026-11-23
 # =============================================
 
 """Template Version Receipt
@@ -75,7 +75,7 @@ def read_receipt(trinity_dir: Path) -> dict[str, Any] | None:
 
 
 def _write(path: Path, payload: dict[str, Any]) -> bool:
-    """Atomic write: tmp file then replace, same contract as the config writer. Never outside the AIPass root."""
+    """Atomic write: tmp file then replace, same contract as the config writer. Fenced by ``write_fence``."""
     if fence_write(path, lane="template_receipt") is not None:
         return False
     tmp = path.with_suffix(path.suffix + ".tmp")

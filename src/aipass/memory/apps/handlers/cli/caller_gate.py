@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: caller_gate.py
-# Description: Caller Gate Handler: who may name another branch on a verb that writes for it
-# Version: 1.1.0
+# Description: Caller Gate Handler: who may name another branch on a verb that writes for it, or read the global store
+# Version: 1.2.0
 # Created: 2026-11-15
-# Modified: 2026-11-17
+# Modified: 2026-11-23
 # =============================================
 
 """A seat writes its own branch; @memory's seat and the verified admin (ai_mail's rail) may name another."""
@@ -26,8 +26,8 @@ def _address(name: str) -> str:
     return f"@{name.strip().lstrip('@').lower()}"
 
 
-def other_branch_refusal(verb: str, target: str | None, what: str) -> str | None:
-    """Why the caller may not run *verb*, which writes *what*, for *target* (None = the fleet); None when it may."""
+def other_branch_refusal(verb: str, target: str | None, what: str, act: str = "writes") -> str | None:
+    """Why the caller may not run *verb*, which *act* (writes|reads) *what*, for *target* (None = fleet); else None."""
     wanted = _address(target) if target else None
     try:
         caller, admin = verified_caller()
@@ -38,14 +38,15 @@ def other_branch_refusal(verb: str, target: str | None, what: str) -> str | None
     who = caller or "an unverified caller"
     reason = None
     if rail_down:
-        reason = f"{verb} writes {what}, and the verified-caller rail is unavailable ({rail_down}) - nothing written"
+        done = "written" if act == "writes" else "read"
+        reason = f"{verb} {act} {what}, and the verified-caller rail is unavailable ({rail_down}) - nothing {done}"
     elif (caller and caller == wanted) or caller == MEMORY_SEAT or admin:
         reason = None
     elif wanted:
-        reason = f"{verb} writes {what}: {wanted}'s own seat, {MEMORY_SEAT} or the verified admin only, not {who} - "
+        reason = f"{verb} {act} {what}: {wanted}'s own seat, {MEMORY_SEAT} or the verified admin only, not {who} - "
         reason += f"run it from inside {wanted}'s own directory"
     else:
-        reason = f"{verb} writes {what}: {MEMORY_SEAT} or the verified admin only, not {who} - "
+        reason = f"{verb} {act} {what}: {MEMORY_SEAT} or the verified admin only, not {who} - "
         reason += "mail @devpulse, the verified admin"
 
     json_handler.log_operation(

@@ -54,6 +54,18 @@ Every module routes its help check through `handlers/cli/help_flags.wants_help()
 
 A dashed flag (`--help`, `-h`) counts anywhere on the line. The bare word `help` counts anywhere only for modules whose subcommands take no free text (`rollover`, `config`, `templates`, `pool`, `lint`, `push`, `todo`, `health`); for `search`, `symbolic` and `verify` it counts in the first slot only, so `drone @memory search rollover help` stays a three-word query.
 
+`search` takes two forms. `drone @memory search <query> [--type T] [--n N]` reads the caller's own local
+store; `drone @memory search global <query> [--branch B] [--type T] [--n N]` reads the global store and is
+open to `@memory`'s seat and the verified admin only. The global form is chosen only by a first argument of
+exactly `global`, so `drone @memory search "global warming"` stays a local query. `--branch` on the local
+form, a resolvable-branch failure and a refused global seat all exit 2; a branch with no local store yet
+answers "nothing has rolled yet" and exits 0. The stores and the gate are in [vector_search.md](vector_search.md).
+
+`drone @memory rollover backfill-local [--branch @name] [--apply]` is a dry run unless `--apply` is given. It
+prints one line per branch with each collection's copy (or added) and present counts. A seat other than
+`@memory` or the verified admin is refused with the mail-@devpulse sentence and exits 2, and so does a branch
+that could not be backfilled. The rules are in [rollover_pipeline.md](rollover_pipeline.md#backfilling-the-local-stores).
+
 `handlers/cli/json_flag.py` is the sibling handler for `--json`, and `wants_json()` is deliberately read *after* the help check for the same reason: `--help --json` is still a question, so it prints help and emits no payload. The machine surface itself is in [config_verbs.md](config_verbs.md).
 
 ---

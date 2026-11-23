@@ -3,7 +3,7 @@
 # Description: Rollover Orchestration Handler
 # Version: 1.5.1
 # Created: 2026-03-08
-# Modified: 2026-11-22
+# Modified: 2026-11-23
 # =============================================
 
 """
@@ -68,8 +68,8 @@ LOCAL_STORE_REGISTRY_UNREADABLE = "registry unreadable"
 LOCAL_STORE_ABSENT = "no local store"
 
 
-def local_store_lookup(branch_name: str) -> tuple[Path | None, str | None]:
-    """Find a branch's local .chroma: ``(path, None)`` or ``(None, reason)``.
+def local_store_lookup(branch_name: str, create: bool = True) -> tuple[Path | None, str | None]:
+    """Find a branch's local .chroma: ``(path, None)`` or ``(None, reason)``; ``create=False`` (search) never makes it.
 
     Never raises on an unreadable registry: this runs after the file is trimmed,
     and a raise would leave the entries in neither store.
@@ -91,7 +91,7 @@ def local_store_lookup(branch_name: str) -> tuple[Path | None, str | None]:
                 # Existing is not permission: the store writes wherever it is handed.
                 if write_fence.fence_write(chroma_path, lane="local_chroma") is not None:
                     return None, LOCAL_STORE_ABSENT
-                if not chroma_path.exists():
+                if create and not chroma_path.exists():
                     chroma_path.mkdir(parents=True, exist_ok=True)
                     logger.info(f"[rollover] Created local .chroma directory for {branch_name}")
                 return chroma_path, None

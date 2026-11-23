@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_marker7_memory_lane.py
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
-# Version: 1.2.3
+# Version: 1.3.0
 # Created: 2026-08-27
-# Modified: 2026-11-18
+# Modified: 2026-11-23
 # =============================================
 
 """Tests for apps/modules/rollover.py, apps/modules/templates.py and the handlers they drive."""
@@ -34,7 +34,7 @@ from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.json import entry_limits
 from aipass.memory.apps.handlers.json import memory_files
 from aipass.memory.apps.handlers import write_fence
-from aipass.memory.apps.handlers.templates import spawn_pusher
+from aipass.memory.apps.handlers.templates import receipt, spawn_pusher
 from aipass.memory.apps.handlers.tracking import tab_renderer
 from aipass.memory.apps.modules import rollover
 from aipass.memory.apps.modules import templates
@@ -79,6 +79,14 @@ def _run_rollover_that_rolled(monkeypatch, names: list) -> bool:
     ran = rollover.run_rollover()
     assert recorder.log_operation.call_args.args[0] == "rollover_execute"
     return ran
+
+
+def _served(path: Path) -> bool:
+    """Is resolved *path* under the live AIPass root or a live declared external branch?"""
+    homes = [registry_scope.REPO_ROOT.resolve()]
+    homes += [Path(item["path"]).resolve() for item in registry_scope.external_branches()]
+    path = Path(path).resolve()
+    return any(path == home or home in path.parents for home in homes)
 
 
 # =============================================================================
@@ -138,10 +146,10 @@ class TestOneFleetOneDefinition:
         for row in rows:
             assert set(row) == {"name", "path", "registry", "email", "residency"}, row
 
-    def test_the_normalize_lane_never_reaches_into_another_repository(self, live_fleet, monkeypatch):
-        """The normalize lane writes, so it never reaches into another repository.
+    def test_the_normalize_lane_writes_where_rollover_serves_and_nowhere_else(self, live_fleet, monkeypatch):
+        """The normalize lane heals every rolled branch of the write scope, declared externals included.
 
-        Rolled branches are matched by name; an external branch sharing a name must never be rewritten.
+        Rolled branches are matched by name; the write scope holds no two branches under one name.
         """
         seen = []
         monkeypatch.setattr(
@@ -149,15 +157,13 @@ class TestOneFleetOneDefinition:
             "normalize_branch",
             lambda name, path, config: seen.append((name, Path(path))) or {"success": True},
         )
-        fleet = registry_scope.fleet_branches()
-        every_name = [item["name"] for item in fleet]
-        in_repo = {item["name"] for item in fleet if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL}
-        _run_rollover_that_rolled(monkeypatch, every_name)
+        rolled = [item["name"] for item in detector.write_scope()]
+        _run_rollover_that_rolled(monkeypatch, rolled)
 
-        assert {name for name, _ in seen} == in_repo, "every in-repo citizen that rolled heals, and nobody else"
-        home = registry_scope.REPO_ROOT.resolve()
-        outside = [p for _, p in seen if home not in p.resolve().parents and p.resolve() != home]
-        assert not outside, f"normalize would write outside this repo: {outside}"
+        assert {name for name, _ in seen} == set(rolled), "every citizen that rolled heals, and nobody else"
+        assert len(seen) == len(rolled), "a name healed twice: two branches answered it"
+        outside = [p for _, p in seen if not _served(p)]
+        assert not outside, f"normalize would write outside the AIPass root and every declared external: {outside}"
 
     def test_a_branch_whose_frame_could_not_be_written_is_named(self, live_fleet, monkeypatch, caplog):
         """The normalizer reports failure by return value; the caller must name the branch, not drop it.
@@ -179,18 +185,30 @@ class TestOneFleetOneDefinition:
         assert "memory" in joined, joined
         assert "write failed" in joined, joined
 
-    def test_the_rollover_lane_never_reaches_into_another_repository(self, live_fleet):
-        """Rollover WRITES too — it trims memory files. Same edge as the push.
-
-        Trap: repointing the detector at `fleet_branches` would pull the external tier into a write scope.
-        """
+    def test_the_rollover_lane_writes_where_it_serves_and_nowhere_else(self, live_fleet):
+        """Rollover WRITES: its scope is the AIPass root plus every declared external branch, and nothing else."""
         rolled = {Path(item["path"]).resolve() for item in detector.write_scope()}
         assert _MEMORY_ROOT.resolve() in rolled, "a scope without this branch proves nothing about what it excludes"
-        home = registry_scope.REPO_ROOT.resolve()
-        outside = [p for p in rolled if home not in p.parents and p != home]
-        assert outside == [], f"rollover would write outside this repo: {outside}"
+        outside = [p for p in rolled if not _served(p)]
+        assert outside == [], f"rollover would write outside the root and every declared external: {outside}"
+        in_repo = {item["name"].lower() for item in registry_scope.fleet_branches() if item["residency"] != "external"}
+        free = {
+            Path(i["path"]).resolve() for i in registry_scope.external_branches() if i["name"].lower() not in in_repo
+        }
+        assert free <= rolled, f"declared externals rollover cannot reach: {sorted(free - rolled)}"
 
-    # The write fence: memory may READ another project, never WRITE one, refused at the write itself.
+    def test_a_rolled_external_has_its_frame_re_rendered(self, declared_externals, monkeypatch):
+        """@wren and the nested @grow rolled, so their frames heal; the scope they rolled in is the one asked."""
+        seen = []
+        monkeypatch.setattr(
+            normalizer, "normalize_branch", lambda name, path, config: seen.append(Path(path)) or {"success": True}
+        )
+
+        _run_rollover_that_rolled(monkeypatch, ["wren", "grow"])
+
+        assert sorted(seen) == sorted([declared_externals.wren, declared_externals.grow])
+
+    # The write fence: services write where they serve (the root, declared externals), refused anywhere else.
 
     @staticmethod
     def _fenced_world(tmp_path, monkeypatch):
@@ -299,6 +317,29 @@ class TestOneFleetOneDefinition:
         assert "x: Failed to write local.json" in result["errors"]
         assert foreign.read_bytes() == before
         assert not (foreign.parent / "observations.json").exists()
+
+    def test_the_spawn_template_push_writes_into_a_declared_external(self, declared_externals, monkeypatch):
+        """Positive pin for the lane above: a template set inside a declared external branch is written."""
+        target = declared_externals.wren / "templates" / "x" / ".trinity" / "local.json"
+        target.parent.mkdir(parents=True)
+        target.write_text('{\n  "sessions": []\n}\n', encoding="utf-8")
+        monkeypatch.setattr(spawn_pusher, "_find_spawn_templates_dir", lambda: target.parents[2])
+        recorder = MagicMock()
+        monkeypatch.setattr(spawn_pusher, "json_handler", recorder)
+
+        result = spawn_pusher.push_to_spawn_templates(dry_run=False)
+
+        assert recorder.log_operation.call_args.args[0] == "spawn_template_push"
+        assert not [e for e in result["errors"] if "Failed to write" in e], result["errors"]
+        assert target.read_text(encoding="utf-8") != '{\n  "sessions": []\n}\n'
+
+    def test_a_template_receipt_is_stamped_in_a_declared_external(self, declared_externals):
+        """The receipt lane, for @wren and the nested @grow: the stamp lands in their own .trinity/."""
+        for branch in (declared_externals.wren, declared_externals.grow):
+            stamp = receipt.write_receipt(branch / ".trinity", receipt.STAMPED_BY_PUSH)
+
+            assert stamp["success"] is True, stamp
+            assert (branch / ".trinity" / receipt.RECEIPT_NAME).is_file()
 
     def test_the_push_and_the_scope_module_resolve_the_same_fleet(self, live_fleet):
         """The two LANES answer the same fleet; the external tier is subtracted here, in the expectation."""

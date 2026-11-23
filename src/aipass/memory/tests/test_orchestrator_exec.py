@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_orchestrator_exec.py
 # Description: Tests for the orchestrator execute_rollover pipeline
-# Version: 1.1.3
+# Version: 1.2.0
 # Created: 2026-04-26
-# Modified: 2026-11-22
+# Modified: 2026-11-23
 # Category: memory/tests
 # =============================================
 
@@ -18,6 +18,8 @@
 # sentry: no-test-needed(covered_elsewhere) — the stats update_central writes, in tests/test_central_writer.py
 # sentry: no-test-needed(covered_elsewhere) — the pool run process_memory_pool does, in tests/test_intake.py
 
+import contextlib
+import io
 import json
 import subprocess
 import types
@@ -25,8 +27,12 @@ from types import SimpleNamespace
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
+from aipass.memory.apps.handlers.cli import caller_gate
+from aipass.memory.apps.handlers.intake import plans_processor
 from aipass.memory.apps.handlers.monitor import detector
-from aipass.memory.apps.handlers.rollover import orchestrator
+from aipass.memory.apps.handlers.rollover import backfill, orchestrator
+from aipass.memory.apps.handlers.rollover.backfill import PLANS
+from aipass.memory.apps.handlers.storage import chroma_subprocess
 from aipass.trigger import Trigger
 from aipass.trigger import trigger as trigger_bus
 
@@ -809,3 +815,174 @@ class TestWhatARealRolloverArchives:
         assert result["success_count"] == 1
         assert [number for number, _doc in stored] == [3, 2, 1]
         assert [number for number, _summary in kept] == list(range(18, 3, -1))
+
+
+class TestAnExternalRollsIntoItsOwnStore:
+    """A declared external rolls like a core branch: its own .chroma, the global store, then its trimmed file."""
+
+    def test_the_local_store_lookup_finds_wren_and_the_nested_grow(self, declared_externals):
+        for name, branch in (("wren", declared_externals.wren), ("GROW", declared_externals.grow)):
+            assert orchestrator.local_store_lookup(name) == (branch / ".chroma", None)
+            assert (branch / ".chroma").is_dir()
+
+    def test_an_undeclared_name_still_finds_no_store(self, declared_externals):
+        assert orchestrator.local_store_lookup("ghost") == (None, orchestrator.LOCAL_STORE_ABSENT)
+
+    def test_a_rollover_of_wren_stores_locally_and_globally_then_trims(self, declared_externals, monkeypatch):
+        ext = _REAL_EXTRACTOR
+        rollover_cfg = {"defaults": {"local": {"sessions": {"count": 15}}}, "per_branch": {}}
+        monkeypatch.setattr(ext, "config_loader", SimpleNamespace(section=lambda name: rollover_cfg))
+        monkeypatch.setattr(detector, "config_loader", SimpleNamespace(section=lambda name: rollover_cfg))
+        local = declared_externals.wren / ".trinity" / "local.json"
+        sessions = [
+            {"number": n, "date": "2026-11-01", "summary": f"s {n}", "status": "completed"} for n in range(18, 0, -1)
+        ]
+        local.write_text(
+            json.dumps({"document_metadata": {"schema_version": "3.0.0"}, "sessions": sessions}), encoding="utf-8"
+        )
+        stores = []
+        monkeypatch.setattr(
+            orchestrator,
+            "run_json",
+            lambda script, data, **kw: (
+                stores.append(data["db_path"]) or {"success": True, "collection": "c", "total_vectors": 3}
+            ),
+        )
+        monkeypatch.setattr(
+            orchestrator, "encode_batch_subprocess", lambda texts: {"success": True, "embeddings": [[0.1]] * len(texts)}
+        )
+        monkeypatch.setattr(orchestrator, "get_branch_local_chroma_path", _REAL_LOCAL_CHROMA_PATH)
+        monkeypatch.setattr(orchestrator, "extractor", _REAL_EXTRACTOR)
+        monkeypatch.setattr(_CENTRAL_UPDATE, MagicMock(return_value={"success": True}))
+        monkeypatch.setattr(_POOL_PROCESS, MagicMock(return_value={"files_processed": 0}))
+
+        result = orchestrator.execute_rollover()
+
+        assert (result["success_count"], result["failed"]) == (1, []), result
+        assert result["results"][0]["local_stored"] is True
+        assert stores == [str(declared_externals.wren / ".chroma"), None]
+        kept = json.loads(local.read_text(encoding="utf-8"))["sessions"]
+        assert [s["number"] for s in kept] == list(range(18, 3, -1))
+
+
+def _in_process_chroma(script, payload, **kwargs):
+    """The chroma lane run in this process against real stores under tmp_path: JSON in, JSON out."""
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        chroma_subprocess.main(io.StringIO(json.dumps(payload)))
+    return json.loads(out.getvalue())
+
+
+def _read(collection, store):
+    """A collection's rows as the backfill's read operation hands them back."""
+    return _in_process_chroma(
+        None, {"operation": "read_collection", "collection_name": collection, "db_path": str(store)}
+    )
+
+
+class TestTheBackfillCopiesEachCitizensGlobalRowsIntoItsOwnStore:
+    """Global rows reach the local store as stored, once; a dry run counts and writes nothing; other seats are refused."""
+
+    def _world(self, declared_externals, monkeypatch, tmp_path, seat="@memory"):
+        world = declared_externals
+        global_store = tmp_path / "global_chroma"
+        monkeypatch.setattr(chroma_subprocess, "_DEFAULT_DB_PATH", global_store)
+        monkeypatch.setattr(backfill, "run_json", _in_process_chroma)
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: (seat, False))
+        monkeypatch.setattr(backfill, "config_loader", SimpleNamespace(section=lambda name: {}))
+        monkeypatch.setattr(plans_processor, "_find_repo_root", lambda: world.home)
+        archive = world.seed / ".backup" / "processed_plans"
+        archive.mkdir(parents=True)
+        (archive / "FPLAN-0003_grow.md").write_text("# Plan\n**Branch**: grow\n", encoding="utf-8")
+
+        def seed(collection, rows, metadata):
+            ids, docs, metas = zip(*rows)
+            embeddings = [[0.1 * (i + 1), 0.2, 0.3] for i in range(len(ids))]
+            rows = {"ids": list(ids), "embeddings": embeddings, "documents": list(docs), "metadatas": list(metas)}
+            _in_process_chroma(
+                None, {"operation": "add_missing", "collection_name": collection, "metadata": metadata, **rows}
+            )
+
+        seed("wren_local", [("wren_local_aaa", "a wren session", {"timestamp": "t1"})], {"branch": "wren"})
+        seed("wren_observations", [("wren_observations_bbb", "a wren note", {"timestamp": "t2"})], {"branch": "wren"})
+        plan = {"type": "plan", "section": "s"}
+        seed(
+            PLANS,
+            [
+                (
+                    "flow_plans_w1",
+                    "wren's plan",
+                    {**plan, "source_file": "F1.md", "project": "wren_project", "branch": "wren"},
+                ),
+                ("FLOW_plans_g1", "**Branch**: grow\nhead", {**plan, "source_file": "F2.md", "project": "seed"}),
+                ("FLOW_plans_g2", "grow body, no line", {**plan, "source_file": "F2.md", "project": "seed"}),
+                (
+                    "FLOW_plans_g3",
+                    "only the archive names it",
+                    {**plan, "source_file": "FPLAN-0003_grow.md", "project": "seed"},
+                ),
+                ("FLOW_plans_x1", "**Branch**: wren\nno project tag", {**plan, "source_file": "F4.md"}),
+                (
+                    "flow_plans_x2",
+                    "another project's name",
+                    {**plan, "source_file": "F5.md", "project": "seed", "branch": "wren"},
+                ),
+            ],
+            {"branch": "FLOW", "type": "plans", "hnsw:space": "cosine"},
+        )
+        return world, global_store
+
+    def test_a_dry_run_counts_per_collection_and_writes_nothing(self, declared_externals, monkeypatch, tmp_path):
+        world, _ = self._world(declared_externals, monkeypatch, tmp_path)
+
+        result = backfill.backfill_local()
+
+        assert result["success"] is True, result
+        assert (
+            "@wren: wren_local copy 1, present 0; wren_observations copy 1, present 0; flow_plans copy 1, present 0"
+            in result["lines"]
+        )
+        assert (
+            "@grow: grow_local copy 0, present 0; grow_observations copy 0, present 0; flow_plans copy 3, present 0"
+            in result["lines"]
+        )
+        assert result["plans_unowned"] == 2
+        assert not (world.wren / ".chroma").exists() and not (world.grow / ".chroma").exists()
+
+    def test_apply_copies_as_stored_and_a_re_run_adds_nothing(self, declared_externals, monkeypatch, tmp_path):
+        world, global_store = self._world(declared_externals, monkeypatch, tmp_path)
+
+        first = backfill.backfill_local(apply=True)
+        again = backfill.backfill_local(apply=True)
+        dry = backfill.backfill_local(branch="@grow")
+
+        assert first["success"] and again["success"], (first, again)
+        local = _read(PLANS, world.grow / ".chroma")
+        assert sorted(local["ids"]) == ["FLOW_plans_g1", "FLOW_plans_g2", "FLOW_plans_g3"]
+        source = _read("wren_local", global_store)
+        copied = _read("wren_local", world.wren / ".chroma")
+        for field in ("ids", "embeddings", "documents", "metadatas"):
+            assert copied[field] == source[field]
+        assert copied["metadata"]["branch"] == "wren"
+        assert (
+            "@wren: wren_local added 0, present 1; wren_observations added 0, present 1; flow_plans added 0, present 1"
+            in again["lines"]
+        )
+        assert (
+            "@grow: grow_local copy 0, present 0; grow_observations copy 0, present 0; flow_plans copy 0, present 3"
+            in dry["lines"]
+        )
+
+    def test_another_seat_is_refused_and_nothing_is_read(self, declared_externals, monkeypatch, tmp_path):
+        world, _ = self._world(declared_externals, monkeypatch, tmp_path, seat="@canary")
+        calls = []
+        monkeypatch.setattr(backfill, "run_json", lambda *a, **k: calls.append(a) or {"success": True})
+
+        result = backfill.backfill_local(apply=True)
+
+        assert result["success"] is False
+        assert result["error"] == (
+            "rollover backfill-local writes every citizen's global rows into its local store: @memory or the "
+            "verified admin only, not @canary - mail @devpulse, the verified admin"
+        )
+        assert calls == [] and not (world.wren / ".chroma").exists()

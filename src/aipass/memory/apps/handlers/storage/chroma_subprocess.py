@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: chroma_subprocess.py
 # Description: ChromaDB Subprocess Handler
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2025-11-27
-# Modified: 2026-11-22
+# Modified: 2026-11-23
 # =============================================
 
 """
@@ -246,7 +246,8 @@ def _get_by_source(collection_name, source_pattern, n_results=5, db_path=None):
     try:
         collection = client.get_collection(collection_name, embedding_function=None)
     except NotFoundError as e:
-        return {"success": False, "error": f"Collection '{collection_name}' not found: {e}"}
+        # A store nothing has written plans to yet is a state, the answer _count_vectors gives too.
+        return {"success": True, "results": [], "count": 0, "exists": False, "message": str(e)}
 
     result = collection.get(include=["metadatas", "documents"])
     matches = []
@@ -318,6 +319,56 @@ def _get_by_ids(collection_name, ids, db_path=None):
         documents[found_id] = result["documents"][i]
 
     return {"success": True, "documents": documents, "count": len(documents)}
+
+
+_BATCH = 1000  # under Chroma's max batch size for one get/add call
+
+
+def _read_collection(collection_name, db_path=None):
+    """Every row of one collection as stored, embeddings included; an absent collection answers ``exists: False``."""
+    client = _get_client(db_path)
+
+    from chromadb.errors import NotFoundError
+
+    try:
+        collection = client.get_collection(collection_name, embedding_function=None)
+    except NotFoundError as e:
+        empty = {"ids": [], "embeddings": [], "documents": [], "metadatas": []}
+        return {"success": True, "exists": False, "message": str(e), **empty}
+
+    result = collection.get(include=["embeddings", "documents", "metadatas"])
+    return {
+        "success": True,
+        "exists": True,
+        "metadata": collection.metadata,
+        "ids": list(result["ids"]),
+        "embeddings": [emb.tolist() if hasattr(emb, "tolist") else list(emb) for emb in result["embeddings"]],
+        "documents": list(result["documents"]),
+        "metadatas": list(result["metadatas"]),
+    }
+
+
+def _add_missing(collection_name, ids, embeddings, documents, metadatas, metadata=None, db_path=None):
+    """Add, exactly as given, the rows whose ids the collection lacks; a present id is counted and never touched."""
+    client = _get_client(db_path)
+    collection = client.get_or_create_collection(
+        name=collection_name, metadata=metadata or {"hnsw:space": "cosine"}, embedding_function=None
+    )
+
+    ids = list(ids or [])
+    present = set()
+    for start in range(0, len(ids), _BATCH):
+        present.update(collection.get(ids=ids[start : start + _BATCH], include=[])["ids"])
+    missing = [i for i, doc_id in enumerate(ids) if doc_id not in present]
+    for start in range(0, len(missing), _BATCH):
+        batch = missing[start : start + _BATCH]
+        collection.add(
+            ids=[ids[i] for i in batch],
+            embeddings=[embeddings[i] for i in batch],
+            documents=[documents[i] for i in batch],
+            metadatas=[metadatas[i] for i in batch],
+        )
+    return {"success": True, "collection": collection_name, "added": len(missing), "present": len(present)}
 
 
 # Every archive that rolls over owns a "<name>_local" or "<name>_observations" collection.
@@ -441,6 +492,18 @@ def main(stdin: TextIO | None = None):
             result = _get_by_ids(
                 collection_name=input_data.get("collection_name"),
                 ids=input_data.get("ids"),
+                db_path=input_data.get("db_path"),
+            )
+        elif operation == "read_collection":
+            result = _read_collection(input_data.get("collection_name"), db_path=input_data.get("db_path"))
+        elif operation == "add_missing":
+            result = _add_missing(
+                collection_name=input_data.get("collection_name"),
+                ids=input_data.get("ids"),
+                embeddings=input_data.get("embeddings"),
+                documents=input_data.get("documents"),
+                metadatas=input_data.get("metadatas"),
+                metadata=input_data.get("metadata"),
                 db_path=input_data.get("db_path"),
             )
         elif operation == "delete_by_source":
