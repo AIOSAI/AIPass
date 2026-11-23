@@ -3,7 +3,7 @@
 # Description: Tests for doctor's home, seating, preflight, citizen-count, skills, shadow, smoke, registry, scope rows
 # Version: 1.13.0
 # Created: 2026-10-08
-# Modified: 2026-11-21
+# Modified: 2026-11-23
 # =============================================
 
 """Tests for apps/modules/doctor.py and _doctor_smoke.py: home, seating, preflight, drone, skills, shadows, smoke."""
@@ -1138,6 +1138,23 @@ class TestGitignoreCoverageRows:
 
         assert list(rows) == ["gitignore coverage"]
         assert rows["gitignore coverage"].detail.startswith("not measured: the AIPass source tree")
+
+    def test_a_project_nested_in_a_parent_repo_reads_the_index_of_the_repo_that_holds_it(self) -> None:
+        self._track("src/aipass/README.md")
+        (self.root / ".gitignore").write_text(".spawn/\n*_REGISTRY.json\n", encoding="utf-8")
+        nested = self.root / "projects" / "finch"
+        for rel in ("FINCH_REGISTRY.json", "src/finch/finch/.spawn/meta.json"):
+            (nested / rel).parent.mkdir(parents=True, exist_ok=True)
+            (nested / rel).write_text("state\n", encoding="utf-8")
+
+        assert check_gitignore_coverage(nested) == [("gitignore coverage", GLYPH_PASS, "no runtime file tracked", "")]
+
+        subprocess.run(["git", "init", "-q"], cwd=nested, check=True)
+        subprocess.run(["git", "add", "-f", "FINCH_REGISTRY.json"], cwd=nested, check=True)
+
+        assert [row[:3] for row in check_gitignore_coverage(nested)] == [
+            ("gitignore coverage: FINCH_REGISTRY.json", GLYPH_FAIL, "1 tracked file(s) one installation writes")
+        ]
 
     def test_a_folder_that_is_no_repository_passes_with_nothing_tracked(self) -> None:
         rows = self._rows()
