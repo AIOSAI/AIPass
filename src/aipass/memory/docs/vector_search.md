@@ -31,6 +31,12 @@ no value, a `--branch`/`--type` that is not a name (a letter or digit, then lett
 `-`; a leading `@` on `--branch` is dropped) and an `--n` below 1, before the embedding subprocess
 runs. Whether a branch or type has vectors is the store's answer, after the model loads.
 
+**A result names its owner from the collection.** Every hit from `search_vectors` and `get_by_source`
+carries `branch` (lowercased) and `type` from the metadata the collection was created with, because a
+collection name cannot be split back: `ai_mail_email_sent` is branch `ai_mail`, type `email_sent`.
+The result screen heads each hit `branch (type)`; a collection created without that metadata is
+headed by its own name.
+
 **The model is downloaded once, with network.** `embed_subprocess.py` loads
 `sentence-transformers/all-MiniLM-L6-v2` through fastembed, which reads it from its cache
 (`$FASTEMBED_CACHE_PATH`, default `<tempdir>/fastembed_cache`) or downloads it there from Hugging Face

@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.4.4
+# Version: 1.5.0
 # Created: 2026-03-05
 # Modified: 2026-11-22
 # =============================================
@@ -13,7 +13,10 @@
 # sentry: no-test-needed(stdlib) — uuid.uuid4()'s randomness, which apps/modules/core.py mints citizen_id from
 
 import json
+import os
 import shutil
+import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -34,6 +37,7 @@ from aipass.spawn.apps.handlers.project_defaults import PROJECT_TEMPLATE_DIR, st
 from aipass.spawn.apps.handlers.update_ignore import is_ignored, read_ignore
 from aipass.spawn.apps.handlers.placeholders import (
     build_replacements_dict,
+    layout_package,
     replace_placeholders,
     validate_no_placeholders,
 )
@@ -77,6 +81,58 @@ class TestCreateFlags:
         assert identity["role"] == "Flag Role"
         assert identity["traits"] == ["curious"]
         assert identity["purpose"] == "Flag Purpose"
+
+    def test_create_in_a_src_package_layout_imports_itself_from_that_package(self, tmp_path):
+        """<project>/src/shop/clerk: the newborn's door runs and names shop.clerk. Mutant: localize off -> red."""
+        target = tmp_path / "src" / "shop" / "clerk"
+
+        assert handle_create([str(target), "--registry", str(tmp_path / "SHOP_REGISTRY.json")]) == 0
+
+        assert (tmp_path / "src" / "shop" / "__init__.py").is_file()
+        entry = (target / "apps" / "clerk.py").read_text(encoding="utf-8")
+        assert "shop.clerk.apps.modules" in entry and "aipass.clerk" not in entry
+        done = subprocess.run(
+            [sys.executable, str(target / "apps" / "clerk.py"), "--help"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+        )
+        assert done.returncode == 0, done.stderr[-600:]
+
+    def test_a_src_package_newborn_passes_its_own_fence_tests(self, tmp_path):
+        """The fence probe builds names at runtime (f"aipass.{BRANCH}"). Mutant: that form unrewritten -> red."""
+        target = tmp_path / "src" / "shop" / "clerk"
+        assert handle_create([str(target), "--registry", str(tmp_path / "SHOP_REGISTRY.json")]) == 0
+
+        done = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_handlers_fence.py"],
+            cwd=str(target),
+            env={**os.environ, "PYTHONPATH": str(tmp_path / "src")},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=300,
+        )
+
+        assert done.returncode == 0, done.stdout[-1500:]
+        assert 'f"shop.{BRANCH}' in (target / "tests" / "support_fence.py").read_text(encoding="utf-8")
+
+    def test_the_library_door_keeps_the_aipass_prefix_unless_asked(self, tmp_path):
+        """aipass new re-roots its own first citizen after spawn_agent; a second pass would duplicate its edits."""
+        target = tmp_path / "src" / "shop" / "clerk"
+
+        assert spawn_agent(str(target), registry_path=str(tmp_path / "SHOP_REGISTRY.json"))["success"] is True
+
+        assert "aipass.clerk.apps.modules" in (target / "apps" / "clerk.py").read_text(encoding="utf-8")
+        assert not (tmp_path / "src" / "shop" / "__init__.py").exists()
+
+    @pytest.mark.parametrize(
+        ("parts", "package"),
+        [(("src", "shop", "clerk"), "shop"), (("src", "aipass", "clerk"), None), (("clerk",), None)],
+    )
+    def test_layout_package_reads_the_package_from_src(self, tmp_path, parts, package):
+        assert layout_package(tmp_path.joinpath(*parts)) == package
 
 
 @pytest.fixture
@@ -394,6 +450,7 @@ class TestMintRefusals:
         assert not tmp_registry.exists()
 
     def test_a_name_already_registered_refuses_before_any_copy(self, tmp_path, tmp_agent, tmp_registry):
+        (tmp_path / "elsewhere").mkdir()
         add_to_registry(tmp_registry, "TEST_AGENT", str(tmp_path / "elsewhere"), "W", "@test_agent")
 
         result = spawn_agent(str(tmp_agent), registry_path=str(tmp_registry))
@@ -402,9 +459,21 @@ class TestMintRefusals:
         assert "already registered" in result["error"]
         assert not tmp_agent.exists()
 
+    def test_a_row_whose_directory_is_gone_is_replaced_by_the_fresh_birth(self, tmp_path, tmp_agent, tmp_registry):
+        """An archived-by-hand owner leaves a row that guards nothing. Mutant: refuse on the name alone -> red."""
+        add_to_registry(tmp_registry, "TEST_AGENT", str(tmp_path / "elsewhere"), "W", "@test_agent")
+
+        result = spawn_agent(str(tmp_agent), registry_path=str(tmp_registry))
+
+        assert result["success"] is True, result.get("error")
+        rows = [b for b in load_registry(tmp_registry)["branches"] if b["name"].lower() == "test_agent"]
+        assert len(rows) == 1
+        assert rows[0]["path"] != str(tmp_path / "elsewhere")
+
     @pytest.mark.parametrize("stored", ["test_agent", "TEST_AGENT"])
     def test_a_name_registered_in_either_case_refuses_before_any_copy(self, tmp_path, tmp_agent, tmp_registry, stored):
         """The pre-copy guard ignores case. Mutant: it compares exact case -> red on the other spelling."""
+        (tmp_path / "elsewhere").mkdir()
         add_to_registry(tmp_registry, stored, str(tmp_path / "elsewhere"), "W", "@test_agent")
 
         result = spawn_agent(str(tmp_agent), registry_path=str(tmp_registry))

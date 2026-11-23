@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: search.py
 # Description: Search Orchestration Module
-# Version: 0.7.2
+# Version: 0.7.3
 # Created: 2025-11-27
 # Modified: 2026-11-22
 # =============================================
@@ -194,9 +194,8 @@ def show_search_results(
         metadata = item.get("metadata", {})
         similarity = item.get("similarity", 0)
 
-        parts = collection.split("_")
-        branch_name = parts[0] if parts else "unknown"
-        mem_type = parts[1] if len(parts) > 1 else "unknown"
+        owner, mem_type = item.get("branch"), item.get("type")
+        heading = f"{owner} ({mem_type})" if owner and mem_type else collection
 
         # Entry identity first: a recovered entry is named, not matched on text that may not stay unique.
         meta_lines = []
@@ -215,7 +214,7 @@ def show_search_results(
 
         meta_text = " | ".join(meta_lines) if meta_lines else ""
 
-        panel_title = f"Result {i} - {branch_name} ({mem_type}) - Similarity: {similarity:.2%}"
+        panel_title = f"Result {i} - {heading} - Similarity: {similarity:.2%}"
 
         panel_content = document
         if meta_text:

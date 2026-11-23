@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Main orchestrator for agent spawning
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-03-05
-# Modified: 2026-11-20
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -125,7 +125,7 @@ def handle_command(command: str, args: List[str]) -> bool:
                 i += 2
             else:
                 i += 1
-        result = spawn_agent(target_path, **kwargs)
+        result = spawn_agent(target_path, localize=True, **kwargs)
         return result["success"]
     else:
         logger.error(f"Unknown spawn command: {command}")
@@ -142,6 +142,7 @@ def spawn_agent(
     registry_path=None,
     citizen_class=None,
     arrival=None,
+    localize=False,
 ):
     """Create a new AIPass agent from template — the public door (aipass.spawn exports it).
 
@@ -158,4 +159,5 @@ def spawn_agent(
         registry_path=registry_path,
         citizen_class=citizen_class,
         arrival=arrival,
+        localize=localize,
     )

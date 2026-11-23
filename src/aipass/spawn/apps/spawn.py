@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.4.4
+# Version: 1.5.0
 # Created: 2026-03-05
 # Modified: 2026-11-22
 # =============================================
@@ -255,6 +255,7 @@ def handle_create(args):
         template_dir=template_dir,
         registry_path=parsed.registry,
         citizen_class=citizen_class,
+        localize=True,
     )
 
     if result["success"]:

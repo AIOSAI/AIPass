@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.9.1
+# Version: 1.10.0
 # Created: 2026-07-17
 # Modified: 2026-11-22
 # =============================================
@@ -15,6 +15,7 @@ import hashlib
 import importlib
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -500,6 +501,34 @@ def _built_with_agent(host_env, monkeypatch, name: str, spawn_answer: dict):
         patch("aipass.aipass.apps.handlers.new_project.spawn_agent", return_value=spawn_answer) as mock_spawn,
     ):
         return create_project(name, no_agent=False), mock_spawn
+
+
+def test_a_newborn_project_citizen_passes_its_own_fence_tests(host_env, monkeypatch):
+    """A real birth (spawn runs, git stubbed), then the newborn's fence file in its own interpreter.
+
+    Mutant: the localizer's `\\{BRANCH\\}` arm dropped -> support_fence's f"aipass.{BRANCH}" names stay
+    unrooted -> No module named aipass.<branch> -> red.
+    """
+    monkeypatch.chdir(host_env)
+    with (
+        patch("subprocess.run", side_effect=_mock_git_run),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=str(host_env)),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
+    ):
+        result = create_project("fenced", no_agent=False)
+    home = Path(result["agent_home"])
+    env = {**os.environ, "PYTHONPATH": str(host_env / "projects" / "fenced" / "src")}
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/test_handlers_fence.py", "-q", "-p", "no:cacheprovider"],
+        cwd=home,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
+    )
+    assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
 
 
 def test_agent_home_simple(host_env, monkeypatch):

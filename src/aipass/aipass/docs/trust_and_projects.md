@@ -43,6 +43,13 @@ Code: [`apps/modules/trust.py`](../apps/modules/trust.py).
 `--template python` adds a pyproject and `src/`; `--no-agent` leaves the agent
 out. `aipass new --help` lists the templates: `empty` and `python`.
 
+The project is not installed in the venv, so the agent's code is re-rooted
+from `aipass.<pkg>` to `<pkg>.<pkg>`, the package the project declares: the
+literal name and the template's placeholder forms (`{BRANCH}`, `{MY_BRANCH}`,
+`"aipass." + MY_BRANCH`). The entry point and the handlers-fence probe put
+`src/` on the path themselves. With `PYTHONPATH` at the project's `src/`, a
+fresh agent passes its own fence tests.
+
 Code: [`apps/modules/new_project.py`](../apps/modules/new_project.py) and
 [`apps/handlers/new_project/`](../apps/handlers/new_project) — registry,
 template, scaffold and repo init.

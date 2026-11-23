@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: placeholders.py
 # Description: Placeholder replacement engine
-# Version: 2.1.1
+# Version: 2.2.1
 # Created: 2026-03-05
 # Modified: 2026-11-22
 # =============================================
@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from aipass.prax import logger
+from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.metadata import detect_profile
 from aipass.spawn.apps.handlers.registry import aipass_home, find_registry
 
@@ -124,6 +125,56 @@ def build_replacements_dict(target_dir, branch_name, **overrides):
         replacements.update(meta_tabs)
 
     return replacements
+
+
+def layout_package(target_dir) -> str | None:
+    """<project>/src/<package>/<branch> gives <package>; aipass and any other layout give None."""
+    target = Path(target_dir)
+    if target.parent.parent.name != "src" or target.parent.name == "aipass":
+        return None
+    return target.parent.name
+
+
+def _insert_after(path: Path, anchor: str, text: str) -> None:
+    """Insert text after the first anchor in path; a missing anchor means the citizen template moved."""
+    content = path.read_text(encoding="utf-8")
+    if anchor not in content:
+        raise RuntimeError(f"{path.name}: {anchor.strip()!r} not found; the citizen template changed")
+    atomic_write_text(path, content.replace(anchor, anchor + text, 1))
+
+
+def localize_package_imports(target_dir, branch: str) -> str | None:
+    """Re-root a minted citizen to <package>.<branch>; src/ goes on its path, as a project is not installed.
+
+    Answers the package, or None for an aipass layout. RuntimeError: a rewrite anchor left the template."""
+    target = Path(target_dir)
+    package = layout_package(target)
+    if package is None:
+        return None
+    package_init = target.parent / "__init__.py"
+    if not package_init.exists():
+        atomic_write_text(package_init, "")
+    # shortcut: a branch named after an aipass package (cli, prax) would re-root that package's imports too;
+    # refuse such names here if a project ever wants one.
+    own = re.compile(rf"\baipass([./])(?={re.escape(branch)}\b|\{{(?:MY_)?BRANCH\}}|\"\s*\+\s*MY_BRANCH)")
+    for path in target.rglob("*"):
+        if path.suffix in (".py", ".md") and path.is_file():
+            text = path.read_text(encoding="utf-8")
+            if own.search(text):
+                atomic_write_text(path, own.sub(rf"{package}\1", text))
+    _insert_after(
+        target / "apps" / f"{branch}.py",
+        f'os.environ.setdefault("AIPASS_BRANCH_NAME", "{branch}")\n',
+        "sys.path.insert(0, str(Path(__file__).resolve().parents[3]))\n",
+    )
+    fence = target / "tests" / "test_handlers_fence.py"
+    _insert_after(fence, "\nimport shutil\n", "import os\n")
+    _insert_after(
+        fence,
+        "        cwd=str(cwd),\n",
+        '        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[3])},\n',
+    )
+    return package
 
 
 def validate_no_placeholders(target_dir):

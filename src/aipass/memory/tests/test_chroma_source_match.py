@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_chroma_source_match.py
 # Description: Tests for source_file matching in the ChromaDB subprocess handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-23
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/storage/chroma_subprocess.py."""
@@ -37,6 +37,8 @@ def run(capsys):
 
 class _FakeCollection:
     """Minimal stand-in for a Chroma collection backed by source_file names."""
+
+    metadata = None
 
     def __init__(self, source_files):
         self._sources = list(source_files)
@@ -265,8 +267,9 @@ _STORE = [
 
 
 class _SearchCollection:
-    def __init__(self, name):
+    def __init__(self, name, metadata=None):
         self.name = name
+        self.metadata = metadata
 
     def query(self, query_embeddings=None, n_results=5):
         return {
@@ -388,3 +391,27 @@ class TestAFailedCollectionIsNotASearchedOne:
 
         assert result["success"] is False
         assert "flow_local" in result["error"] and "flow_plans" in result["error"]
+
+
+class TestTheResultNamesItsOwner:
+    """ai_mail_email_sent split at its first underscore read as branch "ai": the owner is the collection's own."""
+
+    @staticmethod
+    def _store(monkeypatch, metadata):
+        client = _SearchClient([])
+        client._collections = [_SearchCollection("ai_mail_email_sent", metadata)]
+        monkeypatch.setattr(chroma_subprocess, "_get_client", lambda db_path=None: client)
+
+    def test_branch_and_type_come_from_the_collection_metadata_lowercased(self, monkeypatch, run):
+        self._store(monkeypatch, {"hnsw:space": "cosine", "branch": "AI_MAIL", "type": "email_sent"})
+
+        result = run("search_vectors", query_embedding=[0.1], branch="ai_mail")
+
+        assert [(r["branch"], r["type"]) for r in result["results"]] == [("ai_mail", "email_sent")]
+
+    def test_a_collection_without_metadata_names_no_owner(self, monkeypatch, run):
+        self._store(monkeypatch, None)
+
+        result = run("search_vectors", query_embedding=[0.1], branch="ai_mail")
+
+        assert [(r["branch"], r["type"]) for r in result["results"]] == [("", "")]

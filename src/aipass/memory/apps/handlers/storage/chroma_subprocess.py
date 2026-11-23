@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: chroma_subprocess.py
 # Description: ChromaDB Subprocess Handler
-# Version: 1.8.1
+# Version: 1.9.0
 # Created: 2025-11-27
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -231,6 +231,12 @@ def _check_plan(plan_label, db_path=None):
     return {"success": True, "found": match_count > 0, "count": match_count, "source_files": sorted(matching_files)}
 
 
+def _owner(collection) -> dict:
+    """The branch and type the collection was created with: its name cannot be split (ai_mail_email_sent)."""
+    meta = collection.metadata or {}
+    return {"branch": str(meta.get("branch", "")).lower(), "type": str(meta.get("type", ""))}
+
+
 def _get_by_source(collection_name, source_pattern, n_results=5, db_path=None):
     """Fetch documents whose source_file metadata contains a pattern."""
     client = _get_client(db_path)
@@ -254,6 +260,7 @@ def _get_by_source(collection_name, source_pattern, n_results=5, db_path=None):
                     "metadata": meta,
                     "id": result["ids"][i],
                     "distance": 0.0,
+                    **_owner(collection),
                 }
             )
             if len(matches) >= n_results:
@@ -364,6 +371,7 @@ def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5,
                             "metadata": results["metadatas"][0][i] if results["metadatas"] else {},
                             "distance": results["distances"][0][i] if results["distances"] else None,
                             "id": results["ids"][0][i] if results["ids"] else None,
+                            **_owner(collection),
                         }
                     )
         except Exception as e:

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: memory.py
 # Description: Entry point CLI for drone @memory
-# Version: 1.3.4
+# Version: 1.3.5
 # Created: 2026-03-08
 # Modified: 2026-11-22
 # =============================================
@@ -10,7 +10,7 @@
 Memory System - Central Memory Archive & Rollover System
 """
 
-__version__ = "1.3.1"
+__version__ = "1.3.5"
 
 import sys
 

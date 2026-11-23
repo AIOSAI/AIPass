@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: mint_ops.py
 # Description: The mint of a new citizen from the template, step by step
-# Version: 1.5.2
+# Version: 1.6.1
 # Created: 2026-09-28
 # Modified: 2026-11-22
 # =============================================
@@ -20,7 +20,11 @@ from aipass.spawn.apps.handlers.metadata import (
     normalize_branch_name,
     detect_profile,
 )
-from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, validate_no_placeholders
+from aipass.spawn.apps.handlers.placeholders import (
+    build_replacements_dict,
+    localize_package_imports,
+    validate_no_placeholders,
+)
 from aipass.spawn.apps.handlers.file_ops import (
     copy_template,
     regenerate_template_registry,
@@ -38,6 +42,7 @@ from aipass.spawn.apps.handlers.registry import (
     ensure_project_has_owner,
     load_registry,
     row_at,
+    save_registry,
 )
 from aipass.spawn.apps.handlers.adoption_ops import adopt_existing, birth_from_seed, error_result
 from aipass.spawn.apps.handlers.class_registry import (
@@ -72,12 +77,14 @@ def spawn_at(
     registry_path=None,
     citizen_class=None,
     arrival=None,
+    localize=False,
 ) -> dict:
     """Decide the lane for a target and run it: refuse, adopt, birth from seed, or mint.
 
     citizen_class None means decide at mint from the citizen number; retired names are refused.
     traits: a bare string becomes a one-element list (identity.traits is a list).
-    arrival: "fresh" or "adopted" stamps a project seat's defaults at mint; None stamps nothing."""
+    arrival: "fresh" or "adopted" stamps a project seat's defaults at mint; None stamps nothing.
+    localize: re-root the newborn's imports to the package its src/<package>/<branch> layout names."""
     # Forbidden and retired values refuse before any filesystem work, through every door.
     for candidate in (citizen_class, Path(template_dir).name if template_dir else ""):
         refusal = refuse_retired_or_forbidden(candidate)
@@ -154,6 +161,7 @@ def spawn_at(
         registry_path=registry_path,
         citizen_class=citizen_class,
         arrival=arrival,
+        localize=localize,
     )
 
 
@@ -183,6 +191,7 @@ def mint_citizen(
     registry_path=None,
     citizen_class=None,
     arrival=None,
+    localize=False,
 ) -> dict:
     """Mint a citizen at a target that does not exist yet, from template."""
     folder_name = get_branch_name(target)
@@ -201,10 +210,15 @@ def mint_citizen(
     except ValueError:
         logger.warning("[spawn] Mint refused: %s is outside registry %s", target, reg_path)
         return error_result(f"{target} is outside the project of registry {reg_path}; nothing was written.")
-    if any(
-        b.get("name", "").lower() == branch_lower for b in branches_as_list(load_registry(reg_path).get("branches", []))
-    ):
+    registry = load_registry(reg_path)
+    same_name = [b for b in branches_as_list(registry.get("branches", [])) if b.get("name", "").lower() == branch_lower]
+    if any((reg_path.parent / b.get("path", "")).is_dir() for b in same_name):
         return error_result(f"{branch_lower} is already registered in {reg_path}; nothing was written.")
+    if same_name:
+        # A row whose directory is gone (archived by hand) guards nothing: the fresh birth replaces it.
+        registry["branches"] = [b for b in branches_as_list(registry.get("branches", [])) if b not in same_name]
+        save_registry(reg_path, registry)
+        logger.warning("[spawn] Stale row %s dropped from %s: directory gone; minting afresh", branch_lower, reg_path)
     citizen_number = get_next_citizen_number(reg_path)
 
     # Resolved before the copy: the passport is written before the registry, so both must carry this id.
@@ -235,6 +249,13 @@ def mint_citizen(
 
     ensure_directory(target)
     copied, skipped = copy_template(template, target, replacements)
+    if localize:
+        try:
+            package = localize_package_imports(target, branch_lower)
+        except RuntimeError as e:
+            return error_result(f"Imports not re-rooted: {e}. Nothing was registered; the tree is left at {target}.")
+        if package:
+            logger.info("[spawn] %s imports itself as %s.%s", branch_lower, package, branch_lower)
 
     # The template has no {{TRAITS}} placeholder, so traits are written after render or silently dropped.
     traits_issues = []

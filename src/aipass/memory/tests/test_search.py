@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_search.py
 # Description: Tests for the search orchestration module
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/search.py."""
@@ -546,6 +546,31 @@ class TestResultMetadataDisplay:
         body = "\n".join(self._panel_bodies(mocks))
         assert "#14" in body
         assert "2026-05-31" in body
+
+    @staticmethod
+    def _titles(mocks):
+        return [call.kwargs["title"] for call in mocks["panel"].call_args_list]
+
+    def test_the_heading_names_the_owner_the_store_reports(self, monkeypatch):
+        """A name split at "_" headed ai_mail_email_sent as "ai (mail)"."""
+        search_mod, mocks = _import_search(monkeypatch)
+        found = self._search_returning({})
+        found["results"][0].update(collection="ai_mail_email_sent", branch="ai_mail", type="email_sent")
+        mocks["execute_search"].return_value = found
+
+        assert search_mod.show_search_results("sent mail") is True
+
+        assert self._titles(mocks)[0].startswith("Result 1 - ai_mail (email_sent) - ")
+
+    def test_a_result_with_no_owner_is_headed_by_its_collection(self, monkeypatch):
+        search_mod, mocks = _import_search(monkeypatch)
+        found = self._search_returning({})
+        found["results"][0].update(collection="ai_mail_email_sent", branch="", type="")
+        mocks["execute_search"].return_value = found
+
+        assert search_mod.show_search_results("sent mail") is True
+
+        assert self._titles(mocks)[0].startswith("Result 1 - ai_mail_email_sent - ")
 
     def test_empty_timestamp_renders_no_time_label(self, monkeypatch):
         """Rollover writes timestamp="" for .trinity entries -- don't print a bare label."""
