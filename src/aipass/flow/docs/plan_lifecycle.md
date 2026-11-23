@@ -116,9 +116,17 @@ vectorisation is silent. Nothing in flow calls `is_plan_vectorized()`; that
 function lives in `@memory` and is reached only by the separate
 `drone @memory verify <label>` command, which is where a real answer comes from.
 
+**Closes that stack never drop a plan.** One runner works at a time, holding
+`.post_close_runner.lock`. Every runner first leaves a `.post_close_runner.lock.rerun`
+marker, then tries the lock. A runner that finds the lock held exits 0 and leaves
+its marker. The holder consumes the marker before each pass and passes again while
+one exists, rechecking after it releases the lock. A plan closed after the holder
+listed its files is therefore picked up by that holder's next pass. A lock or
+marker that cannot be created is logged as an error and the runner exits 1.
+
 Closed plans are archived to `<project-root>/.backup/processed_plans/`, where the project root is the nearest directory above the plan holding a `*_REGISTRY.json` with a `branches` key: an external project's plans stay in that project, never the host's. A plan with no register above it archives to the host's. The host's archive is a shared runtime namespace managed by `@backup` (see `src/aipass/backup/README.md`) and consumed by `@memory` for vectorization; `@memory` reads the host's archive only. Restore looks in the same project archive the row's `file_path` resolves to.
 
-`drone @flow list` shows the rows whose location sits in the caller's project, under a header naming it. Only `list all` from the host project's seat lists every project, under the header `fleet`. A caller standing in no project is refused. Plan numbers stay one sequence across every project.
+`drone @flow list` shows the rows whose location sits in the caller's project, under a header naming it. Only `list all` from the host project's seat lists every project, under the header `fleet`. A caller standing in no project is refused. Plan numbers stay one sequence across every project. A row and the `Created ... in <location>` lines print unwrapped, so a long location stays on its plan's line at any console width.
 
 ---
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_list_plans.py
 # Description: Unit tests for apps/modules/list_plans.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-11-21
+# Modified: 2026-11-23
 # =============================================
 
 """Tests for apps/modules/list_plans.py."""
@@ -144,6 +144,26 @@ class TestListPlansOrchestrator:
             mock_impl.assert_called_once()
         out, _err = capsys.readouterr()
         assert out == "Plan list output\n3 plans total\n"
+
+    def test_a_row_wider_than_the_console_stays_on_its_own_line(self, capsys: pytest.CaptureFixture[str]):
+        """A location wider than the console (pinned 200 by conftest) stays on its plan's line, not below it.
+
+        Mutant: drop soft_wrap=True from the formatted_list print reddens this.
+        """
+        row = "  FPLAN-1197  \\[closed]  " + "/projects/finch/src" * 12 + "  A subject  2026-11-23 04:19"
+        mock_result = {
+            "success": True,
+            "empty": False,
+            "formatted_list": row,
+            "formatted_stats": "",
+            "filter_type": "all",
+        }
+
+        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result):
+            list_plans("all")
+
+        out, _err = capsys.readouterr()
+        assert out.splitlines()[0] == row.replace("\\[", "[")
 
     def test_empty_result_shows_warning(self):
         """Empty + success result should display a warning."""

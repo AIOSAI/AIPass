@@ -1,41 +1,18 @@
 # =================== AIPass ====================
 # Name: list_plans.py
 # Description: PLAN listing module with filtering
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-21
-# Modified: 2026-11-15
+# Modified: 2026-11-23
 # =============================================
 
-"""
-List PLAN Module - Thin Orchestrator
-
-Orchestrates plan listing workflow by delegating to handlers.
-Module contains NO business logic - only workflow coordination and display.
-
-Workflow:
-    1. Parse arguments
-    2. Call list_ops handler for data
-    3. Display results via console
-
-Usage:
-    From flow.py: flow plan list [filter]
-    Standalone: drone @flow list [filter]
-
-Filters:
-    list          - List open plans only (default)
-    list open     - List open plans only
-    list closed   - List closed plans only
-    list all      - List all plans
-"""
+"""List PLAN module: a thin orchestrator; list_ops gathers the rows, this prints them. See drone @flow list --help."""
 
 import sys
 import os
 
 from typing import List
 from pathlib import Path
-
-_PKG_ROOT = Path(__file__).resolve().parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
-FLOW_ROOT = _PKG_ROOT / "flow"
 
 from aipass.prax import logger
 
@@ -51,6 +28,9 @@ from aipass.flow.apps.handlers.registry.statistics import get_registry_statistic
 from aipass.flow.apps.handlers.plan.display import format_plans_list, format_statistics_summary
 
 from aipass.flow.apps.handlers.plan.list_ops import list_plans_impl
+
+_PKG_ROOT = Path(__file__).resolve().parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
+FLOW_ROOT = _PKG_ROOT / "flow"
 
 MODULE_NAME = "list_plans"
 
@@ -129,7 +109,7 @@ def list_plans(filter_type: str = "open") -> bool:
         return False
 
     try:
-        console.print(result["formatted_list"])
+        console.print(result["formatted_list"], soft_wrap=True)
         console.print(result["formatted_stats"])
     except BrokenPipeError:
         logger.info(f"[{MODULE_NAME}] Broken pipe (stdout closed early)")

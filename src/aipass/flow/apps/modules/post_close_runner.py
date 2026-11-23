@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: post_close_runner.py
 # Description: Background post-close processing
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-02-14
-# Modified: 2026-11-15
+# Modified: 2026-11-23
 # =============================================
 
 """
@@ -12,8 +12,8 @@ Post-Close Background Runner
 Runs @memory archival as a background process.
 Called by close_plan.py via subprocess.Popen so the close command returns fast.
 
-A held lock means a running instance, which scans every unprocessed plan, so
-this one exits 0; a lock that cannot be created is logged and exits 1.
+A held lock means a running instance: this one leaves a rerun marker for that
+holder and exits 0; a lock or marker that cannot be created is logged and exits 1.
 
 This script lives inside the flow branch so handler import guards allow it.
 """
@@ -94,14 +94,32 @@ def main(argv: list[str]) -> int:
         print_help()
         return 0
 
+    # Marker before lock: the holder re-runs while it exists, so a close landing after its listing still drains.
+    rerun = LOCK_FILE.with_name(LOCK_FILE.name + ".rerun")
     try:
-        acquired = acquire_lock(LOCK_FILE)
+        rerun.touch()
     except OSError as e:
-        logger.error("[%s] Could not create lock %s: %s", MODULE_NAME, LOCK_FILE, e)
+        logger.error("[%s] Could not leave rerun marker %s: %s", MODULE_NAME, rerun, e)
         return 1
-    if not acquired:
-        return 0
+    while rerun.exists():
+        try:
+            acquired = acquire_lock(LOCK_FILE)
+        except OSError as e:
+            logger.error("[%s] Could not create lock %s: %s", MODULE_NAME, LOCK_FILE, e)
+            return 1
+        if not acquired:
+            logger.info("[%s] Lock held, rerun marker left for its holder: %s", MODULE_NAME, rerun)
+            return 0
+        try:
+            release_lock(rerun)
+            _run_pass(argv)
+        finally:
+            release_lock(LOCK_FILE)
+    return 0
 
+
+def _run_pass(argv: list[str]) -> None:
+    """One archive and vectorize pass over every closed plan; a failure is logged and the next pass still runs."""
     json_handler.log_operation("post_close_processed", {"argv": argv[1:]})
     try:
         process_closed_plans()
@@ -119,9 +137,6 @@ def main(argv: list[str]) -> int:
 
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Background processing failed: {e}")
-    finally:
-        release_lock(LOCK_FILE)
-    return 0
 
 
 if __name__ == "__main__":

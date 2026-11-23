@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: create_plan.py
 # Description: PLAN creation module with location awareness
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2025-11-16
-# Modified: 2026-11-21
+# Modified: 2026-11-23
 # =============================================
 
 """
@@ -209,7 +209,7 @@ def create_plan(
             elif msg_type == "warning":
                 warning(msg["text"])
             elif msg_type == "display":
-                console.print(msg["text"])
+                console.print(msg["text"], soft_wrap=True)
         return ok, num, loc, tmpl, error
 
     return result
@@ -270,7 +270,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         prefix=prefix,
         digits=digits,
     )
-    console.print(result_msg)
+    console.print(result_msg, soft_wrap=True)
 
     # Handled even on failure: False makes flow.py print a spurious "Unknown command".
     return True
