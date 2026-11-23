@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "missed", "corrections"],
+  "properties": {
+    "summary": {"type": "string"},
+    "missed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "group", "name", "kind", "invoked_by", "file", "lines", "does", "touches", "depends_on", "tested_by", "note"],
+        "properties": {
+          "id": {"type": "string"},
+          "group": {"type": "string"},
+          "name": {"type": "string"},
+          "kind": {"type": "string"},
+          "invoked_by": {"type": "string"},
+          "file": {"type": "string"},
+          "lines": {"type": "integer"},
+          "does": {"type": "string"},
+          "touches": {"type": "string"},
+          "depends_on": {"type": "string"},
+          "tested_by": {"type": "string"},
+          "note": {"type": "string"}
+        }
+      }
+    },
+    "corrections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "field", "was", "should_be", "why"],
+        "properties": {
+          "id": {"type": "string"},
+          "field": {"type": "string"},
+          "was": {"type": "string"},
+          "should_be": {"type": "string"},
+          "why": {"type": "string"}
+        }
+      }
+    }
+  }
+}
