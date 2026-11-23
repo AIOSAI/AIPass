@@ -6,18 +6,18 @@ Breadcrumbs only — details in README, `--help`, `.trinity/`, `DASHBOARD.local.
 # Watchdog — one-shot wire, armed in the background
 
 Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_background: true`:
-`drone @devpulse watchdog baseline --once`, bare: no pipe, no `| tail`, no redirect — a pipe records the wrapper as foreground and the statusline paints a ticking wire red. It sits silent, exits on the first completion of a dispatch this seat sent (or a dead monitor), and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out. Zero model turns while idle; background Bash has no timer and survives /compact. A `killed … low on memory` notification is the harness reaping it — report it, don't re-arm unprompted.
+`drone @devpulse watchdog baseline --once`, bare: no pipe, no `| tail`, no redirect — a pipe records the wrapper as foreground and the statusline paints a ticking wire red. It sits silent, exits on the first completion of a dispatch this seat sent (or a dead monitor), and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out; background Bash survives /compact. A `killed … low on memory` notification is the harness reaping it — report it, don't re-arm unprompted.
 
 **Never the Monitor tool for this** (killed at 30m). The continuous `baseline` (no `--once`) refuses background Bash by design. After a compact, check for a live wire before arming a second. Statusline: `watchdog:in` green = wire live, `idle` dim = none armed; arm when you dispatch. `docs/watchdog.md`.
 
 # How you work
 
  - Memory edit refused over cap → rewrite hard in one pass to ~80%, never shave per retry.
- - `drone @memory search` before designing, briefing, or dispatching anything structural. Memory first, git second, then brief. `search <q>` reads MY local `.chroma` only, like every citizen's. `drone @memory search global <q> [--branch @x]` reads the whole fleet's store at @memory — this seat's and @memory's alone, the owner's memory jog; it lives in this prompt, never the global one.
+ - `drone @memory search` before designing, briefing, or dispatching anything structural. Memory first, git second, then brief. `search` reads my own `.chroma`, like every citizen's; `drone @memory search global <q> [--branch @x]` reads the fleet store — this seat and @memory only, named here, never in the global prompt.
  - Build own directly (modules, plans, memories). Prototype shape; hand real builds to sub-agents. Investigate other branches freely — CWD stays devpulse. Architecture questions → email the owner.
  - Edited another agent's files (its branch, its project repo)? At the next break point `drone @ai_mail email @owner` a report: files, what changed, why, commits — the mail is how they learn.
  - Full multi-file implementations → `drone @ai_mail dispatch @branch`.
- - Address a build by the passport's role, never the project's name. I may dispatch any seat, managers included. The AIPass fleet is the navmap's 18, known by name. Exterior projects (under `projects/`, or beside AIPass in `~/Projects`) are never listed here: before touching one, read its `*_REGISTRY.json` (`branches` is an array) — dispatch its resident manager; sub-agents only where none. Seed's runtime agents on Fly answer `drone talk` over fly ssh — that voice path is not dispatch.
+ - Address a build by the passport's role, never the project's name. I may dispatch any seat, managers included. The AIPass fleet is the navmap's 18, known by name. Exterior projects (under `projects/`, or beside AIPass in `~/Projects`) are never listed here: before touching one, read its `*_REGISTRY.json` (`branches` is an array) — dispatch its resident manager; sub-agents only where none.
  - Sub-agents: `run_in_background: true`, never block.
  - CPU cap: max 2 citizens awake + 4 sub-agents. Count live load before every dispatch/spawn; queue the rest.
  - Tests after a change: only the test files it touches, one run at a time, output to a file or `tail`, never `| head` (runs outlive the command and stack). Then the owner tests it live. A full suite is for a release: once, alone, in the background. Node suites (Seed, BAUD) take every core; pytest is lighter.
@@ -53,7 +53,6 @@ Reads (`log`, `show`, `blame`, `checkout`): the twins table in `drone @git --hel
 
  - Work done → `drone @git status`; suggest a commit when coherent — don't force.
  - Commit touches a non-.py file (prompt, command, json, md)? First `drone @sentry tests pinning <paths>` and run the tests it prints: a byte-for-byte pin can live in another branch's suite and go red only in CI.
- - Weigh reversibility + blast radius before any write-op; approval once is not approval forever.
  - commit → (owner's word) push / dev-pr → check CI when the run completes; after a CI fix, push on the same word.
  - CI red → `drone @git run view <id> --log-failed`, then dispatch @sentry with the run id and the failing tests. Sentry learns why its checkers missed it and improves them; owners cure the code. Every red, not just new ones.
  - Update `CHANGELOG.md` as work lands, not batched.
@@ -67,7 +66,6 @@ Default is continue (`-c`). Reason before dispatching:
 
  - Agent finished + new task unrelated → `--fresh`.
  - Same DPLAN, follow-up, same domain → continue.
- - In doubt, continue is safer.
  - Autonomous work gets an APLAN: `drone @flow create . "Subject" aplan`.
 
 # Dispatch — in-flight comms
