@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.14.2
+# Version: 1.15.0
 # Created: 2026-10-04
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -100,6 +100,9 @@ def page(command: str | None = None) -> str:
             "  A range a..b (or a...b) lists every commit in it, read-only; a count caps it.\n"
             "  Example: drone @git log 5 src/aipass/drone\n"
             "  Example: drone @git log origin/dev..HEAD\n"
+            "  log --remote <branch>: origin's live head of a branch (`<sha>  refs/heads/<branch>`),\n"
+            "  asked of origin now; origin/<branch> is only as fresh as the last fetch.\n"
+            "  Example: drone @git log --remote dev\n"
         )
     if command == "tracked":
         return (
@@ -422,6 +425,7 @@ def page(command: str | None = None) -> str:
         "                         Show recent git log (default: 10); with paths, only the\n"
         "                         commits touching them. count: N, -n N or -N\n"
         "  log [count] <a>..<b>   Every commit in a range (a count caps it)\n"
+        "  log --remote <branch>  Origin's live head of a branch (not the last fetch)\n"
         "  show <ref> [path] [--stat]  Show a commit, or a file's contents at it\n"
         "  blame <file> [-L START,END]  Who last changed each line (optionally a range)\n"
         "  tracked <path ...>     Tracked, ignored, untracked, missing or outside, per path\n"
@@ -490,6 +494,7 @@ def page(command: str | None = None) -> str:
         "  git diff [--stat] -- <path>      drone @git diff [--staged] [--stat] <path ...>\n"
         "  git rev-list --count a...b       drone @git status --all  (ahead/behind origin)\n"
         "  git log origin/dev..HEAD         drone @git log origin/dev..HEAD\n"
+        "  git ls-remote origin <branch>    drone @git log --remote <branch>\n"
         "  git archive <ref> | tar -x       drone @git export <ref> <dir>\n"
         "  git restore -s <ref> -- <p>      drone @git restore --source <ref> <p>\n"
         "  git reset --soft HEAD~<n>        drone @git uncommit <n>  (unpushed only)\n"

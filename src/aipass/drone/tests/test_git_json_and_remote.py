@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_json_and_remote.py
 # Description: The git read doors and their --json, remote, gh tiers, merge-main, the read twins and lock
-# Version: 1.0.8
+# Version: 1.0.9
 # Created: 2026-08-18
-# Modified: 2026-11-14
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/modules/git_module.py's --json on status/log/show and apps/handlers/git/remote_handler.py."""
@@ -1359,6 +1359,30 @@ class TestAheadBehindAndRanges:
         )
 
 
+class TestLogRemote:
+    """log --remote <branch> reads origin's live head, not the last-fetched origin/<branch>."""
+
+    def test_the_live_head_not_the_stale_tracking_ref(self, seat: dict[str, Path]) -> None:
+        work, upstream = seat["work"], seat["upstream"]
+
+        result = _twin(work, "log", ["--remote", "main"])
+
+        live = _git(upstream, "rev-parse", "main")
+        assert live != _git(work, "rev-parse", "origin/main")
+        assert (result["exit_code"], result["stdout"]) == (0, f"{live}  refs/heads/main")
+
+    def test_a_missing_branch_name_is_refused(self, seat: dict[str, Path]) -> None:
+        result = _twin(seat["work"], "log", ["--remote"])
+
+        assert (result["exit_code"], result["stderr"]) == (1, log_handler.REFUSE_REMOTE_USAGE)
+
+    def test_a_branch_origin_lacks_is_refused_by_name(self, seat: dict[str, Path]) -> None:
+        result = _twin(seat["work"], "log", ["--remote", "no-such-branch"])
+
+        assert (result["exit_code"], result["stdout"]) == (1, "")
+        assert result["stderr"] == "log --remote: origin has no branch 'no-such-branch'."
+
+
 class TestExport:
     """export <ref> <dir>: the tracked tree at a ref, into an empty dir under the temp dir or your docs.local."""
 
@@ -1436,6 +1460,7 @@ class TestTwinTiersAndHelp:
             "  git diff [--stat] -- <path>      drone @git diff [--staged] [--stat] <path ...>\n",
             "  git rev-list --count a...b       drone @git status --all  (ahead/behind origin)\n",
             "  git log origin/dev..HEAD         drone @git log origin/dev..HEAD\n",
+            "  git ls-remote origin <branch>    drone @git log --remote <branch>\n",
             "  git archive <ref> | tar -x       drone @git export <ref> <dir>\n",
         ):
             assert row in table

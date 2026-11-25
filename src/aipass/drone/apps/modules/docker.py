@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: docker.py
 # Description: Module orchestrator for drone docker: disposable test boxes it names, lists and removes
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-11-24
 # Modified: 2026-11-25
 # =============================================
@@ -71,7 +71,7 @@ def run(command: str | None = None, args: list[str] | None = None) -> int:
     except box.BoxRefusal as exc:
         logger.warning("docker: refused: %s", exc)
         error(str(exc))
-        return EXIT_REFUSED
+        return exc.code
 
 
 def _parse(args: list[str]) -> dict:
@@ -108,8 +108,10 @@ def _ready() -> int:
 
 
 def create(verb: str, args: list[str]) -> int:
-    """Build the base if needed, record the box, run it attached to this terminal."""
+    """Check the name, build the base if needed, then start, record, enter and stop the box."""
     opts = _parse(args)
+    if opts["name"] is not None:
+        box.check_name(opts["name"])
     image_ref = opts["image"] or box.host_image_ref()
     box.check_apt_base(image_ref)
     mounts = [box.check_mount(p) for p in opts["mount"]]
@@ -124,6 +126,7 @@ def create(verb: str, args: list[str]) -> int:
         error(f"docker build of {box.base_tag(image_ref)} failed (exit {built})")
         return built
     name = opts["name"] or box.next_name(verb, box.read_rows())
+    box.check_free(name)
     console.print(f"{name}  ({verb}, {image_ref}{', kept' if opts['keep'] else ''})", markup=False, highlight=False)
     return box.launch(verb, name, image_ref, opts, mounts, repo_root, url, tty=sys.stdin.isatty())
 
@@ -145,24 +148,35 @@ def list_boxes() -> int:
         console.print("no drone docker boxes on this machine", markup=False)
     if gone:
         console.print(f"{gone} earlier box(es) gone (ran with --rm, or removed outside drone)", markup=False)
+    for vol in box.login_volumes() or ["no login volumes"]:
+        console.print(f"login volume  {vol}" if vol.startswith("aipass-") else vol, markup=False)
     return 0
 
 
 def shell(name: str) -> int:
-    """Start a stopped box if needed and open a login shell in it."""
+    """Start a stopped box, open a login shell in it, and stop it again so it is left as found."""
     if _ready():
         return EXIT_NO_DOCKER
-    state = box.own_box(name)
-    if state != "running" and box.docker(["start", name]).returncode != 0:
-        error(f"docker start {name} failed")
-        return EXIT_REFUSED
-    return box.attach(["docker", "exec", "-it", name, "bash", "-l"])
+    if box.own_box(name) == "running":
+        return box.attach(["docker", "exec", "-it", name, "bash", "-l"])
+    box.docker(["start", name])
+    try:
+        if box.live_states().get(name) != "running":
+            raise box.BoxRefusal(
+                f"{name} does not stay up when started (a box made before drone docker ran boxes on sleep); "
+                f"drone docker rm {name} and make it again"
+            )
+        return box.attach(["docker", "exec", "-it", name, "bash", "-l"])
+    finally:
+        box.stop(name)
 
 
 def remove(args: list[str]) -> int:
     """Stop then remove named boxes, or every live one with --all; record each removal."""
     if _ready():
         return EXIT_NO_DOCKER
+    if args == ["--login"]:
+        return remove_login()
     if args == ["--all"]:
         states = box.live_states()
         names = [n for n in box.boxes(box.read_rows()) if n in states]
@@ -184,6 +198,23 @@ def remove(args: list[str]) -> int:
     if not names:
         console.print("no drone docker boxes to remove", markup=False)
     return EXIT_REFUSED if failed else 0
+
+
+def remove_login() -> int:
+    """Remove the aipass-login-* volumes, clearing every sign-in; docker's refusal of one in use passes through."""
+    vols = [v for v in box.login_volumes() if v in box.LOGIN_VOLUMES]
+    if not vols:
+        console.print("no login volumes to remove", markup=False)
+        return 0
+    result = box.docker(["volume", "rm", *vols])
+    removed = result.stdout.split()
+    if removed:
+        box.record({"event": "login_removed", "volumes": removed})
+    for vol in removed:
+        console.print(f"removed {vol}", markup=False)
+    if result.returncode != 0:
+        error(result.stderr.strip())
+    return result.returncode
 
 
 def print_introspection() -> None:
@@ -215,9 +246,12 @@ Verbs:
   dev | main           bare + that branch cloned from origin on github (not this checkout), pip-installed
                        local, dev and main have aipass on PATH and nothing else set up; your first
                        command is: aipass install --source ~/AIPass-src
-  list                 its boxes: name, verb, age, running or stopped, kept or rm on exit
-  shell <name>         start a kept box if stopped and open a shell in it
+  list                 its boxes: name, verb, age, running or stopped, kept or rm on exit;
+                       then the aipass-login-* volumes, or "no login volumes"
+  shell <name>         start a kept box if stopped, open a shell in it, stop it again on exit
   rm <name>... | --all stop and remove its boxes; a name it did not make is refused
+  rm --login           remove the aipass-login-* volumes: this is how a sign-in is cleared
+                       (docker refuses a volume a container still uses; that refusal is shown)
 
 Options for bare, local, dev, main:
   --keep               do not remove on exit (default: removed on exit)
@@ -226,13 +260,17 @@ Options for bare, local, dev, main:
   --login              named volumes for ~/.claude, ~/.codex, ~/.config/opencode in the box
   --image <ref>        base image (default: this machine's ID:VERSION_ID; ubuntu or debian only)
   --rebuild            rebuild the cached base image (--no-cache)
-  --name <name>        instead of aipass-<verb>-<n>
+  --name <name>        instead of aipass-<verb>-<n>; must match ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$
+                       and not be a container or a recorded box already (else exit 2)
   -- <command>         run this one command in the box instead of a shell
 
 Rules:
   Host credential dirs (~/.claude, ~/.codex, ~/.config/opencode, ~/.secrets, ~/.ssh) never
   mount, nor any directory inside or holding one. --login is the only state carried between boxes.
   Docker absent or its daemon down: one line, exit 2.
+  Every box runs sleep under --init; the script or shell runs through docker exec, and the box is
+  stopped after (a kept box stays, stopped, and can always be entered again with shell).
+  bare, local, dev and main exit with the box command's exit code (docker's, if the box never starts).
 
 Examples:
   drone docker bare

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_docker.py
 # Description: drone docker: the base Dockerfile, the argv per verb and option, names, refusals, exit 2
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-24
 # Modified: 2026-11-25
 # =============================================
@@ -39,6 +39,12 @@ class FakeDocker:
         self.stamp: str | None = None
         self.live: dict[str, str] = {}
         self.dockerfile = ""
+        self.run_result: tuple[int, str, str] = (0, "c0ffee\n", "")
+        self.exec_result: tuple[int, str, str] = (0, "", "")
+        self.exec_raises = False
+        self.start_dies = False
+        self.volumes: list[str] = []
+        self.volume_rm: tuple[int, str, str] | None = None
 
     def __call__(self, argv, *args, **kwargs):
         argv = list(argv)
@@ -64,12 +70,45 @@ class FakeDocker:
     def _ps(self, argv: list[str]) -> tuple[int, str, str]:
         flt = argv[argv.index("--filter") + 1]
         if flt.startswith("name=^"):
-            prefix = flt[len("name=^") :]
-            return 0, "\n".join(n for n in self.live if n.startswith(prefix)), ""
+            want = flt[len("name=^") :]
+            if want.endswith("$"):
+                return 0, "\n".join(n for n in self.live if n == want[:-1]), ""
+            return 0, "\n".join(n for n in self.live if n.startswith(want)), ""
         return 0, "\n".join(f"{n}\t{s}" for n, s in self.live.items()), ""
+
+    def _run(self, argv: list[str]) -> tuple[int, str, str]:
+        if self.run_result[0] == 0:
+            self.live[argv[argv.index("--name") + 1]] = "running"
+        return self.run_result
+
+    def _exec(self, argv: list[str]) -> tuple[int, str, str]:
+        if self.exec_raises:
+            raise KeyboardInterrupt
+        return self.exec_result
+
+    def _start(self, argv: list[str]) -> tuple[int, str, str]:
+        self.live[argv[2]] = "exited" if self.start_dies else "running"
+        return 0, argv[2] + "\n", ""
+
+    def _stop(self, argv: list[str]) -> tuple[int, str, str]:
+        self.live[argv[-1]] = "exited"
+        return 0, argv[-1] + "\n", ""
+
+    def _volume(self, argv: list[str]) -> tuple[int, str, str]:
+        if argv[2] == "ls":
+            return 0, "\n".join(self.volumes), ""
+        if self.volume_rm is not None:
+            return self.volume_rm
+        return 0, "\n".join(argv[3:]), ""
 
     def runs(self) -> list[list[str]]:
         return [c for c in self.calls if c[:2] == ["docker", "run"]]
+
+    def execs(self) -> list[list[str]]:
+        return [c for c in self.calls if c[:2] == ["docker", "exec"]]
+
+    def verbs(self) -> list[str]:
+        return [c[1] for c in self.calls if c[1] in ("run", "exec", "start", "stop")]
 
 
 def path_with_docker(tmp_path: Path) -> str:
@@ -164,23 +203,44 @@ class TestBaseImage:
 
 
 class TestRunArgv:
-    def test_bare_runs_rm_labelled_named_with_a_login_shell(self, fake: FakeDocker) -> None:
+    def test_bare_runs_sleep_detached_then_execs_a_login_shell_then_stops(self, fake: FakeDocker) -> None:
         docker.run("bare", ["--image", "ubuntu:26.04"])
         assert fake.runs() == [
-            [
-                "docker",
-                "run",
-                "--rm",
-                "--name",
-                "aipass-bare-1",
-                "--label",
-                "aipass.box=bare",
-                "aipass-base:ubuntu-26.04",
-                "bash",
-                "-lc",
-                "exec bash -l",
-            ]
+            "docker run -d --init --rm --name aipass-bare-1 --label aipass.box=bare "
+            "aipass-base:ubuntu-26.04 sleep infinity".split()
         ]
+        assert fake.execs() == [["docker", "exec", "aipass-bare-1", "bash", "-lc", "exec bash -l"]]
+        assert fake.verbs() == ["run", "exec", "stop"]
+        assert fake.calls[-1] == ["docker", "stop", "-t", "1", "aipass-bare-1"]
+
+    def test_the_exec_exit_code_is_the_commands_result_and_the_box_is_stopped(self, fake: FakeDocker) -> None:
+        fake.exec_result = (7, "", "")
+        assert docker.run("bare", ["--image", "ubuntu:26.04", "--", "exit 7"]) == 7
+        assert fake.verbs()[-1] == "stop"
+
+    def test_an_interrupted_exec_still_stops_the_box(self, fake: FakeDocker) -> None:
+        fake.exec_raises = True
+        with pytest.raises(KeyboardInterrupt):
+            docker.run("bare", ["--image", "ubuntu:26.04", "--", "true"])
+        assert fake.verbs() == ["run", "exec", "stop"]
+
+    def test_a_failed_run_writes_no_row_execs_nothing_and_returns_dockers_code(
+        self, fake: FakeDocker, capsys: pytest.CaptureFixture
+    ) -> None:
+        fake.run_result = (125, "", "docker: Error response from daemon: no space left")
+        assert docker.run("bare", ["--image", "ubuntu:26.04", "--", "true"]) == 125
+        assert "no space left" in capsys.readouterr().err
+        assert fake.verbs() == ["run"]
+        assert not docker_handler.ledger_path().exists()
+
+    def test_the_row_is_written_after_run_succeeds_and_before_exec(
+        self, fake: FakeDocker, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[str] = []
+        real = docker_handler.record
+        monkeypatch.setattr(docker_handler, "record", lambda row: (seen.append(" ".join(fake.verbs())), real(row)))
+        docker.run("bare", ["--image", "ubuntu:26.04", "--", "true"])
+        assert seen == ["run"]
 
     # A real pseudo-terminal, not a patched isatty; Windows has none.
     @pytest.mark.skipif(not hasattr(os, "openpty"), reason="no pseudo-terminals on this OS")
@@ -190,14 +250,15 @@ class TestRunArgv:
             monkeypatch.setattr(sys, "stdin", tty)
             docker.run("bare", ["--image", "ubuntu:26.04"])
         os.close(main)
-        assert fake.runs()[0][2] == "-it"
+        assert fake.execs()[0][2] == "-it"
+        assert "-it" not in fake.runs()[0]
 
     def test_local_mounts_the_repo_read_only_clones_head_and_pip_installs_it(self, fake: FakeDocker) -> None:
         docker.run("local", ["--image", "ubuntu:26.04"])
         argv = fake.runs()[0]
         root = Path.cwd().resolve()
         assert argv[argv.index("-v") + 1] == f"{root}:/src:ro"
-        lines = script_of(argv).splitlines()
+        lines = script_of(fake.execs()[0]).splitlines()
         clone = lines.index("git clone -q file:///src ~/AIPass-src")
         assert "git -C ~/AIPass-src log -1 --oneline" in lines
         assert lines.index(PIP_INSTALL) > clone
@@ -207,14 +268,14 @@ class TestRunArgv:
 
     def test_bare_installs_nothing(self, fake: FakeDocker) -> None:
         docker.run("bare", ["--image", "ubuntu:26.04"])
-        assert "pip install" not in script_of(fake.runs()[0])
+        assert "pip install" not in script_of(fake.execs()[0])
 
     @pytest.mark.parametrize("verb", ["dev", "main"])
     def test_dev_and_main_clone_that_branch_from_origins_https_url(self, fake: FakeDocker, verb: str) -> None:
         docker.run(verb, ["--image", "ubuntu:26.04"])
         argv = fake.runs()[0]
         assert "-v" not in argv
-        lines = script_of(argv).splitlines()
+        lines = script_of(fake.execs()[0]).splitlines()
         clone = lines.index(f"git clone -q --branch {verb} https://github.com/AIOSAI/AIPass ~/AIPass-src")
         assert lines.index(PIP_INSTALL) > clone
         assert "echo '  aipass install --source ~/AIPass-src'" in lines
@@ -227,7 +288,7 @@ class TestRunArgv:
 
     def test_with_runs_the_vendor_installer_before_the_shell(self, fake: FakeDocker) -> None:
         docker.run("bare", ["--image", "ubuntu:26.04", "--with", "claude", "--with", "codex"])
-        script = script_of(fake.runs()[0])
+        script = script_of(fake.execs()[0])
         assert "curl -fsSL https://claude.ai/install.sh | bash || echo 'install of claude failed'" in script
         assert "npm install -g @openai/codex || echo 'install of codex failed'" in script
         assert script.index("claude.ai") < script.index("exec bash -l")
@@ -260,9 +321,40 @@ class TestRunArgv:
         assert fake.runs()[0][fake.runs()[0].index("--name") + 1] == "trial"
         assert ledger_rows()[-1]["name"] == "trial"
 
+    @pytest.mark.parametrize("bad", ["Bad Name!", "-lead", ".dot", "a/b", ""])
+    def test_a_name_docker_would_refuse_exits_2_before_any_call_or_row(
+        self, fake: FakeDocker, capsys: pytest.CaptureFixture, bad: str
+    ) -> None:
+        assert docker.run("bare", ["--name", bad, "--", "echo ran"]) == 2
+        assert "^[a-zA-Z0-9][a-zA-Z0-9_.-]*$" in capsys.readouterr().err
+        assert fake.calls == []
+        assert not docker_handler.ledger_path().exists()
+
+    def test_a_live_containers_name_is_taken_and_its_row_untouched(
+        self, fake: FakeDocker, capsys: pytest.CaptureFixture
+    ) -> None:
+        seed({"event": "created", "name": "aipass-dup-e2e", "verb": "bare", "kept": True})
+        before = docker_handler.ledger_path().read_text(encoding="utf-8")
+        fake.live = {"aipass-dup-e2e": "exited"}
+        assert docker.run("bare", ["--image", "ubuntu:26.04", "--name", "aipass-dup-e2e", "--", "true"]) == 2
+        assert "aipass-dup-e2e is taken" in capsys.readouterr().err
+        assert fake.runs() == []
+        assert docker_handler.ledger_path().read_text(encoding="utf-8") == before
+
+    def test_a_recorded_name_with_no_container_is_taken(self, fake: FakeDocker, capsys: pytest.CaptureFixture) -> None:
+        seed({"event": "created", "name": "night-claude", "verb": "dev", "kept": True})
+        assert docker.run("bare", ["--image", "ubuntu:26.04", "--name", "night-claude", "--", "true"]) == 2
+        assert "night-claude is taken" in capsys.readouterr().err
+        assert fake.runs() == []
+        assert len(ledger_rows()) == 1
+
+    def test_a_similar_live_name_does_not_take_this_one(self, fake: FakeDocker) -> None:
+        fake.live = {"trial-2": "running", "xtrial": "running"}
+        assert docker.run("bare", ["--image", "ubuntu:26.04", "--name", "trial", "--", "true"]) == 0
+
     def test_a_command_after_dashes_replaces_the_shell(self, fake: FakeDocker) -> None:
         docker.run("bare", ["--image", "ubuntu:26.04", "--", "whoami;", "python3 --version"])
-        assert script_of(fake.runs()[0]) == "whoami; python3 --version"
+        assert script_of(fake.execs()[0]) == "whoami; python3 --version"
 
 
 class TestCredentialMounts:
@@ -364,10 +456,28 @@ class TestShellAndList:
         )
         fake.live = {"aipass-local-1": "exited"}
         assert docker.run("shell", ["aipass-local-1"]) == 0
-        assert [c for c in fake.calls if c[1] in ("start", "exec")] == [
+        assert [c for c in fake.calls if c[1] in ("start", "exec", "stop")] == [
             ["docker", "start", "aipass-local-1"],
             ["docker", "exec", "-it", "aipass-local-1", "bash", "-l"],
+            ["docker", "stop", "-t", "1", "aipass-local-1"],
         ]
+        assert fake.live["aipass-local-1"] == "exited"
+
+    def test_shell_refuses_in_a_sentence_when_start_leaves_it_down(
+        self, fake: FakeDocker, capsys: pytest.CaptureFixture
+    ) -> None:
+        seed({"event": "created", "name": "aipass-bare-e2e", "verb": "bare", "kept": True})
+        fake.live = {"aipass-bare-e2e": "exited"}
+        fake.start_dies = True
+        assert docker.run("shell", ["aipass-bare-e2e"]) == 1
+        assert "aipass-bare-e2e does not stay up when started" in capsys.readouterr().err
+        assert fake.execs() == []
+
+    def test_shell_into_a_running_box_leaves_it_running(self, fake: FakeDocker) -> None:
+        seed({"event": "created", "name": "aipass-bare-3", "verb": "bare"})
+        fake.live = {"aipass-bare-3": "running"}
+        assert docker.run("shell", ["aipass-bare-3"]) == 0
+        assert fake.verbs() == ["exec"]
 
     def test_list_shows_its_live_boxes_and_counts_the_gone(
         self, fake: FakeDocker, capsys: pytest.CaptureFixture
@@ -394,6 +504,38 @@ class TestShellAndList:
         assert "aipass-dev-1" in out and "stopped" in out and "kept" in out
         assert "postgres" not in out
         assert "1 earlier box(es) gone" in out
+        assert "no login volumes" in out
+
+    def test_list_names_each_login_volume(self, fake: FakeDocker, capsys: pytest.CaptureFixture) -> None:
+        fake.volumes = ["aipass-login-claude", "aipass-login-codex"]
+        assert docker.run("list", []) == 0
+        out = capsys.readouterr().out
+        assert "login volume  aipass-login-claude" in out and "login volume  aipass-login-codex" in out
+        assert "no login volumes" not in out
+
+
+class TestLoginVolumes:
+    def test_rm_login_removes_only_the_aipass_login_volumes_and_records_it(self, fake: FakeDocker) -> None:
+        fake.volumes = ["aipass-login-claude", "aipass-login-opencode", "aipass-login-other"]
+        assert docker.run("rm", ["--login"]) == 0
+        assert [c for c in fake.calls if c[1] == "volume" and c[2] != "ls"] == [
+            ["docker", "volume", "rm", "aipass-login-claude", "aipass-login-opencode"]
+        ]
+        row = ledger_rows()[-1]
+        assert (row["event"], row["volumes"]) == ("login_removed", ["aipass-login-claude", "aipass-login-opencode"])
+
+    def test_dockers_refusal_of_a_volume_in_use_passes_through(
+        self, fake: FakeDocker, capsys: pytest.CaptureFixture
+    ) -> None:
+        fake.volumes = ["aipass-login-claude"]
+        fake.volume_rm = (1, "", "Error response from daemon: remove aipass-login-claude: volume is in use")
+        assert docker.run("rm", ["--login"]) == 1
+        assert "volume is in use" in capsys.readouterr().err
+        assert not docker_handler.ledger_path().exists()
+
+    def test_rm_login_with_none_says_so(self, fake: FakeDocker, capsys: pytest.CaptureFixture) -> None:
+        assert docker.run("rm", ["--login"]) == 0
+        assert "no login volumes to remove" in capsys.readouterr().out
 
 
 class TestDockerMissing:

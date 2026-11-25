@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-05
-# Modified: 2026-11-24
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -14,7 +14,7 @@ import functools
 import importlib
 import sys
 from pathlib import Path
-from typing import Callable, List
+from typing import Callable, List, TextIO
 
 from rich.table import Table
 from rich.text import Text
@@ -282,6 +282,11 @@ def _handle_systems() -> int:
     return 0
 
 
+def _write_line(stream: TextIO, text: str) -> None:
+    """Write a module's answer ending in a newline, so the next command's output starts on its own line."""
+    stream.write(text if text.endswith("\n") else text + "\n")
+
+
 def _module_unavailable(name: str, why: str) -> int:
     """Name a registered module that cannot run, on stderr; the exit code is 1."""
     err_console.print(f"drone: module @{name} is registered but not available: {why}")
@@ -324,9 +329,9 @@ def _handle_module(name: str, args: List[str]) -> int:
         return 1
 
     if result.get("stdout"):
-        sys.stdout.write(result["stdout"])
+        _write_line(sys.stdout, result["stdout"])
     if result.get("stderr"):
-        sys.stderr.write(result["stderr"])
+        _write_line(sys.stderr, result["stderr"])
     return result.get("exit_code", 0)
 
 
@@ -726,9 +731,9 @@ def main() -> int:
             return 1
         if isinstance(result, dict):
             if result.get("stdout"):
-                sys.stdout.write(result["stdout"])
+                _write_line(sys.stdout, result["stdout"])
             if result.get("stderr"):
-                sys.stderr.write(result["stderr"])
+                _write_line(sys.stderr, result["stderr"])
             return result.get("exit_code", 0)
         return 0 if result else 1
 

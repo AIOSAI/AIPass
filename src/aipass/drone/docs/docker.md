@@ -17,9 +17,10 @@ you kept it. The flags and examples are `drone docker --help`.
 | `bare` | A fresh image of this machine's OS with the base tools, no AIPass, a login shell |
 | `local` | `bare` plus this checkout's committed HEAD, cloned and pip-installed; the working tree is mounted read-only at `/src` |
 | `dev`, `main` | `bare` plus that branch cloned from origin on github, not from this checkout, and pip-installed |
-| `list` | Its boxes: name, verb, age, running or stopped, kept or removed on exit |
-| `shell <name>` | Starts a kept box if it is stopped, then opens a login shell in it |
+| `list` | Its boxes: name, verb, age, running or stopped, kept or removed on exit; then one line per `aipass-login-*` volume, or `no login volumes` |
+| `shell <name>` | Starts a kept box if it is stopped, opens a login shell in it, and stops it again when you leave |
 | `rm <name>...`, `rm --all` | Stops, then removes its boxes; records each removal |
+| `rm --login` | Removes the `aipass-login-*` volumes, which clears every sign-in (see Login volumes) |
 
 `local` is the only verb that uses this checkout: it clones `file:///src` to `~/AIPass-src`, so
 the box sees the committed HEAD, not uncommitted edits. `dev` and `main` clone with `--branch dev`
@@ -52,8 +53,33 @@ These apply to `bare`, `local`, `dev` and `main`:
 | `--name <name>` | Instead of `aipass-<verb>-<n>` |
 | `-- <command>` | Runs that one command in the box instead of the shell |
 
-A terminal on stdin gets `docker run -it`; without one (a script, a pipe) the box runs without a
-TTY, which is how `-- <command>` runs unattended.
+A terminal on stdin gets `docker exec -it`; without one (a script, a pipe) the command runs without
+a TTY, which is how `-- <command>` runs unattended.
+
+## How a box runs
+
+Every box, kept or not, runs the same four steps:
+
+1. `docker run -d --init [--rm] --name <name> --label aipass.box=<verb> [volumes] <image> sleep infinity`.
+   The box's own process is `sleep`, so it stays up until stopped; `--init` lets `docker stop` end
+   it at once.
+2. Only when that succeeds is the `created` row written. When docker refuses, its error is printed,
+   no row is written, and drone exits with docker's code.
+3. `docker exec [-it] <name> bash -lc <script>` runs the installers, the clone and then the shell or
+   the `-- <command>`, attached to this terminal.
+4. `docker stop -t 1 <name>`, always, even when the exec fails or is interrupted. A `--rm` box is
+   then removed by docker; a kept box is left stopped.
+
+Because the box's own process is `sleep` and not the script, starting a kept box never re-runs a
+one-shot `-- <command>`: a kept box can always be entered again. `shell <name>` starts a stopped
+box, runs `docker exec -it <name> bash -l`, then stops it again, so the box is left as it was found.
+A box that was already running is entered and left running. A box that does not stay up when started
+(one made before this shape, whose own process was the script) is refused in one sentence that says
+to remove it and make it again.
+
+**The exit code.** `bare`, `local`, `dev` and `main` exit with the exit code of the exec: the
+`-- <command>`'s own code (`-- 'exit 7'` exits 7), or the shell's. When the box never starts, the
+code is docker's (125 for a docker refusal).
 
 ## The base image
 
@@ -81,6 +107,14 @@ the recorded boxes and the containers docker holds. Every box carries the label
 `aipass.box=<verb>` and a row in `<project>/.ai_central/docker_boxes.jsonl`, beside drone's
 deletion record: name, verb, image, created, kept, mounts. A removal appends a `removed` row.
 
+`--name` must match docker's own rule, `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`. Any other name is refused
+in one line naming the rule, exit 2, before any docker call or ledger row.
+
+A name, given or generated, that is already a container (`docker ps -a`, exact match) or a box on
+record and not removed is refused, exit 2, for example
+`aipass-dup-e2e is taken: a box by that name exists; pick another --name or drone docker rm it`.
+So a reused name never overwrites another box's row.
+
 `list`, `shell` and `rm` act only on a name that has a row and a live container carrying the label.
 Anything else is refused as `drone docker did not make <name>`; no other container on the machine
 is ever listed, entered, stopped or removed.
@@ -94,6 +128,17 @@ is ever listed, entered, stopped or removed.
    `aipass-login-claude`, `aipass-login-codex` and `aipass-login-opencode`, at `~/.claude`,
    `~/.codex` and `~/.config/opencode` in the box, so a sign-in made in one box serves the next.
    It never binds the host's own directories.
+
+## Login volumes
+
+`drone docker list` ends with the `aipass-login-*` volumes docker holds, one name per line (no
+size: measuring it is not cheap), or `no login volumes`.
+
+`drone docker rm --login` is how a sign-in is cleared. It runs `docker volume rm` on
+`aipass-login-claude`, `aipass-login-codex` and `aipass-login-opencode`, those that exist, and
+writes a `login_removed` row naming the volumes removed. Docker refuses to remove a volume a
+container still uses, kept or running; that refusal is the right result, and drone prints docker's
+error and exits nonzero. Remove or leave the box that holds it, then run `rm --login` again.
 
 ## When docker cannot answer
 

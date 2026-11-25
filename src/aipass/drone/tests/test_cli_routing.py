@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: CLI Routing Tests for Drone (adapted from universal template)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-27
-# Modified: 2026-11-21
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/drone.py, the drone CLI entry point and its routing."""
@@ -360,7 +360,7 @@ class TestMainModuleRouting:
         ):
             result = main()
         assert result == 3
-        assert capsys.readouterr().out == "output"
+        assert capsys.readouterr().out == "output\n"
 
     def test_discovered_module_exception(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -627,7 +627,12 @@ class TestHandleModule:
         )
         assert result == 0
         mock_rmc.assert_called_once_with("git", "status", None)
-        assert capsys.readouterr().out == "ok"
+        assert capsys.readouterr().out == "ok\n"
+
+    def test_an_answer_ending_in_a_newline_gets_no_second(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Two `drone @git log` runs back to back once ran together: the newline is added only when missing."""
+        self._run(["@git", "log"], route={"return_value": {"stdout": "ok\n", "stderr": "no\n", "exit_code": 0}})
+        assert capsys.readouterr() == ("ok\n", "no\n")
 
     def test_command_import_error(self, capsys: pytest.CaptureFixture[str]) -> None:
         """ImportError during a module verb exits 1 and says why on stderr (mutant: except returns 0)."""

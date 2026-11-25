@@ -18,6 +18,10 @@ noise. `show` sits at global tier because reading history is not a write, and it
 **not** scoped: scoping it would refuse the case it exists for — one citizen auditing another's
 past. Auditing a deletion means reading what was deleted, and the present-tense verbs cannot.
 
+**The live remote head.** `origin/<branch>` is only the last fetch. `log --remote <branch>` asks
+origin now (`git ls-remote origin refs/heads/<branch>`) and prints `<sha>  refs/heads/<branch>`;
+`--json` carries `sha`. No branch name, or one origin lacks, is refused, exit 1 (`TestLogRemote`).
+
 Both the ref and the optional path are refused before any argv is built if git would read them as a
 flag (empty, or a leading `-`) — the same guard the tag lanes use. `--stat`, in any slot, is the
 one flag `show` takes (git's per-file summary); any other flag-shaped token is refused.
@@ -31,18 +35,16 @@ document with `--json`. The flag rides in **any slot** and is stripped before po
 `log --json 20` parses exactly like `log 20`. A help flag outranks it: `status --help --json` is
 still a question.
 
-Every document carries an `ok` verdict, **including refusals** — a caller that asked for JSON can
-parse why it failed rather than getting a bare sentence it has to guess at. The exit code still
-goes non-zero, so a shell script reading only `$?` is told the same truth.
+Every document carries an `ok` verdict, **including refusals**, so a JSON caller can parse why it
+failed; the exit code still goes non-zero for a script reading only `$?`.
 
 Prose output is kept stable for human readers; a machine caller takes the document, never the
 shape of a rendered row.
 
 **`status --json` reports git's two porcelain columns, which the rendered view cannot.** The
 columns are index then worktree, and they are different facts: `M ` is a staged modification, ` M`
-an unstaged one. The rendered row shows one right-aligned letter and always has, so those two
-collapse into the same `   M` on screen — a consumer reading the rendered row sees every staged
-change as unstaged. The document carries `status` verbatim plus `index` and `worktree` split out:
+an unstaged one. The rendered row shows one right-aligned letter, so both read as `   M` on
+screen. The document carries `status` verbatim plus `index` and `worktree` split out:
 
 ```json
 {"status": "M ", "path": "src/x.py", "index": "M", "worktree": " "}
@@ -61,12 +63,10 @@ directory for free.
 no audit record. The whole component goes, not just a password: the common personal-access-token
 form is `https://<TOKEN>@host/path`, where the secret sits in the username slot.
 
-SSH forms are left alone deliberately — in `git@github.com:a/b.git` the `git@` is the standard
-account name, not a secret, and redacting it would mangle every ordinary remote to hide nothing.
+SSH forms are left alone: in `git@github.com:a/b.git` the `git@` is the account name, not a secret.
 
-A repository with no remote is a real answer (`ok: true`, `count: 0`), not an error. A directory
-with no `.git` at all answers `ok: false` on a non-zero return — a different answer, and the two
-are not collapsed.
+A repository with no remote is a real answer (`ok: true`, `count: 0`); a directory with no `.git`
+answers `ok: false` on a non-zero return.
 
 **`remote set <name> <url>`** is the one write, owner tier (the gate's `remote-write`), so a
 project's manager runs it in its own repo and the admin seat reaches another repo with `--repo`.
@@ -89,8 +89,7 @@ in the body — a body of any length is fine and wanted.
 The number is **prax's** `SUBJECT_CAP`, imported from `aipass.prax.apps.modules.dashboard` and
 never copied into drone: a commit subject and a plan subject are the same glance (the dashboard's
 `last_commit_msg`, the oneline log, the PR list), so they are the same cap. Pinned by reading the
-import line out of the source, because a hand-copied number survives an identity check: CPython
-interns small ints.
+import line out of the source (CPython interns small ints, so an identity check passes a copy).
 
 Where it sits matters as much as the number. `subject_refusal()` runs **first** in
 `commit_handler.commit_changes()` — before the repo is resolved, before `--all`'s ruff pass, before

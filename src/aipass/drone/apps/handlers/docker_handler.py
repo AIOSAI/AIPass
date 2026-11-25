@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: docker_handler.py
 # Description: drone docker: the base Dockerfile, the docker argv per verb, names, the box ledger
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-11-24
 # Modified: 2026-11-25
 # =============================================
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shlex
 import shutil
 import subprocess
@@ -49,11 +50,20 @@ LOGIN_DIRS = {"claude": ".claude", "codex": ".codex", "opencode": ".config/openc
 # Host dirs that hold sign-ins or keys: never mounted into a box, nor any dir inside or above them.
 CREDENTIAL_DIRS = (".claude", ".codex", ".config/opencode", ".secrets", ".ssh")
 
+# Docker's own rule for a container name.
+NAME_RULE = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
+LOGIN_VOLUMES = tuple(f"aipass-login-{cli}" for cli in LOGIN_DIRS)
+EXIT_USAGE = 2
+
 USERMOD_LINE = "Add yourself to the docker group, then log in again: sudo usermod -aG docker $USER"
 
 
 class BoxRefusal(Exception):
-    """The request is refused; the message is printed exactly."""
+    """The request is refused; the message is printed exactly and ``code`` is the exit code."""
+
+    def __init__(self, message: str, code: int = 1) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def host_image_ref() -> str:
@@ -139,15 +149,13 @@ def run_argv(
     verb: str,
     name: str,
     image: str,
-    script: str,
     keep: bool,
-    tty: bool,
     mounts: list[Path],
     login: bool,
     repo_root: Path | None,
 ) -> list[str]:
-    """``docker run`` for one box."""
-    argv = ["docker", "run"] + (["-it"] if tty else [])
+    """``docker run -d`` for one box; sleep keeps it up, so a kept box can always be started and entered."""
+    argv = ["docker", "run", "-d", "--init"]
     if not keep:
         argv.append("--rm")
     argv += ["--name", name, "--label", f"{LABEL}={verb}"]
@@ -158,7 +166,27 @@ def run_argv(
     if login:
         for cli, rel in LOGIN_DIRS.items():
             argv += ["-v", f"aipass-login-{cli}:{BOX_HOME}/{rel}"]
-    return argv + [image, "bash", "-lc", script]
+    return argv + [image, "sleep", "infinity"]
+
+
+def exec_argv(name: str, script: str, tty: bool) -> list[str]:
+    """``docker exec`` of the box script, attached to this terminal."""
+    return ["docker", "exec"] + (["-it"] if tty else []) + [name, "bash", "-lc", script]
+
+
+def check_name(name: str) -> None:
+    """Refuse a name docker would refuse, before any docker call or ledger row."""
+    if not re.match(NAME_RULE, name):
+        raise BoxRefusal(f"--name {name} refused: a box name must match {NAME_RULE}", EXIT_USAGE)
+
+
+def check_free(name: str) -> None:
+    """Refuse a name that is a container or a box on record, so no other box's row is overwritten."""
+    live = docker(["ps", "-a", "--filter", f"name=^{name}$", "--format", "{{.Names}}"]).stdout.split()
+    if name in live or name in boxes(read_rows()):
+        raise BoxRefusal(
+            f"{name} is taken: a box by that name exists; pick another --name or drone docker rm it", EXIT_USAGE
+        )
 
 
 def launch(
@@ -172,18 +200,19 @@ def launch(
     *,
     tty: bool,
 ) -> int:
-    """Record the box, then run it attached to this terminal; docker run's exit code."""
+    """Start the box, record it, exec its script on this terminal, stop it; the exec's exit code."""
     argv = run_argv(
         verb=verb,
         name=name,
         image=base_tag(image_ref),
-        script=box_script(verb, opts["with"], url, opts["command"]),
         keep=opts["keep"],
-        tty=tty,
         mounts=mounts,
         login=opts["login"],
         repo_root=repo_root,
     )
+    started = docker(argv[1:])
+    if started.returncode != 0:
+        raise BoxRefusal((started.stderr or started.stdout).strip(), started.returncode)
     record(
         {
             "event": "created",
@@ -196,7 +225,18 @@ def launch(
         }
     )
     logger.info("docker: running %s from %s", name, image_ref)
-    return attach(argv)
+    try:
+        return attach(exec_argv(name, box_script(verb, opts["with"], url, opts["command"]), tty))
+    finally:
+        stop(name)
+
+
+def stop(name: str) -> None:
+    """``docker stop -t 1``: a --rm box is then removed by docker, a kept one left stopped."""
+    try:
+        docker(["stop", "-t", "1", name])
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("docker: stop %s failed: %s", name, exc)
 
 
 def attach(argv: list[str]) -> int:
@@ -297,6 +337,11 @@ def live_states() -> dict[str, str]:
         name, _, state = line.partition("\t")
         states[name] = state
     return states
+
+
+def login_volumes() -> list[str]:
+    """The ``aipass-login-*`` volumes docker holds."""
+    return docker(["volume", "ls", "--filter", "name=^aipass-login-", "--format", "{{.Name}}"]).stdout.split()
 
 
 def next_name(verb: str, rows: list[dict]) -> str:

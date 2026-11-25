@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.20.0
+# Version: 1.21.0
 # Created: 2026-03-17
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -943,6 +943,14 @@ def _handle_log(args: list[str], repo_root: Path | None = None) -> dict:
     # Stripped BEFORE the count scan below: left in, `--json` reaches int(),
     # fails, and logs a bogus "Invalid log count argument" on every call.
     args = strip_json_flag(args)
+    if args[:1] == ["--remote"]:
+        root = repo_root if repo_root is not None else lock_handler.find_repo_root()
+        head = log_handler.get_remote_head(args[1] if len(args) == 2 else "", root)
+        if as_json:
+            return _json_document({"sha": head.get("sha", ""), "message": head["message"]}, ok=head["success"])
+        if head["success"]:
+            return {"stdout": head["message"], "stderr": "", "exit_code": 0}
+        return {"stdout": "", "stderr": head["message"], "exit_code": 1}
     count: int | None = None
     path_tokens: list[tuple[str, bool]] = []
     after_separator = False
