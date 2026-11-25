@@ -3,7 +3,7 @@
 # Description: System health aggregation — aipass doctor command
 # Version: 1.20.0
 # Created: 2026-04-16
-# Modified: 2026-11-24
+# Modified: 2026-11-25
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -62,6 +62,7 @@ from aipass.aipass.apps.modules._doctor_wire import (
     reconcile_stale_deny,
     settings_fix_report,
 )
+from aipass.aipass.apps.handlers.provider_wire import manifest_settings
 from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_claude_code,
     detect_cpu,
@@ -1235,7 +1236,14 @@ def _set_aside_unchosen(groups: Dict[str, List[CheckResult]], install: bool) -> 
     if install:
         groups["System"] = [r for r in groups.get("System", []) if r.label != "claude code"]
     aside = [key for key in provider_choice.ORDER if key != chosen]
-    services = [r for r in groups.get("Services", []) if provider_choice.row_provider(r.label) not in aside]
+    manifest_path = _find_manifest()
+    scalars = manifest_settings(json.loads(manifest_path.read_text(encoding="utf-8"))) if manifest_path else {}
+
+    def owner(label: str) -> Optional[str]:
+        """A settings-scalar row is labelled with its manifest key, so the label list cannot know it."""
+        return "claude" if label in scalars else provider_choice.row_provider(label)
+
+    services = [r for r in groups.get("Services", []) if owner(r.label) not in aside]
     for key in aside:
         if provider_choice.cli_path(key):
             services.append(CheckResult(key, GLYPH_PASS, f"not chosen: aipass provider {key}", ""))

@@ -3,7 +3,7 @@
 # Description: Tests for aipass doctor: the command, the run and the provider checks
 # Version: 1.10.0
 # Created: 2026-04-16
-# Modified: 2026-11-24
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""
@@ -1355,6 +1355,32 @@ class TestPreflightWireDoor:
             run_doctor()
         labels = [(r.label, r.detail) for r in groups["Services"]]
         assert labels == [("hooks", "wired"), ("codex", "not chosen: aipass provider codex")]
+
+    def test_a_claude_settings_scalar_row_belongs_to_claude(self, tmp_path, monkeypatch) -> None:
+        """The scalar rows carry the manifest key as their label (includeGitInstructions); with
+        Codex chosen they are set aside with the rest of Claude's rows.
+
+        Mutant: scalar keys not mapped to claude -> the warn row survives -> red.
+        """
+        mod = "aipass.aipass.apps.modules.doctor"
+        report = tmp_path / "src" / "aipass" / "devpulse" / "dropbox" / "install_report.json"
+        report.parent.mkdir(parents=True)
+        report.write_text(json.dumps({"provider": "codex"}), encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
+        for name in ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        rows = [
+            CheckResult("includeGitInstructions", GLYPH_WARN, "manifest wants false, provider has MISSING", "x"),
+            CheckResult("codex hooks", GLYPH_PASS, "wired", ""),
+        ]
+        monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: list(rows))
+        groups: dict = {}
+        with (
+            patch("aipass.aipass.apps.handlers.provider_choice.cli_path", side_effect={"codex": "/bin/codex"}.get),
+            patch(f"{mod}._print_doctor_groups", side_effect=lambda g: groups.update(g) or (0, 0, 0)),
+        ):
+            run_doctor()
+        assert [r.label for r in groups["Services"]] == ["codex hooks"]
 
 
 class TestDoctorFixAsks:
