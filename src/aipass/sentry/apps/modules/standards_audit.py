@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: standards_audit.py
 # Description: Standards Audit Module
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-05
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -441,6 +441,8 @@ def print_help():
     console.print()
     console.print("[bold cyan]Standards Audit Module[/bold cyan]")
     console.print("Pack-aware audit — check compliance across all branches")
+    console.print()
+    console.print("[yellow]Usage:[/yellow] drone @sentry audit <pack|tests> <@branch> <flags>")
     console.print()
 
     console.print("[yellow]COMMANDS:[/yellow]")

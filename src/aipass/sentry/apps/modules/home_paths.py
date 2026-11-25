@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: home_paths.py
 # Description: The home-paths verb — the developer_home standard over the whole tracked tree, for CI
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-04
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """The `home-paths` verb. Scans every tracked text file of the repository for a
@@ -117,11 +117,16 @@ def print_help() -> None:
     console.print("  drone @sentry home-paths scan <root>     scan the repo at <root>")
     console.print()
     console.print("[yellow]Exit codes[/yellow]")
-    console.print("  0 clean   1 a hit   2 could not measure (git, an unreadable file)   7 an unknown argument")
+    console.print(
+        "  0 clean   1 a hit   2 could not measure (git, an unreadable file)   7 an unknown argument", highlight=False
+    )
     console.print()
     console.print("[yellow]Bypass[/yellow]")
     console.print("  a line rule for developer_home in the owning branch's .sentry/bypass.json")
     console.print("  Standard: drone @sentry standard developer_home")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @sentry home-paths scan[/green]")
     console.print()
 
 

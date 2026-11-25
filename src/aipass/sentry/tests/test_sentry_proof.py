@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_sentry_proof.py
 # Description: Unit tests for the sentry_proof module
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-03-24
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/modules/sentry_proof.py."""
@@ -129,13 +129,14 @@ def test_handle_command_unknown_pack():
 
 
 def test_print_introspection_runs(capsys, _mock_infrastructure):
-    """print_introspection headers sentry proof and lists the proof packs."""
+    """print_introspection titles itself sentry proof and lists the proof packs."""
     _mock_infrastructure.reset_mock()
     result = sentry_proof.print_introspection()
     printed = capsys.readouterr().out
     headers = [call.args[0] for call in _mock_infrastructure.call_args_list if call.args]
     assert result is None
-    assert headers == ["sentry proof"], f"introspection headed itself {headers!r}"
+    assert headers == [], f"introspection headed itself {headers!r}"
+    assert "sentry proof" in printed.splitlines(), f"introspection never titled itself: {printed!r}"
     assert "Available Proof Packs:" in printed, f"introspection never listed the packs: {printed!r}"
 
 

@@ -101,7 +101,7 @@ The pad size is `rollover.defaults.local.todos.count` through @memory's resolver
 **Where the full story goes** — the session entry is a headline, not a container:
 - `summary` holds the headline and nothing more. Extra fields bolted onto a session entry (`findings[]`, `verification`, …) are shape violations, however well-intentioned — the shape is closed.
 - A transferable lesson from the session → its own `key_learnings` entry.
-- The depth is already kept: rollover archives whole entries to @memory's vector store — recall with `drone @memory search "query"` (own branch first, global when needed). Nothing is lost by keeping the entry small.
+- The depth is already kept: rollover archives whole entries to @memory's vector store — recall with `drone @memory search "query"` (a citizen searches its own branch's store; the global store answers @memory and the admin only). Nothing is lost by keeping the entry small.
 - `tags` is the findability hook — tag the session with related files/topics so search lands on it later.
 
 **Forbidden:** any other top-level section; duplicate keys; renamed fields; text fields holding anything but a string; entries without `number` + `date`.

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: permissions.py
 # Description: Shared trust list for hook layer and drone authorization
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-21
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """Shared permission definitions for cross-branch write authorization."""
@@ -58,8 +58,25 @@ def print_introspection() -> None:
     from aipass.cli import console
 
     console.print("[bold cyan]permissions[/bold cyan] — shared trust list for hook + drone layers")
+    console.print("[dim]Which branches may write across branch lines[/dim]")
     console.print(f"  TRUSTED_CROSS_WRITERS: {TRUSTED_CROSS_WRITERS}")
     console.print("  Functions: is_trusted_caller(name), identify_caller(cwd)")
+    console.print("  [dim]Run 'drone @sentry permissions --help' for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Usage and examples for the permissions command."""
+    from aipass.cli import console
+
+    console.print()
+    console.print("[bold cyan]sentry permissions[/bold cyan] — shared trust list for hook + drone layers")
+    console.print()
+    console.print("[yellow]Usage:[/yellow]")
+    console.print("  drone @sentry permissions    show TRUSTED_CROSS_WRITERS and the functions that read it")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @sentry permissions[/green]")
+    console.print()
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -73,6 +90,6 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
     if wants_help(None, args):
-        print_introspection()
+        print_help()
         return True
     return False

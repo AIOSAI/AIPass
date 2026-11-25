@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_coverage_audit_display.py
 # Description: audit coverage, render phase: the branch and system summaries audit_display prints
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/handlers/audit/audit_display.py."""
@@ -702,7 +702,7 @@ class TestPrintSystemSummary:
         assert "  Average compliance:    0%" in lines
         assert "  Type errors:           0" in lines
         assert "STANDARD AVERAGES:" in lines
-        assert "TOP IMPROVEMENT AREAS:" not in lines
+        assert "TOP IMPROVEMENT AREAS: the three lowest standard averages" not in lines
 
     def test_mixed_tiers(self, capsys):
         """A fleet spanning all three tiers renders, and so does an all-excellent one."""
@@ -797,7 +797,7 @@ class TestPrintSystemSummary:
             ],
         )
 
-        assert "TOP IMPROVEMENT AREAS:" in lines
+        assert "TOP IMPROVEMENT AREAS: the three lowest standard averages" in lines
         assert "  1. Arch            (avg: 70%, 1 branches <75%)" in lines
         assert "  2. Naming          (avg: 70%, 2 branches <75%)" in lines
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: proof_query.py
 # Description: Proof Query Module
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-22
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -79,11 +79,11 @@ def _load_proof_content(content_file: Path, proof_name: str) -> str | None:
         return None
 
 
-def _show_query_introspection() -> None:
+def print_introspection() -> None:
     """No-args display: list available proof packs with content counts."""
     console.print()
     console.print("[bold cyan]proof_query Module[/bold cyan]")
-    console.print("Pack-aware content query — browse proof content by pack and name")
+    console.print("[dim]Pack-aware content query — browse proof content by pack and name[/dim]")
     console.print()
 
     packs = _discover_proof_packs()
@@ -108,6 +108,8 @@ def _show_query_introspection() -> None:
         for name in packs:
             console.print(f"  [green]drone @sentry proof_query {name}[/green]")
         console.print()
+    console.print("  [green]drone @sentry proof_query --help[/green]    [dim]# Full usage guide[/dim]")
+    console.print()
 
 
 def _list_pack_proofs(pack_name: str, pack_dir: Path) -> None:
@@ -181,7 +183,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if pack_name not in packs:
         error(f"Unknown pack: '{pack_name}'")
         console.print()
-        console.print("[yellow]Available packs:[/yellow]")
+        console.print("[yellow]Available packs:[/yellow] [dim]the proof packs this branch holds[/dim]")
         for name in packs:
             console.print(f"  [cyan]{name}[/cyan]")
         console.print()
@@ -195,16 +197,13 @@ def handle_command(command: str, args: List[str]) -> bool:
     return True
 
 
-def print_introspection() -> None:
-    """Display module info for sentry introspection system."""
-    _show_query_introspection()
-
-
 def print_help() -> None:
     """Print help information."""
     console.print()
     console.print("[bold cyan]Proof Query Module[/bold cyan]")
     console.print("Pack-aware content query — browse and display proof content")
+    console.print()
+    console.print("[yellow]Usage:[/yellow] drone @sentry proof_query <pack> <proof>")
     console.print()
 
     console.print("[yellow]COMMANDS:[/yellow]")

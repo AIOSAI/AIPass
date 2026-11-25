@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sentry_proof.py
 # Description: Self-proof orchestrator — discovers and runs proof packs
-# Version: 1.0.5
+# Version: 1.0.6
 # Created: 2026-03-22
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """sentry proof — Self-check orchestrator for standards pack integrity.
@@ -233,11 +233,12 @@ def _display_proof_results(pack_name: str, results: dict) -> None:
     console.print()
 
 
-def _show_proof_introspection() -> None:
+def print_introspection() -> None:
     """Show available proof packs and example commands when proof is run with no args."""
     packs = _discover_proof_packs()
     console.print()
-    header("sentry proof")
+    console.print("[bold cyan]sentry proof[/bold cyan]")
+    console.print("[dim]Self-check orchestrator — verifies standards pack integrity[/dim]")
     console.print()
 
     if not packs:
@@ -263,12 +264,8 @@ def _show_proof_introspection() -> None:
     first_pack = next(iter(packs))
     console.print(f"  [green]drone @sentry proof {first_pack}[/green]              [dim]# Run all proofs[/dim]")
     console.print(f"  [green]drone @sentry proof {first_pack} --json[/green]       [dim]# JSON output[/dim]")
+    console.print("  [green]drone @sentry proof --help[/green]                [dim]# Full usage guide[/dim]")
     console.print()
-
-
-def print_introspection() -> None:
-    """Display module info and connected handlers."""
-    _show_proof_introspection()
 
 
 def print_help() -> None:
@@ -276,6 +273,8 @@ def print_help() -> None:
     console.print()
     console.print("[bold cyan]sentry proof Module[/bold cyan]")
     console.print("Self-check orchestrator — verifies standards pack integrity")
+    console.print()
+    console.print("[yellow]Usage:[/yellow] drone @sentry proof <pack> <--json>")
     console.print()
 
     console.print("[yellow]COMMANDS:[/yellow]")
@@ -295,6 +294,11 @@ def print_help() -> None:
     console.print("  Proof pack = handlers/*_proof/ directory")
     console.print("  Target = handlers/*_standards/ directory (auto-resolved)")
     console.print("  Verdict: CERTIFIED (all pass) or NOT CERTIFIED (any fail/error)")
+    console.print()
+
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]drone @sentry proof aipass[/green]")
+    console.print("  [green]drone @sentry proof aipass --json[/green]")
     console.print()
 
     console.print("[dim]Commands: proof, sentry_proof, --help[/dim]")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_ux.py
 # Description: Tests for cli_ux_check.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-07-17
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/cli_ux_check.py — CLI UX house pattern detection."""
@@ -431,3 +431,143 @@ def main():
     result = check_module(str(entry))
     assert result["passed"] is True
     assert result["score"] == 100
+
+
+def _file(tmp_path, rel, source):
+    path = tmp_path / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
+    return str(path)
+
+
+def _failed(path):
+    return {c["name"]: c["message"] for c in check_module(path)["checks"] if not c["passed"]}
+
+
+STYLED_MODULE = """
+from aipass.cli import console
+
+def print_introspection():
+    console.print("[bold cyan]tool[/bold cyan]")
+    console.print("[dim]Does one thing[/dim]")
+    console.print("Run [green]drone @x tool --help[/green]")
+
+def print_help():
+    console.print("[yellow]Usage:[/yellow]")
+    console.print("[yellow]Examples:[/yellow]")
+
+def handle_command(command, args):
+    return True
+"""
+
+
+class TestTheModuleTierMirrorsTheEntryTier:
+    def test_a_discovered_module_with_no_help_fails_the_entry_rows(self, tmp_path):
+        failed = _failed(
+            _file(tmp_path, "apps/modules/tool.py", "def handle_command(command, args):\n    return True\n")
+        )
+        assert {"two_tier_help", "title_markup", "purpose_line", "help_pointer", "usage_section"} <= set(failed)
+
+    def test_a_styled_module_passes_every_row_and_skips_the_entry_only_row(self, tmp_path):
+        result = check_module(_file(tmp_path, "apps/modules/tool.py", STYLED_MODULE))
+        assert (result["passed"], result["score"]) == (True, 100)
+        assert "no_internal_modules" not in {c["name"] for c in result["checks"]}
+
+    @pytest.mark.parametrize(
+        "rel, source",
+        [
+            ("apps/modules/_tool.py", "def handle_command(command, args):\n    return True\n"),
+            ("apps/modules/tool.py", "def helper():\n    return True\n"),
+            ("apps/handlers/tool.py", "def handle_command(command, args):\n    return True\n"),
+        ],
+    )
+    def test_an_underscore_module_a_module_without_a_command_and_a_handler_are_not_the_tier(
+        self, tmp_path, rel, source
+    ):
+        assert check_module(_file(tmp_path, rel, source)) == {
+            "passed": True,
+            "checks": [],
+            "score": 100,
+            "standard": "CLI_UX",
+        }
+
+
+class TestEveryPrintKeepsItsStylingDeliberate:
+    @pytest.mark.parametrize(
+        "source, row, line",
+        [
+            ("def print_help():\n    for l in HELP:\n        console.print(l, markup=False)\n", "markup_kept", 3),
+            ("def report(x):\n    console.print('[bold]Done[/bold]', markup=False)\n", "markup_kept", 2),
+            ("def print_help():\n    console.print('plain words')\n", "help_styled", 1),
+            ("def _print_usage():\n    console.print('Usage: tool run')\n", "help_styled", 1),
+            ("def report(items):\n    console.print('Branches:')\n", "heading_styled", 2),
+            ("def report(items):\n    console.print(f'Branches ({len(items)}):')\n", "heading_styled", 2),
+            (
+                "def report(items):\n    console.print('[bold]Branches:[/bold]')\n    for i in items:\n        console.print(i)\n",
+                "group_explained",
+                2,
+            ),
+            (
+                "def report(items):\n    console.print('[bold]Services:[/bold]')\n    console.print('  @drone routing')\n",
+                "group_explained",
+                2,
+            ),
+            ("def report():\n    console.print('tool v1.0.0')\n", "highlight_deliberate", 2),
+            ("def report(items):\n    console.print(f'{len(items)} found')\n", "highlight_deliberate", 2),
+            ("def report(item_count):\n    err_console.print(f'found {item_count}')\n", "highlight_deliberate", 2),
+            ("def report(ratio):\n    console.print(f'ratio {ratio:.2f}')\n", "highlight_deliberate", 2),
+            ("def report():\n    console.print('log [count] [path] 2')\n", "highlight_deliberate", 2),
+        ],
+    )
+    def test_each_rule_fails_its_site_and_names_the_line(self, tmp_path, source, row, line):
+        failed = _failed(_file(tmp_path, "apps/handlers/report.py", source))
+        assert row in failed and f"line {line}" in failed[row]
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "def report(err):\n    err_console.print(f'drone: could not load: {err}', markup=False)\n",
+            "def print_help():\n    console.print(escape('[bold] [count]'))\n    console.print('[bold]Usage:[/bold]')\n",
+            "def print_help():\n    header('Tool')\n    console.print('plain')\n",
+            "def print_help():\n    console.print(Table(header_style='bold'))\n",
+            "def print_help():\n    console.print('[yellow]Usage:[/yellow]')\n    for v in VERBS:\n        console.print(v)\n",
+            "def report(items):\n    console.print('[bold]Branches:[/bold]')\n    console.print('[dim]agents with a home[/dim]')\n    for i in items:\n        console.print(i)\n",
+            "def report(path):\n    console.print('Diagnostics runs through the audit pipeline in four steps:')\n",
+            "def report(path):\n    console.print('Error: no file at:')\n",
+            "def report():\n    console.print('tool v1.0.0', highlight=False)\n",
+            "def report():\n    console.print('tool v1.0.0', style='cyan')\n",
+            "def report(items):\n    console.print('[bold]Branches:[/bold]')\n    console.print('  [dim]agents with a home[/dim]')\n",
+            "def report():\n    console.print('[cyan]tool v1.0.0[/cyan]')\n",
+            "def report(name):\n    console.print(f'  @{name:<18} routing')\n",
+            "def report():\n    console.print('\\\\[bold] stays literal')\n",
+        ],
+    )
+    def test_escape_helpers_styled_tables_explained_groups_prose_and_names_pass(self, tmp_path, source):
+        assert _failed(_file(tmp_path, "apps/handlers/report.py", source)) == {}
+
+    def test_an_escaped_tag_is_text_so_its_line_is_still_unstyled(self, tmp_path):
+        failed = _failed(
+            _file(tmp_path, "apps/handlers/report.py", "def report():\n    console.print('\\\\[bold] v1.0')\n")
+        )
+        assert "line 2" in failed["highlight_deliberate"]
+
+
+DRONE_SYSTEMS = """
+def handle_systems(services, branches):
+    console.print("Infrastructure:")
+    console.print(f"  @{'drone':<18} Command routing (v{VERSION})")
+    console.print()
+    console.print(f"AIPass Services ({len(services)}):")
+    for name in services:
+        console.print(f"  @{name:<18}")
+    console.print(f"Branches ({len(branches)}):")
+    for branch in branches:
+        console.print(f"  @{branch}")
+"""
+
+
+def test_drone_systems_shape_fails_unstyled_unexplained_groups_and_highlighter_colour(tmp_path):
+    failed = _failed(_file(tmp_path, "apps/drone.py", DRONE_SYSTEMS))
+    for heading in ("line 3 'Infrastructure:'", "line 6 'AIPass Services ({}):'", "line 9 'Branches ({}):'"):
+        assert heading in failed["heading_styled"] and heading in failed["group_explained"]
+    assert "line 4, line 6, line 9" in failed["highlight_deliberate"]

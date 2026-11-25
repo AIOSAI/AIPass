@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: standards_query.py
 # Description: Standards Query Module
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-09
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -227,7 +227,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if pack_name not in packs:
         error(f"Unknown pack: '{pack_name}'")
         console.print()
-        console.print("[yellow]Available packs:[/yellow]")
+        console.print("[yellow]Available packs:[/yellow] [dim]the standards packs this branch holds[/dim]")
         for name in packs:
             console.print(f"  [cyan]{name}[/cyan]")
         console.print()
@@ -281,6 +281,8 @@ def print_introspection() -> None:
         for name in packs:
             console.print(f"  [green]drone @sentry standards_query {name}[/green]")
         console.print()
+    console.print("[dim]Run 'drone @sentry standards_query --help' for usage.[/dim]")
+    console.print()
 
 
 def print_alias_help() -> None:
@@ -315,6 +317,8 @@ def print_help():
     console.print()
     console.print("[bold cyan]Standards Query Module[/bold cyan]")
     console.print("Pack-aware content query — browse and display standards content")
+    console.print()
+    console.print("[yellow]Usage:[/yellow] drone @sentry standards_query <pack> <standard>")
     console.print()
 
     console.print("[yellow]COMMANDS:[/yellow]")

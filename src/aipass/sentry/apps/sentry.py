@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sentry.py
 # Description: SENTRY - Standards Platform for AIPass
-# Version: 2.0.7
+# Version: 2.0.8
 # Created: 2026-03-05
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -97,7 +97,7 @@ def print_introspection() -> None:
 
     console.print()
     console.print("[bold cyan]sentry - Standards Platform for AIPass[/bold cyan]")
-    console.print(f"  Version: {VERSION}")
+    console.print(f"  Version: [cyan]{VERSION}[/cyan]")
     console.print()
 
     console.print(f"[yellow]Discovered Modules:[/yellow] {len(modules)}")
@@ -327,7 +327,7 @@ def main() -> int:
             return 0
 
         if args[0] in ["--version", "-V"]:
-            console.print(f"sentry v{VERSION}")
+            console.print(f"sentry v{VERSION}", highlight=False)
             return 0
 
         command = args[0]

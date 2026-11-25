@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane.py
 # Description: tests for the audit-tests runner, its target resolution and the verb
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-08-29
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/modules/audit_tests.py, apps/handlers/audit_tests/runner.py and the pytest pack it drives."""
@@ -444,7 +444,7 @@ class TestVerbIsDiscoverable:
     def test_help_is_intercepted_before_any_target_is_resolved(self, monkeypatch):
         # Not "raise inside _run": handle_command catches every exception by design, so that pin could never fail.
         seen = []
-        monkeypatch.setattr(verb, "_print_help", lambda: seen.append("help"))
+        monkeypatch.setattr(verb, "print_help", lambda: seen.append("help"))
         monkeypatch.setattr(verb, "_run", lambda args: seen.append("ran"))
         verb.handle_command("audit-tests", ["--help"])
         assert seen == ["help"]
@@ -728,7 +728,7 @@ class TestLaneVerbRefusesTheUnrecognized:
     def test_a_help_flag_beside_an_unknown_token_still_explains(self, monkeypatch):
         # help_flag_safety: a help flag anywhere explains, never executes or refuses; the unknown token waits.
         seen: list = []
-        monkeypatch.setattr(verb, "_print_help", lambda: seen.append("help"))
+        monkeypatch.setattr(verb, "print_help", lambda: seen.append("help"))
         monkeypatch.setattr(verb, "_run", lambda args: seen.append("ran"))
 
         verb.handle_command("audit-tests", ["-tests", "--help"])

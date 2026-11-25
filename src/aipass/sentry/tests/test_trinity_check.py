@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_check.py
 # Description: Unit tests for trinity_check - trinity memory file standards checker
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-08-25
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/trinity_check.py and trinity_groups.py."""
@@ -53,7 +53,7 @@ _CANONICAL_OBSERVATION_BRANCHES = frozenset(
         "aipass",
         "api",
         "backup",
-        "canary",
+        "canary_test",
         "cli",
         "commons",
         "daemon",

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_tests.py
 # Description: the audit-tests verb - execution-tier test quality measurement
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-29
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """The `audit-tests` verb. Measures how much a test suite proves, by running it.
@@ -68,7 +68,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     if wants_help(None, args):
-        _print_help()
+        print_help()
         return True
 
     try:
@@ -272,7 +272,7 @@ def print_introspection() -> None:
     console.print("  gate could have fired.")
     console.print()
     console.print("[yellow]Groups[/yellow]")
-    console.print("  hygiene            the only SCORED group - 100 or 0, never a percentage")
+    console.print("  hygiene            the only SCORED group - 100 or 0, never a percentage", highlight=False)
     console.print("  oracle_execution   not built; reports not_applicable with a reason")
     console.print("  order_dependence   not built; reports not_applicable with a reason")
     console.print("  ai_advisory        nominate-only, never scored")
@@ -288,11 +288,12 @@ def print_introspection() -> None:
     console.print()
 
 
-def _print_help() -> None:
+def print_help() -> None:
     """The verb's own help."""
     console.print()
     console.print("[bold cyan]audit-tests[/bold cyan] — execution-tier test quality")
     console.print()
+    console.print("[yellow]Usage:[/yellow]")
     console.print("  drone @sentry audit-tests @branch          measure one branch")
     console.print("  drone @sentry audit-tests <directory>      measure any directory")
     console.print("  drone @sentry audit-tests aipass           measure every citizen")
@@ -300,7 +301,7 @@ def _print_help() -> None:
     console.print("[yellow]Options[/yellow]")
     console.print("  --budget <seconds>        wall-clock budget per target (Law T-BUDGET)")
     console.print("  --prove-refusal           run with the gate OFF; the run must REFUSE")
-    console.print("  --symlink-siblings        faster, and stamps m10_complete: false")
+    console.print("  --symlink-siblings        faster, and stamps m10_complete: false", highlight=False)
     console.print("  --no-tmpdir-allowance     treat TMPDIR writes as violations too")
     console.print("  --width-coupling          run the suite at two widths and diff the verdicts")
     console.print("  --pseudo-tested           gut one function at a time; HOURS on a real branch")
@@ -318,4 +319,8 @@ def _print_help() -> None:
     console.print("[dim]form sees the CALLER's branch only, so cross-branch scoping takes a ref.[/dim]")
     console.print("[dim]The suite runs against a COPY. Nothing writes to the real target.[/dim]")
     console.print("[dim]A run that cannot prove its own gate can fire publishes NOTHING.[/dim]")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @sentry audit-tests @flow[/green]")
+    console.print("  [green]drone @sentry audit-tests @flow --budget 600[/green]")
     console.print()

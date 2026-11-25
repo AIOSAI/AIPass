@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bypass.py
 # Description: Bypass Module — prune the bypass rules that can never match
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-09-25
-# Modified: 2026-11-15
+# Modified: 2026-11-25
 # =============================================
 
 """Bypass Module
@@ -140,7 +140,10 @@ def _print_outcome(branch: str, dry_run: bool, outcome: dict) -> None:
         console.print(f"  left for the owner [{left['index']}] {left['file']} / {left['standard']}: {left['why']}")
         console.print(f"      [dim]reason: {left['reason'] or '(none given)'} — rewrite it as named rules[/dim]")
     console.print()
-    console.print(f"  {len(outcome['dead'])} dead, {outcome['kept']} kept ({len(outcome['left'])} blank-field, left)")
+    console.print(
+        f"  [cyan]{len(outcome['dead'])}[/cyan] dead, [cyan]{outcome['kept']}[/cyan] kept"
+        f" ([cyan]{len(outcome['left'])}[/cyan] blank-field, left)"
+    )
     if outcome["refused"]:
         warning(f"Nothing written: {outcome['refused']}")
     elif outcome["written"]:
@@ -154,6 +157,8 @@ def print_help() -> None:
     """Print help information"""
     console.print()
     header("Bypass")
+    console.print()
+    console.print("[yellow]Usage:[/yellow] drone @sentry bypass prune <@branch> <--dry-run>")
     console.print()
     console.print("[yellow]COMMANDS:[/yellow]")
     console.print(
@@ -170,7 +175,12 @@ def print_help() -> None:
     console.print()
     console.print("[yellow]NEVER REMOVED:[/yellow]")
     console.print("  a live rule. A rule with a blank file or standard is dead too (a rule needs")
-    console.print("  both to be active, owner 2026-09-25) but is LEFT, named, for its owner to rewrite.")
+    console.print(
+        "  both to be active, owner 2026-09-25) but is LEFT, named, for its owner to rewrite.", highlight=False
+    )
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]drone @sentry bypass prune @flow --dry-run[/green]")
     console.print()
     console.print("[dim]Commands: bypass, --help[/dim]")
 

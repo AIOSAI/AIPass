@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_display.py
 # Description: Audit Display Module
-# Version: 1.7.0
+# Version: 1.7.1
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -424,22 +424,26 @@ def print_system_summary(audit_results: List[Dict], no_bypass: bool = False):
         console.print("[bold]SYSTEM SUMMARY[/bold] — [bold yellow]BYPASSES DISABLED[/bold yellow][bold]:[/bold]")
     else:
         console.print("[bold]SYSTEM SUMMARY:[/bold]")
-    console.print(f"  Total branches:        {total_branches}")
-    console.print(f"  Average compliance:    {avg_compliance}%")
-    console.print(f"  Branches ≥90%:         {excellent}")
-    console.print(f"  Branches 75-89%:       {good}")
-    console.print(f"  Branches <75%:         {needs_work}")
+    console.print(f"  Total branches:        [cyan]{total_branches}[/cyan]")
+    console.print(f"  Average compliance:    [cyan]{avg_compliance}%[/cyan]")
+    console.print(f"  Branches ≥90%:         [cyan]{excellent}[/cyan]")
+    console.print(f"  Branches 75-89%:       [cyan]{good}[/cyan]")
+    console.print(f"  Branches <75%:         [cyan]{needs_work}[/cyan]")
     if total_type_errors > 0:
-        console.print(f"  Type errors:           {total_type_errors} ({branches_with_type_errors} branches)")
+        console.print(
+            f"  Type errors:           [cyan]{total_type_errors}[/cyan] ({branches_with_type_errors} branches)"
+        )
     else:
-        console.print("  Type errors:           0")
+        console.print("  Type errors:           [cyan]0[/cyan]")
     waived = [r["waived"] for r in audit_results if r.get("waived") is not None]
     if waived:
         console.print(
             f"  Waived sites:          {sum(waived)} [dim](bypass rows; a 100 with rows waived is not a clean 100)[/dim]"
         )
     if cache_served:
-        console.print(f"  Cache-served:          {cache_served}/{total_branches} branches (unchanged, skipped re-scan)")
+        console.print(
+            f"  Cache-served:          [cyan]{cache_served}/{total_branches}[/cyan] branches (unchanged, skipped re-scan)"
+        )
     if no_bypass:
         console.print("  Bypass rules:          [bold yellow]DISABLED[/bold yellow] [dim](raw, not comparable)[/dim]")
     console.print()
@@ -472,10 +476,12 @@ def print_system_summary(audit_results: List[Dict], no_bypass: bool = False):
     top_issues = sorted(standard_averages.items(), key=lambda x: x[1])[:3]
 
     if top_issues:
-        console.print("[bold]TOP IMPROVEMENT AREAS:[/bold]")
+        console.print("[bold]TOP IMPROVEMENT AREAS:[/bold] [dim]the three lowest standard averages[/dim]")
         for i, (standard, avg_score) in enumerate(top_issues, 1):
             branches_failing = sum(1 for r in audit_results if r["scores"].get(standard, 100) < 75)
-            console.print(f"  {i}. {standard.title():15} (avg: {avg_score}%, {branches_failing} branches <75%)")
+            console.print(
+                f"  {i}. {standard.title():15} (avg: [cyan]{avg_score}%[/cyan], {branches_failing} branches <75%)"
+            )
 
     console.print("─" * 70)
     console.print()

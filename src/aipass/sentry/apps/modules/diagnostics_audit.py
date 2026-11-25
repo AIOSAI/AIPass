@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: diagnostics_audit.py
 # Description: System-wide Type Error Diagnostics
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """System-wide Type Error Diagnostics
@@ -81,15 +81,15 @@ def print_system_summary(all_results: List[Dict]):
 
     console.print()
     console.print("─" * 70)
-    console.print("[bold]SYSTEM DIAGNOSTICS SUMMARY:[/bold]")
-    console.print(f"  Total branches:        {total_branches}")
-    console.print(f"  Clean branches:        {clean_branches}")
-    console.print(f"  Branches with errors:  {branches_with_errors}")
+    console.print("[bold]SYSTEM DIAGNOSTICS SUMMARY:[/bold] [dim]pyright totals across every branch[/dim]")
+    console.print(f"  Total branches:        [cyan]{total_branches}[/cyan]")
+    console.print(f"  Clean branches:        [cyan]{clean_branches}[/cyan]")
+    console.print(f"  Branches with errors:  [cyan]{branches_with_errors}[/cyan]")
     console.print()
-    console.print(f"  Files analyzed:        {total_files}")
-    console.print(f"  Files with errors:     {files_with_errors}")
-    console.print(f"  Total errors:          {total_errors}")
-    console.print(f"  Total warnings:        {total_warnings}")
+    console.print(f"  Files analyzed:        [cyan]{total_files}[/cyan]")
+    console.print(f"  Files with errors:     [cyan]{files_with_errors}[/cyan]")
+    console.print(f"  Total errors:          [cyan]{total_errors}[/cyan]")
+    console.print(f"  Total warnings:        [cyan]{total_warnings}[/cyan]")
     console.print()
 
     if branches_with_errors > 0:
@@ -161,6 +161,8 @@ def print_help():
     console.print("[bold cyan]Diagnostics Audit Module[/bold cyan]")
     console.print("System-wide type error detection using pyright")
     console.print()
+    console.print("[yellow]Usage:[/yellow] drone @sentry audit aipass <@branch>")
+    console.print()
 
     console.print("[yellow]COMMANDS:[/yellow]")
     console.print("  [green]drone @sentry diagnostics_audit[/green]     [dim]Show this module and its handlers[/dim]")
@@ -175,6 +177,9 @@ def print_help():
     console.print("  - Undefined variables")
     console.print("  - Import errors")
     console.print("  - Argument type mismatches")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]drone @sentry audit aipass @flow[/green]")
     console.print()
 
 
