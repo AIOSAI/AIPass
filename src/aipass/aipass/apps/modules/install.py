@@ -68,7 +68,7 @@ _CLOSING_NOTE = (
 
 def _prompt(msg: str, default: str = "") -> str:
     """Simple input prompt with optional default (raises on Ctrl-C/EOF)."""
-    display = f"{msg} [{default}]: " if default else f"{msg}: "
+    display = f"{msg} [Enter for {default}]: " if default else f"{msg}: "
     try:
         val = input(display).strip()
         return val if val else default
