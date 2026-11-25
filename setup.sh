@@ -174,7 +174,8 @@ fi
 # asked here: git names the gap the first time a commit needs one. ---
 resolve_user_name() {
     USER_NAME="$(git config --global user.name 2>/dev/null || true)"
-    USER_NAME="${USER_NAME:-${USER:-}}"
+    # $USER is unset under a bare su or a container entrypoint; the login name is always there.
+    USER_NAME="${USER_NAME:-${USER:-$(id -un 2>/dev/null || true)}}"
 }
 resolve_user_name
 
