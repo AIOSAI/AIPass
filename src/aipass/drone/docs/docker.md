@@ -56,6 +56,9 @@ These apply to `bare`, `local`, `dev` and `main`:
 A terminal on stdin gets `docker exec -it`; without one (a script, a pipe) the command runs without
 a TTY, which is how `-- <command>` runs unattended.
 
+A single argument after `--` is a shell script, as in `-- 'echo a; echo b'`. Multiple arguments
+are shell-quoted individually, so `-- bash -c 'echo a b'` preserves the argument to `bash -c`.
+
 ## How a box runs
 
 Every box, kept or not, runs the same four steps:
@@ -68,7 +71,8 @@ Every box, kept or not, runs the same four steps:
 3. `docker exec [-it] <name> bash -lc <script>` runs the installers, the clone and then the shell or
    the `-- <command>`, attached to this terminal.
 4. `docker stop -t 1 <name>`, always, even when the exec fails or is interrupted. A `--rm` box is
-   then removed by docker; a kept box is left stopped.
+   then removed by docker and gets a `removed` row after a successful stop; a kept box is left stopped.
+   A failed stop is logged and leaves the record open.
 
 Because the box's own process is `sleep` and not the script, starting a kept box never re-runs a
 one-shot `-- <command>`: a kept box can always be entered again. `shell <name>` starts a stopped
@@ -77,13 +81,17 @@ A box that was already running is entered and left running. A box that does not 
 (one made before this shape, whose own process was the script) is refused in one sentence that says
 to remove it and make it again.
 
+The creating command owns the box's lifetime: when it exits, it stops the box even if a second
+terminal is still attached through `shell`. Concurrent sessions do not extend that lifetime.
+
 **The exit code.** `bare`, `local`, `dev` and `main` exit with the exit code of the exec: the
 `-- <command>`'s own code (`-- 'exit 7'` exits 7), or the shell's. When the box never starts, the
 code is docker's (125 for a docker refusal).
 
 ## The base image
 
-Each base ref has one cached image, `aipass-base:<ref>` with `:` and `/` turned into `-` (this
+Each base ref has one cached image, `aipass-base:<ref>` with characters outside ASCII letters,
+digits, `_`, `.` and `-` turned into `-`, including the `@` and `:` in digest-pinned references (this
 host: `aipass-base:ubuntu-26.04`). It is built from a Dockerfile written to a temporary directory:
 the base, `apt-get install` of python3, python3-venv, python3-pip, git, curl, ca-certificates,
 nodejs, npm, tmux, ripgrep and jq, a user `aipass` with a home,
@@ -105,7 +113,12 @@ name before docker is called.
 Every box is named `aipass-<verb>-<n>`, where n is one past the highest number for that verb among
 the recorded boxes and the containers docker holds. Every box carries the label
 `aipass.box=<verb>` and a row in `<project>/.ai_central/docker_boxes.jsonl`, beside drone's
-deletion record: name, verb, image, created, kept, mounts. A removal appends a `removed` row.
+deletion record: name, verb, image, created, kept, mounts. A removal appends a `removed` row,
+including automatic removal after a non-kept run, so an explicit name can be used again.
+
+`rm` uses `docker rm -f`, which stops and removes a running box in one call. If a known box
+disappears between the ownership check and removal, Docker's `No such container:` result also
+closes its record; other failures are printed and leave its record open.
 
 `--name` must match docker's own rule, `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`. Any other name is refused
 in one line naming the rule, exit 2, before any docker call or ledger row.
@@ -122,8 +135,11 @@ is ever listed, entered, stopped or removed.
 ## The two rules
 
 1. **No host credentials enter a box.** `--mount` refuses `~/.claude`, `~/.codex`,
-   `~/.config/opencode`, `~/.secrets` and `~/.ssh`, any directory inside one, and any directory
-   that holds one (your home, `~/.config`). A missing path is refused by name.
+   `~/.config/opencode`, `~/.secrets`, `~/.ssh`, `~/.config/gh`, `~/.git-credentials`, `~/.netrc`,
+   `~/.aws`, `~/.gnupg`, `~/.docker` and `~/.kube`, any path inside one, and any directory
+   that holds one (your home, `~/.config`). Both the requested path and each credential path
+   are resolved first, so a symlink and its credential target are both refused. A missing path
+   is refused by name.
 2. **`--login` is the only state carried between boxes.** It mounts three named volumes,
    `aipass-login-claude`, `aipass-login-codex` and `aipass-login-opencode`, at `~/.claude`,
    `~/.codex` and `~/.config/opencode` in the box, so a sign-in made in one box serves the next.

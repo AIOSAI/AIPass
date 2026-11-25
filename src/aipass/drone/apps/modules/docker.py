@@ -13,6 +13,7 @@ Every box is ``aipass-<verb>-<n>``, labelled and recorded; drone docker never to
 
 from __future__ import annotations
 
+import shlex
 import sys
 import time
 
@@ -77,7 +78,8 @@ def run(command: str | None = None, args: list[str] | None = None) -> int:
 def _parse(args: list[str]) -> dict:
     """The create options; raise BoxRefusal on an unknown flag or a missing value."""
     opts: dict = {"keep": False, "login": False, "rebuild": False, "with": [], "mount": [], "image": None, "name": None}
-    opts["command"] = " ".join(args[args.index("--") + 1 :]) if "--" in args else None
+    command = args[args.index("--") + 1 :] if "--" in args else []
+    opts["command"] = command[0] if len(command) == 1 else shlex.join(command) if command else None
     rest = args[: args.index("--")] if "--" in args else list(args)
     while rest:
         flag = rest.pop(0)
@@ -172,7 +174,7 @@ def shell(name: str) -> int:
 
 
 def remove(args: list[str]) -> int:
-    """Stop then remove named boxes, or every live one with --all; record each removal."""
+    """Force-remove named boxes, or every live one with --all; record each removal."""
     if _ready():
         return EXIT_NO_DOCKER
     if args == ["--login"]:
@@ -186,9 +188,8 @@ def remove(args: list[str]) -> int:
             box.own_box(name)
     failed = 0
     for name in names:
-        box.docker(["stop", name])
-        result = box.docker(["rm", name])
-        if result.returncode != 0:
+        result = box.docker(["rm", "-f", name])
+        if result.returncode != 0 and "No such container:" not in result.stderr:
             error(f"docker rm {name} failed: {(result.stderr or result.stdout).strip()}")
             failed += 1
             continue
@@ -262,14 +263,16 @@ Options for bare, local, dev, main:
   --rebuild            rebuild the cached base image (--no-cache)
   --name <name>        instead of aipass-<verb>-<n>; must match ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$
                        and not be a container or a recorded box already (else exit 2)
-  -- <command>         run this one command in the box instead of a shell
+  -- <command>         one argument is a shell script; multiple arguments retain their quoting
 
 Rules:
-  Host credential dirs (~/.claude, ~/.codex, ~/.config/opencode, ~/.secrets, ~/.ssh) never
-  mount, nor any directory inside or holding one. --login is the only state carried between boxes.
+  Host credential paths (~/.claude, ~/.codex, ~/.config/opencode, ~/.secrets, ~/.ssh, ~/.config/gh,
+  ~/.git-credentials, ~/.netrc, ~/.aws, ~/.gnupg, ~/.docker, ~/.kube) never mount, nor any path
+  inside or directory holding one. --login is the only state carried between boxes.
   Docker absent or its daemon down: one line, exit 2.
   Every box runs sleep under --init; the script or shell runs through docker exec, and the box is
   stopped after (a kept box stays, stopped, and can always be entered again with shell).
+  A successful non-kept stop records removal, so its --name can be reused.
   bare, local, dev and main exit with the box command's exit code (docker's, if the box never starts).
 
 Examples:

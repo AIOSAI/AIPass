@@ -191,8 +191,8 @@
       "file": "apps/handlers/docker_handler.py",
       "standard": "help_text",
       "lines": [
-        97,
-        103
+        110,
+        116
       ],
       "reason": "The python3 lines are not drone help: both are Dockerfile text, the apt package list and the venv created in the image, run inside a container where drone does not exist, so 'drone @branch' cannot be the instruction.",
       "anchor": "python3"

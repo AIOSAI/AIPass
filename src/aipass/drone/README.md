@@ -34,6 +34,8 @@ drone @git status                 # Read-only git, available to every branch
   lands in an audit store and in the logs.
 - **Discovers.** Commands are read from the branches themselves, so the inventory is generated
   rather than written down.
+- **Makes disposable test boxes.** `drone docker` runs clean Ubuntu or Debian containers, blocks
+  credential mounts, and records both creation and removal so throwaway names can be reused.
 
 Not a task runner, not a scheduler, and never a writer of another branch's files.
 
@@ -79,8 +81,9 @@ Three layers. `apps/drone.py` is the entry point and the routing decision tree: 
 then `@target` resolution, then the module lane. `apps/modules/` holds one orchestrator per
 concern — `resolver` and `config` for addressing, `router` for dispatch, `registry` and
 `module_registry` for what exists, `discovery` and `scan` for what a branch can do, `commands` for
-shortcuts, `git_module` for the whole git surface, `rm` for contained deletes and `broker` for the
-daemon that performs them on request. Another branch imports none of them: it takes every name
+shortcuts, `git_module` for the whole git surface, `docker` for disposable test boxes,
+`rm` for contained deletes and `broker` for the daemon that performs them on request.
+Another branch imports none of them: it takes every name
 from the package door, `aipass.drone` (`__init__.py`), which hands each one out from its home.
 `apps/handlers/` holds the implementation, grouped one
 directory per concern: `git/` (a handler per verb), `broker/` (socket daemon, client, protocol and
@@ -131,7 +134,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ---
 
-**Last Updated:** 2026-11-21
+**Last Updated:** 2026-11-25
 
 ---
 [← Back to AIPass](../../../README.md)

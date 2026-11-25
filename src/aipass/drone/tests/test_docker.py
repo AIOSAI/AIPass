@@ -43,6 +43,9 @@ class FakeDocker:
         self.exec_result: tuple[int, str, str] = (0, "", "")
         self.exec_raises = False
         self.start_dies = False
+        self.auto_remove: set[str] = set()
+        self.stop_result: tuple[int, str, str] | None = None
+        self.rm_result: tuple[int, str, str] | None = None
         self.volumes: list[str] = []
         self.volume_rm: tuple[int, str, str] | None = None
 
@@ -78,7 +81,10 @@ class FakeDocker:
 
     def _run(self, argv: list[str]) -> tuple[int, str, str]:
         if self.run_result[0] == 0:
-            self.live[argv[argv.index("--name") + 1]] = "running"
+            name = argv[argv.index("--name") + 1]
+            self.live[name] = "running"
+            if "--rm" in argv:
+                self.auto_remove.add(name)
         return self.run_result
 
     def _exec(self, argv: list[str]) -> tuple[int, str, str]:
@@ -91,7 +97,20 @@ class FakeDocker:
         return 0, argv[2] + "\n", ""
 
     def _stop(self, argv: list[str]) -> tuple[int, str, str]:
-        self.live[argv[-1]] = "exited"
+        if self.stop_result is not None:
+            return self.stop_result
+        if argv[-1] in self.auto_remove:
+            self.live.pop(argv[-1], None)
+        else:
+            self.live[argv[-1]] = "exited"
+        return 0, argv[-1] + "\n", ""
+
+    def _rm(self, argv: list[str]) -> tuple[int, str, str]:
+        if self.rm_result is not None:
+            return self.rm_result
+        if argv[-1] not in self.live:
+            return 1, "", f"Error response from daemon: No such container: {argv[-1]}"
+        self.live.pop(argv[-1])
         return 0, argv[-1] + "\n", ""
 
     def _volume(self, argv: list[str]) -> tuple[int, str, str]:
@@ -152,6 +171,14 @@ def script_of(argv: list[str]) -> str:
 
 
 class TestBaseImage:
+    def test_a_digest_base_builds_with_a_valid_cache_tag(self, fake: FakeDocker) -> None:
+        fake.image_cached = False
+        image = "ubuntu@sha256:" + "a" * 64
+        assert docker.run("bare", ["--image", image, "--", "true"]) == 0
+        build = next(c for c in fake.calls if c[:2] == ["docker", "build"])
+        assert build[build.index("-t") + 1] == "aipass-base:ubuntu-sha256-" + "a" * 64
+        assert fake.dockerfile.startswith(f"FROM {image}\n")
+
     def test_a_missing_base_is_built_from_the_spec_dockerfile(self, fake: FakeDocker) -> None:
         fake.image_cached = False
         assert docker.run("bare", ["--image", "ubuntu:26.04", "--", "true"]) == 0
@@ -240,7 +267,7 @@ class TestRunArgv:
         real = docker_handler.record
         monkeypatch.setattr(docker_handler, "record", lambda row: (seen.append(" ".join(fake.verbs())), real(row)))
         docker.run("bare", ["--image", "ubuntu:26.04", "--", "true"])
-        assert seen == ["run"]
+        assert seen == ["run", "run exec stop"]
 
     # A real pseudo-terminal, not a patched isatty; Windows has none.
     @pytest.mark.skipif(not hasattr(os, "openpty"), reason="no pseudo-terminals on this OS")
@@ -353,12 +380,61 @@ class TestRunArgv:
         assert docker.run("bare", ["--image", "ubuntu:26.04", "--name", "trial", "--", "true"]) == 0
 
     def test_a_command_after_dashes_replaces_the_shell(self, fake: FakeDocker) -> None:
-        docker.run("bare", ["--image", "ubuntu:26.04", "--", "whoami;", "python3 --version"])
+        docker.run("bare", ["--image", "ubuntu:26.04", "--", "whoami; python3 --version"])
         assert script_of(fake.execs()[0]) == "whoami; python3 --version"
+
+    def test_a_multiword_command_preserves_the_bash_c_argument(self, fake: FakeDocker) -> None:
+        assert docker.run("bare", ["--image", "ubuntu:26.04", "--", "bash", "-c", "echo a b"]) == 0
+        assert script_of(fake.execs()[0]) == "bash -c 'echo a b'"
+
+    def test_a_nonkept_name_is_reusable_after_its_removed_row(self, fake: FakeDocker) -> None:
+        args = ["--image", "ubuntu:26.04", "--name", "reusable", "--", "true"]
+        assert docker.run("bare", args) == 0
+        assert [(row["event"], row["name"]) for row in ledger_rows()] == [
+            ("created", "reusable"),
+            ("removed", "reusable"),
+        ]
+        assert docker.run("bare", args) == 0
+        assert len(fake.runs()) == 2
+
+    def test_a_failed_stop_leaves_the_name_record_open(self, fake: FakeDocker) -> None:
+        fake.stop_result = (1, "", "permission denied")
+        assert docker.run("bare", ["--image", "ubuntu:26.04", "--", "true"]) == 0
+        assert [row["event"] for row in ledger_rows()] == ["created"]
 
 
 class TestCredentialMounts:
-    @pytest.mark.parametrize("target", [".ssh", ".config/opencode", ".claude/projects", "", ".config"])
+    @pytest.mark.parametrize("use_target", [False, True])
+    def test_a_symlinked_credential_path_and_its_target_are_refused(
+        self, fake: FakeDocker, tmp_path: Path, capsys: pytest.CaptureFixture, use_target: bool
+    ) -> None:
+        target = tmp_path / "credentials"
+        target.mkdir()
+        link = tmp_path / "home" / ".aws"
+        link.symlink_to(target, target_is_directory=True)
+        assert docker.run("bare", ["--mount", str(target if use_target else link)]) == 1
+        assert "host credentials never enter a box" in capsys.readouterr().err
+        assert fake.calls == []
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            ".ssh",
+            ".config/opencode",
+            ".claude/projects",
+            "",
+            ".config",
+            ".config/gh",
+            ".git-credentials",
+            ".netrc",
+            ".aws",
+            ".gnupg",
+            ".docker",
+            ".kube",
+            ".aws/nested",
+            ".config/gh/nested",
+        ],
+    )
     def test_a_credential_dir_inside_or_holding_one_is_refused(
         self,
         fake: FakeDocker,
@@ -367,8 +443,19 @@ class TestCredentialMounts:
         target: str,
     ) -> None:
         home = tmp_path / "home"
-        for rel in (".ssh", ".config/opencode", ".claude/projects"):
+        for rel in (
+            ".ssh",
+            ".config/opencode",
+            ".claude/projects",
+            ".config/gh/nested",
+            ".aws/nested",
+            ".gnupg",
+            ".docker",
+            ".kube",
+        ):
             (home / rel).mkdir(parents=True, exist_ok=True)
+        for rel in (".git-credentials", ".netrc"):
+            (home / rel).touch()
         assert docker.run("bare", ["--image", "ubuntu:26.04", "--mount", str(home / target)]) == 1
         assert "host credentials never enter a box" in capsys.readouterr().err
         assert fake.runs() == []
@@ -393,7 +480,7 @@ class TestNames:
         docker.run("bare", ["--image", "ubuntu:26.04"])
         argv = fake.runs()[0]
         assert argv[argv.index("--name") + 1] == "aipass-bare-6"
-        row = ledger_rows()[-1]
+        row = next(row for row in ledger_rows() if row["name"] == "aipass-bare-6")
         assert (row["event"], row["name"], row["verb"], row["image"]) == (
             "created",
             "aipass-bare-6",
@@ -418,13 +505,12 @@ class TestRm:
         assert docker.run("rm", ["postgres"]) == 1
         assert not [c for c in fake.calls if c[1] in ("stop", "rm")]
 
-    def test_its_own_box_is_stopped_then_removed_and_recorded(self, fake: FakeDocker) -> None:
+    def test_its_own_box_is_force_removed_and_recorded(self, fake: FakeDocker) -> None:
         seed({"event": "created", "name": "aipass-dev-1", "verb": "dev"})
         fake.live = {"aipass-dev-1": "running"}
         assert docker.run("rm", ["aipass-dev-1"]) == 0
         assert [c[1:] for c in fake.calls if c[1] in ("stop", "rm")] == [
-            ["stop", "aipass-dev-1"],
-            ["rm", "aipass-dev-1"],
+            ["rm", "-f", "aipass-dev-1"],
         ]
         assert ledger_rows()[-1]["event"] == "removed"
 
@@ -435,7 +521,34 @@ class TestRm:
         )
         fake.live = {"aipass-bare-1": "exited", "someone-else": "running"}
         assert docker.run("rm", ["--all"]) == 0
-        assert [c[2] for c in fake.calls if c[1] == "rm"] == ["aipass-bare-1"]
+        assert [c[-1] for c in fake.calls if c[1] == "rm"] == ["aipass-bare-1"]
+
+    def test_a_running_auto_removed_box_is_removed_successfully(self, fake: FakeDocker) -> None:
+        seed({"event": "created", "name": "auto-box", "verb": "bare", "kept": False})
+        fake.live["auto-box"] = "running"
+        fake.auto_remove.add("auto-box")
+        assert docker.run("rm", ["auto-box"]) == 0
+        assert "auto-box" not in fake.live
+        row = ledger_rows()[-1]
+        assert (row["event"], row["name"]) == ("removed", "auto-box")
+
+    @pytest.mark.parametrize(
+        "result, expected",
+        [
+            ((1, "", "Error response from daemon: No such container: trial"), 0),
+            ((1, "", "permission denied"), 1),
+        ],
+    )
+    def test_only_an_already_gone_box_counts_as_removed(
+        self, fake: FakeDocker, capsys: pytest.CaptureFixture, result: tuple[int, str, str], expected: int
+    ) -> None:
+        seed({"event": "created", "name": "trial", "verb": "bare"})
+        fake.live["trial"] = "running"
+        fake.rm_result = result
+        assert docker.run("rm", ["trial"]) == expected
+        assert ledger_rows()[-1]["event"] == ("removed" if expected == 0 else "created")
+        if expected:
+            assert "permission denied" in capsys.readouterr().err
 
 
 class TestShellAndList:

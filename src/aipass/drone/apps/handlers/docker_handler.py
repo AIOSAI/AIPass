@@ -48,7 +48,20 @@ INSTALLERS = {
 LOGIN_DIRS = {"claude": ".claude", "codex": ".codex", "opencode": ".config/opencode"}
 
 # Host dirs that hold sign-ins or keys: never mounted into a box, nor any dir inside or above them.
-CREDENTIAL_DIRS = (".claude", ".codex", ".config/opencode", ".secrets", ".ssh")
+CREDENTIAL_DIRS = (
+    ".claude",
+    ".codex",
+    ".config/opencode",
+    ".secrets",
+    ".ssh",
+    ".config/gh",
+    ".git-credentials",
+    ".netrc",
+    ".aws",
+    ".gnupg",
+    ".docker",
+    ".kube",
+)
 
 # Docker's own rule for a container name.
 NAME_RULE = r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$"
@@ -84,7 +97,7 @@ def check_apt_base(image_ref: str) -> None:
 
 def base_tag(image_ref: str) -> str:
     """The cached image's tag for one base ref."""
-    return "aipass-base:" + image_ref.replace("/", "-").replace(":", "-")
+    return "aipass-base:" + re.sub(r"[^a-zA-Z0-9_.-]", "-", image_ref)
 
 
 def dockerfile_text(image_ref: str) -> str:
@@ -119,7 +132,7 @@ def check_mount(path_str: str, home: Path | None = None) -> Path:
         raise BoxRefusal(f"--mount {path_str} refused: no such path")
     home = (home or Path.home()).resolve()
     for rel in CREDENTIAL_DIRS:
-        cred = home / rel
+        cred = (home / rel).resolve()
         if path == cred or cred in path.parents or path in cred.parents:
             raise BoxRefusal(
                 f"--mount {path_str} refused: it is, holds or sits in ~/{rel}; host credentials never enter a box"
@@ -228,15 +241,21 @@ def launch(
     try:
         return attach(exec_argv(name, box_script(verb, opts["with"], url, opts["command"]), tty))
     finally:
-        stop(name)
+        # shortcut: the creating session owns the box lifetime; shared sessions need a separate contract.
+        if stop(name) and not opts["keep"]:
+            record({"event": "removed", "name": name})
 
 
-def stop(name: str) -> None:
-    """``docker stop -t 1``: a --rm box is then removed by docker, a kept one left stopped."""
+def stop(name: str) -> bool:
+    """Stop a box; return whether docker confirmed it, so a failed stop cannot close its record."""
     try:
-        docker(["stop", "-t", "1", name])
+        result = docker(["stop", "-t", "1", name])
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.warning("docker: stop %s failed: %s", name, exc)
+        return False
+    if result.returncode != 0:
+        logger.warning("docker: stop %s failed: %s", name, (result.stderr or result.stdout).strip())
+    return result.returncode == 0
 
 
 def attach(argv: list[str]) -> int:
