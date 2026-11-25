@@ -3,7 +3,7 @@
 # Description: Tests for aipass doctor: the command, the run and the provider checks
 # Version: 1.10.0
 # Created: 2026-04-16
-# Modified: 2026-11-15
+# Modified: 2026-11-24
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""
@@ -19,11 +19,11 @@ import json
 import os
 import re
 import subprocess
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest  # pyright: ignore[reportMissingImports]
 
+from aipass.aipass.apps.handlers.system_detect.system_detector import detect_python
 from aipass.aipass.apps.handlers.ui.progress import (
     GLYPH_FAIL,
     GLYPH_PASS,
@@ -57,43 +57,6 @@ def clean_env(monkeypatch):
     monkeypatch.delenv("AIPASS_HOME", raising=False)
 
 
-def _seat_home(tmp_path, monkeypatch, *, venv: bool = True, via: str = "settings"):
-    """An install home under tmp_path named by the user's settings.json or the env; returns (home, venv python).
-
-    The user's home is tmp_path/user, entered with _home_at by the caller.
-    """
-    home = tmp_path / "home"
-    home.mkdir()
-    venv_python = home / ".venv" / "bin" / "python"
-    if venv:
-        venv_python.parent.mkdir(parents=True)
-        venv_python.write_text("", encoding="utf-8")
-    claude = tmp_path / "user" / ".claude"
-    claude.mkdir(parents=True)
-    monkeypatch.delenv("AIPASS_HOME", raising=False)
-    if via == "settings":
-        settings = {"env": {"AIPASS_HOME": str(home)}}
-        (claude / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
-    elif via == "env":
-        monkeypatch.setenv("AIPASS_HOME", str(home))
-    return home, venv_python
-
-
-def _doctor_with_only_pytest_collect(monkeypatch, run, args, capsys) -> str:
-    """Run `aipass doctor` with every group and row but pytest collect stubbed; returns stdout."""
-    mod = "aipass.aipass.apps.modules.doctor"
-    for name in ("_check_system", "check_identity", "_check_community", "_check_structure"):
-        monkeypatch.setattr(f"{mod}.{name}", lambda: [])
-    for name in ("_check_scaffold", "_check_sandbox", "_check_drone_systems", "check_wire_verify"):
-        monkeypatch.setattr(f"{mod}.{name}", lambda: [])
-    monkeypatch.setattr(f"{mod}.check_admin_lane", lambda: [])
-    monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
-    monkeypatch.setattr(f"{mod}.reconcile_stale_deny", lambda **_kw: [])
-    with patch(f"{mod}.json_handler", autospec=True), patch(f"{mod}.subprocess.run", side_effect=run):
-        assert handle_command("doctor", args) is True
-    return capsys.readouterr().out
-
-
 class _Stdin(io.StringIO):
     """A real text stream for input() to read, answering isatty() as told."""
 
@@ -124,7 +87,7 @@ class TestDoctorHandleCommand:
         with patch("aipass.aipass.apps.modules.doctor.run_doctor", return_value=0) as run:
             result = handle_command("doctor", [])
         assert result is True
-        run.assert_called_once_with(verbose=False, interactive=True, fix=False, yes=False, smoke=False, model="")
+        run.assert_called_once_with(interactive=True, fix=False, yes=False, smoke=False, model="")
 
     def test_info_flag_calls_introspection(self) -> None:
         """--info flag triggers print_introspection (returns True)."""
@@ -166,39 +129,6 @@ class TestDoctorHandleCommand:
                     handle_command("doctor", ["--check"])
         assert exc_info.value.code == 1
 
-    def test_verbose_flag_passed_to_run_doctor(self) -> None:
-        """--verbose flag is forwarded to run_doctor."""
-        with patch("aipass.aipass.apps.modules.doctor.run_doctor", return_value=0) as mock_run:
-            with patch("aipass.aipass.apps.modules.doctor.json_handler", autospec=True):
-                handle_command("doctor", ["--verbose"])
-        mock_run.assert_called_once_with(verbose=True, interactive=True, fix=False, yes=False, smoke=False, model="")
-
-    @pytest.mark.parametrize(("args", "shown"), [(["--verbose"], True), ([], False)])
-    def test_verbose_shows_pytest_collect_errors(
-        self, args: list[str], shown: bool, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """--verbose prints the collect errors behind 'collection issues'; the plain run does not.
-
-        The home's venv python is a stub file the runner swaps for this interpreter, so a real
-        pytest collects a src/aipass/ that is not under the tmp home and prints its own ERROR line.
-        Mutant: `... if verbose)` -> `... if False)` (verbose ignored again) -> red.
-        Mutant: `"--collect-only", "-q"]` -> `"-q"]` (pytest handed a real run) -> red.
-        """
-        home, home_python = _seat_home(tmp_path, monkeypatch)
-        calls: list[list[str]] = []
-        real_run = subprocess.run  # bound now: the patch replaces subprocess.run itself
-
-        def run(argv, **kwargs):
-            calls.append(argv)
-            real = [sys.executable, *argv[1:]] if argv[0] == str(home_python) else argv
-            return real_run(real, **kwargs)
-
-        with _home_at(tmp_path / "user"):
-            out = _doctor_with_only_pytest_collect(monkeypatch, run, args, capsys)
-        assert "collection issues" in out
-        assert ("file or directory not found" in out) is shown
-        assert [str(home_python), "-m", "pytest", "src/aipass/", "--collect-only", "-q"] in calls
-
     def test_unreadable_updateignore_is_one_scaffold_row(self, tmp_path, monkeypatch, capsys) -> None:
         """An .updateignore that is there but cannot be read: doctor says so in one Scaffold row.
 
@@ -215,7 +145,7 @@ class TestDoctorHandleCommand:
         registry.write_text("{}", encoding="utf-8")
         (project / ".updateignore").mkdir()
         mod = "aipass.aipass.apps.modules.doctor"
-        for name in ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_sandbox"):
+        for name in ("_check_system", "check_identity", "_check_community", "_check_structure"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
         monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
@@ -228,76 +158,14 @@ class TestDoctorHandleCommand:
         assert "scaffold manifest" not in out  # one row: the drift report is not guessed without the claims
 
 
-class TestPytestCollect:
-    """The pytest collect row runs the install home's venv python at the home, never sys.executable."""
-
-    @pytest.mark.parametrize("via", ["settings", "env"])
-    def test_runs_the_home_venv_python_with_cwd_at_the_home(self, via, tmp_path, monkeypatch, capsys) -> None:
-        """On the pipx route sys.executable has no pytest and no src/ beside it: the pipx 2.8.22 false warn.
-
-        Mutant: argv[0] `str(python)` -> `sys.executable` -> red. Mutant: `cwd=str(home)` -> `cwd=None` -> red.
-        Mutant: the env fallback `or os.environ.get(...)` dropped -> red on via=env.
-        """
-        home, home_python = _seat_home(tmp_path, monkeypatch, via=via)
-        calls: list[tuple[list[str], object]] = []
-
-        def run(argv, **kwargs):
-            calls.append((argv, kwargs.get("cwd")))
-            return subprocess.CompletedProcess(argv, 0, "tests/test_a.py::test_one\n", "")
-
-        with _home_at(tmp_path / "user"):
-            out = _doctor_with_only_pytest_collect(monkeypatch, run, [], capsys)
-        assert calls == [([str(home_python), "-m", "pytest", "src/aipass/", "--collect-only", "-q"], str(home))]
-        assert "1 tests collected" in out
-
-    def test_a_home_without_a_venv_says_so_and_runs_nothing(self, tmp_path, monkeypatch, capsys) -> None:
-        """Mutant: the `.is_file()` guard removed -> red (the runner is called, the row says collection issues)."""
-        home, _ = _seat_home(tmp_path, monkeypatch, venv=False)
-        calls: list[list[str]] = []
-
-        def run(argv, **kwargs):
-            calls.append(argv)
-            raise FileNotFoundError(argv[0])
-
-        with _home_at(tmp_path / "user"):
-            out = _doctor_with_only_pytest_collect(monkeypatch, run, [], capsys)
-        assert calls == []
-        assert f"no venv at home ({home})" in " ".join(out.split())
-        assert "collection issues" not in out
-
-    def test_no_home_set_says_so_and_runs_nothing(self, tmp_path, monkeypatch, capsys) -> None:
-        """Mutant: the not-set return removed -> red (Path('') runs, the row never names the cause)."""
-        _seat_home(tmp_path, monkeypatch, via="none")
-        calls: list[list[str]] = []
-
-        def run(argv, **kwargs):
-            calls.append(argv)
-            return subprocess.CompletedProcess(argv, 1, "", "")
-
-        with _home_at(tmp_path / "user"):
-            out = _doctor_with_only_pytest_collect(monkeypatch, run, [], capsys)
-        assert calls == []
-        assert "AIPASS_HOME not set" in out
-
-    def test_a_home_venv_without_pytest_is_named_not_collection_issues(self, tmp_path, monkeypatch, capsys) -> None:
-        """Mutant: the `No module named pytest` arm removed -> red."""
-        _seat_home(tmp_path, monkeypatch)
-
-        def run(argv, **kwargs):
-            return subprocess.CompletedProcess(argv, 1, "", f"{argv[0]}: No module named pytest\n")
-
-        with _home_at(tmp_path / "user"):
-            out = _doctor_with_only_pytest_collect(monkeypatch, run, [], capsys)
-        assert "pytest not installed in the home venv" in out
-        assert "collection issues" not in out
-
-
 class TestClaudeCodeRow:
     """The System group's claude code row: Claude Code reads AGENTS.md from v2.1.277."""
 
-    def _system_out(self, tmp_path, monkeypatch, capsys, stdout: str | None) -> str:
+    def _system_out(self, tmp_path, monkeypatch, capsys, stdout: str | None, python=(3, 12)) -> str:
         mod = "aipass.aipass.apps.modules.doctor"
-        for name in ("check_identity", "_check_community", "_check_structure", "_check_scaffold", "_check_sandbox"):
+        version = MagicMock(major=python[0], minor=python[1], micro=0)
+        monkeypatch.setattr(f"{mod}.detect_python", lambda: detect_python(version))
+        for name in ("check_identity", "_check_community", "_check_structure", "_check_scaffold"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
         monkeypatch.setattr(f"{mod}.check_admin_lane", lambda: [])
@@ -316,8 +184,17 @@ class TestClaudeCodeRow:
 
         detector = "aipass.aipass.apps.handlers.system_detect.system_detector.subprocess.run"
         with patch(f"{mod}.json_handler", autospec=True), patch(detector, side_effect=run):
-            handle_command("doctor", [])
+            try:
+                handle_command("doctor", [])
+            except SystemExit as exc:
+                assert exc.code == 1  # a FAIL row exits 1; the row text is what the test reads
         return " ".join(capsys.readouterr().out.split())
+
+    @pytest.mark.parametrize(("python", "row"), [((3, 10), "✓ python 3.10.0"), ((3, 9), "✗ python 3.9.0")])
+    def test_the_python_floor_is_3_10_as_pyproject_requires(self, python, row, tmp_path, monkeypatch, capsys):
+        """B14. Mutant: the floor back at 3.9 -> 3.9 passes -> red. Mutant: the floor at 3.11 -> 3.10 fails -> red."""
+        out = self._system_out(tmp_path, monkeypatch, capsys, "2.1.277 (Claude Code)\n", python=python)
+        assert row in out
 
     @pytest.mark.parametrize("version", ["2.1.277", "2.1.1000", "3.0.0"])
     def test_at_or_past_2_1_277_passes(self, version, tmp_path, monkeypatch, capsys) -> None:
@@ -345,24 +222,6 @@ class TestClaudeCodeRow:
 
 
 class TestRunDoctor:
-    @pytest.fixture(autouse=True)
-    def sandbox_group_stays_offline(self):
-        """No test in this class runs a real binary through doctor's Sandbox group.
-
-        run_doctor() runs all seven groups; these tests patch five of them, so Sandbox
-        used to reach the machine — `npm root -g` and the node resolver, which write
-        ~/.npm/_logs/<ts>-debug-0.log on the real HOME (reported by @devpulse, mail
-        df3763d4). Every probe in that group goes through sandbox_checker's own
-        shutil.which / subprocess.run, so stubbing both there answers what doctor reads
-        (nothing found) and a subprocess call is now a test failure, not a stray log.
-        """
-        module = "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker"
-        with (
-            patch(f"{module}.shutil.which", return_value=None),
-            patch(f"{module}.subprocess.run", side_effect=AssertionError("doctor ran a real binary in a unit test")),
-        ):
-            yield
-
     def _mock_all_checks(self, mock_system, mock_identity, mock_services, mock_community):
         """Set all group mocks to return empty lists (no errors)."""
         mock_system.return_value = []
@@ -1075,19 +934,41 @@ class TestCodexCliRows:
 class TestPassportRole:
     """Tests for the passport role read in check_identity (round-2 addendum: identity.role, not top-level)."""
 
-    def _run_with_passport(self, tmp_path, passport_data):
-        registry = tmp_path / "TEST_REGISTRY.json"
-        registry.write_text(json.dumps({"metadata": {"id": "t"}, "branches": []}), encoding="utf-8")
-        trinity = tmp_path / ".trinity"
-        trinity.mkdir()
+    def _run_with_passport(self, tmp_path, passport_data, branches=None):
+        """The project's owner (its manager) holds *passport_data*; aipass's own branch holds a decoy role."""
+        project = tmp_path / "project"
+        trinity = project / "src" / "boss" / ".trinity"
+        trinity.mkdir(parents=True)
         (trinity / "passport.json").write_text(json.dumps(passport_data), encoding="utf-8")
+        owner = {"name": "boss", "path": "src/boss", "owner": True}
+        registry = project / "TEST_REGISTRY.json"
+        doc = {"metadata": {"id": "t"}, "branches": [owner] if branches is None else branches}
+        registry.write_text(json.dumps(doc), encoding="utf-8")
+        branch_root = tmp_path / "aipass_branch"
+        (branch_root / ".trinity").mkdir(parents=True)
+        decoy = {"identity": {"role": "aipass-own-decoy"}}
+        (branch_root / ".trinity" / "passport.json").write_text(json.dumps(decoy), encoding="utf-8")
 
         with (
             patch("aipass.aipass.apps.modules.doctor._find_registry", return_value=registry),
-            patch("aipass.aipass.apps.modules.doctor._BRANCH_ROOT", tmp_path),
+            patch("aipass.aipass.apps.modules.doctor._BRANCH_ROOT", branch_root),
             patch("aipass.aipass.apps.modules.doctor._check_owner_seating", return_value=[]),
         ):
             return check_identity()
+
+    def test_the_row_reads_the_projects_owner_not_aipass_own_passport(self, tmp_path) -> None:
+        """B21. Mutant: the passport read from _BRANCH_ROOT -> 'role: aipass-own-decoy' -> red."""
+        (row,) = [
+            r for r in self._run_with_passport(tmp_path, {"identity": {"role": "manager"}}) if r.label == "passport"
+        ]
+        assert (row.glyph, row.detail) == (GLYPH_PASS, "role: manager")
+
+    def test_a_project_with_no_owner_warns_and_names_the_missing_owner(self, tmp_path) -> None:
+        """B21. Mutant: the first branch taken as the owner -> PASS -> red."""
+        branches = [{"name": "boss", "path": "src/boss"}]
+        results = self._run_with_passport(tmp_path, {"identity": {"role": "manager"}}, branches=branches)
+        (row,) = [r for r in results if r.label == "passport"]
+        assert (row.glyph, row.detail) == (GLYPH_WARN, "no owner in the registry")
 
     def test_nested_identity_role_read(self, tmp_path) -> None:
         """Role nested under identity.role is read correctly, not reported as unknown."""
@@ -1369,7 +1250,7 @@ class TestPreflightWireDoor:
         # Every group but the provider wire is stubbed and HOME is tmp_path: no live state is read or written.
         mod = "aipass.aipass.apps.modules.doctor"
         stubbed = ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold")
-        for name in (*stubbed, "_check_sandbox", "check_wire_verify", "_fix_owner_seating"):
+        for name in (*stubbed, "check_wire_verify", "_fix_owner_seating"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
         manifest = tmp_path / ".claude" / "provider_manifest.json"
@@ -1403,7 +1284,7 @@ class TestDoctorFixAsks:
         # Every group but the provider wire is stubbed and HOME is tmp_path: no live state is read or written.
         mod = "aipass.aipass.apps.modules.doctor"
         stubbed = ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold")
-        for name in (*stubbed, "_check_sandbox", "check_wire_verify", "_fix_owner_seating"):
+        for name in (*stubbed, "check_wire_verify", "_fix_owner_seating"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
         claude = tmp_path / ".claude"
@@ -1494,21 +1375,16 @@ class TestDoctorFixAsks:
         assert any(re.match(r'-\s+"Bash\(rm -r \*\)"', line) for line in lines)
         assert any(re.match(r'\+\s+"Edit\(~/\.claude/\*\*\)"', line) for line in lines)
 
-    @pytest.mark.parametrize(
-        ("tty", "non_interactive", "why"),
-        [(False, False, _doctor_wire.NOT_APPLIED_NO_TTY), (True, True, _doctor_wire.NOT_APPLIED_NON_INTERACTIVE)],
-    )
-    def test_f_an_unattended_install_writes_nothing_and_its_row_names_why(
-        self, tmp_path, monkeypatch, tty, non_interactive, why
-    ) -> None:
-        """Mutant: the install door's auto-consent -> written, red. Mutant: non_interactive ignored -> y read, red."""
+    def test_f_an_unattended_install_writes_nothing_and_its_row_names_why(self, tmp_path, monkeypatch) -> None:
+        """Mutant: the install door's auto-consent -> written, red."""
         settings, original, _folder = self._world(tmp_path, monkeypatch)
-        stdin = _Stdin("y\n", tty=tty)
+        stdin = _Stdin("y\n", tty=False)
         with patch("sys.stdin", stdin), _home_at(tmp_path):
-            groups, _counts = run_doctor_preflight(non_interactive=non_interactive)
+            groups, _counts = run_doctor_preflight()
 
         (row,) = [r for r in groups["Services"] if r.label == _doctor_wire.SETTINGS_FIX_LABEL]
-        assert (row.glyph, row.detail, row.remediation) == (GLYPH_WARN, why, "aipass doctor --fix --yes")
+        expected = (GLYPH_WARN, _doctor_wire.NOT_APPLIED_NO_TTY, "aipass doctor --fix --yes")
+        assert (row.glyph, row.detail, row.remediation) == expected
         assert settings.read_bytes() == original
         assert stdin.read() == "y\n"
 
@@ -1546,7 +1422,7 @@ class TestDoctorManifestRunsOnce:
         """Run a default doctor (interactive, no --fix); count `codex --version` at the subprocess edge."""
         mod = "aipass.aipass.apps.modules.doctor"
         stubbed = ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold")
-        for name in (*stubbed, "_check_sandbox"):
+        for name in stubbed:
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: doctor.check_provider_manifest())
         manifest = tmp_path / ".claude" / "provider_manifest.json"

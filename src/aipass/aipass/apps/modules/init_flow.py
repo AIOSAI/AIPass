@@ -3,7 +3,7 @@
 # Description: aipass init — project scaffold, scaffold update, first agent
 # Version: 2.2.1
 # Created: 2026-04-16
-# Modified: 2026-11-21
+# Modified: 2026-11-24
 # =============================================
 
 """
@@ -252,6 +252,11 @@ def _handle_init_update(args: list[str]) -> int:
     """
     from aipass.aipass.apps.handlers.init.bootstrap import update_project
 
+    unknown = [a for a in args if a.startswith("-") and a not in ("--dry-run", "--json")]
+    if unknown:
+        cli_error(f"Unknown flag(s) for aipass init update: {' '.join(unknown)}")
+        print_help()
+        return 1
     dry_run = "--dry-run" in args
     as_json = "--json" in args
     positional = [a for a in args if not a.startswith("--")]
@@ -325,6 +330,7 @@ def _handle_init_agent(args: list[str]) -> int:
         agent_path = f"{package_dir}/{agent_name}"
     else:
         agent_path = f"src/{agent_name}"
+        console.print(f"[dim]No src package found, using {agent_path}[/dim]")
 
     cmd = ["drone", "@spawn", "create", agent_path]
     console.print(f"[dim]Running: {' '.join(cmd)}[/dim]")

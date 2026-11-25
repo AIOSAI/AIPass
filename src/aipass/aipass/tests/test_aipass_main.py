@@ -3,7 +3,7 @@
 # Description: Tests for aipass.py entry point / CLI main
 # Version: 1.5.0
 # Created: 2026-05-12
-# Modified: 2026-11-16
+# Modified: 2026-11-24
 # =============================================
 
 """Tests for apps/aipass.py and the handlers it drives."""
@@ -281,9 +281,26 @@ class TestMain:
             patch("aipass.aipass.apps.aipass._installed_version", side_effect=_not_found),
         ):
             result = main()
-        out, _err = capsys.readouterr()
+        out, err = capsys.readouterr()
         assert result == 0
         assert out == "aipass unknown\n"
+        assert "no aipass pyproject.toml" in " ".join(err.split())
+
+    def test_an_unknown_version_without_a_toml_reader_says_to_install_tomli(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Mutant: the no-reader reason dropped -> a bare 'unknown' -> red."""
+        _not_found = importlib.metadata.PackageNotFoundError
+        with (
+            patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "--version"]),
+            patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]),
+            patch("aipass.aipass.apps.aipass.tomllib", None),
+            patch("aipass.aipass.apps.aipass._installed_version", side_effect=_not_found),
+        ):
+            assert main() == 0
+        out, err = capsys.readouterr()
+        assert out == "aipass unknown\n"
+        assert "on Python 3.10 install tomli" in " ".join(err.split())
 
     def test_help_flag_shows_help(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: --help prints the introspection instead of the help -> red."""
@@ -372,7 +389,7 @@ class TestMain:
     def test_introspection_shows_public_commands(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: no public command collected -> red."""
         mod = types.ModuleType("aipass.aipass.apps.modules.doctor")
-        mod.__doc__ = "Doctor"
+        mod.__doc__ = "aipass doctor — the module's own\nwords.\n\nNot this paragraph."
         mod.COMMAND = "doctor"  # type: ignore[attr-defined]
         mod.handle_command = lambda c, a: True  # type: ignore[attr-defined]
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass"]):
@@ -380,7 +397,9 @@ class TestMain:
                 main()
         out, _err = capsys.readouterr()
         assert "Commands:" in out
-        assert "System health — structure, registry, hooks, tests" in out
+        assert "the module's own words." in out
+        assert "aipass doctor —" not in out
+        assert "Not this paragraph" not in out
 
     def test_introspection_hides_non_public(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: modules listed by file stem, public filter dropped -> red."""
@@ -484,7 +503,7 @@ class TestMain:
     def test_help_shows_command_constant(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: introspection names modules by file stem -> red."""
         mod = types.ModuleType("aipass.aipass.apps.modules.new_project")
-        mod.__doc__ = "New project"
+        mod.__doc__ = "aipass new: New project"
         mod.COMMAND = "new"  # type: ignore[attr-defined]
         mod.handle_command = lambda c, a: True  # type: ignore[attr-defined]
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass"]):
@@ -494,7 +513,7 @@ class TestMain:
             ):
                 main()
         out, _err = capsys.readouterr()
-        assert "Create a project inside AIPass" in out
+        assert "New project" in out
         assert "new_project" not in out
 
     def test_introspection_skips_no_command_module(self, capsys: pytest.CaptureFixture[str]) -> None:
@@ -587,33 +606,26 @@ class TestMain:
 
 
 class TestHelpAgreesWithCode:
-    """print_help against the verbs the dispatcher actually routes.
+    """print_help's command list is the discovered modules, never a hand-written copy."""
 
-    The README no longer carries a command table, so nothing else catches help that disagrees.
-    """
-
-    @staticmethod
-    def _help_text(capsys: pytest.CaptureFixture[str]) -> str:
-        """Rendered help as the user reads it on stdout."""
-        print_help(modules=[])
-        return capsys.readouterr().out
-
-    def test_help_names_revoke(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """`revoke` routes in trust.py, so help must name it — it named only `trust`."""
-        assert "revoke <path>" in self._help_text(capsys)
-
-    def test_help_does_not_claim_bare_json_is_json_output(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """JSON comes from `doctor --fix --json`; `--json` alone falls through."""
-        text = self._help_text(capsys)
-        assert "doctor --fix --json" in text
-        assert "JSON output for structure scan" not in text
+    def test_help_lists_each_discovered_module_in_its_own_words_and_nothing_else(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Mutant: the hand-written list back in print_help -> 'baud install' printed, 'Ship it' missing -> red."""
+        mod = types.ModuleType("aipass.aipass.apps.modules.ship")
+        mod.__doc__ = "aipass ship — Ship it"
+        mod.COMMAND = "ship"  # type: ignore[attr-defined]
+        mod.handle_command = lambda c, a: True  # type: ignore[attr-defined]
+        print_help(modules=[mod])
+        out = capsys.readouterr().out
+        assert "Ship it" in out
+        for gone in ("baud install", "doctor --fix --json", "revoke <path>"):
+            assert gone not in out
 
     def test_help_names_no_retired_command(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """help, profile, handoff, feedback and `init run` were retired 2026-11-14: help must not offer them.
-
-        Mutant: leaving the `init run` help line in place -> red.
-        """
-        text = self._help_text(capsys)
+        """help, profile, handoff, feedback and `init run` were retired 2026-11-14: help must not offer them."""
+        print_help(modules=discover_modules())
+        text = capsys.readouterr().out
         for retired in ("help <question>", "profile", "handoff", "feedback", "init run"):
             assert retired not in text
-        assert "init [target]" in text
+        assert "init" in text

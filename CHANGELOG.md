@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+### Changed
+
+- **aipass: the strip, from the owner's keep-or-cut map** (2026-11-24). Cut: the setup sandbox prerequisites and the doctor Sandbox group, the doctor pytest-collect row, the legacy-prep check and its fix, the `install run` alias, the exec into a claude session after `aipass new` (the next-steps block now always prints), the unreachable command entries in the underscore helper modules, and the placeholder folders (`apps/integrations`, `apps/plugins`, `templates/`, `tools/`). Fixed: bare `aipass` builds its command table from the discovered modules; `install` and `init update` refuse unknown flags and print the command's help; the settings merge keeps an emptied hooks or env key empty; doctor's Python floor is 3.10, its passport row reads the project's manager passport, and `--non-interactive` is gone from the `--rows-json` route (`--yes` alone decides); `init agent` prints why it chose a fallback source path; repointing a dangling `.venv` link asks on a terminal and reports under ACTION NEEDED without one; the scaffold backup stamp is local time; `--version` names the reason when it prints `unknown`; a failed `aipass new` revokes the trust enrolment it made; `baud install --dest` never repoints @api at the scratch folder. Docs say what remains. The Dockerfile and the docker-publish workflow are archived: the image was never used.
+
 ### Added
 
 - **skills: `/map` (`$map` in Codex), the keep-or-cut map** (2026-11-23). Maps every action a branch or program performs into one page where the owner ticks keep or cut and leaves a comment per row, decisions in the artifact's `decisions` store. Three read-only passes: sub-agent slices against a shared brief, a second model (codex, read-only sandbox, schema-checked output) hunting what was missed and what was wrong, then the mapper's own file-by-file read recorded as verify/fix/add/drop files that fold the overlays away and mark every row verified. `.agents/skills/map/`: the SKILL, the brief and second-pass prompt templates, the page, `merge.py`, `show.py`, `left.py`.

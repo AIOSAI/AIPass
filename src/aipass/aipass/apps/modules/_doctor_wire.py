@@ -3,7 +3,7 @@
 # Description: Auto-wire provider settings from manifest into user config
 # Version: 1.8.0
 # Created: 2026-05-08
-# Modified: 2026-11-14
+# Modified: 2026-11-24
 # =============================================
 
 """
@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any, List, NamedTuple, Optional
 
 from aipass.cli import console, success, warning
-from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.json import json_handler
@@ -515,43 +514,6 @@ def _print_manual_wire_warning(
             console.print(f"  [dim]•[/dim] {key} — {desc}")
         console.print()
     console.print(f"[dim]Wire when ready: {WIRE_COMMAND} — see .claude/hooks/README.md[/dim]")
-
-
-def print_introspection() -> None:
-    """Display module info for doctor_wire."""
-    console.print()
-    console.print("[bold cyan]doctor_wire Module[/bold cyan]")
-    console.print("Auto-wire provider settings from manifest into user config")
-    console.print()
-    console.print("[yellow]Provides:[/yellow]")
-    console.print("  [dim]- HOOK_DESCRIPTIONS / ENV_DESCRIPTIONS[/dim]")
-    console.print("  [dim]- Bridge pattern — hooks wired as $AIPASS_HOME bridge commands[/dim]")
-    console.print("  [dim]- fix_provider_settings() — plan, show, ask once, write through the backed-up doors[/dim]")
-    console.print()
-
-
-def handle_command(command: str, args: list[str]) -> bool:
-    """Handle command routing. This is a helper module — no standalone commands."""
-    if command != "doctor_wire":
-        return False
-
-    if not args:
-        console.print("[dim]Helper module — use: aipass doctor (auto-wire runs when needed)[/dim]")
-        json_handler.log_operation("doctor_wire_usage", {"command": command})
-        return True
-
-    if wants_help(args):
-        console.print("[dim]Helper module — use: aipass doctor (auto-wire runs when needed)[/dim]")
-        json_handler.log_operation("doctor_wire_help", {"command": command})
-        return True
-
-    if args[0] in ("--info", "info"):
-        print_introspection()
-        json_handler.log_operation("doctor_wire_info", {"command": command})
-        return True
-
-    json_handler.log_operation("doctor_wire_noop", {"command": command})
-    return False
 
 
 class WireCheckResult(NamedTuple):

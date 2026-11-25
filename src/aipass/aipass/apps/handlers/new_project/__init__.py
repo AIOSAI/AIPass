@@ -3,7 +3,7 @@
 # Description: New project handler — create projects inside AIPass
 # Version: 1.9.0
 # Created: 2026-07-17
-# Modified: 2026-11-21
+# Modified: 2026-11-24
 # =============================================
 
 """
@@ -398,4 +398,7 @@ def create_project(
     except Exception:
         if target.exists():
             shutil.rmtree(target)
+        from aipass.hooks import revoke
+
+        revoke(str(target))
         raise

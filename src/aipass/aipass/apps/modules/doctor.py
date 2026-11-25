@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.19.0
+# Version: 1.20.0
 # Created: 2026-04-16
-# Modified: 2026-11-21
+# Modified: 2026-11-24
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -27,15 +27,6 @@ from aipass.aipass.shared.project_home import _detect_aipass_home, find_fenceles
 
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.handlers.settings_backup import DOOR_DOCTOR_FIX, DOOR_INSTALL
-from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
-    check_broker_alive,
-    check_bwrap_functional,
-    check_bwrap_present,
-    check_node_present,
-    check_rg_present,
-    check_sandbox_flag,
-    check_srt_resolvable,
-)
 from aipass.aipass.apps.handlers.admin_lane import check_admin_lane
 from aipass.hooks import read_registry as read_trust_registry
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
@@ -114,15 +105,11 @@ def _check_system() -> List[CheckResult]:
     results: List[CheckResult] = []
 
     py = detect_python()
-    if py["ok"]:
-        glyph, detail, rem = GLYPH_PASS, py["version"], ""
-    elif py["warning"]:
-        glyph, detail = GLYPH_WARN, py["version"]
-        rem = "Python 3.8 reaches end-of-life — upgrade to 3.9+"
+    if (py["major"], py["minor"]) >= (3, 10):  # pyproject's requires-python
+        results.append(CheckResult("python", GLYPH_PASS, py["version"], ""))
     else:
-        glyph, detail = GLYPH_FAIL, py["version"]
-        rem = "Upgrade Python: https://python.org/downloads"
-    results.append(CheckResult("python", glyph, detail, rem))
+        rem = "AIPass needs Python 3.10+: https://python.org/downloads"
+        results.append(CheckResult("python", GLYPH_FAIL, py["version"], rem))
 
     git = detect_git()
     if git["found"]:
@@ -430,8 +417,11 @@ def check_identity() -> List[CheckResult]:
             )
         )
 
-    passport = _BRANCH_ROOT / ".trinity" / "passport.json"
-    if passport.exists():
+    owner = next((b for b in reg_data.get("branches", []) if isinstance(b, dict) and b.get("owner")), None)
+    passport = reg_path.parent / owner.get("path", "") / ".trinity" / "passport.json" if owner else None
+    if passport is None:
+        results.append(CheckResult("passport", GLYPH_WARN, "no owner in the registry", "Run 'aipass doctor --fix'"))
+    elif passport.exists():
         try:
             with open(passport, "r", encoding="utf-8") as f:
                 pdata = json.load(f)
@@ -439,7 +429,7 @@ def check_identity() -> List[CheckResult]:
             results.append(CheckResult("passport", GLYPH_PASS, f"role: {role}", ""))
         except Exception as exc:
             logger.warning("[doctor] passport read error: %s", exc)
-            results.append(CheckResult("passport", GLYPH_WARN, "unreadable", "Check .trinity/passport.json"))
+            results.append(CheckResult("passport", GLYPH_WARN, "unreadable", f"Check {passport}"))
     else:
         results.append(CheckResult("passport", GLYPH_WARN, "not found", ""))
 
@@ -701,60 +691,11 @@ def _check_drone_systems() -> List[CheckResult]:
     return results
 
 
-def _home_venv_python(home: Path) -> Path:
-    """The home's venv interpreter: .venv/bin/python."""
-    return home / ".venv" / "bin" / "python"
-
-
-def _check_pytest_collect(verbose: bool) -> List[CheckResult]:
-    """Collect the install home's suite with the home's own venv, cwd at the home.
-
-    Never sys.executable: on the pipx route that is pipx's venv, with no pytest and no src/ beside it.
-    """
-    home_val = _configured_aipass_home() or os.environ.get("AIPASS_HOME", "")
-    if not home_val:
-        fix = "Set env.AIPASS_HOME in ~/.claude/settings.json (aipass install does)"
-        return [CheckResult("pytest collect", GLYPH_WARN, "AIPASS_HOME not set", fix)]
-    home = Path(home_val)
-    python = _home_venv_python(home)
-    if not python.is_file():
-        fix = f"Run ./setup.sh in {home} to create it"
-        return [CheckResult("pytest collect", GLYPH_WARN, f"no venv at home ({home})", fix)]
-    try:
-        proc = subprocess.run(
-            [str(python), "-m", "pytest", "src/aipass/", "--collect-only", "-q"],
-            capture_output=True,
-            text=True,
-            timeout=90,
-            cwd=str(home),
-        )
-    except FileNotFoundError as exc:
-        logger.warning("[doctor] home venv python would not run: %s", exc)
-        return [CheckResult("pytest collect", GLYPH_WARN, f"venv python will not run ({python})", "")]
-    except subprocess.TimeoutExpired as exc:
-        logger.warning("[doctor] pytest collect timed out: %s", exc)
-        fix = "Run manually: pytest src/aipass/ --collect-only -q — may just be a slow/shared-CPU environment"
-        return [CheckResult("pytest collect", GLYPH_WARN, "timed out (90s)", fix)]
-    lines = [ln.replace("[", r"\[") for ln in (proc.stdout + proc.stderr).splitlines()]  # markup-escaped
-    if proc.returncode == 0:
-        collected = [ln for ln in lines if "<" in ln or "::" in ln]
-        detail = f"{len(collected)} tests collected" if collected else "ok"
-        return [CheckResult("pytest collect", GLYPH_PASS, detail, "")]
-    if "No module named pytest" in proc.stderr:
-        fix = f"{python} -m pip install pytest"
-        return [CheckResult("pytest collect", GLYPH_WARN, "pytest not installed in the home venv", fix)]
-    # --verbose: pytest's ERROR lines (else its last line) under the row
-    errs = [ln for ln in lines if ln.startswith("ERROR")] or lines[-1:]
-    detail = "collection issues" + "".join(f"\n      {ln}" for ln in errs[:_MAX_NAMED_EXTRAS] if verbose)
-    return [CheckResult("pytest collect", GLYPH_WARN, detail, "Run pytest to diagnose")]
-
-
-def _check_services(verbose: bool = False) -> List[CheckResult]:
+def _check_services() -> List[CheckResult]:
     """Run Services group checks."""
     results: List[CheckResult] = []
 
     results.extend(_check_drone_systems())
-    results.extend(_check_pytest_collect(verbose))
 
     manifest_checks = check_provider_manifest()
     results.extend(manifest_checks)
@@ -936,53 +877,6 @@ def _fix_instruction_shadow() -> List[CheckResult]:
     return _check_instruction_shadow(root) + fixed
 
 
-def _check_sandbox() -> List[CheckResult]:
-    """Run Sandbox group checks — kernel sandbox prerequisites, only when the flag is on.
-
-    Off, the hook gates do the containing, so a missing prerequisite is no finding: one PASS row.
-    """
-    flag = check_sandbox_flag()
-    if not flag["enabled"]:
-        setting = f"={flag['raw_value']}" if flag["raw_value"] else " unset"
-        return [
-            CheckResult("sandbox", GLYPH_PASS, f"off (AIPASS_SANDBOX_ENABLED{setting}); prerequisites not checked", "")
-        ]
-
-    results: List[CheckResult] = []
-    results.append(CheckResult("sandbox flag", GLYPH_PASS, "AIPASS_SANDBOX_ENABLED=ON", ""))
-
-    def _sev(ok: bool) -> str:
-        return GLYPH_PASS if ok else GLYPH_FAIL
-
-    def _found(label: str, probe: dict, cure: str) -> CheckResult:
-        return CheckResult(label, _sev(probe["found"]), probe["path"] or "not found", "" if probe["found"] else cure)
-
-    bwrap = check_bwrap_present()
-    results.append(_found("bwrap", bwrap, "sudo apt install bubblewrap"))
-
-    if bwrap["found"]:
-        func = check_bwrap_functional()
-        detail = func["detail"]
-        if not func["ok"] and func["sysctl_value"] is not None:
-            detail = f"{detail} (apparmor_restrict_unprivileged_userns={func['sysctl_value']})"
-        results.append(CheckResult("bwrap functional", _sev(func["ok"]), detail, ""))
-
-    node = check_node_present()
-    results.append(_found("node", node, "Install Node.js: https://nodejs.org/"))
-
-    srt = check_srt_resolvable()
-    results.append(_found("srt (@anthropic-ai/sandbox-runtime)", srt, srt["install_hint"]))
-
-    rg = check_rg_present()
-    results.append(_found("rg (ripgrep)", rg, "sudo apt install ripgrep  (or static binary to ~/.local/bin/rg)"))
-
-    project_root = find_project_root(Path.cwd())
-    broker = check_broker_alive(project_root)
-    results.append(CheckResult("broker daemon", _sev(broker["alive"]), broker["detail"], ""))
-
-    return results
-
-
 def _check_tier0(root: Path, aipass_home: str | None, preview: str) -> List[CheckResult]:
     """Compare a project's tier0 kernel against AIPASS_HOME, with provenance."""
     from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
@@ -1038,7 +932,7 @@ def _tree_in_use(root: Path) -> str:
     return str(root)
 
 
-_SKILL_ROW_LABELS = ("shared skills", "skills link", "legacy prep", "provider switch", "skills fix")
+_SKILL_ROW_LABELS = ("shared skills", "skills link", "provider switch", "skills fix")
 _FIX_COMMAND = "aipass doctor --fix"
 
 
@@ -1074,13 +968,6 @@ def _check_shared_skills(root: Path) -> List[CheckResult]:
         detail = f"{bs.SKILLS_LINK_REL} points at {state['link_to']}, not {bs.SKILLS_REL}"
         rows.append(CheckResult("skills link", GLYPH_WARN, detail, f"Point it at ../{bs.SKILLS_REL}"))
 
-    if state["legacy_prep"] == "managed":
-        detail = f"{bs.LEGACY_PREP_REL} beside {bs.PREP_SKILL_REL}: /prep is offered twice"
-        rows.append(CheckResult("legacy prep", GLYPH_WARN, detail, fix))
-    elif state["legacy_prep"] == "edited":
-        detail = f"{bs.LEGACY_PREP_REL} is edited, so it is yours and kept: /prep is offered twice"
-        rows.append(CheckResult("legacy prep", GLYPH_WARN, detail, f"Fold your edits into {bs.PREP_SKILL_REL}"))
-
     if state["switch_missing"]:
         detail = f"missing {', '.join(state['switch_missing'])}: the chat cannot switch CLI here"
         cure = f"Run 'aipass init update {root}'"
@@ -1092,7 +979,7 @@ def _check_shared_skills(root: Path) -> List[CheckResult]:
 
 
 def _fix_shared_skills() -> List[CheckResult]:
-    """--fix: make a missing skills link, retire an unedited legacy prep command."""
+    """--fix: make a missing skills link."""
     from aipass.aipass.apps.handlers.init.bootstrap import repair_shared_skills
 
     reg_path = _find_registry()
@@ -1195,27 +1082,24 @@ def _wire_gap(row: CheckResult) -> bool:
 
 
 def _compute_doctor_groups(
-    verbose: bool = False,
     interactive: bool = False,
     fix: bool = False,
     door: str = DOOR_DOCTOR_FIX,
     yes: bool = False,
-    non_interactive: bool = False,
 ) -> Dict[str, List[CheckResult]]:
     """Run all six check groups (optionally auto-fixing). Returns them by group name.
 
     With *fix*, the settings step shows its plan and asks once before writing: *yes* skips
-    the question, *non_interactive* writes nothing, and *door* names the writer in the
+    the question (no tty and no *yes* writes nothing), and *door* names the writer in the
     settings backup and receipt.
     """
     group_specs = [
         ("System", _check_system),
         ("Identity", check_identity),
-        ("Services", lambda: _check_services(verbose=verbose)),
+        ("Services", _check_services),
         ("Community", _check_community),
         ("Structure", _check_structure),
         ("Scaffold", _check_scaffold),
-        ("Sandbox", _check_sandbox),
     ]
     groups: Dict[str, List[CheckResult]] = {}
     with make_doctor_progress() as progress:
@@ -1230,10 +1114,7 @@ def _compute_doctor_groups(
             progress.remove_task(task_id)
 
     if fix:
-        settings_rows = [
-            CheckResult(*row)
-            for row in fix_provider_settings(_find_manifest(), door=door, yes=yes, non_interactive=non_interactive)
-        ]
+        settings_rows = [CheckResult(*row) for row in fix_provider_settings(_find_manifest(), door=door, yes=yes)]
         manifest_results = check_provider_manifest()
         if manifest_results:
             groups["Services"] = merge_manifest_rows(groups.get("Services", []), manifest_results)
@@ -1329,7 +1210,6 @@ def _print_doctor_groups(groups: Dict[str, List[CheckResult]]) -> tuple[int, int
 
 
 def run_doctor(
-    verbose: bool = False,
     interactive: bool = False,
     fix: bool = False,
     yes: bool = False,
@@ -1348,7 +1228,7 @@ def run_doctor(
     console.print(f"  scope: {f'project {project}' if project else outside}")
     console.print()
 
-    groups = _compute_doctor_groups(verbose=verbose, interactive=interactive, fix=fix, yes=yes)
+    groups = _compute_doctor_groups(interactive=interactive, fix=fix, yes=yes)
     if smoke:
         groups["Services"] = groups.get("Services", []) + [CheckResult(*row) for row in check_smoke(model)]
     pass_count, warn_count, error_count = _print_doctor_groups(groups)
@@ -1358,7 +1238,6 @@ def run_doctor(
 
 
 def run_doctor_preflight(
-    non_interactive: bool = False,
     yes: bool = False,
 ) -> tuple[Dict[str, List[CheckResult]], tuple[int, int, int]]:
     """The install's health check: doctor --fix under the install door, printed; *yes* is install's --yes.
@@ -1369,18 +1248,18 @@ def run_doctor_preflight(
     console.print("[bold cyan]Running aipass doctor --fix...[/bold cyan]")
     console.print()
 
-    groups = _compute_doctor_groups(fix=True, door=DOOR_INSTALL, yes=yes, non_interactive=non_interactive)
+    groups = _compute_doctor_groups(fix=True, door=DOOR_INSTALL, yes=yes)
     counts = _print_doctor_groups(groups)
     logger.info("[doctor] install health check complete — pass=%d warn=%d error=%d", *counts)
     return groups, counts
 
 
-def write_preflight_rows(rows_path: Path, non_interactive: bool = False, yes: bool = False) -> None:
+def write_preflight_rows(rows_path: Path, yes: bool = False) -> None:
     """``doctor --fix --rows-json PATH``: the install's health check, run in the home, its rows for the report.
 
     Writes {"counts": {pass, warn, error}, "rows": every non-PASS row after the fix}; an unwritable path raises.
     """
-    groups, (passed, warned, errored) = run_doctor_preflight(non_interactive=non_interactive, yes=yes)
+    groups, (passed, warned, errored) = run_doctor_preflight(yes=yes)
     rows = [
         {
             "group": group,
@@ -1405,7 +1284,7 @@ def print_introspection() -> None:
     console.print("[bold cyan]doctor Module[/bold cyan]")
     console.print("System health aggregation — flutter-doctor-style output")
     console.print()
-    console.print("[yellow]Groups:[/yellow] System, Identity, Services, Community, Structure, Scaffold, Sandbox")
+    console.print("[yellow]Groups:[/yellow] System, Identity, Services, Community, Structure, Scaffold")
     console.print("[yellow]Next:[/yellow]  [green]aipass doctor[/green] / [green]aipass doctor --fix[/green]")
     console.print()
 
@@ -1417,13 +1296,12 @@ def print_help() -> None:
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
     console.print("  [green]aipass doctor[/green]           [dim]# Run all checks[/dim]")
-    console.print("  [green]aipass doctor --verbose[/green] [dim]# Show sub-check detail[/dim]")
     console.print("  [green]aipass doctor --fix[/green]     [dim]# Settings plan + diff, ask once; owner repair[/dim]")
     console.print("  [green]aipass doctor --fix --yes[/green][dim]# The same, writing without the question[/dim]")
     console.print("  [green]aipass doctor --fix --json[/green][dim]# Remediation + settings plan as JSON[/dim]")
     console.print(
         "  [green]aipass doctor --fix --rows-json PATH[/green] [dim]# install's health check: rows + counts to PATH;"
-        " --non-interactive writes no settings[/dim]"
+        " --yes writes the settings[/dim]"
     )
     console.print("  [green]aipass doctor --smoke[/green]   [dim]# + one live model turn per installed provider[/dim]")
     console.print("  [green]aipass doctor --smoke --json[/green] [dim]# hooks' smoke results as JSON[/dim]")
@@ -1451,7 +1329,6 @@ def handle_command(command: str, args: list[str]) -> bool:
         print_introspection()
         return True
 
-    verbose = "--verbose" in args or "-v" in args
     fix_mode = "--fix" in args
     json_mode = "--json" in args
     yes_mode = "--yes" in args
@@ -1463,7 +1340,7 @@ def handle_command(command: str, args: list[str]) -> bool:
         if not fix_mode:
             cli_error("--rows-json reports the install's health check: run it with --fix")
             raise SystemExit(2)
-        write_preflight_rows(Path(rows_json), non_interactive="--non-interactive" in args, yes=yes_mode)
+        write_preflight_rows(Path(rows_json), yes=yes_mode)
         return True
 
     if smoke_mode and fix_mode:
@@ -1485,9 +1362,7 @@ def handle_command(command: str, args: list[str]) -> bool:
             console.print(json.dumps({"provider_settings": settings_report}, indent=2), markup=False, highlight=False)
         return True
 
-    error_count = run_doctor(
-        verbose=verbose, interactive=True, fix=fix_mode, yes=yes_mode, smoke=smoke_mode, model=model
-    )
+    error_count = run_doctor(interactive=True, fix=fix_mode, yes=yes_mode, smoke=smoke_mode, model=model)
     if fix_mode:
         project_root = find_project_root(Path.cwd())
         if project_root:

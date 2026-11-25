@@ -3,7 +3,7 @@
 # Description: Tests for aipass init — scaffold, update, agent routes
 # Version: 2.2.1
 # Created: 2026-04-16
-# Modified: 2026-11-21
+# Modified: 2026-11-24
 # =============================================
 
 """Tests for apps/modules/init_flow.py and the handlers it drives."""
@@ -545,6 +545,30 @@ class TestInitUpdateGitAuth:
         update.assert_not_called()
         out, err = capsys.readouterr()
         assert "aipass init update --dry-run --json" in " ".join(f"{out} {err}".split())
+
+    def test_an_unknown_flag_is_refused_with_help_and_nothing_runs(self, tmp_path: Path, capsys) -> None:
+        """X15: update ran with an unknown flag silently dropped."""
+        with (
+            patch("aipass.aipass.apps.handlers.init.bootstrap.update_project") as update,
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            handle_command("init", ["update", str(tmp_path), "--dryrun"])
+
+        assert exit_info.value.code == 1
+        update.assert_not_called()
+        out, err = capsys.readouterr()
+        assert "--dryrun" in f"{out}{err}" and "USAGE:" in out
+
+    def test_agent_without_a_src_package_says_which_path_it_falls_back_to(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        """A50: the fallback to src/<name> was silent."""
+        monkeypatch.chdir(tmp_path)
+        with patch("subprocess.run", return_value=MagicMock(returncode=0)) as run, pytest.raises(SystemExit):
+            handle_command("init", ["agent", "scout"])
+
+        assert run.call_args[0][0] == ["drone", "@spawn", "create", "src/scout"]
+        assert "No src package found, using src/scout" in " ".join(capsys.readouterr().out.split())
 
     def test_help_offers_json_only_with_dry_run(self, capsys: pytest.CaptureFixture[str]) -> None:
         print_help()

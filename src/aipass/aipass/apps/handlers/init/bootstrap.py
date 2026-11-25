@@ -3,7 +3,7 @@
 # Description: Init handler — bootstrap an AIPass project in any directory
 # Version: 2.8.0
 # Created: 2026-03-14
-# Modified: 2026-11-17
+# Modified: 2026-11-24
 # =============================================
 
 """
@@ -16,8 +16,9 @@ Init is re-runnable: existing files are skipped, not errors. Logs through prax; 
 import json
 import re
 import shutil
+import sys
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from pathlib import Path
 
 from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
@@ -228,6 +229,18 @@ def write_owner_seeds(target: Path) -> list[str]:
     return written
 
 
+def _keep_dangling_venv(link: Path, dest: Path) -> str | None:
+    """A dangling .venv link is repointed only on a terminal's yes; else the ACTION NEEDED note it stays with."""
+    if not link.is_symlink():
+        return None
+    old = link.readlink()
+    if sys.stdin.isatty():
+        answer = input(f"{link} points at missing {old}; repoint it to {dest}? [y/N] ")
+        if answer.strip().lower() in ("y", "yes"):
+            return None
+    return f"ACTION NEEDED: {link} still points at missing {old}. Repoint it: ln -sfn {dest} {link}"
+
+
 def _link_venv(link: Path, dest: Path) -> None:
     """Point `link` at `dest`; a dangling link (its home moved) is swapped for a fresh one by rename."""
     if not link.is_symlink():
@@ -302,7 +315,8 @@ def _merge_settings(existing: dict, generated: dict) -> dict:
         merged["permissions"] = merged_perms
 
     for key in existing:
-        if key not in merged:
+        # hooks and env were filtered above: an empty result stays empty, never the stripped original.
+        if key not in merged and key not in ("hooks", "env"):
             merged[key] = existing[key]
 
     return merged
@@ -548,7 +562,9 @@ def init_project(
     venv_link = target / ".venv"
     if not venv_link.exists() and aipass_home:
         aipass_venv = Path(aipass_home) / ".venv"
-        if aipass_venv.is_dir():
+        note = _keep_dangling_venv(venv_link, aipass_venv) if aipass_venv.is_dir() else None
+        notes.extend([note] if note else [])
+        if aipass_venv.is_dir() and not note:
             _link_venv(venv_link, aipass_venv)
             created.append(f".venv (symlink to AIPass runtime: {aipass_venv})")
 
@@ -874,7 +890,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     if apply:
         aipass_dir.mkdir(exist_ok=True)
         claude_dir.mkdir(exist_ok=True)
-        backup_dir = _apply_writes(target, writes, retires, symlinks)
+        backup_dir = _apply_writes(target, writes, retires, symlinks, notes)
         notes.extend(_retire_shadows(target, shadows))
         if skills_link:
             note = link_skills(target)
@@ -884,7 +900,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
             trust_reenrol = _enroll_project(target)
 
     updated = [str(dest) for dest, _ in writes if not dest.name.endswith(sm.NEW_SUFFIX)]
-    updated += [f".venv (symlink to AIPass runtime: {dest})" for _, dest in symlinks]
+    updated += [f".venv (symlink to AIPass runtime: {dest})" for link, dest in symlinks if not apply or link.exists()]
     updated += [f"{SKILLS_LINK_REL} (symlink to {_SKILLS_LINK_TARGET.as_posix()})"] if skills_link else []
 
     return {
@@ -1001,12 +1017,12 @@ def _handler_reason(handlers: list) -> str:
     return ", ".join(parts) if parts else "merge changes hook config"
 
 
-def _apply_writes(target: Path, writes: list, retires: list, symlinks: list) -> Path | None:
+def _apply_writes(target: Path, writes: list, retires: list, symlinks: list, notes: list) -> Path | None:
     """Perform the planned writes, backing up anything overwritten first.
 
     Backups mirror the project tree under ``.aipass/.backup/scaffold_<stamp>/`` so restore is by path.
     """
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
     backup_root = target / sm.BACKUP_REL / f"scaffold_{stamp}"
     used = False
 
@@ -1036,6 +1052,9 @@ def _apply_writes(target: Path, writes: list, retires: list, symlinks: list) -> 
         logger.info("Retired managed file: %s -> %s", stale_path, disabled)
 
     for link, dest in symlinks:
-        _link_venv(link, dest)
+        note = _keep_dangling_venv(link, dest)
+        notes.extend([note] if note else [])
+        if not note:
+            _link_venv(link, dest)
 
     return backup_root if used else None

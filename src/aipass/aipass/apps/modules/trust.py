@@ -3,11 +3,11 @@
 # Description: Trust management — aipass trust / aipass revoke commands
 # Version: 1.0.4
 # Created: 2026-07-15
-# Modified: 2026-11-22
+# Modified: 2026-11-24
 # =============================================
 
 """
-aipass trust / revoke — manage the trusted-project registry (DPLAN-0244)
+aipass trust / revoke — manage the trusted-project registry
 
 Enrollment controls which projects have their .aipass/hooks.json loaded
 by the hook engine. Projects created via `aipass init` auto-enroll;

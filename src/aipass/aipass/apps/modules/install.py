@@ -3,7 +3,7 @@
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + doctor + report)
 # Version: 1.9.0
 # Created: 2026-07-05
-# Modified: 2026-11-15
+# Modified: 2026-11-24
 # =============================================
 
 """
@@ -427,7 +427,7 @@ def _health_check(home: Path, dry_run: bool, non_interactive: bool, yes: bool = 
 
     In-process, a bootstrap from a wheel would judge its own cwd, environment and code, not the home.
     """
-    flags = [*(["--yes"] if yes else []), *(["--non-interactive"] if non_interactive else [])]
+    flags = ["--yes"] if yes else []
     if dry_run:
         console.print(f"[yellow]\\[dry-run][/yellow] would run: aipass doctor --fix {' '.join(flags)}".rstrip())
         return [], {"pass": 0, "warn": 0, "error": 0}
@@ -814,6 +814,25 @@ def _flag_value(args: list[str], flag: str) -> str | None:
     return None
 
 
+_SWITCHES = (
+    "--non-interactive", "--yes", "--dry-run", "--here", "--finish",
+    "--no-symlink", "--force-symlink", "--no-baud", "--force-global-home",
+)  # fmt: skip
+_VALUE_FLAGS = ("--path", "--baud-tag", "--source")
+
+
+def _unknown_args(args: list[str]) -> list[str]:
+    """The args install does not know; a value flag's next arg is its value, whatever it looks like."""
+    unknown: list[str] = []
+    it = iter(args)
+    for arg in it:
+        if arg in _VALUE_FLAGS:
+            next(it, None)
+        elif arg not in _SWITCHES and arg.split("=", 1)[0] not in _VALUE_FLAGS:
+            unknown.append(arg)
+    return unknown
+
+
 def handle_command(command: str, args: list[str]) -> bool:
     """Route install subcommands. Returns True if handled, False otherwise."""
     if command != COMMAND:
@@ -826,21 +845,26 @@ def handle_command(command: str, args: list[str]) -> bool:
         print_introspection()
         return True
 
-    run_args = args[1:] if args and args[0] == "run" else args
+    unknown = _unknown_args(args)
+    if unknown:
+        logger.warning("[install] refused unknown args: %s", unknown)
+        error(f"aipass install: unknown argument(s): {' '.join(unknown)}")
+        print_help()
+        sys.exit(2)
 
-    non_interactive = "--non-interactive" in run_args
-    yes = "--yes" in run_args
-    dry_run = "--dry-run" in run_args
-    here = "--here" in run_args
-    finish = "--finish" in run_args
-    no_symlink = "--no-symlink" in run_args
-    force_symlink = "--force-symlink" in run_args
-    no_baud = "--no-baud" in run_args
-    path = _flag_value(run_args, "--path") or None
+    non_interactive = "--non-interactive" in args
+    yes = "--yes" in args
+    dry_run = "--dry-run" in args
+    here = "--here" in args
+    finish = "--finish" in args
+    no_symlink = "--no-symlink" in args
+    force_symlink = "--force-symlink" in args
+    no_baud = "--no-baud" in args
+    path = _flag_value(args, "--path") or None
     # A valueless --baud-tag or --source reaches its validator as "" and is refused there.
-    baud_tag = _flag_value(run_args, "--baud-tag")
+    baud_tag = _flag_value(args, "--baud-tag")
     baud_tag = LATEST if baud_tag is None else baud_tag
-    source = _flag_value(run_args, "--source")
+    source = _flag_value(args, "--source")
 
     if finish:
         result = run_finish(non_interactive=non_interactive, path=path, here=here, dry_run=dry_run, yes=yes)

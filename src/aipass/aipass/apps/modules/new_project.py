@@ -3,11 +3,11 @@
 # Description: aipass new — create projects inside the AIPass installation
 # Version: 1.2.3
 # Created: 2026-07-17
-# Modified: 2026-11-22
+# Modified: 2026-11-24
 # =============================================
 
 """
-aipass new — create projects inside the AIPass installation (DPLAN-0247)
+aipass new — create projects inside the AIPass installation
 
 Creates a project at <host>/projects/<name> with its own git repo,
 AIPass scaffold, and optional resident agent. Born deployable.
@@ -232,24 +232,6 @@ def handle_command(command: str, args: list[str]) -> bool:
         {"name": name, "template": template, "target": result["target"]},
     )
     logger.info("[aipass] new project: %s (%s) at %s", name, template, result["target"])
-
-    if result["agent_created"] and sys.stdin.isatty():
-        from aipass.aipass.apps.handlers.handoff_platform import (
-            launch_inline,
-            return_path_breadcrumb,
-        )
-
-        console.print()
-        console.print("[dim]Launching your manager agent — Ctrl-C to stay in the shell.[/dim]")
-        console.print(f"[dim]Return anytime with: {return_path_breadcrumb(result['agent_home'])}[/dim]")
-        console.print()
-
-        launch_inline(
-            "claude",
-            "You are the new resident agent of this project."
-            " Read your passport and README, then tell me what you can do.",
-            result["agent_home"],
-        )
 
     console.print()
     console.print("[yellow]Next steps:[/yellow]")

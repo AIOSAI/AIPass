@@ -3,7 +3,7 @@
 # Description: Tests for init bootstrap handler (DPLAN-0164)
 # Version: 1.8.0
 # Created: 2026-05-04
-# Modified: 2026-11-21
+# Modified: 2026-11-24
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
@@ -19,7 +19,7 @@ import uuid
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest  # pyright: ignore[reportMissingImports]
 
@@ -720,9 +720,11 @@ def test_minted_tracked_files_have_no_absolute_paths(tmp_path, monkeypatch):
 
 
 def test_init_repoints_a_venv_link_left_dangling_by_a_moved_home(tmp_path, monkeypatch):
-    """A .venv symlink to a home that moved is repointed, not a FileExistsError."""
+    """A .venv symlink to a home that moved is repointed on a terminal's yes, not a FileExistsError."""
     host = _host(tmp_path, {".venv/pyvenv.cfg": ""})
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=MagicMock(return_value=True)))
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
     target = tmp_path / "proj"
     target.mkdir()
     (target / ".venv").symlink_to(tmp_path / "old_home" / ".venv")
@@ -730,6 +732,22 @@ def test_init_repoints_a_venv_link_left_dangling_by_a_moved_home(tmp_path, monke
     init_project(target, project_name="zeta")
 
     assert (target / ".venv").resolve() == (host / ".venv").resolve()
+
+
+def test_init_without_a_terminal_leaves_a_dangling_venv_link_and_says_action_needed(tmp_path, monkeypatch):
+    """X04: with no terminal to ask, the dangling link was repointed silently."""
+    host = _host(tmp_path, {".venv/pyvenv.cfg": ""})
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=MagicMock(return_value=False)))
+    target = tmp_path / "proj"
+    target.mkdir()
+    old = tmp_path / "old_home" / ".venv"
+    (target / ".venv").symlink_to(old)
+
+    result = init_project(target, project_name="zeta")
+
+    assert (target / ".venv").readlink() == old
+    assert [n for n in result["notes"] if n.startswith("ACTION NEEDED:") and str(host / ".venv") in n]
 
 
 def test_init_raises_when_the_trust_registry_cannot_be_imported(tmp_path, monkeypatch):

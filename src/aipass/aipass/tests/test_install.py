@@ -3,7 +3,7 @@
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
 # Version: 1.8.0
 # Created: 2026-07-05
-# Modified: 2026-11-16
+# Modified: 2026-11-24
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -17,6 +17,7 @@ import os
 import shlex
 import subprocess as _sp
 import sys
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
@@ -26,7 +27,7 @@ import pytest
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 from aipass.aipass.apps.modules import doctor, install as _install
 from aipass.aipass.apps.modules.doctor import CheckResult
-from aipass.aipass.apps.modules._doctor_wire import DECLINED_WARNING, NOT_APPLIED_NON_INTERACTIVE
+from aipass.aipass.apps.modules._doctor_wire import DECLINED_WARNING, NOT_APPLIED_NO_TTY
 from aipass.aipass.tests.support_doctor import _home_at
 from aipass.aipass.apps.modules.install import (
     DEFAULT_HOME,
@@ -97,7 +98,9 @@ _REAL_RUN = _sp.run
 def _the_homes_aipass(argv, **_kw) -> _sp.CompletedProcess:
     """The home's `aipass doctor ...` answered in this process: doctor's own handle_command reads the argv."""
     try:
-        doctor.handle_command("doctor", argv[1:])
+        # The real child has no terminal under stdin=DEVNULL: the in-process doctor reads one that says so.
+        with patch("sys.stdin", _Stdin("", tty=False)) if _kw.get("stdin") is _sp.DEVNULL else nullcontext():
+            doctor.handle_command("doctor", argv[1:])
     except SystemExit as exc:
         return _sp.CompletedProcess(argv, int(exc.code or 0))
     return _sp.CompletedProcess(argv, 0)
@@ -874,6 +877,22 @@ class TestHandleCommand:
         setup_calls = [c.args[0] for c in run.call_args_list if c.args[0][:1] == ["bash"]]
         assert setup_calls == [["bash", str(home / "setup.sh"), "--no-finish", "--no-symlink", "--force-symlink"]]
 
+    @pytest.mark.parametrize(
+        ("given", "unknown"),
+        [(["--dry-run", "--bogus"], "--bogus"), (["run", "--dry-run"], "run"), (["--yes", "x"], "x")],
+    )
+    def test_an_unknown_arg_is_refused_with_2_and_the_help_and_nothing_runs(self, given, unknown, capsys) -> None:
+        """X17, A19: an unknown flag, or the retired `run` alias. Mutant: unknown args ignored -> run_install -> red."""
+        with patch(f"{_MOD}.run_install") as run, patch(f"{_MOD}.run_finish") as finish:
+            with pytest.raises(SystemExit) as exc:
+                handle_command("install", given)
+        out, err = capsys.readouterr()
+        assert exc.value.code == 2
+        run.assert_not_called()
+        finish.assert_not_called()
+        assert f"unknown argument(s): {unknown}" in err
+        assert "USAGE:" in out
+
     def test_finish_routes_to_run_finish(self) -> None:
         """--finish routes to run_finish instead of run_install."""
         with (
@@ -946,7 +965,7 @@ def _doctor_world(tmp_path: Path, monkeypatch) -> Path:
     """The real doctor --fix with every group but the provider wire stubbed. Returns the settings file."""
     for name in ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold"):
         monkeypatch.setattr(doctor, name, lambda: [])
-    for name in ("_check_sandbox", "check_wire_verify", "_fix_owner_seating", "_fix_shared_skills"):
+    for name in ("check_wire_verify", "_fix_owner_seating", "_fix_shared_skills"):
         monkeypatch.setattr(doctor, name, lambda: [])
     monkeypatch.setattr(doctor, "_fix_instruction_shadow", lambda: [])
     monkeypatch.setattr(doctor, "_check_services", lambda **_kw: [])
@@ -1094,7 +1113,7 @@ class TestInstallReport:
     def test_a_non_interactive_install_writes_no_settings_and_shows_the_warn_row(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
-        """Mutant: the install door's old auto-consent -> the settings file is rewritten -> red."""
+        """Mutants: the install door's old auto-consent; stdin not closed -> the settings file is rewritten -> red."""
         settings = _doctor_world(tmp_path, monkeypatch)
         original = settings.read_bytes()
         home = tmp_path / "AIPass"
@@ -1106,10 +1125,8 @@ class TestInstallReport:
         attention = json.loads(install_report_path(home).read_text(encoding="utf-8"))["attention"]
         assert exc.value.code == 0
         assert settings.read_bytes() == original
-        assert (
-            f"  warning: settings fix: {NOT_APPLIED_NON_INTERACTIVE} -> aipass doctor --fix --yes" in out.splitlines()
-        )
-        assert {"label": "settings fix", "detail": NOT_APPLIED_NON_INTERACTIVE} in [
+        assert f"  warning: settings fix: {NOT_APPLIED_NO_TTY} -> aipass doctor --fix --yes" in out.splitlines()
+        assert {"label": "settings fix", "detail": NOT_APPLIED_NO_TTY} in [
             {"label": a["label"], "detail": a["detail"]} for a in attention
         ]
 
@@ -1177,7 +1194,7 @@ class TestInstallReport:
         home = tmp_path / "AIPass"
         _rc, ran = _full_install(home, monkeypatch, "--no-baud", "--yes", *door)
 
-        assert doctor_stays_stubbed == [{"non_interactive": True, "yes": True}]
+        assert [c["yes"] for c in doctor_stays_stubbed] == [True]
         setup_envs = [env for argv, env in ran if argv[:1] == ["bash"]]
         assert [env["AIPASS_YES"] for env in setup_envs] == ([] if door else ["1"])
 
@@ -1201,7 +1218,8 @@ class TestHealthCheck:
     def test_the_homes_doctor_runs_in_the_home_with_its_argv_env_and_no_terminal_under_non_interactive(
         self, tmp_path: Path, monkeypatch, capsys, homes_doctor
     ) -> None:
-        """Mutants: cwd dropped; no AIPASS_HOME; os.environ dropped; stdin always None; --yes dropped -> each red."""
+        """Mutants: cwd dropped; no AIPASS_HOME; os.environ dropped; stdin always None; --yes dropped;
+        B07: --non-interactive passed again -> each red."""
         home = tmp_path / "AIPass"
         home.mkdir()
         monkeypatch.setenv("AIPASS_PROBE", "kept")
@@ -1212,7 +1230,6 @@ class TestHealthCheck:
         rows_file = home / ".aipass" / "install_doctor_rows.json"
         assert argv == [
             str(home / ".venv" / "bin" / "aipass"), "doctor", "--fix", "--rows-json", str(rows_file), "--yes",
-            "--non-interactive",
         ]  # fmt: skip
         assert kw["cwd"] == str(home)
         assert (kw["env"]["AIPASS_HOME"], kw["env"]["AIPASS_PROBE"]) == (str(home), "kept")

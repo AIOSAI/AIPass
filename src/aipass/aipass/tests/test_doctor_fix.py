@@ -3,7 +3,7 @@
 # Description: Tests for doctor --fix remediation report (DPLAN-0177 Phase 2)
 # Version: 1.7.0
 # Created: 2026-05-15
-# Modified: 2026-11-21
+# Modified: 2026-11-24
 # =============================================
 
 """Tests for apps/modules/_doctor_fix.py."""
@@ -16,7 +16,6 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from aipass.aipass.apps.modules._doctor_fix import (
     RemediationItem,
@@ -24,7 +23,6 @@ from aipass.aipass.apps.modules._doctor_fix import (
     format_json_report,
     format_text_report,
     generate_remediation,
-    handle_command,
     print_json_report,
     print_remediation_report,
     rebuild_corrupt_registry,
@@ -414,35 +412,6 @@ class TestPrintFunctions:
         _make_registry(tmp_path, [{"name": "agent1", "path": str(tmp_path / "src" / "agent1")}])
         count = print_json_report(tmp_path)
         assert count >= 1
-
-
-# =============================================================================
-# TestDoctorFixHandleCommand
-# =============================================================================
-
-
-class TestDoctorFixHandleCommand:
-    def test_wrong_command(self) -> None:
-        """Non-doctor_fix commands are not handled."""
-        assert handle_command("doctor", []) is False
-        assert handle_command("help", []) is False
-
-    def test_no_args_shows_usage(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """No args shows the usage message, not the introspection banner.
-
-        Mutant: no-args usage line not printed -> red.
-        """
-        result = handle_command("doctor_fix", [])
-        assert result is True
-        out, _err = capsys.readouterr()
-        assert "aipass doctor --fix" in out
-
-    def test_info_flag(self) -> None:
-        """--info triggers print_introspection."""
-        with patch("aipass.aipass.apps.modules._doctor_fix.print_introspection") as mock:
-            result = handle_command("doctor_fix", ["--info"])
-        assert result is True
-        mock.assert_called_once()
 
 
 class TestRebuildCorruptRegistry:

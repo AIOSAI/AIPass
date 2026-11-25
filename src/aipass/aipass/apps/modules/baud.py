@@ -3,7 +3,7 @@
 # Description: aipass baud: install @baud's phone face and baud-cli from a release and point @api at them
 # Version: 1.5.1
 # Created: 2026-09-13
-# Modified: 2026-11-15
+# Modified: 2026-11-24
 # =============================================
 
 """
@@ -131,7 +131,9 @@ def _resolve_dest(dest: str | None) -> Path:
     return Path(dest).expanduser().resolve() if dest else DEFAULT_DEST
 
 
-def _print_dry_run(tag: str, from_path: str | None, sums_path: str | None, dest: Path, binary_path: str | None) -> None:
+def _print_dry_run(
+    tag: str, from_path: str | None, sums_path: str | None, dest: Path, binary_path: str | None, repoint: bool
+) -> None:
     """Walk the install without touching the network or the disk."""
     prefix = "[yellow]\\[dry-run][/yellow]"
     if from_path:
@@ -153,7 +155,14 @@ def _print_dry_run(tag: str, from_path: str | None, sums_path: str | None, dest:
     console.print(f"  {prefix} would unpack the face (safety filter, staging swap) into {dest}")
     if lands_binary:
         console.print(f"  {prefix} would land baud-cli at {bin_path(baud_root(dest))} (0755, old one kept as .prev)")
-    console.print(f"  {prefix} would point @api's host server at {dest}{' and at baud-cli' if lands_binary else ''}")
+    cli = " and at baud-cli" if lands_binary else ""
+    console.print(
+        f"  {prefix} would point @api's host server at {dest}{cli}" if repoint else f"  {prefix} {_KEEP_POINT}"
+    )
+
+
+# --dest is a scratch or second copy: @api's host server keeps serving the face it already points at.
+_KEEP_POINT = "--dest: @api's host server not repointed; it keeps the face it already serves"
 
 
 def _report(message: str, best_effort: bool) -> None:
@@ -225,7 +234,7 @@ def install_phone_face(
     try:
         validate_tag(tag)
         if dry_run:
-            _print_dry_run(tag, from_path, sums_path, target, binary_path)
+            _print_dry_run(tag, from_path, sums_path, target, binary_path, repoint=not dest)
             return 0
         outcome = _install(tag, from_path, sums_path, target, binary_path)
     except _BAUD_ERRORS as exc:
@@ -241,6 +250,9 @@ def install_phone_face(
         success(f"baud-cli {outcome.tag} installed at {outcome.binary.path} ({outcome.binary.sha256[:12]}…)")
     else:
         console.print(f"  {outcome.binary_note}")
+    if dest:
+        console.print(f"  {_KEEP_POINT}")
+        return 0
     return _point(outcome, hints=not best_effort)
 
 
@@ -375,7 +387,10 @@ def print_help() -> None:
     console.print("  [green]aipass baud install --from TAR[/green]       [dim]# a tarball on disk, no network[/dim]")
     console.print("  [green]    ... --sums SUMS[/green]                  [dim]# SHA256SUMS, default beside it[/dim]")
     console.print("  [green]    ... --binary BIN[/green]                 [dim]# + baud-cli, same sums file[/dim]")
-    console.print("  [green]aipass baud install --dest DIR[/green]       [dim]# face DIR, baud-cli DIR/../bin[/dim]")
+    console.print(
+        "  [green]aipass baud install --dest DIR[/green]       "
+        "[dim]# face DIR, baud-cli DIR/../bin, @api not repointed[/dim]"
+    )
     console.print("  [green]aipass baud install --dry-run[/green]        [dim]# walk the steps, change nothing[/dim]")
     console.print(
         "  [green]aipass baud status[/green] [dim]\\[--dest DIR][/dim]      [dim]# installed tags, @api settings[/dim]"

@@ -39,7 +39,7 @@ One pass produces seven groups, in this order:
 - **Services** — what a session depends on: `drone systems` reachability
   (when drone fails because the registry is unreadable, the row names the
   registry and `aipass doctor --fix`, not the install),
-  pytest collection, the provider manifest rows (hooks, env vars, permission
+  the provider manifest rows (hooks, env vars, permission
   rules, the settings scalars), the wire verification and stale deny rules.
 - **Community** — the mailbox is readable and `dropbox/` is writable.
 - **Structure** — agent placement, stray-file detection, the registry's paths
@@ -83,11 +83,6 @@ One pass produces seven groups, in this order:
   hook handlers for the project you are standing in. This is the group that
   tells you a scaffold update is owed; see
   [`scaffold_update.md`](scaffold_update.md).
-- **Sandbox** — with `AIPASS_SANDBOX_ENABLED` off (the default; the hook gates
-  do the containing), one PASS row and no prerequisite is checked. On, the
-  kernel sandbox prerequisites — bwrap and whether it runs, node, srt, rg, the
-  broker daemon — each a row, a missing one a FAIL; Linux only
-  ([`apps/handlers/sandbox_check/`](../apps/handlers/sandbox_check)).
 
 An `admin lane` row (`lit` / `dark` / `partial`) rides in the report as well.
 It observes presence only and never errors —
@@ -173,12 +168,11 @@ safety gates on git, edits and rm, no standards checks on edits; it names
 nothing and its row says `not applied: no tty — aipass doctor --fix --yes`;
 `--yes` writes without the question. The install's Health check runs the same
 step, its wire receipt naming the door `install`: it asks on a terminal, `aipass install --yes`
-writes without the question, and with no terminal or under `--non-interactive` without `--yes` it writes nothing and its row says
-`not applied: no tty` or `not applied: --non-interactive`, each naming
-`aipass doctor --fix --yes`. Each receipt records the door and the consent,
+writes without the question, and with no terminal and no `--yes` it writes nothing and its row says
+`not applied: no tty`, naming `aipass doctor --fix --yes`. `--yes` alone decides consent. Each receipt records the door and the consent,
 `y (tty)` or `--yes`. The install runs it as `aipass doctor --fix --rows-json PATH`
 in the home: the same run, then every non-pass row and the counts written to PATH
-as JSON for the install report; `--non-interactive` there writes no settings. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
+as JSON for the install report; the install passes `--yes` only when it was given `--yes`. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
 [`apps/handlers/provider_reconcile.py`](../apps/handlers/provider_reconcile.py)
 and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 
@@ -192,9 +186,11 @@ the OpenCode plugin, backs up to `.backup/settings/` beside that file the same w
 `receipts.jsonl` in the same folder: when, which door, who, the backup's name,
 and the file's sha256 before and after. `doctor --fix` prints both paths. The
 backups are never pruned or rotated. If the backup or the receipt cannot be
-written, the command fails and the settings file is left as it was. If the
-write itself fails, the command fails too and no receipt is written; the
-backup taken just before it stays. Code:
+written before the write, the command fails and the settings file is left as
+it was. If the write itself fails, the command fails too and no receipt is
+written; the backup taken just before it stays. If the receipt append fails
+after a successful write, the command fails with the receipt path while the
+settings file keeps the new content and the backup holds the old. Code:
 [`apps/handlers/settings_backup.py`](../apps/handlers/settings_backup.py).
 
 ## Both CLIs see every shared skill
@@ -204,17 +200,15 @@ the provider switch.
 `shared skills` passes when each `SKILL.md` has a `name` and a `description` in
 its frontmatter. `skills link` passes when `.claude/skills` is a symlink
 resolving to `.agents/skills`, and warns when it is missing, a copy, or points
-elsewhere. `legacy prep` warns when an old `.claude/commands/prep.md` sits
-beside the skill, so `/prep` is offered twice. `provider switch` passes when
+elsewhere. `provider switch` passes when
 the project holds every switch file: `.claude/commands/codex.md` (`/codex`) and
 `.claude/commands/opencode.md` (`/opencode`) for Claude Code,
 `.codex/skills/claude/SKILL.md` (`$claude`) and `.codex/skills/opencode/SKILL.md`
 (`$opencode`) for Codex, and `.opencode/commands/` `claude.md`, `codex.md`,
 `memo.md`, `prep.md` and `compass.md` for OpenCode. It names each missing one,
 and the cure is `aipass init update`, which writes them and records their hash.
-`doctor --fix` makes a missing link and renames an unedited legacy `prep.md` to
-`prep(disabled).md`, one `skills fix` row per change; it writes no switch file,
-and a copy, a foreign link and an edited `prep.md` are left for you. Where the
+`doctor --fix` makes a missing link, one `skills fix` row; it writes no switch file,
+and a copy or a foreign link is left for you. Where the
 filesystem refuses links, `--fix` writes a copy that will not follow
 `.agents/skills`, and the row says so.
 
@@ -223,8 +217,8 @@ filesystem refuses links, `--fix` writes a copy that will not follow
 `doctor --fix` will not apply a scaffold update. An update can replace files, so
 it is a decision and not a repair — the plan goes to a human first. The one
 exception is a stamp-only plan; [`scaffold_update.md`](scaffold_update.md) has
-the rule. The skills link and the legacy `prep.md` above are repairs, not an
-update: neither overwrites a file.
+the rule. The skills link above is a repair, not an
+update: it overwrites no file.
 
 Code: [`apps/modules/doctor.py`](../apps/modules/doctor.py), with the
 remediation report in [`apps/modules/_doctor_fix.py`](../apps/modules/_doctor_fix.py),

@@ -50,7 +50,7 @@ is a decision with rules of its own rather than a repair. `aipass init agent
 <name>` creates an agent through @spawn.
 
 **Diagnose.** `aipass doctor` aggregates the health of everything a session
-needs: system, identity, services, community, structure, scaffold, sandbox. It
+needs: system, identity, services, community, structure, scaffold. It
 can offer to wire what it found, and `--fix` prints the repair command for each
 failing row.
 
@@ -103,11 +103,10 @@ report), `_doctor_wire.py` (the provider rows and the wire prompt) and
 face with `_phone_print.py` (the install's phone lines and pairing QR).
 
 Under them, `apps/handlers/` holds the implementation groups: `system_detect/`,
-`structure_scan/`, `sandbox_check/` and `admin_lane.py` for what doctor reads;
+`structure_scan/` and `admin_lane.py` for what doctor reads;
 `init/` for scaffolding and `new_project/` for project creation;
 `readme_map/` for live documentation reads; `baud/` for fetch, verify, unpack,
-binary, install and point;
-`handoff_platform/` for the session `new` opens in its agent; `provider_wire.py`
+binary, install and point; `provider_wire.py`
 and `provider_reconcile.py` for the provider settings, with `settings_backup.py`
 for the backup and receipt each of their writes takes first; `opencode_cli.py`
 for the OpenCode rows; `help_flag.py`, `json/` and `ui/` for the

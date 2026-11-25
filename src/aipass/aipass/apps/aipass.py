@@ -3,13 +3,14 @@
 # Description: aipass branch entry point — thin command router
 # Version: 0.6.1
 # Created: 2026-04-16
-# Modified: 2026-11-22
+# Modified: 2026-11-24
 # =============================================
 
 """
 aipass Branch - Main Orchestrator
 """
 
+import re
 import sys
 import importlib
 import importlib.metadata
@@ -29,18 +30,6 @@ except ModuleNotFoundError:  # pragma: no cover — Python 3.10
     except ModuleNotFoundError:
         tomllib = None  # type: ignore[assignment]
         logger.info("[aipass] tomllib/tomli unavailable, pyproject version read disabled")
-
-
-_PUBLIC_COMMANDS = {
-    "adopt": "Turn an existing directory anywhere into a project",
-    "baud": "Install the baud phone face from a release",
-    "doctor": "System health — structure, registry, hooks, tests",
-    "init": "Scaffold or update a project, create an agent",
-    "install": "One-command bootstrap — clone, setup.sh, hooks, doctor",
-    "new": "Create a project inside AIPass",
-    "read": "View a branch README, rendered in the terminal",
-    "trust": "Trust registry — enroll/revoke projects",
-}
 
 
 def _pyproject_version(start: Path) -> str | None:
@@ -85,6 +74,10 @@ def _resolve_version() -> str:
         return _installed_version()
     except importlib.metadata.PackageNotFoundError:
         logger.info("[aipass] No repo pyproject.toml and no package metadata, version unknown")
+        if tomllib is None:
+            warning("version unknown: no TOML reader (tomllib is Python 3.11+); on Python 3.10 install tomli")
+        else:
+            warning("version unknown: no aipass pyproject.toml above this file and no installed package metadata")
         return "unknown"
 
 
@@ -127,6 +120,22 @@ def discover_modules() -> List[Any]:
     return modules
 
 
+def _description(module: Any) -> str:
+    """The module docstring's first paragraph, minus its leading 'aipass <command> —' or ':'."""
+    paragraph = " ".join((module.__doc__ or "").strip().split("\n\n")[0].split())
+    return re.sub(r"^aipass [\w /]+?(?: —|:)\s*", "", paragraph)
+
+
+def _print_commands(modules: List[Any]) -> None:
+    """The command table: every discovered module with a COMMAND, in its own words."""
+    commands = sorted((m.COMMAND, _description(m)) for m in modules if getattr(m, "COMMAND", None))
+    if commands:
+        console.print("[yellow]Commands:[/yellow]")
+        for name, desc in commands:
+            console.print(f"  [green]{name:16}[/green] [dim]{desc}[/dim]")
+        console.print()
+
+
 def print_introspection(modules: List[Any] | None = None) -> None:
     """Bare invocation — title, purpose, public commands, --help pointer."""
     console.print()
@@ -137,19 +146,7 @@ def print_introspection(modules: List[Any] | None = None) -> None:
     if modules is None:
         modules = discover_modules()
 
-    commands = []
-    for module in modules:
-        name = getattr(module, "COMMAND", None)
-        if name and name in _PUBLIC_COMMANDS:
-            commands.append((name, _PUBLIC_COMMANDS[name]))
-    commands.sort()
-
-    if commands:
-        console.print("[yellow]Commands:[/yellow]")
-        for name, desc in commands:
-            console.print(f"  [green]{name:16}[/green] [dim]{desc}[/dim]")
-        console.print()
-
+    _print_commands(modules)
     console.print("[dim]Run 'aipass --help' for usage and examples[/dim]")
     console.print()
 
@@ -165,34 +162,10 @@ def print_help(modules: List[Any] | None = None) -> None:
     console.print("  [green]aipass[/green] [dim]<command>[/dim] [dim]\\[options][/dim]")
     console.print("  [green]aipass[/green]                       [dim]Show commands[/dim]")
     console.print("  [green]aipass[/green] [dim]<command>[/dim] [dim]--help[/dim]     [dim]Help for a command[/dim]")
+    console.print("  [green]aipass --version[/green]             [dim]Show version[/dim]")
     console.print()
 
-    console.print("[yellow]Commands:[/yellow]")
-    console.print("  [green]baud install[/green]                 [dim]Install the baud phone face from a release[/dim]")
-    console.print("  [green]baud status[/green]                  [dim]Installed phone face, where @api points[/dim]")
-    console.print(
-        "  [green]doctor[/green]                       [dim]System health — structure, registry, hooks, tests[/dim]"
-    )
-    console.print("  [green]doctor --fix[/green]                 [dim]Remediation report with repair commands[/dim]")
-    console.print("  [green]doctor --fix --json[/green]          [dim]The remediation report as JSON[/dim]")
-    console.print(
-        "  [green]init \\[target][/green]                [dim]Scaffold a project; init update, init agent[/dim]"
-    )
-    console.print("  [green]install[/green]                      [dim]Bootstrap — clone, setup.sh, hooks, doctor[/dim]")
-    console.print("  [green]new <name>[/green]                   [dim]Create a project inside AIPass[/dim]")
-    console.print(
-        "  [green]adopt <name>[/green]                 [dim]Turn an existing directory anywhere into a project[/dim]"
-    )
-    console.print(
-        "  [green]read <branch>[/green]                [dim]View a branch README, rendered in the terminal[/dim]"
-    )
-    console.print(
-        "  [green]trust[/green] [dim]\\[path][/dim]                 "
-        "[dim]Trust registry — show it, or enroll a project[/dim]"
-    )
-    console.print("  [green]revoke <path>[/green]                [dim]Remove a project from the trust registry[/dim]")
-    console.print("  [green]--version[/green]                    [dim]Show version[/dim]")
-    console.print()
+    _print_commands(discover_modules() if modules is None else modules)
 
     console.print("[yellow]Examples:[/yellow]")
     console.print("  [green]aipass doctor[/green]                       [dim]Check system health[/dim]")
