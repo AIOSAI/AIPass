@@ -159,6 +159,14 @@ class TestLooksLikeAipassTree:
 class TestResolveHome:
     """Resolving the install home from flags, env, and defaults."""
 
+    def test_here_in_a_folder_with_a_space_is_refused_like_path(self, tmp_path: Path, monkeypatch) -> None:
+        """Mutant: --here returns cwd unchecked -> the spaced home installs -> red."""
+        spaced = tmp_path / "My Projects"
+        spaced.mkdir()
+        monkeypatch.chdir(spaced)
+        with pytest.raises(ValueError):
+            _resolve_home(None, here=True, non_interactive=True)
+
     def test_here_returns_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """--here resolves to the current working directory, the real one (monkeypatch.chdir)."""
         monkeypatch.chdir(tmp_path)
@@ -1576,3 +1584,13 @@ class TestClonedBranchIsNamed:
         with patch.object(_install.console, "print"):
             assert _install._clone_repo(home, dry_run=False, source=checkout.as_uri()) is True
         assert f"url = {checkout.as_uri()}" in (home / ".git" / "config").read_text(encoding="utf-8")
+
+
+def test_a_repair_install_keeps_the_provider_already_chosen(tmp_path, monkeypatch, capsys) -> None:
+    """The report is rewritten whole; the pick must survive it. Mutant: not carried -> provider gone -> red."""
+    home = tmp_path / "AIPass"
+    report = install_report_path(home)
+    report.parent.mkdir(parents=True)
+    report.write_text(json.dumps({"provider": "codex"}), encoding="utf-8")
+    _finish(home, monkeypatch, capsys)
+    assert json.loads(report.read_text(encoding="utf-8"))["provider"] == "codex"

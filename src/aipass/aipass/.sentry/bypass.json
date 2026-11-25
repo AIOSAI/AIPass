@@ -87,9 +87,9 @@
       "lines": [
         186,
         239,
-        712
+        714
       ],
-      "reason": "186: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:211). 239: _pid_alive, a PermissionError from signal 0 means the process exists under another user, so True is the answer. 712: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them; again 2026-10-24 (FPLAN-0665 moved them 4 down). Again 2026-11-24 (home validation moved them 17-20 down)."
+      "reason": "186: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:211). 239: _pid_alive, a PermissionError from signal 0 means the process exists under another user, so True is the answer. 714: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them; again 2026-10-24 (FPLAN-0665 moved them 4 down). Again 2026-11-24 (home validation moved them 17-20 down)."
     },
     {
       "file": "apps/modules/doctor.py",
@@ -145,10 +145,10 @@
       "standard": "through_the_command",
       "lines": [
         32,
-        1508,
-        1540,
-        1567,
-        1577
+        1516,
+        1548,
+        1575,
+        1585
       ],
       "reason": "Ruling (c), fleet green leg 7: run_install, the one public door, clones the repo (_clone_repo), runs setup.sh (_run_setup), fixes ownership (_check_and_fix_owner), fetches baud (_install_phone_face), then runs the health check and the final screen (_finish, which writes the install report and reads _registry_user_name and _setup_attention); _resolve_home and _looks_like_aipass_tree prompt and probe before the clone. Every helper is pinned with the far side stubbed (lines re-pinned 2026-10-15, DPLAN-0409 C3). _resolve_source (--source) is a pure check before the clone, also pinned through run_install. Re-pinned 2026-11-14 (FPLAN-0924; 1269 is a second _clone_repo pin). Re-pinned 2026-11-24 (home-validation pins moved them down). _clone_repo is also pinned against a real local checkout (origin repoint): run_install would run setup.sh."
     },
@@ -511,6 +511,15 @@
         189
       ],
       "reason": "189: the helper runs doctor to read its rows; a FAIL row exits 1, which the except asserts (exc.code == 1) rather than swallowing; any other exit fails the assert."
+    },
+    {
+      "file": "apps/handlers/provider_choice.py",
+      "standard": "logged_fallback",
+      "lines": [
+        93,
+        205
+      ],
+      "reason": "ask_provider: Ctrl-C or Ctrl-D at the install's last question means skip, the same answer as 'q', so None is the answer, not a failure (docstring names all three); run_ending then prints the 'aipass provider' line. Logged at info. Audit finding 7, 2026-11-25. 205: run_ending's wiring failure returns 1, the documented failure code (installer or wiring failed, AIPass installed), logged at error with the retry line printed; 0 is only success."
     }
   ]
 }

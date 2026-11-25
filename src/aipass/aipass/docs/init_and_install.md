@@ -21,7 +21,7 @@ with its fix step.
 | Form | What it does |
 |---|---|
 | `install` | The whole bootstrap into the default home, ending at the report |
-| `install --path DIR` / `--here` | Choose the install home: an absolute path or `~/name`, with no whitespace, quote or shell character (the home lands in shell rc lines and three providers' configs; only a plain path survives them all). A refused path exits 2 with the reason; the terminal prompt asks again |
+| `install --path DIR` / `--here` | Choose the install home (`--here`: the current folder, under the same rule): an absolute path or `~/name`, with no whitespace, quote or shell character (the home lands in shell rc lines and three providers' configs; only a plain path survives them all). A refused path exits 2 with the reason; the terminal prompt asks again |
 | `install --source PATH\|URL` | Clone AIPass from this path or URL instead of the public repo (a local path clones its committed HEAD; for the install sandbox) |
 | `install --non-interactive` | Headless: no questions, stdin closed for `setup.sh`, no pairing QR, the default home `~/AIPass` |
 | `install --yes` | Consent to the machine changes up front: `AIPASS_YES=1` exported to `setup.sh` |
@@ -39,7 +39,7 @@ No AI CLI is installed or wired before the end. After the report, the install
 asks once which CLI talks to devpulse: `[1] Claude Code`, `[2] Codex`,
 `[3] OpenCode`, each marked `installed` when found (PATH, `~/.local/bin/claude`,
 `~/.opencode/bin/opencode`). A number or a name picks; Enter with nothing typed
-asks again; `q` skips and names `aipass provider <name>`. `--provider NAME`
+asks again; `q`, Ctrl-C or Ctrl-D skips and names `aipass provider <name>`. `--provider NAME`
 answers it headless; `--non-interactive` without it asks nothing, installs
 nothing and prints the three `aipass provider` lines.
 
@@ -54,17 +54,20 @@ with its output visible; no copy of an installer lives in this repo:
 
 An installer that fails prints the page and `aipass provider <name>`; AIPass
 itself is installed, the report is unchanged, and the exit is 1. Otherwise the
-report gains `"provider": "<name>"`, only that CLI is wired (Claude: the
+report gains `"provider": "<name>"` (a later repair install keeps it), only that CLI is wired (Claude: the
 settings rows, `~/.claude/commands/memo.md` unless one exists, and the boot
 shim; Codex: its hooks and config pins; OpenCode: the plugin), and devpulse
-opens in it from `<home>/src/aipass/devpulse` with `AIPASS_HOME` set. Claude
+opens in it from `<home>/src/aipass/devpulse` with `AIPASS_HOME` set and the
+CLI's own folder first on PATH (a fresh `~/.local/bin` is not on it yet). A
+wiring error (an unreadable settings file) prints the reason and `aipass
+provider <name>`, opens nothing and exits 1. Claude
 runs the boot shim's own entry, `<home>/.venv/bin/python3 -m
 aipass.hooks.apps.handlers.lifecycle.session_boot`, with no prompt: the shim's
 first-run rule starts the chat on the greeting. Codex opens as `codex
 <greeting>` and OpenCode as `opencode --prompt <greeting>` (the forms their
 `--help` gives). Code: [`apps/handlers/provider_choice.py`](../apps/handlers/provider_choice.py).
 
-`aipass provider NAME [--dry-run]` is the same ending any time, for the home in
+`aipass provider NAME [--dry-run]` is the same ending any time (any other flag exits 2), for the home in
 `$AIPASS_HOME`, else `~/AIPass` (no provider manifest there exits 2). A CLI
 already installed is never installed again: it is wired afresh and opened.
 Bare `aipass provider` lists each CLI and where it is installed. Code:

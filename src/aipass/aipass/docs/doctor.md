@@ -191,12 +191,14 @@ your pick at the end of the install`: a later plain `aipass doctor` counts them.
 Every non-pass row and the counts go to PATH as JSON for the install report.
 
 Once the install report (`src/aipass/devpulse/dropbox/install_report.json`
-under `$AIPASS_HOME`, else the working directory) records `provider`, every run
+in the home, the folder holding the provider manifest doctor found, never the
+shell's `$AIPASS_HOME`) records `provider`, every run
 checks only that CLI's rows (Claude: hooks, env vars, permissions, global
 settings, wire verify; the `codex ...` and `opencode ...` rows by name); each
 other installed CLI is one `not chosen` information row and never red. With no
 provider recorded, `doctor` and `doctor --fix` check and wire every installed
-CLI. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
+CLI. A manifest that does not parse is the `hooks` row's to report; the
+set-aside reads it as empty rather than stopping the run. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
 [`apps/handlers/provider_reconcile.py`](../apps/handlers/provider_reconcile.py)
 and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 

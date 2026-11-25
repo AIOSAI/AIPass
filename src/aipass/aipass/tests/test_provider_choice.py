@@ -3,7 +3,7 @@
 # Description: Tests for the install's last step: one provider picked, installed, wired, opened
 # Version: 1.0.0
 # Created: 2026-11-24
-# Modified: 2026-11-24
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/handlers/provider_choice.py's ending and the aipass provider command it backs."""
@@ -12,6 +12,7 @@
 # sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import json
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -26,7 +27,7 @@ class TestProviderEnding:
 
     _PC = "aipass.aipass.apps.handlers.provider_choice"
 
-    def _end(self, tmp_path, key, *, non_interactive=False, answers=(), found=None, installer_rc=0):
+    def _end(self, tmp_path, key, *, non_interactive=False, answers=(), found=None, installer_rc=0, wire_error=None):
         lines: list[str] = []
         found = dict(found or {})
         report = tmp_path / "src" / "aipass" / "devpulse" / "dropbox" / "install_report.json"
@@ -43,7 +44,7 @@ class TestProviderEnding:
                 f"{self._PC}.shutil.which", side_effect=lambda b: found.get(b) or ("/bin/npm" if b == "npm" else None)
             ),
             patch(f"{self._PC}.subprocess.run", side_effect=run) as ran,
-            patch(f"{self._PC}.wire_provider", return_value=["wired"]) as wire,
+            patch(f"{self._PC}.wire_provider", return_value=["wired"], side_effect=wire_error) as wire,
             patch(f"{self._PC}.json_handler"),
             _home_at(tmp_path),
         ):
@@ -80,6 +81,8 @@ class TestProviderEnding:
             str(tmp_path / ".venv" / "bin" / "python3"), "-m", "aipass.hooks.apps.handlers.lifecycle.session_boot"
         ]  # fmt: skip
         assert ran.call_args.kwargs["env"]["AIPASS_HOME"] == str(tmp_path)
+        # The shim finds claude on PATH; a fresh installer's bin is not on it yet. Mutant: PATH as inherited -> red.
+        assert ran.call_args.kwargs["env"]["PATH"].startswith("/bin" + os.pathsep)
 
     def test_an_installer_failure_names_the_page_and_leaves_the_install_complete(self, tmp_path) -> None:
         """Mutant: wire after a failed install -> red on the wire call."""
@@ -110,3 +113,27 @@ class TestProviderEnding:
             provider.handle_command("provider", ["gemini"])
         assert exit_info.value.code == 2
         assert "claude, codex, opencode" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("interrupt", [KeyboardInterrupt(), EOFError()])
+    def test_ctrl_c_or_ctrl_d_at_the_question_skips_like_q(self, interrupt, tmp_path) -> None:
+        """No traceback after a good install. Mutant: the interrupt not caught -> raises -> red."""
+        rc, lines, ran, wire, _report = self._end(tmp_path, None, answers=[interrupt])
+        assert rc == 0 and ran.call_count == 0 and wire.call_count == 0
+        assert any("aipass provider" in line for line in lines)
+
+    def test_a_wiring_error_names_the_retry_and_opens_nothing(self, tmp_path) -> None:
+        """An unreadable settings file must not end the install on a crash. Mutant: no except -> raises -> red."""
+        rc, lines, ran, _wire, _report = self._end(
+            tmp_path, "claude", found={"claude": "/bin/claude"}, wire_error=ValueError("settings.json: bad JSON")
+        )
+        assert rc == 1
+        assert ran.call_count == 0
+        assert "Claude Code is installed but not wired: settings.json: bad JSON" in lines
+        assert "Fix that, then run: aipass provider claude" in lines
+
+    def test_aipass_provider_refuses_an_unknown_flag_so_a_dry_run_typo_changes_nothing(self, capsys) -> None:
+        """Mutant: unknown flags dropped -> --dryrun runs for real -> red."""
+        with pytest.raises(SystemExit) as exit_info:
+            provider.handle_command("provider", ["claude", "--dryrun"])
+        assert exit_info.value.code == 2
+        assert "unknown flag(s): --dryrun" in capsys.readouterr().err

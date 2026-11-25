@@ -106,7 +106,7 @@ def _checked_home(raw: str) -> Path:
 def _resolve_home(path: str | None, here: bool, non_interactive: bool) -> Path:
     """Decide where AIPass lives — --here / --path / $AIPASS_HOME / cwd / prompt / default."""
     if here:
-        return Path.cwd().resolve()
+        return _checked_home(str(Path.cwd().resolve()))
     if path:
         return _checked_home(path)
     env_home = os.environ.get("AIPASS_HOME", "").strip()
@@ -546,6 +546,8 @@ def _final_screen(
         "written_at": datetime.now(timezone.utc).isoformat(),
         "home": str(home),
         "aipass_version": _aipass_version(),
+        # A repair install keeps the earlier pick; the ending overwrites it on a new one.
+        **({"provider": chosen} if (chosen := provider_choice.chosen_provider(home)) else {}),
         "user_name": _registry_user_name(home),
         "outcome": "step_failed" if failed else "doctor_errors" if counts.get("error", 0) else "installed",
         "failed_steps": failed or [],

@@ -3,7 +3,7 @@
 # Description: The install's last question: which CLI talks to devpulse; install, wire, open it
 # Version: 1.0.0
 # Created: 2026-11-24
-# Modified: 2026-11-24
+# Modified: 2026-11-25
 # =============================================
 
 """provider_choice: one provider picked at the end of the install, installed by its vendor, wired, opened.
@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Callable, List, NamedTuple, Optional
 
 from aipass.aipass.apps.handlers.json import json_handler
+from aipass.aipass.apps.handlers.settings_backup import SettingsBackupError
 from aipass.prax import logger
 
 
@@ -77,14 +78,19 @@ def later_lines() -> List[str]:
 
 
 def ask_provider(prompt: Callable[[str], str], say: Callable[[str], None]) -> Optional[str]:
-    """The one question; the chosen key, or None on 'q'. Enter with nothing typed asks again."""
+    """The one question; the chosen key, or None on 'q', Ctrl-C or Ctrl-D (all mean skip). Enter asks again."""
     say("Which do you want to talk to devpulse with?")
     for number, key in enumerate(ORDER, 1):
         mark = "   (installed)" if cli_path(key) else ""
         say(f"  [{number}] {PROVIDERS[key].title}{mark}")
     say("  [q] skip: run 'aipass provider <name>' later")
     while True:
-        answer = prompt("> ").strip().lower()
+        try:
+            answer = prompt("> ").strip().lower()
+        except (KeyboardInterrupt, EOFError) as exc:
+            logger.info("[provider_choice] question left with %s: skipped like q", type(exc).__name__)
+            say("")
+            return None
         if answer == "q":
             return None
         if answer in ("1", "2", "3"):
@@ -170,7 +176,7 @@ def run_ending(
     """The install's last step: pick, install when missing, wire the pick only, open devpulse.
 
     0 when devpulse opened, was skipped, or a headless run named no provider; 1 when the
-    vendor installer failed: AIPass itself is installed either way.
+    vendor installer or the wiring failed, each with its retry line: AIPass itself is installed either way.
     """
     if key is None and non_interactive:
         say("No provider chosen (headless). Pick one later:")
@@ -190,11 +196,21 @@ def run_ending(
         say(f"then run: aipass provider {key}")
         return 1
     _record_provider(home / "src" / "aipass" / "devpulse" / "dropbox" / "install_report.json", key)
-    for action in wire_provider(key, home):
+    try:
+        actions = wire_provider(key, home)
+    except (OSError, ValueError, SettingsBackupError) as exc:
+        logger.error("[provider_choice] wiring %s failed: %s", key, exc)
+        say(f"{provider.title} is installed but not wired: {exc}")
+        say(f"Fix that, then run: aipass provider {key}")
+        return 1
+    for action in actions:
         say(f"  {action}")
     devpulse = home / "src" / "aipass" / "devpulse"
-    argv = open_argv(key, cli_path(key) or provider.binary, greeting, home)
-    subprocess.run(argv, cwd=devpulse, env={**os.environ, "AIPASS_HOME": str(home)}, check=False)
+    found = cli_path(key)
+    argv = open_argv(key, found or provider.binary, greeting, home)
+    # A fresh installer's bin (~/.local/bin) is not on this process's PATH; the shim looks claude up there.
+    path = os.pathsep.join([str(Path(found).parent)] * bool(found) + [os.environ.get("PATH", "")])
+    subprocess.run(argv, cwd=devpulse, env={**os.environ, "AIPASS_HOME": str(home), "PATH": path}, check=False)
     return 0
 
 

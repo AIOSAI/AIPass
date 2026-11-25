@@ -437,24 +437,24 @@ echo "Configuring cross-project access ..."
 PROFILE="$HOME/.bashrc"
 
 # AIPASS_HOME
-if ! grep -q "AIPASS_HOME" "$PROFILE" 2>/dev/null; then
+if ! grep -qxF "export AIPASS_HOME=\"$SCRIPT_DIR\"" "$PROFILE" 2>/dev/null; then  # this home exactly: a second install moves it
     echo "" >> "$PROFILE"
     echo "# AIPass — cross-project access" >> "$PROFILE"
     echo "export AIPASS_HOME=\"$SCRIPT_DIR\"" >> "$PROFILE"
     echo "  AIPASS_HOME added to $PROFILE"
 else
-    echo "  AIPASS_HOME already in $PROFILE"
+    echo "  AIPASS_HOME already $SCRIPT_DIR in $PROFILE"
 fi
 
 # ~/.bashrc returns early when not interactive; ~/.profile reaches every login shell (Codex's shell snapshot, cron).
 if [ -f "$HOME/.profile" ]; then
-    if ! grep -q "AIPASS_HOME" "$HOME/.profile" 2>/dev/null; then
+    if ! grep -qxF "export AIPASS_HOME=\"$SCRIPT_DIR\"" "$HOME/.profile" 2>/dev/null; then
         echo "" >> "$HOME/.profile"
         echo "# AIPass — cross-project access (login shells, interactive or not)" >> "$HOME/.profile"
         echo "export AIPASS_HOME=\"$SCRIPT_DIR\"" >> "$HOME/.profile"
         echo "  AIPASS_HOME added to $HOME/.profile"
     else
-        echo "  AIPASS_HOME already in $HOME/.profile"
+        echo "  AIPASS_HOME already $SCRIPT_DIR in $HOME/.profile"
     fi
 fi
 

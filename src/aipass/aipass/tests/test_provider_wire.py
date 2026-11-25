@@ -3,7 +3,7 @@
 # Description: Tests for provider_wire — hook merges per CLI, backup and receipt first; doctor's codex, opencode rows
 # Version: 1.12.0
 # Created: 2026-08-01
-# Modified: 2026-11-24
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/handlers/provider_wire.py and the manifest-driven hook merge it drives."""
@@ -1159,7 +1159,7 @@ class TestWireTheChosenProvider:
 
     _PW = "aipass.aipass.apps.handlers.provider_wire"
 
-    def _wire(self, tmp_path, key):
+    def _wire(self, tmp_path, key, shim_rc=0):
         home = tmp_path / "AIPass"
         (home / ".claude" / "templates").mkdir(parents=True)
         (home / ".claude" / "templates" / "memo.md").write_text("memo", encoding="utf-8")
@@ -1170,7 +1170,7 @@ class TestWireTheChosenProvider:
             patch("aipass.aipass.apps.handlers.provider_choice.subprocess.run") as run,
             _home_at(tmp_path),
         ):
-            run.return_value.returncode = 0
+            run.return_value.returncode = shim_rc
             actions = provider_choice.wire_provider(key, home)
         return actions, claude, codex, opencode, run
 
@@ -1190,3 +1190,17 @@ class TestWireTheChosenProvider:
         assert (tmp_path / ".claude" / "commands" / "memo.md").read_text(encoding="utf-8") == "memo"
         assert run.call_args.args[0][-1].endswith("hooks/tools/install_boot_shim.sh")
         assert actions[0] == "hooks" and actions[-1] == "boot shim installed"
+
+    def test_an_existing_memo_command_is_kept(self, tmp_path) -> None:
+        """The user's own /memo is theirs. Mutant: copy unconditionally -> overwritten -> red."""
+        mine = tmp_path / ".claude" / "commands" / "memo.md"
+        mine.parent.mkdir(parents=True)
+        mine.write_text("my memo", encoding="utf-8")
+        actions, *_rest = self._wire(tmp_path, "claude")
+        assert mine.read_text(encoding="utf-8") == "my memo"
+        assert not any("memo.md" in action for action in actions)
+
+    def test_a_failed_boot_shim_is_named_with_its_exit(self, tmp_path) -> None:
+        """A renamed or broken shim script must show, never read as installed. Mutant: always 'installed' -> red."""
+        actions, *_rest = self._wire(tmp_path, "claude", shim_rc=127)
+        assert actions[-1] == "boot shim exit 127"

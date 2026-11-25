@@ -1335,16 +1335,24 @@ class TestPreflightWireDoor:
             ("codex", GLYPH_PASS, "not chosen: aipass provider codex"),
         ]
 
-    def test_a_recorded_provider_is_checked_and_the_others_read_as_information(self, tmp_path, monkeypatch) -> None:
+    @pytest.mark.parametrize("manifest", ["{}", '{"cli": {,}'])
+    def test_a_recorded_provider_is_checked_and_the_others_read_as_information(
+        self, manifest, tmp_path, monkeypatch
+    ) -> None:
         """After the pick, every run: the chosen CLI's rows stay, an unchosen one's become one info row.
 
-        Mutant: the report's provider ignored -> the codex row stays -> red.
+        Run from devpulse's folder with AIPASS_HOME unset (a fresh shell): the home is where the manifest is.
+        A manifest that does not parse is the hooks row's to report, never a crash here.
+        Mutants: the report's provider ignored -> red; home from AIPASS_HOME/cwd -> red; json unguarded -> red.
         """
         mod = "aipass.aipass.apps.modules.doctor"
         report = tmp_path / "src" / "aipass" / "devpulse" / "dropbox" / "install_report.json"
         report.parent.mkdir(parents=True)
         report.write_text(json.dumps({"provider": "claude"}), encoding="utf-8")
-        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "provider_manifest.json").write_text(manifest, encoding="utf-8")
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+        monkeypatch.chdir(report.parent.parent)
         for name in ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         rows = [CheckResult("hooks", GLYPH_PASS, "wired", ""), CheckResult("codex hooks", GLYPH_WARN, "missing", "x")]
@@ -1368,7 +1376,10 @@ class TestPreflightWireDoor:
         report = tmp_path / "src" / "aipass" / "devpulse" / "dropbox" / "install_report.json"
         report.parent.mkdir(parents=True)
         report.write_text(json.dumps({"provider": "codex"}), encoding="utf-8")
-        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
+        manifest = {"cli": {"claude": {"settings": {"includeGitInstructions": False}}}}
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "provider_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
         for name in ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         rows = [

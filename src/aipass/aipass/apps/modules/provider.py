@@ -3,7 +3,7 @@
 # Description: aipass provider NAME: the install's last step, callable any time
 # Version: 1.0.0
 # Created: 2026-11-24
-# Modified: 2026-11-24
+# Modified: 2026-11-25
 # =============================================
 
 """aipass provider claude|codex|opencode: install the CLI if missing, wire it, open devpulse in it.
@@ -62,6 +62,10 @@ def handle_command(command: str, args: list[str]) -> bool:
     if wants_help(args):
         print_help()
         return True
+    unknown = [arg for arg in args if arg.startswith("-") and arg not in ("--dry-run", "--info")]
+    if unknown:
+        error(f"aipass provider: unknown flag(s): {' '.join(unknown)} (only --dry-run)")
+        sys.exit(2)
     names = [arg for arg in args if not arg.startswith("-")]
     if not names or args[0] == "--info":
         print_introspection()

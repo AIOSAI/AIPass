@@ -1235,15 +1235,20 @@ def _set_aside_unchosen(
     The choice is the install report's `provider`. With none recorded, a plain run checks every
     provider as before, and the install's own check (the pick still to come) sets all of them aside.
     """
-    chosen = provider_choice.chosen_provider(Path(os.environ.get("AIPASS_HOME") or Path.cwd()))
+    # The home is where the manifest was found, not the shell's AIPASS_HOME: unset until a new shell.
+    manifest_path = _find_manifest()
+    chosen = provider_choice.chosen_provider(manifest_path.parent.parent) if manifest_path else None
     if chosen is None and not install:
         return groups
     if install:
         set_aside.extend(r for r in groups.get("System", []) if r.label == "claude code")
         groups["System"] = [r for r in groups.get("System", []) if r.label != "claude code"]
     aside = [key for key in provider_choice.ORDER if key != chosen]
-    manifest_path = _find_manifest()
-    scalars = manifest_settings(json.loads(manifest_path.read_text(encoding="utf-8"))) if manifest_path else {}
+    try:
+        scalars = manifest_settings(json.loads(manifest_path.read_text(encoding="utf-8"))) if manifest_path else {}
+    except (OSError, ValueError) as exc:
+        logger.info("[doctor] manifest unreadable for the provider set-aside (the hooks row reports it): %s", exc)
+        scalars = {}
 
     def owner(label: str) -> Optional[str]:
         """A settings-scalar row is labelled with its manifest key, so the label list cannot know it."""
