@@ -26,7 +26,7 @@ drone @git status                 # Read-only git, available to every branch
   module. A branch is dispatched as a subprocess; a module runs in-process. Which lane is taken is
   decided before the call, never discovered by failing one.
 - **Resolves `@names`.** Symbolic addressing against the project registry, with external projects
-  merged in, so the same command works from a repo that is not this one.
+  and the home's hosted projects merged in, so the same command works from a repo that is not this one.
 - **Owns git.** Read verbs for every branch, write verbs for the project's registry-declared owner,
   a door for repositories that are not AIPass, and one audit line per use of it.
 - **Deletes, and records it.** `drone rm` is the only sanctioned delete path in the fleet. Inside
@@ -118,7 +118,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 ## Integration Points
 
 ### Depends On
-- `AIPASS_REGISTRY.json` and `AIPASS_ROOTS.json` — branch resolution and the external tier
+- `AIPASS_REGISTRY.json`, `AIPASS_ROOTS.json` and `projects/*/*_REGISTRY.json` — branch resolution, the external and hosted tiers
 - `.trinity/passport.json` — the identity git authority reads
 - the `gh` CLI — GitHub operations
 - `aipass.prax` — structured logging, and the json service the local shim binds

@@ -15,6 +15,8 @@ to the handler layer.
 
 from __future__ import annotations
 
+from typing import Callable
+
 from aipass.prax import logger
 from aipass.cli import console
 from aipass.drone.apps.handlers.json import json_handler
@@ -30,6 +32,7 @@ __all__ = [
     "external_modules_error",
     "get_module_help",
     "get_module_introspective",
+    "get_module_printer",
     "handle_command",
     "route_module_command",
 ]
@@ -53,6 +56,11 @@ def get_module_help(name: str, command: str | None = None) -> str | None:
 def get_module_introspective(name: str) -> str | None:
     """A module's introspective view: "" for nothing, None when an internal adapter cannot be read."""
     return module_registry_handler.get_module_introspective(name)
+
+
+def get_module_printer(name: str, attr: str) -> Callable[[], None] | None:
+    """An internal module's own styled print_introspection / print_help, or None; ImportError if it cannot load."""
+    return module_registry_handler.get_module_printer(name, attr)
 
 
 def print_introspection():

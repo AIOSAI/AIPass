@@ -33,14 +33,16 @@ from aipass.drone.apps.modules.router import caller_cwd, registry_named_entries,
 from aipass.drone.apps.modules.module_registry import (
     is_module,
     list_modules,
-    get_module_info,
     get_module_introspective,
+    get_module_printer,
     route_module_command,
     get_module_help,
 )
 from aipass.drone.apps.modules.config import missing_home_tip, passport_fault, resolve_aipass_home
 
 VERSION = "1.1.0"
+# The commands main() answers itself, before any @target or module lane; systems lists them as routes.
+BUILT_INS = ("systems", "scan", "activate", "list", "remove", "rm", "docker")
 MODULES_DIR = Path(__file__).parent / "modules"
 
 # Interactive mode — commands/branches that bypass capture + timeout for live terminal output.
@@ -242,19 +244,18 @@ def _handle_systems() -> int:
         f"  [cyan]@{'drone':<18}[/cyan] [dim]Command routing and module discovery (v{VERSION})[/dim]",
         highlight=False,
     )
+    # Modules are routes, not citizens: named here so a reader learns where @git lives.
+    routes = ", ".join([f"@{name}" for name in modules] + list(BUILT_INS))
+    console.print(f"[dim]  routes: {escape(routes)}[/dim]", highlight=False)
     console.print()
 
-    exclude = set(modules) | {"drone"}
-    deduped_services = [s for s in services if s.get("name", "").lower() not in exclude]
-    service_count = len(modules) + len(deduped_services)
-    if service_count:
-        console.print(f"[bold cyan]AIPass Services ({service_count}):[/bold cyan]", highlight=False)
+    services = sorted(
+        (s for s in services if s.get("name", "").lower() != "drone"), key=lambda b: b.get("name", "").lower()
+    )
+    if services:
+        console.print(f"[bold cyan]AIPass Services ({len(services)}):[/bold cyan]", highlight=False)
         console.print("[dim]  citizens with profile library: the framework's own services[/dim]")
-        for name in modules:
-            info = get_module_info(name)
-            desc = info.description if info else "(not available)"
-            console.print(f"  [cyan]{escape(f'@{name:<18}')}[/cyan] [dim]{escape(desc)}[/dim]", highlight=False)
-        for svc in sorted(deduped_services, key=lambda b: b.get("name", "").lower()):
+        for svc in services:
             name = svc.get("name", "").lower()
             desc = svc.get("description", "")
             console.print(f"  [cyan]{escape(f'@{name:<18}')}[/cyan] [dim]{escape(desc)}[/dim]", highlight=False)
@@ -263,7 +264,7 @@ def _handle_systems() -> int:
 
     if project_branches:
         console.print(f"[bold cyan]Branches ({len(project_branches)}):[/bold cyan]", highlight=False)
-        console.print("[dim]  every other citizen the registry and declared roots know, test citizens included[/dim]")
+        console.print("[dim]  every other citizen: registry, roots, hosted projects; test citizens included[/dim]")
         for branch in sorted(project_branches, key=lambda b: b.get("name", "").lower()):
             console.print(f"  [cyan]{escape('@' + branch.get('name', '').lower())}[/cyan]", highlight=False)
 
@@ -300,6 +301,14 @@ def _module_unavailable(name: str, why: str) -> int:
 def _handle_module(name: str, args: List[str]) -> int:
     """Handle routing to an internal module."""
     if not args:
+        try:
+            printer = get_module_printer(name, "print_introspection")
+        except ImportError as exc:
+            logger.error("Module @%s could not load: %s", name, exc)
+            return _module_unavailable(name, "it could not load (see drone log)")
+        if printer is not None:
+            printer()
+            return 0
         intro_text = get_module_introspective(name)
         if intro_text is None:
             # None is the handler's "the adapter could not load"; "" is a quiet module.
@@ -311,6 +320,14 @@ def _handle_module(name: str, args: List[str]) -> int:
         return 0
 
     if args == ["--help"]:
+        try:
+            printer = get_module_printer(name, "print_help")
+        except ImportError as exc:
+            logger.error("Module @%s could not load: %s", name, exc)
+            return _module_unavailable(name, "it could not load (see drone log)")
+        if printer is not None:
+            printer()
+            return 0
         help_text = get_module_help(name)
         if help_text is None:
             return _module_unavailable(name, "it could not load (see drone log)")

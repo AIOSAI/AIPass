@@ -23,10 +23,12 @@ the bare `drone @drone` prints the live module inventory.
 6. **Custom commands** → greedy multi-word matching against `drone_command_registry.json`
 
 `drone systems` prints three groups, each heading followed by one dim line saying what it holds:
-**Infrastructure** is drone itself; **AIPass Services** are the internal and external modules plus
-the citizens whose registry profile is `library`; **Branches** are every other citizen the registry
-and the declared roots know, test citizens included. Names and descriptions are escaped, so a
-bracket in a registry description prints as written.
+**Infrastructure** is drone itself, with a `routes:` line naming what drone routes: its modules
+(`@git`, `@cli`, `@sentry`, `@spawn`) and its built-ins (`BUILT_INS` in `apps/drone.py`). A module is
+a route, not a citizen. **AIPass Services** are the citizens whose registry profile is `library`.
+**Branches** are every other citizen the lookup knows (registry, declared roots, hosted projects),
+test citizens included. Names and descriptions are escaped, so a bracket in a registry description
+prints as written.
 
 The `@target` lane has **no module fallback on the error path.** A `BranchNotFoundError` from a
 branch the registry *does* list is a real fault and fails loud — `resolve_branch()` also refuses a
@@ -50,6 +52,11 @@ not a branch here falls back to module routing, logged at INFO. That lane resolv
 
 External modules are declared in `apps/handlers/routing_config.json` with entry points,
 descriptions and versions.
+
+`drone @<module>` bare and `drone @<module> --help` call an internal module's own
+`print_introspection()` and `print_help()`, so `@git` shows its styled pages. An external module, or
+an internal one without those functions, falls back to the captured or `get_help()` text. An
+internal module that cannot import is named on stderr, exit 1.
 
 ---
 
@@ -144,7 +151,7 @@ print(result.exit_code)
 ```
 
 `list_branches()` returns more rows than `AIPASS_REGISTRY.json` holds: `get_all_branches()` merges
-the primary registry with the external tier declared in `AIPASS_ROOTS.json`. `list_branches(
+the primary registry with the external tier declared in `AIPASS_ROOTS.json` and the hosted tier. `list_branches(
 branch_type=...)` is a live parameter with nothing to match — no row carries a type field, so the
 type filter always returns `[]`, and any status but `active` returns `[]` too. The filter reads the
 row key `type` (`branch.get("type")`), which no registry row carries.
@@ -214,6 +221,16 @@ per-project registration.
 
 - **Dual registry lookup.** `registry_handler.py` merges the local project registry with the AIPass
   home's registry. Local entries win on a name collision.
+- **Four tiers, one order.** `get_all_branches()`, `get_branch_by_name()` and
+  `get_branch_with_registry()` read the same tiers in the same order: primary registry, AIPass home,
+  declared roots (`AIPASS_ROOTS.json`), then hosted projects. Earlier wins a name collision, and the
+  shadowed side is logged at WARNING.
+- **Hosted projects.** Each `<home>/projects/<p>/*_REGISTRY.json` is read: one fixed level, the shape
+  `aipass new` makes, never a walk. Its `active` citizens resolve from anywhere the home resolves, so
+  `drone @finch` works from the home. Declared roots refuse a path inside the home, so without this
+  tier those citizens would stay unreachable. When the primary registry is itself a hosted project,
+  that registry is skipped. A registry that cannot be read is named at WARNING and skipped.
+  Mail addressing is not this tier: @ai_mail reads @memory's gateway, which knows declared roots only.
 - **The AIPass home, without `AIPASS_HOME`.** `resolve_aipass_home()` is the one answer every
   reader asks, first answer wins:
   1. `AIPASS_HOME` set: used as given, because an explicit setting beats a guess.
