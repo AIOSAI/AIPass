@@ -81,6 +81,29 @@ would repeat a fresh re-ground and below a long stretch of autonomous work, afte
 grounds. A second compaction opens a new window. A prompt straight after a compaction had no backstop, so
 it grounds through turn 0, which keeps the post-compact dead zone closed.
 
+**The compaction summary is told what to carry.** Claude Code hands a PreCompact hook's stdout to the
+summarizer as its instructions, so `pre_compact` (`lifecycle/compact.py`) writes to the summarizer, not to the
+model after it. It asks for a closing section headed "Work still out": every task, dispatch and plan still open
+with its next step, the uncommitted files, the unread mail count, the newest open plan and its last log line,
+and the user's last instruction verbatim. It hands over the live facts it reads at that moment, and makes the
+summary's final sentence `Next turn: resume the Work still out list first; answer the user's last line only
+inside that work.` A dispatched seat is also told to save its memories first. Each fact is capped (25 files,
+8 dispatches, 1,500 chars of the instruction, 300 per line) so the whole stays under 8,000 characters; Claude
+Code cuts a PreCompact output at 10,000.
+
+The facts: the seat tree's `git status --porcelain -- .` (other branches' files are not its work), the
+dispatches @ai_mail still holds open that this seat sent or owes, the inbox's `unread_count`, the branch's newest
+open @flow plan with the last line under its Night Log or Execution Log heading (fenced blocks and bold notes
+skipped), the last session entry, and the newest prompt a person typed (tool results, meta rows and harness
+wake-ups skipped). A reader that fails is written into the list as `could not be read (<error>)`, with a
+WARNING, never dropped.
+
+**After the summary, the same list is put in front of the model.** `compact_resume`
+(`compact.handle_resume`, SessionStart, provider matcher `compact`) reads the same facts again and returns them
+as `additionalContext` under `WORK STILL OUT — @<branch>`, ending `Resume this list before replying: answer the
+user's last line only inside that work.` It answers nothing on any other source. The PostToolUse re-ground
+needs a tool call after the compaction; a model that answers in text and stops never makes one.
+
 **A branch can override a loader.** `cadence_config.json` takes a `branches`
 map: `{"canary": {"loaders": {"tier0": {"beat": false}}}}`. The branch is the prompt's cwd's branch root
 (`grounding_content.find_branch_root`), by name. Its entry for a loader is merged over the global entry

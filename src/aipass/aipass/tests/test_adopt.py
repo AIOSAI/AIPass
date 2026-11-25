@@ -3,7 +3,7 @@
 # Description: Tests for aipass adopt — project adoption handler
 # Version: 1.7.0
 # Created: 2026-07-20
-# Modified: 2026-11-20
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/handlers/new_project/adopt.py and apps/modules/adopt.py."""
@@ -606,13 +606,13 @@ def test_module_adopt_reports_refusal(host_env, monkeypatch):
 
 
 def test_aipass_public_commands_includes_adopt(capsys: pytest.CaptureFixture[str]):
-    """The bare `aipass` listing names adopt, read through print_introspection.
+    """The bare `aipass` listing names adopt in its docstring's words, read through print_introspection.
 
-    Mutant: the "adopt" key dropped from _PUBLIC_COMMANDS -> red.
+    Mutant: COMMAND dropped from the adopt module -> red.
     """
     print_introspection([adopt_module])
     out = capsys.readouterr().out
-    assert "Turn an existing directory anywhere into a project" in out
+    assert "existing directory anywhere on disk" in out
 
 
 def test_adopt_writes_the_prep_skill_the_switch_pair_and_links_claude_skills_to_it(host_env):

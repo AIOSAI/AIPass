@@ -135,7 +135,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | [docs/bash_writes.md](docs/bash_writes.md) | What a shell command can be seen to write, and what it misses |
 | [docs/trinity_memory_gate.md](docs/trinity_memory_gate.md) | Memory writes: the shell refusal, the tripwire, judging what a write authors |
 | [docs/testwrite_gate.md](docs/testwrite_gate.md) | Agents do not create tests: the policy file, the fail-closed reasoning |
-| [docs/prompt_injection.md](docs/prompt_injection.md) | Injection caps and their sources, the loud fail-open, the alert banners |
+| [docs/prompt_injection.md](docs/prompt_injection.md) | Injection caps and their sources, the loud fail-open, the alert banners, what a compaction summary carries |
 | [docs/diagnostics.md](docs/diagnostics.md) | The two log streams and the post-edit diagnostics block |
 | [docs/comments.md](docs/comments.md) | The comment budget: the metric, the over-budget answer, the `comments` verb |
 | [docs/sandbox.md](docs/sandbox.md) | The kernel filesystem boundary: policy per role, what is writable, launch seam |

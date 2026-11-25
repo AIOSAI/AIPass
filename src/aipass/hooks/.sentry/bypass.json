@@ -310,7 +310,7 @@
       "file": "apps/handlers/lifecycle/compact.py",
       "standard": "logged_fallback",
       "lines": [
-        46
+        60
       ],
       "reason": "Fleet green leg 5: an injector's content (the last session); None injects nothing. Injectors are skipped on error by doctrine; guards no write."
     },
@@ -723,7 +723,7 @@
       "file": "apps/handlers/lifecycle/compact.py",
       "standard": "fallback",
       "lines": [
-        44
+        58
       ],
       "reason": "Read-only: a corrupt local.json is never written here, it only drops the Last Session block from the post-compact injection. WARNING, which @trigger escalates, names the read failure."
     },
@@ -731,7 +731,7 @@
       "file": "apps/handlers/lifecycle/compact.py",
       "standard": "fallback",
       "lines": [
-        88
+        194
       ],
       "reason": "The injection still runs when cadence cannot reset its counter; the cost is a regrounding cadence measured from before the compaction. Raising would lose the recovery block. WARNING, which @trigger escalates, names the failure."
     },
@@ -739,9 +739,17 @@
       "file": "apps/handlers/lifecycle/compact.py",
       "standard": "fallback",
       "lines": [
-        93
+        199
       ],
       "reason": "The injection still runs when the grounding receipt cannot be set pending; the cost is one compaction the receipt verb does not track. It logs at ERROR, which @trigger escalates."
+    },
+    {
+      "file": "apps/handlers/lifecycle/compact.py",
+      "standard": "fallback",
+      "lines": [
+        72
+      ],
+      "reason": "_fact: one unreadable fact (no inbox, no git, a flow or ai_mail import that raises) must not cost the summary the rest of the work-still-out list. The failure is not hidden: the line reads 'could not be read (<error>)' in the list the summarizer and the next turn see, and a WARNING, which @trigger escalates, names it."
     },
     {
       "file": "apps/handlers/lifecycle/post_compact_regrounding.py",

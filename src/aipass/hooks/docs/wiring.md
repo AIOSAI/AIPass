@@ -26,6 +26,10 @@ Hooks operate on two tiers:
 | UserPromptSubmit, SessionStart | **One** new entry: `claude.py <Event>:<hook_name>` |
 | PreCompact | **Two** new entries — one `matcher: manual`, one `matcher: auto` |
 
+A provider matcher on SessionStart filters by the session's `source`; the engine's own matcher never does (it
+compares a tool name or compact type), so a SessionStart handler meant for one source carries the matcher in the
+provider entry and checks `source` itself. `compact_resume` is the one such entry: `matcher: compact`.
+
 Provider settings are protected files (`modules/protected_paths.py`, enforced by `git_gate` on the edit tools and Bash): only the verified admin seat writes them, so when an entry is needed, email @devpulse to wire it. Without it the engine never receives the event and the handler never fires — and the suite cannot see the gap, so verify with firing evidence in `engine.jsonl`.
 
 **Keeping the manifest and live settings in sync:** `.claude/provider_manifest.json` (repo root, self-editable by @hooks) is the source of truth; `~/.claude/settings.json` is the live copy Claude Code actually reads, and only `aipass doctor --fix` or the admin seat (@devpulse) writes it. Editing the manifest does NOT apply live. Run `aipass doctor` after any manifest edit to see the drift, then ask @devpulse to apply it.
@@ -58,7 +62,7 @@ Entry name and filename diverge for others too (`pre_edit_gate` → `security/ed
 `tool_use_sound` → `notification/tool_sound.py`, `branch_prompt` → `prompt/branch_loader.py`,
 `identity_injector` → `prompt/identity.py`, `email_notification` → `notification/email.py`,
 `auto_fix_diagnostics` → `lifecycle/auto_fix.py`, `subagent_stop_gate` → `security/subagent_gate.py`,
-`notification_sound` → `notification/announce.py`, `pre_compact` → `lifecycle/compact.py`,
+`notification_sound` → `notification/announce.py`, `pre_compact` and `compact_resume` → `lifecycle/compact.py`,
 `pre_compact_rollover` → `lifecycle/rollover.py`). **`.claude/provider_manifest.json` keys by the
 entry name, not the filename** — `claude.py UserPromptSubmit:branch_prompt`, never `:branch_loader`.
 Wire a new per-handler entry with the name as it appears in `hooks.json`.
