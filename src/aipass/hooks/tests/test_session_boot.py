@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_boot.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for session boot wrapper (menu-based attach/start/close)
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-11-02
+# Modified: 2026-11-24
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py."""
@@ -159,7 +159,8 @@ class TestBoot:
         mock_stop.assert_called_once()
         assert result["action"] == "closed"
 
-    def test_no_live_continue_last(self, tmp_path):
+    def test_no_live_continue_last(self, tmp_path, fake_projects):
+        make_transcript(fake_projects, tmp_path, "aaaaaaaa-1", "Earlier chat", 3)
         with (
             patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
@@ -799,7 +800,8 @@ class TestExtraArgsThreading:
         assert "--permission-mode" in cmd
         assert "plan" in cmd
 
-    def test_no_live_continue_threads_extra_args(self, tmp_path):
+    def test_no_live_continue_threads_extra_args(self, tmp_path, fake_projects):
+        make_transcript(fake_projects, tmp_path, "aaaaaaaa-1", "Earlier chat", 3)
         with (
             patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
@@ -919,7 +921,8 @@ class TestMenuQuit:
             result = session_boot.boot(cwd=str(tmp_path))
         assert result["action"] == "quit"
 
-    def test_no_live_q_quits(self, tmp_path):
+    def test_no_live_q_quits(self, tmp_path, fake_projects):
+        make_transcript(fake_projects, tmp_path, "aaaaaaaa-1", "Earlier chat", 3)
         with (
             patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
@@ -978,7 +981,8 @@ class TestAutoNamer:
         cmd = mock_exec.call_args[0][1]
         assert "--name" in cmd
 
-    def test_no_live_continue_gets_name(self, tmp_path):
+    def test_no_live_continue_gets_name(self, tmp_path, fake_projects):
+        make_transcript(fake_projects, tmp_path, "aaaaaaaa-1", "Earlier chat", 3)
         with (
             patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
@@ -1132,6 +1136,60 @@ class TestPickerOffersChatsNotProcesses:
         assert "--continue" in mock_exec.call_args[0][2]
 
 
+class TestFirstRun:
+    """A fresh install has no transcript: a continue offered there is a dead door, so boot starts a chat."""
+
+    def _boot(self, tmp_path, choice=""):
+        with (
+            patch.dict("os.environ", _kept_redirect(), clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value=_CLAUDE),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=[]),
+            patch.object(session_boot, "_warn_on_version_drift", return_value=""),
+            patch.object(session_boot, "_read_choice", return_value=choice) as mock_choice,
+            patch(f"{_MOD}._execvp") as mock_exec,
+        ):
+            session_boot.boot(cwd=str(tmp_path))
+        return mock_exec.call_args[0][1], mock_choice
+
+    def _report(self, tmp_path):
+        (tmp_path / "dropbox").mkdir()
+        (tmp_path / "dropbox" / "install_report.json").write_text("{}", encoding="utf-8")
+
+    def test_no_transcript_starts_a_new_chat_without_a_menu(self, tmp_path, fake_projects, capsys):
+        argv, mock_choice = self._boot(tmp_path)
+        assert mock_choice.call_count == 0
+        assert "[Enter]" not in capsys.readouterr().err
+        assert "--session-id" in argv and "--continue" not in argv and "--resume" not in argv
+        assert argv[-1] != session_boot.INSTALL_GREETING
+
+    def test_the_install_report_rides_as_the_first_prompt(self, tmp_path, fake_projects):
+        self._report(tmp_path)
+        argv, _ = self._boot(tmp_path)
+        assert argv[-1] == session_boot.INSTALL_GREETING
+        assert "--session-id" in argv
+
+    def test_a_transcript_keeps_the_menu_and_no_greeting(self, tmp_path, fake_projects):
+        self._report(tmp_path)
+        make_transcript(fake_projects, tmp_path, "aaaaaaaa-1", "Earlier chat", 3)
+        argv, mock_choice = self._boot(tmp_path, "n")
+        assert mock_choice.call_count == 1
+        assert "--session-id" in argv and session_boot.INSTALL_GREETING not in argv
+
+    def test_a_trustworthy_pointer_keeps_the_menu_and_resumes_it(self, tmp_path, fake_projects):
+        pointer = MagicMock()
+        pointer.resolve_resume_target.return_value = ("feedbeef-0000", "pointer trusted")
+        with patch.object(session_boot, "_session_pointer", return_value=pointer):
+            argv, mock_choice = self._boot(tmp_path)
+        assert mock_choice.call_count == 1
+        assert argv[argv.index("--resume") + 1] == "feedbeef-0000"
+
+    def test_a_transcript_still_continues_on_enter(self, tmp_path, fake_projects):
+        make_transcript(fake_projects, tmp_path, "aaaaaaaa-1", "Earlier chat", 3)
+        argv, _ = self._boot(tmp_path)
+        assert "--continue" in argv
+
+
 class TestChatLine:
     """Chat lines as the multi-session menu prints them."""
 
@@ -1157,7 +1215,10 @@ class TestChatLine:
 
 def _drift_err(tmp_path, capsys):
     """boot() to the no-live menu with the drift probe live; returns stderr."""
-    result = _boot(tmp_path, [], "q", quiet=False)
+    root = tmp_path / "projects_root"
+    make_transcript(root, tmp_path, "aaaaaaaa-1", "Earlier chat", 3)
+    with patch("aipass.hooks.apps.modules.cc_transcripts.PROJECTS_ROOT", root):
+        result = _boot(tmp_path, [], "q", quiet=False)
     assert result["action"] == "quit"
     return capsys.readouterr().err
 
@@ -1246,8 +1307,9 @@ class TestVersionDrift:
             assert "DRIFT" not in _drift_err(tmp_path, capsys)
         mock_run.assert_not_called()
 
-    def test_boot_warns_before_the_menu(self, tmp_path):
+    def test_boot_warns_before_the_menu(self, tmp_path, fake_projects):
         """The line must land where a human is already looking."""
+        make_transcript(fake_projects, tmp_path, "aaaaaaaa-1", "Earlier chat", 3)
         with (
             patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),

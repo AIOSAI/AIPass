@@ -330,10 +330,10 @@
       "file": "apps/handlers/lifecycle/session_boot.py",
       "standard": "logged_fallback",
       "lines": [
-        118,
-        187,
-        331,
-        865
+        126,
+        195,
+        339,
+        879
       ],
       "reason": "Fleet green leg 5: boot display (tmux name, age, pinned CLI version) and the dispatch-lock read for the boot banner. Guards no write."
     },
@@ -469,9 +469,9 @@
       "file": "tests/test_session_boot.py",
       "standard": "through_the_command",
       "lines": [
-        227,
-        232,
-        238
+        228,
+        233,
+        239
       ],
       "reason": "_stop_session's bg early return (a bg session is never SIGTERMed): every boot() caller (_menu_single_new, _menu_single_close, _close_all, _new_over_all) filters bg sessions out first, so no boot()/main() route reaches it and no single mutant can turn a boot()-level test red. Kept as a second layer; whether it is deliberate or dead is open with devpulse (2026-10-24)."
     },
@@ -859,9 +859,9 @@
       "file": "apps/handlers/lifecycle/session_boot.py",
       "standard": "fallback",
       "lines": [
-        116,
-        128,
-        147
+        124,
+        136,
+        155
       ],
       "reason": "Boot-menu tmux lookups: no tmux, a garbled pane line or a failed ppid read only means the session's tmux host is not found, and _stop_session falls to SIGTERM by PID and says which it did on stderr. Nothing is skipped."
     },
@@ -869,9 +869,9 @@
       "file": "apps/handlers/lifecycle/session_boot.py",
       "standard": "fallback",
       "lines": [
-        185,
-        599,
-        897
+        193,
+        607,
+        911
       ],
       "reason": "Display only: an unreadable start time, transcript mtime or lock timestamp drops the age from a boot-menu line. No choice or decision rests on the age."
     },

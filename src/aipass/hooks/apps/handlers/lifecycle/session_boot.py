@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.7.0
+# Version: 4.8.0
 # Description: Boot wrapper — attach-first menu, resumes by pointer (0448), steps aside while dispatched (0449)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-30
-# Modified: 2026-11-17
+# Modified: 2026-11-24
 # =============================================
 
 """Boot wrapper for Claude Code sessions.
@@ -28,6 +28,14 @@ from aipass.prax import logger
 
 _DEFAULT_ARGS = ["--permission-mode", "bypassPermissions"]
 _CHAT_LIMIT = 5
+
+# The install writes dropbox/install_report.json; the first chat reads it. A planted transcript would be
+# version-bound, so the greeting rides as the first prompt instead.
+INSTALL_REPORT = Path("dropbox") / "install_report.json"
+INSTALL_GREETING = (
+    "Read dropbox/install_report.json: a fresh AIPass install. "
+    "Greet me by name, then walk me through each attention item."
+)
 
 # How long 'r' waits for the dispatch monitor to surrender its lock; resuming before races its cleanup.
 _RECLAIM_WAIT_S = 10.0
@@ -807,6 +815,12 @@ def _menu_no_live(
     """Display menu when no live session exists."""
     branch_cwd = cwd or str(Path.cwd())
     sid, reason = _session_pointer().resolve_resume_target(Path(branch_cwd))
+    if not sid and not _transcripts().recent_chats(branch_cwd, limit=_CHAT_LIMIT):
+        # Nothing to continue: a menu offering it would fail on Enter, so start the first chat.
+        logger.info("[SESSION_BOOT] No chat to continue in %s (%s): starting a new one", branch_cwd, reason)
+        greet = (Path(branch_cwd) / INSTALL_REPORT).is_file() and not extra_args
+        prompt = [INSTALL_GREETING] if greet else []
+        return _start_fresh(branch, claude_bin, defaults, extra_args, cwd=branch_cwd, prompt=prompt)
 
     sys.stderr.write(f"\n{branch} — no live chat\n")
     seat = f"  (seat {sid[:8]})" if sid else ""
@@ -951,8 +965,9 @@ def _start_fresh(
     defaults: list[str],
     extra_args: list[str] | None,
     cwd: str | None = None,
+    prompt: list[str] | None = None,
 ) -> dict:
-    """Start a fresh Claude session in a new tmux session.
+    """Start a fresh Claude session in a new tmux session; *prompt* is its first message, when given.
 
     The id is minted and the pointer written BEFORE claude starts; a never-born session fails transcript-exists later.
     """
@@ -966,6 +981,7 @@ def _start_fresh(
     claude_cmd = [claude_bin] + defaults + ["--session-id", session_id] + _name_flag(branch, session_id, extra_args)
     if extra_args:
         claude_cmd.extend(extra_args)
+    claude_cmd.extend(prompt or [])
 
     logger.info("[SESSION_BOOT] Starting fresh in tmux session '%s': %s", session_name, " ".join(claude_cmd))
     _execvp("tmux", ["tmux", "new-session", "-s", session_name, "--"] + claude_cmd)

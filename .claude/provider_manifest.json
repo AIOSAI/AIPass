@@ -208,7 +208,7 @@
       "commands": {
         "memo.md": ".claude/templates/memo.md"
       },
-      "pinned_version": "2.1.228"
+      "pinned_version": "2.1.332"
     },
     "codex": {
       "hooks": [

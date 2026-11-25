@@ -139,7 +139,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | [docs/diagnostics.md](docs/diagnostics.md) | The two log streams and the post-edit diagnostics block |
 | [docs/comments.md](docs/comments.md) | The comment budget: the metric, the over-budget answer, the `comments` verb |
 | [docs/sandbox.md](docs/sandbox.md) | The kernel filesystem boundary: policy per role, what is writable, launch seam |
-| [docs/boot_shim.md](docs/boot_shim.md) | The one script here that writes outside the repo |
+| [docs/boot_shim.md](docs/boot_shim.md) | The one script here that writes outside the repo; the boot menu and the first-run chat |
 | [docs/cadence_investigation.md](docs/cadence_investigation.md) | The per-turn injection counter, keyed per session |
 | [docs/provider_parity.md](docs/provider_parity.md) | `parity` compares both CLIs hook by hook; `smoke` runs one live turn per provider |
 
