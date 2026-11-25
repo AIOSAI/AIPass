@@ -703,3 +703,14 @@ class TestDroneRoute:
         monkeypatch.setattr(sys, "argv", ["drone", "--help"])
         assert drone_app.main() == 0
         assert "docker <verb>" in capsys.readouterr().out
+
+    def test_docker_help_keeps_its_brackets(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        """The help prints with markup on; escape() keeps its literal brackets. Mutant: escape() dropped from a row."""
+        monkeypatch.setattr(sys, "argv", ["drone", "docker", "--help"])
+        assert drone_app.main() == 0
+        out = capsys.readouterr().out
+        assert "drone docker <verb> [options] [-- <command>]" in out
+        assert "must match ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$" in out
+        assert "Examples:" in out

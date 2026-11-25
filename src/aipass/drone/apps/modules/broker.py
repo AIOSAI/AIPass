@@ -94,6 +94,8 @@ def print_introspection() -> None:
     c.print("    - [cyan]path_resolver.py[/cyan] [dim](resolve_beneath — openat2 RESOLVE_BENEATH)[/dim]")
     c.print("    - [cyan]protocol.py[/cyan] [dim](BrokerRequest/BrokerResponse — typed JSON-line IPC)[/dim]")
     c.print()
+    c.print("Run [green]'drone broker --help'[/green] for usage information")
+    c.print()
 
 
 def print_help() -> None:
@@ -111,3 +113,6 @@ def print_help() -> None:
     console.print()
     console.print("[bold]Socket:[/bold]  $REPO/.ai_central/drone_broker.sock")
     console.print("[bold]Audit:[/bold]   $REPO/.ai_central/drone_broker_audit.jsonl")
+    console.print()
+    console.print("[bold]Examples:[/bold]")
+    console.print("  [green]drone broker status[/green]")

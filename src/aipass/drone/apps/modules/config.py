@@ -60,6 +60,8 @@ def print_introspection():
         "    - [cyan]registry_handler.py[/cyan] [dim](reset_registry_path — restore default registry path)[/dim]"
     )
     console.print()
+    console.print("Run [green]'drone @drone config --help'[/green] for usage information")
+    console.print()
 
 
 def handle_command(command: Optional[str] = None, args: Optional[List[str]] = None) -> bool:
@@ -96,9 +98,15 @@ def print_help() -> None:
     """Print help for the config module."""
     from aipass.cli import console
 
-    console.print("config — Registry configuration management")
+    console.print("[bold cyan]config[/bold cyan] — Registry configuration management")
     console.print()
-    console.print("Commands:")
-    console.print("  path                Show current registry path")
-    console.print("  set <path>          Print the AIPASS_REGISTRY export that selects a registry")
-    console.print("  reset               Print the unset that restores the default registry")
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [dim]drone @drone config <command> \\[args][/dim]")
+    console.print()
+    console.print("[bold cyan]Commands:[/bold cyan]")
+    console.print("  [cyan]path[/cyan]                Show current registry path")
+    console.print("  [cyan]set[/cyan] <path>          Print the AIPASS_REGISTRY export that selects a registry")
+    console.print("  [cyan]reset[/cyan]               Print the unset that restores the default registry")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [green]drone @drone config path[/green]")

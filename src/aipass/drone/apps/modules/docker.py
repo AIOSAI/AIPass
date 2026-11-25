@@ -18,7 +18,7 @@ import sys
 import time
 
 from aipass.prax import logger
-from aipass.cli import console, error
+from aipass.cli import console, error, escape
 from aipass.drone.apps.handlers import docker_handler as box
 from aipass.drone.apps.handlers.help_flags import wants_help
 from aipass.drone.apps.handlers.json import json_handler
@@ -230,19 +230,43 @@ def print_introspection() -> None:
 
 
 def print_help() -> None:
-    """Display help (--help flag)."""
-    for line in HELP.splitlines():
-        console.print(line, markup=False, highlight=False, soft_wrap=True)
+    """Display help (--help flag): headings and verbs styled, the text escaped so its brackets print."""
+    console.print()
+    console.print("[bold cyan]drone docker[/bold cyan] — Disposable Test Boxes")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print(escape("  drone docker <verb> [options] [-- <command>]"), highlight=False, soft_wrap=True)
+    console.print()
+    console.print(f"[dim]{escape(HELP['about'])}[/dim]", highlight=False, soft_wrap=True)
+    console.print()
+    console.print("[bold cyan]Verbs:[/bold cyan]")
+    _print_rows(HELP["verbs"])
+    console.print()
+    console.print("[bold cyan]Options for bare, local, dev, main:[/bold cyan]")
+    _print_rows(HELP["options"])
+    console.print()
+    console.print("[bold cyan]Rules:[/bold cyan]")
+    console.print(f"[dim]{escape(HELP['rules'])}[/dim]", highlight=False, soft_wrap=True)
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    for line in HELP["examples"].splitlines():
+        console.print(f"  [green]{escape(line.strip())}[/green]", highlight=False, soft_wrap=True)
+    console.print()
 
 
-HELP = """Usage: drone docker <verb> [options] [-- <command>]
+def _print_rows(block: str) -> None:
+    """A verb or option row: the name cyan in its 21-column field, the text dim; a continuation line dim."""
+    for line in block.splitlines():
+        console.print(
+            f"  [cyan]{escape(line[2:23])}[/cyan][dim]{escape(line[23:])}[/dim]", highlight=False, soft_wrap=True
+        )
 
-Disposable boxes that match this machine. Every box is named aipass-<verb>-<n>, carries the
+
+HELP = {
+    "about": """Disposable boxes that match this machine. Every box is named aipass-<verb>-<n>, carries the
 label aipass.box and a row in .ai_central/docker_boxes.jsonl. drone docker lists, enters and
-removes only those; never any other container.
-
-Verbs:
-  bare                 fresh image of this machine's OS, base tools, no AIPass, a shell
+removes only those; never any other container.""",
+    "verbs": """  bare                 fresh image of this machine's OS, base tools, no AIPass, a shell
   local                bare + this checkout's committed HEAD, cloned and pip-installed (repo ro at /src)
   dev | main           bare + that branch cloned from origin on github (not this checkout), pip-installed
                        local, dev and main have aipass on PATH and nothing else set up; your first
@@ -252,10 +276,8 @@ Verbs:
   shell <name>         start a kept box if stopped, open a shell in it, stop it again on exit
   rm <name>... | --all stop and remove its boxes; a name it did not make is refused
   rm --login           remove the aipass-login-* volumes: this is how a sign-in is cleared
-                       (docker refuses a volume a container still uses; that refusal is shown)
-
-Options for bare, local, dev, main:
-  --keep               do not remove on exit (default: removed on exit)
+                       (docker refuses a volume a container still uses; that refusal is shown)""",
+    "options": """  --keep               do not remove on exit (default: removed on exit)
   --with <cli>         install claude, codex or opencode with its vendor installer (repeatable)
   --mount <path>       bind a host directory read-only at /mnt/<basename> (repeatable)
   --login              named volumes for ~/.claude, ~/.codex, ~/.config/opencode in the box
@@ -263,21 +285,18 @@ Options for bare, local, dev, main:
   --rebuild            rebuild the cached base image (--no-cache)
   --name <name>        instead of aipass-<verb>-<n>; must match ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$
                        and not be a container or a recorded box already (else exit 2)
-  -- <command>         one argument is a shell script; multiple arguments retain their quoting
-
-Rules:
-  Host credential paths (~/.claude, ~/.codex, ~/.config/opencode, ~/.secrets, ~/.ssh, ~/.config/gh,
+  -- <command>         one argument is a shell script; multiple arguments retain their quoting""",
+    "rules": """  Host credential paths (~/.claude, ~/.codex, ~/.config/opencode, ~/.secrets, ~/.ssh, ~/.config/gh,
   ~/.git-credentials, ~/.netrc, ~/.aws, ~/.gnupg, ~/.docker, ~/.kube) never mount, nor any path
   inside or directory holding one. --login is the only state carried between boxes.
   Docker absent or its daemon down: one line, exit 2.
   Every box runs sleep under --init; the script or shell runs through docker exec, and the box is
   stopped after (a kept box stays, stopped, and can always be entered again with shell).
   A successful non-kept stop records removal, so its --name can be reused.
-  bare, local, dev and main exit with the box command's exit code (docker's, if the box never starts).
-
-Examples:
-  drone docker bare
+  bare, local, dev and main exit with the box command's exit code (docker's, if the box never starts).""",
+    "examples": """  drone docker bare
   drone docker local --with claude --login
   drone docker dev --keep
   drone docker bare -- 'cat /etc/os-release'
-  drone docker rm aipass-dev-1"""
+  drone docker rm aipass-dev-1""",
+}

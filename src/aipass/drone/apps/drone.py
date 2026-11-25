@@ -20,7 +20,7 @@ from rich.table import Table
 from rich.text import Text
 
 from aipass.prax import logger
-from aipass.cli import console, err_console
+from aipass.cli import console, err_console, escape
 from aipass.drone.apps.modules import (
     BranchNotFoundError,
     CommandExecutionError,
@@ -236,32 +236,36 @@ def _handle_systems() -> int:
     services = [b for b in all_branches if b.get("profile") == "library"]
     project_branches = [b for b in all_branches if b.get("profile") != "library"]
 
-    console.print("Infrastructure:")
-    console.print(f"  @{'drone':<18} Command routing and module discovery (v{VERSION})")
+    console.print("[bold cyan]Infrastructure:[/bold cyan]")
+    console.print("[dim]  drone itself: the router every command walks through[/dim]")
+    console.print(
+        f"  [cyan]@{'drone':<18}[/cyan] [dim]Command routing and module discovery (v{VERSION})[/dim]",
+        highlight=False,
+    )
     console.print()
 
     exclude = set(modules) | {"drone"}
     deduped_services = [s for s in services if s.get("name", "").lower() not in exclude]
     service_count = len(modules) + len(deduped_services)
     if service_count:
-        console.print(f"AIPass Services ({service_count}):")
+        console.print(f"[bold cyan]AIPass Services ({service_count}):[/bold cyan]", highlight=False)
+        console.print("[dim]  citizens with profile library: the framework's own services[/dim]")
         for name in modules:
             info = get_module_info(name)
-            if info:
-                console.print(f"  @{name:<18} {info.description}")
-            else:
-                console.print(f"  @{name:<18} (not available)")
+            desc = info.description if info else "(not available)"
+            console.print(f"  [cyan]{escape(f'@{name:<18}')}[/cyan] [dim]{escape(desc)}[/dim]", highlight=False)
         for svc in sorted(deduped_services, key=lambda b: b.get("name", "").lower()):
             name = svc.get("name", "").lower()
             desc = svc.get("description", "")
-            console.print(f"  @{name:<18} {desc}")
+            console.print(f"  [cyan]{escape(f'@{name:<18}')}[/cyan] [dim]{escape(desc)}[/dim]", highlight=False)
         if project_branches:
             console.print()
 
     if project_branches:
-        console.print(f"Branches ({len(project_branches)}):")
+        console.print(f"[bold cyan]Branches ({len(project_branches)}):[/bold cyan]", highlight=False)
+        console.print("[dim]  every other citizen the registry and declared roots know, test citizens included[/dim]")
         for branch in sorted(project_branches, key=lambda b: b.get("name", "").lower()):
-            console.print(f"  @{branch.get('name', '').lower()}")
+            console.print(f"  [cyan]{escape('@' + branch.get('name', '').lower())}[/cyan]", highlight=False)
 
     # No AIPass home and no local 'drone': an external project that cannot see the core branches.
     if resolve_aipass_home().path is None:
@@ -639,7 +643,7 @@ def main() -> int:
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print(f"drone v{VERSION}")
+        console.print(f"drone v{VERSION}", highlight=False)
         return 0
 
     if args[0] in ["--help", "-h", "help"]:

@@ -22,6 +22,12 @@ the bare `drone @drone` prints the live module inventory.
 5. **Bare module names** → auto-discovered from `apps/modules/*.py`, routed via `importlib`
 6. **Custom commands** → greedy multi-word matching against `drone_command_registry.json`
 
+`drone systems` prints three groups, each heading followed by one dim line saying what it holds:
+**Infrastructure** is drone itself; **AIPass Services** are the internal and external modules plus
+the citizens whose registry profile is `library`; **Branches** are every other citizen the registry
+and the declared roots know, test citizens included. Names and descriptions are escaped, so a
+bracket in a registry description prints as written.
+
 The `@target` lane has **no module fallback on the error path.** A `BranchNotFoundError` from a
 branch the registry *does* list is a real fault and fails loud — `resolve_branch()` also refuses a
 registry path that escapes the project root, and a fallback would answer that security refusal by

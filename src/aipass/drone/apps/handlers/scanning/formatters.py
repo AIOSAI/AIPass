@@ -46,7 +46,7 @@ def format_scan_results(branch_name: str, commands: list[dict]) -> None:
 
     console.print(table)
     console.print()
-    console.print(f"{len(commands)} command(s) discovered for {display_name}")
+    console.print(f"[cyan]{len(commands)}[/cyan] command(s) discovered for [bold]{display_name}[/bold]")
     console.print()
 
 
@@ -67,9 +67,7 @@ def format_help_scan_failure(branch_name: str, help_errors: list[str]) -> None:
     """
     if not help_errors:
         return
-    from aipass.cli import err_console
+    from aipass.cli import err_console, escape
 
-    err_console.print(
-        f"scan: @{branch_name}: the --help scan failed ({help_errors[0]}); showing module files only",
-        markup=False,
-    )
+    detail = escape(f"@{branch_name}: the --help scan failed ({help_errors[0]}); showing module files only")
+    err_console.print(f"[yellow]scan:[/yellow] {detail}", highlight=False)

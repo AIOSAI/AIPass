@@ -70,11 +70,17 @@ def print_help() -> None:
     """Print help for the router module."""
     from aipass.cli import console
 
-    console.print("router — Command routing logic")
+    console.print("[bold cyan]router[/bold cyan] — Command routing logic")
     console.print()
-    console.print("Commands:")
-    console.print("  route <target> <cmd> \\[args]   Route command to a branch")
-    console.print("  route_all <cmd> \\[args]        Route command to all branches")
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [dim]drone @drone router <command> <target> <cmd> \\[args][/dim]")
+    console.print()
+    console.print("[bold cyan]Commands:[/bold cyan]")
+    console.print("  [cyan]route[/cyan] <target> <cmd> \\[args]   Route command to a branch")
+    console.print("  [cyan]route_all[/cyan] <cmd> \\[args]        Route command to all branches")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [green]drone @drone router route flow --help[/green]")
 
 
 def route_command(
@@ -137,6 +143,8 @@ def print_introspection():
     console.print("[yellow]Connected Modules:[/yellow]")
     console.print("  [cyan]modules/[/cyan]")
     console.print("    - [cyan]resolver.py[/cyan] [dim](resolve_branch, list_branches — branch name resolution)[/dim]")
+    console.print()
+    console.print("Run [green]'drone @drone router --help'[/green] for usage information")
     console.print()
 
 

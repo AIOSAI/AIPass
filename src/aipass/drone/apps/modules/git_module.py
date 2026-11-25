@@ -1465,11 +1465,32 @@ def print_introspection() -> None:
         f" [dim]({','.join(_tier_commands('ci-cure'))})[/dim]"
     )
     c.print()
+    c.print("Run [green]'drone @git --help'[/green] for usage information")
+    c.print()
 
 
 def print_help(command: str | None = None) -> None:
-    """Print help (sentry compliance).
+    """Print help: the page escaped so ``[count]``/``[path]`` placeholders print, its section headings styled."""
+    from aipass.cli import console, escape
 
-    ``markup=False``: Rich would read ``[count]``/``[path]`` placeholders as style tags and delete them.
-    """
-    _get_console().print(get_help(command), markup=False)
+    text = get_help(command)
+    if command is not None:
+        console.print(escape(text), highlight=False, soft_wrap=True)
+        return
+    title, _, body = text.partition("\n")
+    console.print(f"[bold cyan]{escape(title)}[/bold cyan]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print(escape("  drone @git <verb> [args]      drone @git <verb> --help for one verb's page"))
+    console.print()
+    for line in body.splitlines():
+        # A section heading sits at column 0 and ends with ':' (Global (all branches):, Owner ...:).
+        if line and not line[0].isspace() and line.rstrip().endswith(":"):
+            console.print(f"[bold cyan]{escape(line)}[/bold cyan]", highlight=False, soft_wrap=True)
+        else:
+            console.print(escape(line), highlight=False, soft_wrap=True)
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [green]drone @git status[/green]")
+    console.print("  [green]drone @git log 5[/green]")
+    console.print("  [green]drone @git diff --stat[/green]")

@@ -493,9 +493,12 @@ class TestHandleSystems:
         assert "No registry found" in capsys.readouterr().out
 
     def test_with_branches_and_modules(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Modules list under services, agents under branches (mutant: the branch loop print removed)."""
+        """Modules list under services, agents under branches, each group explained, data printed literally.
+
+        Mutants: the branch loop print removed; an explainer line removed; escape() dropped from a description."""
         branches = [
             {"name": "drone", "profile": "library", "description": "Router"},
+            {"name": "memory", "profile": "library", "description": "Archive [vectors] on rollover"},
             {"name": "myapp", "profile": "agent"},
         ]
         with (
@@ -513,6 +516,10 @@ class TestHandleSystems:
         assert result == 0
         assert "Git ops" in out
         assert "@myapp" in out
+        assert "Archive [vectors] on rollover" in out
+        assert "drone itself: the router every command walks through" in out
+        assert "citizens with profile library: the framework's own services" in out
+        assert "every other citizen the registry and declared roots know, test citizens included" in out
 
     def test_aipass_home_hint(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         """`drone systems` prints the AIPASS_HOME hint when unset (mutant: hint print removed)."""

@@ -143,19 +143,27 @@ def print_introspection() -> None:
         "list_commands_by_branch)[/dim]"
     )
     console.print()
+    console.print("Run [green]'drone @drone commands --help'[/green] for usage information")
+    console.print()
 
 
 def print_help() -> None:
     """Print help for the commands module."""
     from aipass.cli import console
 
-    console.print("commands -- Custom command shortcuts")
+    console.print("[bold cyan]commands[/bold cyan] — Custom command shortcuts")
     console.print()
-    console.print("Commands:")
-    console.print("  add <name> <target> <cmd> \\[args...] [--desc=...] [--branch=...]")
-    console.print("  remove <name>                        Remove a custom command")
-    console.print("  list \\[branch]                        List commands (optionally by branch)")
-    console.print("  lookup <name>                        Look up a command by name")
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [dim]drone @drone commands <command> \\[args][/dim]")
+    console.print()
+    console.print("[bold cyan]Commands:[/bold cyan]")
+    console.print("  [cyan]add[/cyan] <name> <target> <cmd> \\[args...] [--desc=...] [--branch=...]")
+    console.print("  [cyan]remove[/cyan] <name>                        Remove a custom command")
+    console.print("  [cyan]list[/cyan] \\[branch]                        List commands (optionally by branch)")
+    console.print("  [cyan]lookup[/cyan] <name>                        Look up a command by name")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [green]drone @drone commands list[/green]")
 
 
 def add(

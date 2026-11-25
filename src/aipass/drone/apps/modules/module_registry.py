@@ -86,6 +86,8 @@ def print_introspection():
         " [dim](get_module_introspective — introspect module adapter)[/dim]"
     )
     console.print()
+    console.print("Run [green]'drone @drone module_registry --help'[/green] for usage information")
+    console.print()
 
 
 def handle_command(command: str | None = None, args: list[str] | None = None) -> bool:
@@ -122,7 +124,9 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             return False
         info = get_module_info(args[0])
         if info:
-            console.print(f"Module: {info.name} v{info.version} — {info.description}")
+            console.print(
+                f"[bold]Module:[/bold] {info.name} [dim]v{info.version}[/dim] — {info.description}", highlight=False
+            )
         elif is_module(args[0]):
             # None for a REGISTERED name means its adapter could not import; an
             # unknown name is the other None. Only the second is "not found".
@@ -150,9 +154,15 @@ def print_help() -> None:
     """Print help for the module_registry module."""
     from aipass.cli import console
 
-    console.print("module_registry — Internal module registry for drone")
+    console.print("[bold cyan]module_registry[/bold cyan] — Internal module registry for drone")
     console.print()
-    console.print("Commands:")
-    console.print("  list                List registered modules")
-    console.print("  info <name>         Show module metadata")
-    console.print("  check <name>        Check if module is registered")
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [dim]drone @drone module_registry <command> \\[name][/dim]")
+    console.print()
+    console.print("[bold cyan]Commands:[/bold cyan]")
+    console.print("  [cyan]list[/cyan]                List registered modules")
+    console.print("  [cyan]info[/cyan] <name>         Show module metadata")
+    console.print("  [cyan]check[/cyan] <name>        Check if module is registered")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [green]drone @drone module_registry list[/green]")
