@@ -118,7 +118,7 @@ fi
 
 # --- Create venv ---
 if [ -d ".venv" ]; then
-    echo "Existing .venv found — removing it for a clean install."
+    echo "Existing .venv found — removing $SCRIPT_DIR/.venv for a clean install."
     rm -rf .venv
 fi
 
@@ -134,94 +134,6 @@ echo "Upgrading pip ..."
 
 echo "Installing aipass in editable mode (with dev, memory, llm, drive, bluesky extras) — this can take a few minutes while the memory wheels build ..."
 "$VENV_PYTHON" -m pip install -e ".[dev,memory,llm,drive,bluesky,host]"
-
-# --- Sandbox prerequisites (kernel FS boundary) ---
-echo ""
-echo "Checking sandbox prerequisites ..."
-
-SB_MISSING=()
-
-# bwrap
-if command -v bwrap &>/dev/null; then
-    echo "  bwrap     ... $(bwrap --version 2>/dev/null || echo 'found')"
-else
-    echo "  bwrap     ... MISSING"
-    echo "    sudo apt install bubblewrap"
-    SB_MISSING+=("bwrap")
-fi
-
-# node
-if command -v node &>/dev/null; then
-    echo "  node      ... $(node --version 2>/dev/null)"
-else
-    echo "  node      ... MISSING"
-    echo "    Install Node.js: https://nodejs.org/"
-    SB_MISSING+=("node")
-fi
-
-# npm (needed for srt install)
-if command -v npm &>/dev/null; then
-    echo "  npm       ... $(npm --version 2>/dev/null)"
-else
-    echo "  npm       ... MISSING"
-    SB_MISSING+=("npm")
-fi
-
-# @anthropic-ai/sandbox-runtime — resolve via the real resolver (owned by
-# the hooks branch, handles node-prefix != npm-prefix layouts, DPLAN-0279)
-SRT_RESOLVER="$SCRIPT_DIR/src/aipass/hooks/apps/modules/_srt_resolve.mjs"
-if command -v node &>/dev/null && [ -f "$SRT_RESOLVER" ]; then
-    SRT_PATH=$(node "$SRT_RESOLVER" --resolve 2>/dev/null) || SRT_PATH=""
-    if [ -n "$SRT_PATH" ]; then
-        echo "  srt       ... $SRT_PATH"
-    else
-        echo "  srt       ... MISSING"
-        if command -v npm &>/dev/null; then
-            NPM_PREFIX=$(npm root -g 2>/dev/null)
-            echo "    Attempting: npm install -g @anthropic-ai/sandbox-runtime (into ${NPM_PREFIX:-npm global prefix})"
-            if npm install -g @anthropic-ai/sandbox-runtime; then
-                echo "    srt       ... installed"
-            else
-                echo "    Install failed (may need sudo). Run manually:"
-                echo "      sudo npm install -g @anthropic-ai/sandbox-runtime"
-                SB_MISSING+=("srt")
-            fi
-        else
-            echo "    Install node+npm first, then: npm install -g @anthropic-ai/sandbox-runtime"
-            SB_MISSING+=("srt")
-        fi
-    fi
-elif ! command -v node &>/dev/null; then
-    echo "  srt       ... skipped (no node)"
-    SB_MISSING+=("srt")
-else
-    # Not an optional tool: the resolver is a tracked file of this checkout.
-    # Its absence means the clone is incomplete, which is the one sandbox
-    # row that belongs in ACTION NEEDED (DPLAN-0409, the 2026-10-15 review).
-    echo "  srt       ... skipped (resolver script missing: $SRT_RESOLVER)"
-    SB_MISSING+=("srt")
-    ACTION_NEEDED+=("Checkout incomplete — $SRT_RESOLVER is a tracked file and is missing. Run: drone @git status, then drone @git fix, or re-run the install line to clone again")
-fi
-
-# rg (ripgrep)
-if command -v rg &>/dev/null; then
-    echo "  rg        ... $(rg --version 2>/dev/null | head -1)"
-elif [ -f "$HOME/.local/bin/rg" ]; then
-    echo "  rg        ... $HOME/.local/bin/rg"
-else
-    echo "  rg        ... MISSING"
-    echo "    sudo apt install ripgrep"
-    SB_MISSING+=("rg")
-fi
-
-if [ ${#SB_MISSING[@]} -eq 0 ]; then
-    echo "  sandbox prereqs: READY"
-else
-    # Optional (DPLAN-0407): AIPass runs without the kernel sandbox, so a missing
-    # tool is a line here, never an ACTION NEEDED item after "ready" (the owner's
-    # test 13: the install ended on a homework list of five optional tools).
-    echo "  sandbox: optional, not set up here (${SB_MISSING[*]} missing); AIPass runs without it — aipass doctor says how"
-fi
 
 # --- Verify CLI entry points ---
 FAIL=0
@@ -537,7 +449,7 @@ confirm_machine_changes() {
     if ! is_interactive || [ -n "${CI:-}" ]; then
         MACHINE_CHANGES="no"
         echo ""
-        echo "  Machine changes skipped: no terminal to ask on and no --yes."
+        echo "  Machine changes skipped: no terminal to ask on and no --yes counts as no."
         ACTION_NEEDED+=("Machine changes skipped (no --yes): hooks, shell rc, AIPASS_HOME, symlinks. Run: aipass install --yes, or $SCRIPT_DIR/setup.sh on a terminal")
         return 0
     fi
@@ -545,9 +457,12 @@ confirm_machine_changes() {
     echo "Setup now changes these things outside $SCRIPT_DIR:"
     echo "  - ~/.claude/settings.json: AIPass hooks, env and deny rules (backed up first)"
     echo "  - ~/.claude/commands/memo.md"
-    echo "  - ~/.bashrc: a claude() boot shim, AIPASS_HOME, and a PATH line if needed; ~/.profile: AIPASS_HOME"
+    echo "  - ~/.bashrc and ~/.zshrc: a claude() shell function (the boot shim). In a branch dir (one with .trinity/),"
+    echo "    a bare 'claude' boots the AIPass session instead of plain Claude Code; every other claude call passes through"
+    echo "  - ~/.bashrc: AIPASS_HOME, and a PATH line if needed; ~/.profile: AIPASS_HOME"
     echo "  - Codex hooks and config pins, the OpenCode plugin (only if they are installed)"
     echo "  - drone/aipass symlinks in /usr/local/bin (sudo) or ~/.local/bin"
+    echo "Nothing above is written until you answer. With no terminal and no --yes, the answer is no."
     local answer=""
     read -r -p "Make these changes? [Y/n]: " answer || answer="n"
     case "$answer" in

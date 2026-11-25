@@ -12,10 +12,14 @@ prints is something another owner could be asked directly.
 ## The groups
 
 The report opens with its scope: `scope: project <root>`, or
-`scope: no project at <cwd>: Structure is not checked`. The Structure checks
-follow the working directory, so a run from outside a project counts fewer
-rows and cannot see a project's damaged citizens. A clean count from there is
-no verdict on a project.
+`scope: no project at <cwd>: the project's registry, mailbox, hooks, Structure
+and Scaffold are not checked`. Those rows follow the working directory: from
+outside a project the Structure and Scaffold groups and the `registry`,
+`passport`, `hooks.json` and `ai_mail` rows are left out, so the exit code
+reflects the machine and the home only, and a fresh install's first run from
+`$HOME` is not an error. A clean count from there is no verdict on a project.
+An unset `AIPASS_HOME` warns that the install wrote it to `~/.bashrc`: open a
+new terminal or `source ~/.bashrc`.
 
 One pass produces seven groups, in this order:
 

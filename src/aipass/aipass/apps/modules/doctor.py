@@ -377,7 +377,8 @@ def check_identity() -> List[CheckResult]:
                     "AIPASS_HOME",
                     GLYPH_WARN,
                     "not set",
-                    "Set in ~/.bashrc: export AIPASS_HOME=/path/to/aipass",
+                    "The install writes it to ~/.bashrc: open a new terminal or run 'source ~/.bashrc'; "
+                    "else add export AIPASS_HOME=/path/to/aipass there",
                 )
             )
 
@@ -1209,6 +1210,20 @@ def _print_doctor_groups(groups: Dict[str, List[CheckResult]]) -> tuple[int, int
     return pass_count, warn_count, error_count
 
 
+#: Rows that read the project doctor runs in; outside one, the scope line stands for them.
+_PROJECT_GROUPS = ("Structure", "Scaffold")
+_PROJECT_ROWS = ("registry", "passport", "hooks.json", "ai_mail")
+
+
+def _machine_rows_only(groups: Dict[str, List[CheckResult]]) -> Dict[str, List[CheckResult]]:
+    """*groups* without the project-scoped groups and rows, so the exit reflects the machine and home."""
+    return {
+        name: [r for r in rows if r.label not in _PROJECT_ROWS]
+        for name, rows in groups.items()
+        if name not in _PROJECT_GROUPS
+    }
+
+
 def run_doctor(
     interactive: bool = False,
     fix: bool = False,
@@ -1224,11 +1239,16 @@ def run_doctor(
     console.print("[bold cyan]aipass doctor[/bold cyan]")
     # The Structure checks follow the working directory: a clean count from outside a project is no clean project.
     project = find_project_root(Path.cwd())
-    outside = f"no project at {Path.cwd()}: Structure is not checked; run from inside a project"
+    outside = (
+        f"no project at {Path.cwd()}: the project's registry, mailbox, hooks, Structure and Scaffold "
+        "are not checked; run from inside a project"
+    )
     console.print(f"  scope: {f'project {project}' if project else outside}")
     console.print()
 
     groups = _compute_doctor_groups(interactive=interactive, fix=fix, yes=yes)
+    if project is None:
+        groups = _machine_rows_only(groups)
     if smoke:
         groups["Services"] = groups.get("Services", []) + [CheckResult(*row) for row in check_smoke(model)]
     pass_count, warn_count, error_count = _print_doctor_groups(groups)

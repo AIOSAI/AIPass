@@ -1364,4 +1364,27 @@ class TestOneLinePerFact:
         if root:
             assert f"scope: project {tmp_path}" in out
         else:
-            assert f"scope: no project at {os.getcwd()}: Structure is not checked" in out
+            assert f"scope: no project at {os.getcwd()}: the project's registry, mailbox, hooks" in out
+
+    @pytest.mark.parametrize("root", [None, "project"])
+    def test_outside_a_project_the_project_rows_do_not_count_and_inside_they_do(
+        self, tmp_path, monkeypatch, capsys, root
+    ) -> None:
+        """A fresh install's first doctor from $HOME: no registry or ai_mail error, exit from machine rows only.
+
+        Mutant: the outside-a-project filter dropped -> 2 errors outside -> red.
+        """
+        groups = {
+            "System": [CheckResult("python", GLYPH_PASS, "3.12", "")],
+            "Identity": [CheckResult("registry", GLYPH_FAIL, "not found", "Run 'aipass init'")],
+            "Community": [CheckResult("ai_mail", GLYPH_FAIL, "not found", "Run 'aipass init'")],
+            "Structure": [CheckResult("project root", GLYPH_WARN, "not detected", "")],
+        }
+        monkeypatch.setattr(f"{_DOCTOR}.find_project_root", lambda _cwd: tmp_path if root else None)
+        monkeypatch.setattr(f"{_DOCTOR}._compute_doctor_groups", lambda **_kw: groups)
+
+        errors = run_doctor()
+        out = " ".join(capsys.readouterr().out.split())
+
+        assert errors == (2 if root else 0)
+        assert ("ai_mail" in out, "not detected" in out) == ((True, True) if root else (False, False))
