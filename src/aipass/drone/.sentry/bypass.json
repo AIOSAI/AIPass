@@ -123,11 +123,11 @@
       "file": "apps/drone.py",
       "standard": "logged_fallback",
       "lines": [
-        622,
-        642,
-        646,
-        702,
-        712
+        633,
+        653,
+        657,
+        716,
+        726
       ],
       "reason": "main() is the process exit status: 1 is the failure answer to the OS on every path that returns it (routing refused, unknown command, the registry unreadable, an unhandled systems error, a module that failed to import or raised), and success is 0. Each handler prints the error to stderr before it. A passport fault (leg 7) is printed after routing by the _reports_passport_fault wrapper and never changes the code. The checker counts the other `return 1`s as a success path because they are not error() calls; they are failures too. Callers: the console script entry only (sys.exit(main())). Fleet green leg 6, drone's decision.",
       "anchor": "return 1"
@@ -186,6 +186,16 @@
         "move_into_archive"
       ],
       "reason": "Two FileExistsError handlers that are the design, not a default: an .archive already there is the common case (mkdir is tried first because a check-then-mkdir races), and a name already taken in the .archive moves on to the next free name, never over it. Neither hides a failure: any other OSError raises to _move_to_archive and the broker, which record outcome failed at ERROR; running out of names raises FileExistsError."
+    },
+    {
+      "file": "apps/handlers/docker_handler.py",
+      "standard": "help_text",
+      "lines": [
+        84,
+        123
+      ],
+      "reason": "The python3 lines are not drone help: one is the Dockerfile's apt package list, the other the next command printed inside a fresh container, where AIPass and drone are not installed yet, so 'drone @branch' cannot be the instruction.",
+      "anchor": "python3"
     }
   ],
   "notes": {

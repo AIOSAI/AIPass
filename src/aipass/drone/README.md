@@ -49,6 +49,7 @@ written down here and cannot go stale:
 - `drone @git --help` — every git verb, its tier, the machine surface and the external-repo door,
   including each refusal exactly as it prints.
 - `drone rm --help` — the delete rules, the carve-outs and the stale-temp sweep.
+- `drone docker --help` — disposable test boxes: the verbs, the options and the two rules.
 
 ---
 
@@ -106,6 +107,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/external_repo_door.md](docs/external_repo_door.md) | `--repo <path>`: the admin-seat door into a repository that is not AIPass, and its ledger |
 | [docs/rm_and_the_record.md](docs/rm_and_the_record.md) | The delete record, the sibling-branch guard, the contains-a-citizen fence, dot names, and stale mode |
 | [docs/broker.md](docs/broker.md) | The broker removal lane, its one decision with drone rm, and its server-side path verification |
+| [docs/docker.md](docs/docker.md) | Disposable test boxes: the verbs, the base image, names and the record, no host credentials, `--login` |
 | [docs/testing.md](docs/testing.md) | How the suite is run and judged, the standards lanes, the mutation bar |
 
 ---

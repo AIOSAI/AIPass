@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-03-05
-# Modified: 2026-11-22
+# Modified: 2026-11-24
 # =============================================
 
 """
@@ -131,6 +131,10 @@ def print_help() -> None:
     table.add_row(
         "rm [--stale AGE] <path>...",
         "Moves in-tree targets to .archive; --stale sweeps old *_json temps (drone rm --help)",
+    )
+    table.add_row(
+        "docker <verb> [options]",
+        "Disposable test boxes: bare, local, dev, main; list, shell, rm (drone docker --help)",
     )
     table.add_row(
         "@target ... --drone-timeout <n>",
@@ -413,6 +417,13 @@ def _handle_rm(args: list[str]) -> int:
     return 0 if result else 1
 
 
+def _handle_docker(args: list[str]) -> int:
+    """Handle ``drone docker <verb> ...`` in-process, so a box's shell inherits this terminal."""
+    from aipass.drone.apps.modules.docker import run
+
+    return run(args[0] if args else None, args[1:])
+
+
 def _handle_custom_command(args: list[str]) -> int:
     """Handle a custom command shortcut by matching and routing."""
     from aipass.drone.apps.modules.commands import match
@@ -674,6 +685,9 @@ def main() -> int:
 
     if command == "rm":
         return _handle_rm(args[1:])
+
+    if command == "docker":
+        return _handle_docker(args[1:])
 
     # aipass is a user-facing CLI, not a drone-routable branch
     if command.lstrip("@") == "aipass":
