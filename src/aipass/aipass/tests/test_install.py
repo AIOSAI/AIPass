@@ -472,7 +472,7 @@ class TestSource:
         home = tmp_path / "home"
         uri = _checkout(tmp_path).resolve().as_uri()
         tools_on_path("git")
-        with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run:
+        with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0, stdout="")) as run:
             assert _clone_repo(home, dry_run=False, source=uri) is True
         clone_calls = [c for c in run.call_args_list if "clone" in c.args[0]]
         assert clone_calls[0].args[0] == ["git", "clone", "--depth", "1", uri, str(home)]
@@ -1544,3 +1544,35 @@ class TestClonedBranchIsNamed:
         ok, _printed, _calls = self._clone(tmp_path, rc=1)
 
         assert ok is False
+
+    @staticmethod
+    def _checkout(tmp_path, origin: str | None):
+        """A real one-commit checkout, with *origin* as its remote when given."""
+        checkout = tmp_path / "AIPass-src"
+        checkout.mkdir()
+        git = ["git", "-C", str(checkout), "-c", "user.name=t", "-c", "user.email=t@t"]
+        _sp.run([*git, "init", "-q", "-b", "dev"], check=True)
+        (checkout / "README.md").write_text("x\n", encoding="utf-8")
+        _sp.run([*git, "add", "README.md"], check=True)
+        _sp.run([*git, "commit", "-q", "-m", "one"], check=True)
+        if origin:
+            _sp.run([*git, "remote", "add", "origin", origin], check=True)
+        return checkout
+
+    def test_a_home_cloned_from_a_checkout_takes_its_origin_and_every_branch(self, tmp_path) -> None:
+        """Pins the box: origin was file:///home/aipass/AIPass-src, fetching dev only. Mutant: no repoint -> red."""
+        checkout = self._checkout(tmp_path, "https://github.com/AIOSAI/AIPass.git")
+        home = tmp_path / "AIPass"
+        with patch.object(_install.console, "print"):
+            assert _install._clone_repo(home, dry_run=False, source=checkout.as_uri()) is True
+        config = (home / ".git" / "config").read_text(encoding="utf-8")
+        assert "url = https://github.com/AIOSAI/AIPass.git" in config
+        assert "fetch = +refs/heads/*:refs/remotes/origin/*" in config
+        assert "file://" not in config
+
+    def test_a_checkout_with_no_origin_leaves_the_clone_as_it_is(self, tmp_path) -> None:
+        checkout = self._checkout(tmp_path, None)
+        home = tmp_path / "AIPass"
+        with patch.object(_install.console, "print"):
+            assert _install._clone_repo(home, dry_run=False, source=checkout.as_uri()) is True
+        assert f"url = {checkout.as_uri()}" in (home / ".git" / "config").read_text(encoding="utf-8")

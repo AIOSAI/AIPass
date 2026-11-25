@@ -23,7 +23,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 from aipass.cli import console, error, success, warning
 from aipass.aipass.apps.handlers.help_flag import wants_help
@@ -330,6 +330,8 @@ def _clone_repo(
         proc = subprocess.run(["git", "clone", "--depth", "1", source, str(home)], timeout=_CLONE_TIMEOUT)
         if proc.returncode == 0:
             _announce_cloned_branch(home)
+            if source.startswith("file://"):
+                _point_origin_upstream(home, Path(unquote(urlsplit(source).path)))
             return True
         # The user's line first: an unwritable log home must not swallow the last word.
         warning(f"git clone failed (exit {proc.returncode}) — git's own message is above. Check the network and retry.")
@@ -338,6 +340,27 @@ def _clone_repo(
         warning("git clone timed out.")
         logger.warning("[install] git clone timed out after %ss", exc.timeout)
     return False
+
+
+def _point_origin_upstream(home: Path, checkout: Path) -> None:
+    """A home cloned from a local checkout takes that checkout's origin, every branch fetched.
+
+    Left as cloned, origin is the checkout's directory and fetches one branch: the home
+    cannot sync or open a PR. A checkout with no origin keeps the clone as it is.
+    """
+    upstream = subprocess.run(
+        ["git", "-C", str(checkout), "remote", "get-url", "origin"], capture_output=True, text=True, timeout=30
+    )
+    url = upstream.stdout.strip()
+    if upstream.returncode != 0 or not url:
+        logger.info("[install] %s has no origin; the home's origin stays %s", checkout, checkout.as_uri())
+        return
+    for args in (
+        ["remote", "set-url", "origin", url],
+        ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"],
+    ):
+        subprocess.run(["git", "-C", str(home), *args], check=True, capture_output=True, text=True, timeout=30)
+    console.print(f"origin -> {_redact_url(url)} (the checkout's own), every branch fetched", markup=False)
 
 
 def _run_setup(
