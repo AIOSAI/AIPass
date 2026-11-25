@@ -21,7 +21,7 @@ with its fix step.
 | Form | What it does |
 |---|---|
 | `install` | The whole bootstrap into the default home, ending at the report |
-| `install --path DIR` / `--here` | Choose the install home |
+| `install --path DIR` / `--here` | Choose the install home: an absolute path or `~/name`, with no whitespace, quote or shell character (the home lands in shell rc lines and three providers' configs; only a plain path survives them all). A refused path exits 2 with the reason; the terminal prompt asks again |
 | `install --source PATH\|URL` | Clone AIPass from this path or URL instead of the public repo (a local path clones its committed HEAD; for the install sandbox) |
 | `install --non-interactive` | Headless: no questions, stdin closed for `setup.sh`, no pairing QR, the default home `~/AIPass` |
 | `install --yes` | Consent to the machine changes up front: passed to the doctor's settings write, and `AIPASS_YES=1` exported to `setup.sh` |

@@ -1166,6 +1166,27 @@ class TestCheckWireVerify:
         assert results[0].glyph == "[yellow]![/yellow]"
         assert "timed out" in results[0].detail
 
+    def test_a_wired_hook_that_cannot_run_fails_the_row_with_the_shells_error(self, tmp_path) -> None:
+        """Wiring that inspects clean but cannot execute is red, quoting sh.
+
+        Pins the container: AIPASS_HOME held a space, every hook died 'not found', doctor said pass.
+        Mutant: the hook never run -> drone @hooks verify answers instead -> red.
+        """
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        hook = {"type": "command", "command": "$AIPASS_HOME/.venv/bin/python3 bridge.py UserPromptSubmit"}
+        settings = {
+            "env": {"AIPASS_HOME": str(tmp_path / "no such") + " ~/.bashrc"},
+            "hooks": {"UserPromptSubmit": [{"hooks": [hook]}]},
+        }
+        (settings_dir / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+        with _home_at(tmp_path):
+            results = check_wire_verify()
+        assert len(results) == 1
+        assert results[0].glyph == "[red]✗[/red]"
+        assert results[0].detail.startswith("a wired hook cannot run: ")
+        assert "not found" in results[0].detail
+
 
 # =============================================================================
 # prompt_auto_wire — non-interactive stdin guard (issue #663)

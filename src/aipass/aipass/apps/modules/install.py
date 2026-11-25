@@ -15,6 +15,7 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -88,12 +89,25 @@ def _redact_url(url: str) -> str:
     return urlunsplit(parts._replace(netloc=parts.netloc.rsplit("@", 1)[1]))
 
 
+#: A home lands in shell rc lines, hook commands and three providers' configs; only a plain path survives them all.
+_UNSAFE_HOME = re.compile(r"[\s\"'`$&;|<>()\\*?!{}\[\]#]")
+
+
+def _checked_home(raw: str) -> Path:
+    """*raw* as a home path, or ValueError naming why: absolute or ~/..., no whitespace, quote or shell character."""
+    if not (raw.startswith("/") or raw.startswith("~/")):
+        raise ValueError(f"{raw!r} is not an absolute path or ~/...")
+    if _UNSAFE_HOME.search(raw[1:] if raw.startswith("~/") else raw):
+        raise ValueError(f"{raw!r} holds whitespace, a quote or a shell character")
+    return Path(raw).expanduser().resolve()
+
+
 def _resolve_home(path: str | None, here: bool, non_interactive: bool) -> Path:
     """Decide where AIPass lives — --here / --path / $AIPASS_HOME / cwd / prompt / default."""
     if here:
         return Path.cwd().resolve()
     if path:
-        return Path(path).expanduser().resolve()
+        return _checked_home(path)
     env_home = os.environ.get("AIPASS_HOME", "").strip()
     if env_home and _looks_like_aipass_tree(Path(env_home).expanduser()):
         return Path(env_home).expanduser().resolve()
@@ -105,8 +119,11 @@ def _resolve_home(path: str | None, here: bool, non_interactive: bool) -> Path:
             logger.info("[install] non-interactive: cwd is an AIPass tree, using %s", cwd)
             return cwd
         return DEFAULT_HOME.resolve()
-    raw = _prompt("Where should AIPass live?", str(DEFAULT_HOME))
-    return Path(raw).expanduser().resolve()
+    while True:
+        try:
+            return _checked_home(_prompt("Where should AIPass live?", str(DEFAULT_HOME)))
+        except ValueError as exc:
+            warning(f"Home refused: {exc}. Give an absolute path or ~/name.")
 
 
 def install_lock_path(home: Path) -> Path:
@@ -626,6 +643,9 @@ def run_finish(
         console.print()
         warning("Cancelled.")
         return 1
+    except ValueError as exc:
+        error(f"Home refused: {exc}. Give an absolute path or ~/name.")
+        return 2
     if not dry_run:
         _verify_binaries(home)
     return _finish(home, dry_run, non_interactive, yes=yes)
@@ -673,6 +693,9 @@ def run_install(
         console.print()
         warning("Cancelled.")
         return 1
+    except ValueError as exc:
+        error(f"Home refused: {exc}. Give an absolute path or ~/name.")
+        return 2
     console.print(f"  Home: [cyan]{home}[/cyan]")
     if source is not None:
         console.print(f"  Source: [cyan]{_redact_url(clone_from)}[/cyan]")

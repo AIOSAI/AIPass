@@ -45,6 +45,13 @@ One pass produces seven groups, in this order:
   registry and `aipass doctor --fix`, not the install),
   the provider manifest rows (hooks, env vars, permission
   rules, the settings scalars), the wire verification and stale deny rules.
+  `wire verify` executes before it inspects: it runs the first wired hook
+  command (UserPromptSubmit first) exactly as the provider settings hold it,
+  through `sh -c` with the settings' `env` and `{}` on stdin. Exit 126 or 127
+  is a FAIL quoting the shell's last error line, `a wired hook cannot run:
+  ...`; wiring that inspects clean but cannot execute (an `AIPASS_HOME` that
+  splits in the shell) never passes. Otherwise the row is `drone @hooks
+  verify`'s verdict. The install's Health check runs the same row.
 - **Community** — the mailbox is readable and `dropbox/` is writable.
 - **Structure** — agent placement, stray-file detection, the registry's paths
   (a registered citizen whose folder exists but whose `.trinity/passport.json`

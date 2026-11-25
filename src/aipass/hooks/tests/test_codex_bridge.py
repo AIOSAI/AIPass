@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.14.1
+# Version: 2.15.0
 # Description: Tests for Codex, OpenCode and Seed bridges: payload mapping, output envelope, apply_patch, fail closed
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-11-22
+# Modified: 2026-11-24
 # =============================================
 
 """Tests for bridges/codex.py, opencode.py and its plugin, seed.py, and the Claude bridge's safe mode (safe_mode.py)."""
@@ -578,7 +578,7 @@ const answers = { deny: '{"deny":"x"}', exit1: "", context: '{"context":"lint fi
 globalThis.Bun = {
   spawn(argv, opts) {
     const mode = argv.at(-1)
-    seen.push({ mode, sync: false, payload: JSON.parse(opts.stdin.toString()) })
+    seen.push({ mode, sync: false, argv, payload: JSON.parse(opts.stdin.toString()) })
     const code = mode === "exit1" ? 1 : 0
     return {
       stdout: new Response(answers[mode]).body,
@@ -602,7 +602,7 @@ const cases = [
   ["context", "PostToolUse", "execute.after"],
 ]
 for (const [mode, event, hook] of cases) {
-  const rows = [{ event, command: `py bridge ${mode}` }]
+  const rows = [{ event, command: `"$AIPASS_HOME/py" "$AIPASS_HOME/bridge" ${mode}` }]
   writeFileSync(join(home, ".claude", "provider_manifest.json"), JSON.stringify({ cli: { opencode: { hooks: rows } } }))
   const hooks = {}
   const ctx = {
@@ -701,7 +701,7 @@ class TestOpenCodePlugin:
             "--experimental-strip-types",
             str(harness),
             str(plugin),
-            str(tmp_path / "home"),
+            str(tmp_path / "aipass home"),
         ]
         done = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", timeout=60)
         assert done.returncode == 0, done.stderr
@@ -719,6 +719,11 @@ class TestOpenCodePlugin:
         tool_calls = [s for s in doc["seen"] if s["mode"] != "stop"]
         # The memory tripwire pairs a call's PreToolUse snapshot with its PostToolUse check by this id.
         assert [(s["payload"]["tool_use_id"], s["sync"]) for s in tool_calls] == [("call_1", False)] * 3
+        # A manifest row quotes each $AIPASS_HOME word for sh; the plugin runs no shell, so it unquotes them.
+        home = tmp_path / "aipass home"
+        assert [s["argv"] for s in tool_calls] == [
+            [f"{home}/py", f"{home}/bridge", m] for m in ("deny", "exit1", "context")
+        ]
         # A standalone run exits on idle before an awaited spawn finishes: Stop must run synchronously.
         assert [(s["mode"], s["sync"], s["payload"]["hook_event_name"]) for s in doc["seen"][3:]] == [
             ("stop", True, "Stop")

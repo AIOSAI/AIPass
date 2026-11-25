@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_wire_verify.py
-# Version: 1.10.0
+# Version: 1.11.0
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
-# Modified: 2026-11-18
+# Modified: 2026-11-24
 # =============================================
 
 """Tests for apps/modules/wire_verify.py."""
@@ -16,11 +16,14 @@
 # sentry: no-test-needed(stdlib) — json.loads' parsing of the settings file, the stdlib's own
 
 import json
+import os
+import subprocess
 from unittest.mock import patch
 
 import pytest
 
 from aipass.hooks.apps.handlers.config import codex_trust
+from aipass.hooks.apps.handlers.config.loader import aipass_home
 from aipass.hooks.apps.modules import wire_verify
 
 _BRIDGE_CMD = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py"
@@ -108,6 +111,33 @@ def _approve(codex_path):
     return codex_path
 
 
+class TestManifestRowsInASpacedHome:
+    """doctor copies each manifest row verbatim into the provider's settings, where sh -c runs it."""
+
+    @pytest.mark.parametrize("cli", ["claude", "codex", "opencode"])
+    def test_every_row_hands_its_bridge_the_event_whole(self, tmp_path, cli):
+        root = aipass_home()
+        assert root is not None
+        manifest = json.loads((root / ".claude" / "provider_manifest.json").read_text(encoding="utf-8"))
+        home = tmp_path / "aipass home"
+        python = home / ".venv" / "bin" / "python3"
+        python.parent.mkdir(parents=True)
+        python.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n', encoding="utf-8")
+        python.chmod(0o755)
+        env = {**os.environ, "AIPASS_HOME": str(home)}
+        rows = manifest["cli"][cli]["hooks"]
+        assert rows
+        for row in rows:
+            # shell=True is /bin/sh -c, what a provider runs; the test env's PATH may hold no sh.
+            done = subprocess.run(
+                row["command"], shell=True, env=env, capture_output=True, text=True, encoding="utf-8", timeout=10
+            )
+            assert done.returncode == 0, (row["command"], done.stderr)
+            bridge, event = done.stdout.splitlines()
+            assert bridge == f"{home}/src/aipass/hooks/apps/handlers/bridges/{cli}.py", row["command"]
+            assert event.split(":", 1)[0] == row["event"], row["command"]
+
+
 def _never_fires(event: str, hook: str) -> str:
     return f"{event}:{hook}: enabled in project config but no provider bridge entry — handler never fires"
 
@@ -116,6 +146,12 @@ class TestExtractBridgeArg:
     def test_filtered_arg(self, tmp_path):
         provider = {"UserPromptSubmit": [_provider_entry("UserPromptSubmit:tier0_kernel")]}
         result = _verify(tmp_path, provider, {"UserPromptSubmit": {"tier0_kernel": _ENABLED}})
+        assert result == {"errors": [], "warnings": [], "info": [_PRETOOL_INFO], "ok": True}
+
+    def test_a_row_with_quoted_words_wires_its_handler(self, tmp_path):
+        quoted = " ".join(f'"{word}"' for word in _BRIDGE_CMD.split())
+        entry = {"hooks": [{"type": "command", "command": f"{quoted} UserPromptSubmit:tier0_kernel"}]}
+        result = _verify(tmp_path, {"UserPromptSubmit": [entry]}, {"UserPromptSubmit": {"tier0_kernel": _ENABLED}})
         assert result == {"errors": [], "warnings": [], "info": [_PRETOOL_INFO], "ok": True}
 
     def test_unfiltered_arg(self, tmp_path):

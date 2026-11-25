@@ -170,6 +170,28 @@ class TestResolveHome:
         target = tmp_path / "tools" / "aipass"
         assert _resolve_home(str(target), here=False, non_interactive=False) == target.resolve()
 
+    def test_tilde_path_expands_to_the_user_home(self, tmp_path: Path) -> None:
+        """--path ~/name lands under $HOME, never a literal '~' directory."""
+        with patch.dict("os.environ", {"HOME": str(tmp_path)}):
+            assert _resolve_home("~/aipass", here=False, non_interactive=True) == (tmp_path / "aipass").resolve()
+
+    @pytest.mark.parametrize("raw", ["/srv/aipass source ~/.bashrc", "/opt/a$b", "relative/dir", "/opt/it's"])
+    def test_a_home_that_splits_in_the_shell_or_is_relative_is_refused(self, raw: str) -> None:
+        """Pins the container: a home with a space split every hook command ('not found').
+
+        Mutant: no character check -> red.
+        """
+        with pytest.raises(ValueError):
+            _resolve_home(raw, here=False, non_interactive=True)
+
+    def test_the_prompt_asks_again_after_a_refused_home(self, tmp_path: Path) -> None:
+        """On a terminal a refused answer re-asks; the next plain path is taken."""
+        good = str(tmp_path / "aipass")
+        with patch("aipass.aipass.apps.modules.install._prompt", side_effect=["/srv/aipass source", good]) as ask:
+            with patch.dict("os.environ", {"AIPASS_HOME": ""}, clear=False):
+                assert _resolve_home(None, here=False, non_interactive=False) == Path(good).resolve()
+        assert ask.call_count == 2
+
     def test_non_interactive_defaults(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """From an ordinary directory, non-interactive still falls back to DEFAULT_HOME.
 
@@ -321,6 +343,7 @@ class TestInstallLock:
         """Mutant: the no-drone guard dropped -> the run fails on the missing file, another warning -> red."""
         home = tmp_path / "AIPass"
         lock = acquire_install_lock(home)
+        assert lock is not None
         with patch(_BUS) as bus, patch(f"{_MOD}.subprocess.run", wraps=_sp.run) as run:
             release_install_lock(lock)
         bus.fire.assert_not_called()
@@ -1065,8 +1088,8 @@ class TestInstallReport:
     def test_the_final_screen_lists_each_row_then_the_report_then_one_quoted_wake_line(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
-        """Mutant: the path not shlex-quoted -> a home with a space breaks the cd -> red."""
-        home = tmp_path / "my home"
+        """The wake line cds into the home: shlex-quoted, though the install refuses a home that needs it."""
+        home = tmp_path / "my-home"
         home.mkdir()
         rc, out, _err = _finish(home, monkeypatch, capsys)
 
@@ -1256,7 +1279,7 @@ class TestHealthCheck:
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
         """Mutant: the returncode check dropped -> the missing rows file is the detail, not the exit -> red."""
-        home = tmp_path / "my home"
+        home = tmp_path / "my-home"
         home.mkdir()
         monkeypatch.setattr(_sp, "run", lambda argv, **_kw: _sp.CompletedProcess(argv, 3))
         rc = run_finish(non_interactive=True, path=str(home))
