@@ -27,6 +27,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from aipass.cli import console, error, success, warning
 from aipass.aipass.apps.handlers.help_flag import wants_help
+from aipass.aipass.apps.handlers import provider_choice
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.baud import LATEST, FetchError, validate_tag
@@ -48,7 +49,7 @@ _DOCTOR_TIMEOUT = 600
 NON_INTERACTIVE_ENV = "AIPASS_NON_INTERACTIVE"
 # Exported under --yes: consent to setup.sh's machine changes, given up front.
 YES_ENV = "AIPASS_YES"
-_WAKE_PROMPT = (
+WAKE_PROMPT = (
     "Read dropbox/install_report.json: a fresh AIPass install. "
     "Greet me by name, then walk me through each attention item."
 )
@@ -482,7 +483,7 @@ def install_report_path(home: Path) -> Path:
 def wake_command(home: Path) -> str:
     """The one line that wakes devpulse on the report."""
     devpulse = install_report_path(home).parent.parent
-    return f'cd {shlex.quote(str(devpulse))} && claude "{_WAKE_PROMPT}"'
+    return f'cd {shlex.quote(str(devpulse))} && claude "{WAKE_PROMPT}"'
 
 
 def _aipass_version() -> str:
@@ -662,8 +663,9 @@ def run_install(
     baud_tag: str = LATEST,
     source: str | None = None,
     yes: bool = False,
+    provider: str | None = None,
 ) -> int:
-    """Run the 5-step one-command install. Returns 0 on success, 1 on failure.
+    """Run the 5-step one-command install, then the provider question. Returns 0 on success, 1 on failure.
 
     A bad ``baud_tag`` or ``source`` is refused with 2 (bad usage) before anything is cloned.
     """
@@ -765,7 +767,17 @@ def run_install(
         },
     )
 
-    return _finish(home, dry_run, non_interactive, last_print=phone_print, yes=yes, failed=failed)
+    result = _finish(home, dry_run, non_interactive, last_print=phone_print, yes=yes, failed=failed)
+    ending = provider_choice.run_ending(
+        provider,
+        home,
+        WAKE_PROMPT,
+        non_interactive=non_interactive,
+        dry_run=dry_run,
+        prompt=input,
+        say=lambda line: console.print(line, markup=False, highlight=False),
+    )
+    return result or ending
 
 
 def print_help() -> None:
@@ -790,6 +802,10 @@ def print_help() -> None:
     console.print(
         "  [green]aipass install --source PATH|URL[/green]   [dim]# clone AIPass from this path or URL instead of the"
         " public repo (a local path clones its committed HEAD; for the install sandbox)[/dim]"
+    )
+    console.print(
+        "  [green]aipass install --provider NAME[/green]    [dim]# claude|codex|opencode: answer the last question"
+        " headless (install it if missing, wire it, open devpulse in it)[/dim]"
     )
     console.print("  [green]aipass install --no-symlink[/green]         [dim]# skip global CLI symlinks[/dim]")
     console.print("  [green]aipass install --force-symlink[/green]      [dim]# repoint from another install[/dim]")
@@ -841,7 +857,7 @@ _SWITCHES = (
     "--non-interactive", "--yes", "--dry-run", "--here", "--finish",
     "--no-symlink", "--force-symlink", "--no-baud", "--force-global-home",
 )  # fmt: skip
-_VALUE_FLAGS = ("--path", "--baud-tag", "--source")
+_VALUE_FLAGS = ("--path", "--baud-tag", "--source", "--provider")
 
 
 def _unknown_args(args: list[str]) -> list[str]:
@@ -888,6 +904,10 @@ def handle_command(command: str, args: list[str]) -> bool:
     baud_tag = _flag_value(args, "--baud-tag")
     baud_tag = LATEST if baud_tag is None else baud_tag
     source = _flag_value(args, "--source")
+    provider = _flag_value(args, "--provider")
+    if provider is not None and provider not in provider_choice.PROVIDERS:
+        error(f"--provider takes one of: {', '.join(provider_choice.ORDER)}")
+        sys.exit(2)
 
     if finish:
         result = run_finish(non_interactive=non_interactive, path=path, here=here, dry_run=dry_run, yes=yes)
@@ -903,6 +923,7 @@ def handle_command(command: str, args: list[str]) -> bool:
             baud_tag=baud_tag,
             source=source,
             yes=yes,
+            provider=provider,
         )
     json_handler.log_operation(
         "install_run",

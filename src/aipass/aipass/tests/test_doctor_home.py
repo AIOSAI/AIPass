@@ -508,7 +508,7 @@ class TestRunDoctorPreflight:
         }
         with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups) as compute:
             assert run_doctor_preflight(yes=True) == (groups, (1, 1, 1))
-        compute.assert_called_once_with(fix=True, door="install", yes=True)
+        compute.assert_called_once_with(fix=True, door="install", yes=True, install=True)
 
 
 class TestDroneCitizenCount:

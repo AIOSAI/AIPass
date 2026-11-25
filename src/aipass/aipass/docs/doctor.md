@@ -181,13 +181,20 @@ safety gates on git, edits and rm, no standards checks on edits; it names
 `aipass doctor --fix` to wire them later, and the row says
 `not applied: declined`. With no terminal to ask on, `doctor --fix` writes
 nothing and its row says `not applied: no tty — aipass doctor --fix --yes`;
-`--yes` writes without the question. The install's Health check runs the same
-step, its wire receipt naming the door `install`: it asks on a terminal, `aipass install --yes`
-writes without the question, and with no terminal and no `--yes` it writes nothing and its row says
-`not applied: no tty`, naming `aipass doctor --fix --yes`. `--yes` alone decides consent. Each receipt records the door and the consent,
-`y (tty)` or `--yes`. The install runs it as `aipass doctor --fix --rows-json PATH`
-in the home: the same run, then every non-pass row and the counts written to PATH
-as JSON for the install report; the install passes `--yes` only when it was given `--yes`. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
+`--yes` writes without the question. The install's Health check, `aipass doctor
+--fix --rows-json PATH` in the home, is install mode: it writes no provider
+settings, even with `--yes`, has no `claude code` row in System, and shows each
+installed CLI as one information row (the ok glyph), `not chosen: aipass
+provider <name>`, because the pick at the install's end wires the chosen one.
+Every non-pass row and the counts go to PATH as JSON for the install report.
+
+Once the install report (`src/aipass/devpulse/dropbox/install_report.json`
+under `$AIPASS_HOME`, else the working directory) records `provider`, every run
+checks only that CLI's rows (Claude: hooks, env vars, permissions, global
+settings, wire verify; the `codex ...` and `opencode ...` rows by name); each
+other installed CLI is one `not chosen` information row and never red. With no
+provider recorded, `doctor` and `doctor --fix` check and wire every installed
+CLI. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
 [`apps/handlers/provider_reconcile.py`](../apps/handlers/provider_reconcile.py)
 and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 

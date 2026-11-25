@@ -1293,9 +1293,13 @@ class TestPromptAutoWireIsatty:
 class TestPreflightWireDoor:
     """The install tail's doctor preflight wires the settings file under the install door (FPLAN-0645)."""
 
-    def test_the_preflight_backs_up_under_the_install_door_and_prints_both_paths(
-        self, tmp_path, monkeypatch, capsys
+    def test_the_install_preflight_writes_no_provider_settings_and_sets_every_installed_cli_aside(
+        self, tmp_path, monkeypatch
     ) -> None:
+        """The pick at the install's end is wired there, never by its health check, even with a yes.
+
+        Mutant: the preflight wires as a plain --fix does -> a backup appears -> red.
+        """
         # Every group but the provider wire is stubbed and HOME is tmp_path: no live state is read or written.
         mod = "aipass.aipass.apps.modules.doctor"
         stubbed = ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold")
@@ -1311,18 +1315,46 @@ class TestPreflightWireDoor:
         (tmp_path / ".claude" / "settings.json").write_text(json.dumps({"env": {}}), encoding="utf-8")
         monkeypatch.setattr(f"{mod}._find_manifest", lambda: manifest)
 
-        with patch("sys.stdin", _Stdin("y\n", tty=True)), _home_at(tmp_path):
-            run_doctor_preflight()
+        monkeypatch.setattr(f"{mod}._check_system", lambda: [CheckResult("claude code", GLYPH_PASS, "2.1.332", "")])
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
+        installed = {"claude": "/bin/claude", "codex": "/bin/codex"}
+        with (
+            patch("aipass.aipass.apps.handlers.provider_choice.cli_path", side_effect=installed.get),
+            patch("sys.stdin", _Stdin("y\n", tty=True)),
+            _home_at(tmp_path),
+        ):
+            groups, _counts = run_doctor_preflight(yes=True)
 
-        folder = tmp_path / ".claude" / ".backup" / "settings"
-        lines = (folder / "receipts.jsonl").read_text(encoding="utf-8").splitlines()
-        assert [json.loads(line)["door"] for line in lines] == ["install"]
-        (backup,) = [p for p in folder.iterdir() if p.name != "receipts.jsonl"]
-        assert backup.name.endswith(".install")
-        # Rich may wrap a long tmp path: compare with all whitespace collapsed.
-        out = "".join(capsys.readouterr().out.split())
-        assert "".join(f"Backed up settings to {backup}".split()) in out
-        assert "".join(f"Receipt: {folder / 'receipts.jsonl'}".split()) in out
+        assert not (tmp_path / ".claude" / ".backup").exists()
+        assert [r.label for r in groups["System"]] == []
+        info = [(r.label, r.glyph, r.detail) for r in groups["Services"] if r.detail.startswith("not chosen")]
+        assert info == [
+            ("claude", GLYPH_PASS, "not chosen: aipass provider claude"),
+            ("codex", GLYPH_PASS, "not chosen: aipass provider codex"),
+        ]
+
+    def test_a_recorded_provider_is_checked_and_the_others_read_as_information(self, tmp_path, monkeypatch) -> None:
+        """After the pick, every run: the chosen CLI's rows stay, an unchosen one's become one info row.
+
+        Mutant: the report's provider ignored -> the codex row stays -> red.
+        """
+        mod = "aipass.aipass.apps.modules.doctor"
+        report = tmp_path / "src" / "aipass" / "devpulse" / "dropbox" / "install_report.json"
+        report.parent.mkdir(parents=True)
+        report.write_text(json.dumps({"provider": "claude"}), encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
+        for name in ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        rows = [CheckResult("hooks", GLYPH_PASS, "wired", ""), CheckResult("codex hooks", GLYPH_WARN, "missing", "x")]
+        monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: list(rows))
+        groups: dict = {}
+        with (
+            patch("aipass.aipass.apps.handlers.provider_choice.cli_path", side_effect={"codex": "/bin/codex"}.get),
+            patch(f"{mod}._print_doctor_groups", side_effect=lambda g: groups.update(g) or (0, 0, 0)),
+        ):
+            run_doctor()
+        labels = [(r.label, r.detail) for r in groups["Services"]]
+        assert labels == [("hooks", "wired"), ("codex", "not chosen: aipass provider codex")]
 
 
 class TestDoctorFixAsks:
@@ -1431,9 +1463,7 @@ class TestDoctorFixAsks:
         with patch("sys.stdin", stdin), _home_at(tmp_path):
             groups, _counts = run_doctor_preflight()
 
-        (row,) = [r for r in groups["Services"] if r.label == _doctor_wire.SETTINGS_FIX_LABEL]
-        expected = (GLYPH_WARN, _doctor_wire.NOT_APPLIED_NO_TTY, "aipass doctor --fix --yes")
-        assert (row.glyph, row.detail, row.remediation) == expected
+        assert not [r for r in groups["Services"] if r.label == _doctor_wire.SETTINGS_FIX_LABEL]
         assert settings.read_bytes() == original
         assert stdin.read() == "y\n"
 

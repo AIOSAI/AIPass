@@ -395,18 +395,18 @@ confirm_machine_changes() {
         MACHINE_CHANGES="no"
         echo ""
         echo "  Machine changes skipped: no terminal to ask on and no --yes counts as no."
-        ACTION_NEEDED+=("Machine changes skipped (no --yes): hooks, shell rc, AIPASS_HOME, symlinks. Run: aipass install --yes, or $SCRIPT_DIR/setup.sh on a terminal")
+        ACTION_NEEDED+=("Machine changes skipped (no --yes): shell rc, AIPASS_HOME, symlinks. Run: aipass install --yes, or $SCRIPT_DIR/setup.sh on a terminal")
         return 0
     fi
     echo ""
     echo "Setup now changes these things outside $SCRIPT_DIR:"
-    echo "  - ~/.claude/settings.json: AIPass hooks, env and deny rules (backed up first)"
-    echo "  - ~/.claude/commands/memo.md"
-    echo "  - ~/.bashrc and ~/.zshrc: a claude() shell function (the boot shim). In a branch dir (one with .trinity/),"
-    echo "    a bare 'claude' boots the AIPass session instead of plain Claude Code; every other claude call passes through"
     echo "  - ~/.bashrc: AIPASS_HOME, and a PATH line if needed; ~/.profile: AIPASS_HOME"
-    echo "  - Codex hooks and config pins, the OpenCode plugin (only if they are installed)"
     echo "  - drone/aipass symlinks in /usr/local/bin (sudo) or ~/.local/bin"
+    echo "No provider is wired now. At the end of the install you pick one, and only it is wired:"
+    echo "  - Claude Code: ~/.claude/settings.json (hooks, env, deny rules; backed up first), ~/.claude/commands/memo.md,"
+    echo "    and a claude() shell function in ~/.bashrc and ~/.zshrc (the boot shim)"
+    echo "  - Codex: \$CODEX_HOME/hooks.json (else ~/.codex/hooks.json) and four pins in its config.toml"
+    echo "  - OpenCode: the AIPass plugin in its config dir (~/.config/opencode)"
     echo "Nothing above is written until you answer. With no terminal and no --yes, the answer is no."
     local answer=""
     read -r -p "Make these changes? [Y/n]: " answer || answer="n"
@@ -415,10 +415,9 @@ confirm_machine_changes() {
     esac
     MACHINE_CHANGES="no"
     echo "  Skipped. Until you run $SCRIPT_DIR/setup.sh again and answer yes:"
-    echo "    - Claude Code, Codex and OpenCode run without AIPass hooks: no memory injection, no gates"
     echo "    - 'drone' and 'aipass' are not on PATH: use $SCRIPT_DIR/.venv/bin/drone"
     echo "    - projects outside this checkout cannot find it (no AIPASS_HOME in your shell)"
-    ACTION_NEEDED+=("Machine changes skipped (hooks, shell rc, symlinks): run $SCRIPT_DIR/setup.sh and answer yes to make them")
+    ACTION_NEEDED+=("Machine changes skipped (shell rc, symlinks): run $SCRIPT_DIR/setup.sh and answer yes to make them")
 }
 confirm_machine_changes
 
@@ -427,103 +426,9 @@ LINUX_SYMLINK_DIR=""
 # === Gated block start: runs only when MACHINE_CHANGES=yes (not re-indented: heredocs) ===
 if [ "$MACHINE_CHANGES" = "yes" ]; then
 
-# --- Install Claude Code hooks ---
-# One door writes ~/.claude/settings.json at install: refresh_provider_hooks below
-# (hooks, env, permissions, scalars), which backs the file up and leaves a receipt
-# first (FPLAN-0645). The stdlib heredoc that used to rewrite env and deny rules
-# after it, with no backup, is gone.
-
-if [ -f "$SCRIPT_DIR/src/aipass/hooks/apps/handlers/bridges/claude.py" ]; then
-    echo "Installing Claude Code hooks ..."
-    mkdir -p "$HOME/.claude"
-
-    "$VENV_PYTHON" - "$SCRIPT_DIR/.claude/provider_manifest.json" << 'PYEOF'
-import sys
-from pathlib import Path
-
-from aipass.aipass.apps.handlers.provider_wire import refresh_provider_hooks
-
-manifest_path = Path(sys.argv[1])
-actions = refresh_provider_hooks(manifest_path)
-for action in actions:
-    print(f"  {action}")
-PYEOF
-else
-    echo "Skipping Claude hooks (bridge not found at src/aipass/hooks/apps/handlers/bridges/claude.py)"
-fi
-
-# --- Install claude() boot shim (attach-if-live / start-in-tmux) ---
-# Ships via the .gitignore negation (#666). Idempotent: the installer checks for
-# its marker before appending to the shell rc, and resolves the venv Python from
-# its own location. Composes with presence_gate seeding.
-BOOT_SHIM="$SCRIPT_DIR/src/aipass/hooks/tools/install_boot_shim.sh"
-if [ -f "$BOOT_SHIM" ]; then
-    echo "Installing claude() boot shim ..."
-    bash "$BOOT_SHIM" || echo "  boot shim install skipped (non-fatal)"
-fi
-
-# --- Install Claude Code commands (provider level) ---
-# memo.md belongs at provider level — works in all projects.
-# prep.md stays at repo root only — it's AIPass-specific.
-COMMANDS_SRC="$SCRIPT_DIR/.claude/templates"
-COMMANDS_DST="$HOME/.claude/commands"
-if [ -f "$COMMANDS_SRC/memo.md" ]; then
-    mkdir -p "$COMMANDS_DST"
-    if [ -e "$COMMANDS_DST/memo.md" ]; then
-        echo "  memo.md -> $COMMANDS_DST/ (already exists, skipped)"
-    elif cp "$COMMANDS_SRC/memo.md" "$COMMANDS_DST/memo.md"; then
-        echo "  memo.md -> $COMMANDS_DST/ (installed)"
-    else
-        echo "  memo.md -> $COMMANDS_DST/ FAILED (see the error above)"
-        ACTION_NEEDED+=("/memo command not installed: cp $COMMANDS_SRC/memo.md $COMMANDS_DST/memo.md")
-    fi
-fi
-
-# --- Install Codex CLI hooks ---
-# One door, the code `aipass doctor --fix` runs for the hooks: cli.codex merged into the
-# user-level $CODEX_HOME/hooks.json (else ~/.codex/hooks.json), then the four config pins set
-# line by line in config.toml, every other line (the owner's model among them) kept.
-if command -v codex &>/dev/null; then
-    echo "Installing Codex CLI hooks ..."
-    if "$VENV_PYTHON" - "$SCRIPT_DIR/.claude/provider_manifest.json" << 'PYEOF'
-import sys
-from pathlib import Path
-
-from aipass.aipass.apps.handlers.provider_wire import refresh_codex
-
-for action in refresh_codex(Path(sys.argv[1])):
-    print(f"  {action}")
-PYEOF
-    then
-        echo "  Trust them once: run codex and choose 'Trust all and continue' (headless runs skip untrusted hooks)."
-    else
-        echo "  Codex hooks NOT installed (see the error above); run aipass doctor for the Codex rows."
-    fi
-else
-    echo "Skipping Codex CLI (not installed)"
-fi
-
-# --- Install the OpenCode plugin (the `aipass doctor --fix` door: backup, byte-equal copy, receipt) ---
-# The curl installer puts opencode in ~/.opencode/bin, on PATH only through ~/.bashrc.
-if command -v opencode &>/dev/null || [ -x "$HOME/.opencode/bin/opencode" ]; then
-    echo "Installing the OpenCode plugin ..."
-    if "$VENV_PYTHON" - "$SCRIPT_DIR/.claude/provider_manifest.json" << 'PYEOF'
-import sys
-from pathlib import Path
-
-from aipass.aipass.apps.handlers.provider_wire import install_opencode_plugin
-
-for action in install_opencode_plugin(Path(sys.argv[1])):
-    print(f"  {action}")
-PYEOF
-    then
-        :
-    else
-        echo "  OpenCode plugin NOT installed (see the error above); run aipass doctor for the OpenCode rows."
-    fi
-else
-    echo "Skipping OpenCode (not installed)"
-fi
+# --- Provider wiring is not setup's ---
+# Claude Code, Codex and OpenCode are wired at the end of `aipass install`, only the one
+# the user picks (`aipass provider <name>` later); `aipass doctor --fix` still wires any installed.
 
 # --- Set AIPASS_HOME + PATH so all services work from any project ---
 echo ""

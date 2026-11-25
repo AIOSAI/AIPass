@@ -15,23 +15,27 @@ It is a command-line program for humans, not a service for other programs:
 aipass                              # the live list of commands
 aipass doctor                       # is this machine wired correctly?
 aipass doctor --fix                 # repair commands, and the settings change asked once
+aipass provider codex               # install (if missing), wire and open devpulse in one CLI
 aipass read <branch>                # read one component's page in the terminal
 aipass init <dir> [name]            # scaffold a project in <dir>
 ```
 
 ## What It Does
 
-**Install.** `aipass install` is the one-command bootstrap in five steps: home,
-`setup.sh`, verify, phone face + baud-cli, and a health check that runs the full
-doctor with its fix step. The provider settings change is shown and asked once
-on a terminal; `--yes` gives that consent up front and exports `AIPASS_YES=1`
-to `setup.sh`. With no terminal, or `--non-interactive` without `--yes`, nothing
-is written and the row names `aipass doctor --fix --yes`. The install ends on a final screen:
-`AIPass installed at <home>` and every row that is not a pass, including what
-`setup.sh` left in `<home>/.aipass/setup_attention.txt`. It writes that list to
-`<home>/src/aipass/devpulse/dropbox/install_report.json`, prints one command
-that wakes devpulse on the report, and launches nothing. `aipass install --finish`
-is that last step alone, the doctor and the report; `setup.sh` ends with it.
+**Install.** `aipass install` is one command, one consent and one choice. It
+asks where AIPass should live, shows what it changes outside the home (shell rc
+lines and symlinks) and asks once (`--yes` answers up front), then clones,
+runs `setup.sh`, verifies, installs the phone face + baud-cli and runs a
+health check. No AI CLI is touched until the end. The final screen lists every
+row that is not a pass and writes them to
+`<home>/src/aipass/devpulse/dropbox/install_report.json`. Then one question:
+Claude Code, Codex or OpenCode, each marked `installed` when it is on this
+machine. A missing one is installed with its vendor's installer, only the
+chosen one is wired, and devpulse opens in it on the install greeting.
+`--provider claude|codex|opencode` answers the question headless;
+`--non-interactive` without it installs no CLI and prints the three
+`aipass provider <name>` lines, the same ending callable any time.
+`aipass install --finish` is the health check and the report alone; `setup.sh` ends with it.
 A phone face that was asked for (no `--no-baud`) and did not install fails the
 install: the final screen says a requested step failed, the report records
 `"outcome": "step_failed"` and `"failed_steps": ["phone face"]`, and the exit is 1. The health check runs the

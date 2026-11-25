@@ -1133,10 +1133,10 @@ class TestInstallReport:
         assert [argv for argv in argvs if "claude" in " ".join(map(str, argv))] == []
         assert install_report_path(home).is_file()
 
-    def test_a_non_interactive_install_writes_no_settings_and_shows_the_warn_row(
+    def test_a_non_interactive_install_writes_no_settings_and_has_no_settings_row(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
-        """Mutants: the install door's old auto-consent; stdin not closed -> the settings file is rewritten -> red."""
+        """The provider is wired at the install's end, never by its health check. Mutant: settings written -> red."""
         settings = _doctor_world(tmp_path, monkeypatch)
         original = settings.read_bytes()
         home = tmp_path / "AIPass"
@@ -1148,15 +1148,13 @@ class TestInstallReport:
         attention = json.loads(install_report_path(home).read_text(encoding="utf-8"))["attention"]
         assert exc.value.code == 0
         assert settings.read_bytes() == original
-        assert f"  warning: settings fix: {NOT_APPLIED_NO_TTY} -> aipass doctor --fix --yes" in out.splitlines()
-        assert {"label": "settings fix", "detail": NOT_APPLIED_NO_TTY} in [
-            {"label": a["label"], "detail": a["detail"]} for a in attention
-        ]
+        assert NOT_APPLIED_NO_TTY not in out
+        assert "settings fix" not in [a["label"] for a in attention]
 
-    def test_a_declined_install_warns_what_will_not_work_and_names_the_fix(
+    def test_the_install_health_check_never_asks_the_settings_question(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
-        """Mutant: the old header-only warning on decline -> the what-will-not-work line is missing -> red."""
+        """No question, no write, no declined warning: the pick at the end wires. Mutant: the preflight asks -> red."""
         settings = _doctor_world(tmp_path, monkeypatch)
         original = settings.read_bytes()
         home = tmp_path / "AIPass"
@@ -1167,8 +1165,7 @@ class TestInstallReport:
         err = " ".join(capsys.readouterr().err.split())
         assert rc == 0
         assert settings.read_bytes() == original
-        assert " ".join(DECLINED_WARNING.split()) in err
-        assert "Wire them later: aipass doctor --fix" in err
+        assert " ".join(DECLINED_WARNING.split()) not in err
 
     def test_an_unwritable_dropbox_is_a_loud_error_exit_1_and_no_wake_line(
         self, tmp_path: Path, monkeypatch, capsys

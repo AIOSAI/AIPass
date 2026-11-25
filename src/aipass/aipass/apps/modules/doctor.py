@@ -20,6 +20,7 @@ from typing import Dict, List, NamedTuple, Optional
 
 from rich.text import Text
 from aipass.cli import console, error as cli_error
+from aipass.aipass.apps.handlers import provider_choice
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
@@ -1121,8 +1122,12 @@ def _compute_doctor_groups(
     fix: bool = False,
     door: str = DOOR_DOCTOR_FIX,
     yes: bool = False,
+    install: bool = False,
 ) -> Dict[str, List[CheckResult]]:
     """Run all six check groups (optionally auto-fixing). Returns them by group name.
+
+    *install* (the install's health check) writes no provider settings: the provider picked at the
+    install's end is wired there, and every other installed CLI reads as information.
 
     With *fix*, the settings step shows its plan and asks once before writing: *yes* skips
     the question (no tty and no *yes* writes nothing), and *door* names the writer in the
@@ -1149,7 +1154,11 @@ def _compute_doctor_groups(
             progress.remove_task(task_id)
 
     if fix:
-        settings_rows = [CheckResult(*row) for row in fix_provider_settings(_find_manifest(), door=door, yes=yes)]
+        settings_rows = (
+            []
+            if install
+            else [CheckResult(*row) for row in fix_provider_settings(_find_manifest(), door=door, yes=yes)]
+        )
         manifest_results = check_provider_manifest()
         if manifest_results:
             groups["Services"] = merge_manifest_rows(groups.get("Services", []), manifest_results)
@@ -1211,6 +1220,26 @@ def _compute_doctor_groups(
             structure = [r for r in groups.get("Structure", []) if not r.label.startswith("instruction shadow")]
             groups["Structure"] = structure + shadow_fix
 
+    return _set_aside_unchosen(groups, install)
+
+
+def _set_aside_unchosen(groups: Dict[str, List[CheckResult]], install: bool) -> Dict[str, List[CheckResult]]:
+    """Check only the chosen provider's rows; each other installed CLI is one info row.
+
+    The choice is the install report's `provider`. With none recorded, a plain run checks every
+    provider as before, and the install's own check (the pick still to come) sets all of them aside.
+    """
+    chosen = provider_choice.chosen_provider(Path(os.environ.get("AIPASS_HOME") or Path.cwd()))
+    if chosen is None and not install:
+        return groups
+    if install:
+        groups["System"] = [r for r in groups.get("System", []) if r.label != "claude code"]
+    aside = [key for key in provider_choice.ORDER if key != chosen]
+    services = [r for r in groups.get("Services", []) if provider_choice.row_provider(r.label) not in aside]
+    for key in aside:
+        if provider_choice.cli_path(key):
+            services.append(CheckResult(key, GLYPH_PASS, f"not chosen: aipass provider {key}", ""))
+    groups["Services"] = services
     return groups
 
 
@@ -1302,7 +1331,7 @@ def run_doctor_preflight(
     console.print("[bold cyan]Running aipass doctor --fix...[/bold cyan]")
     console.print()
 
-    groups = _compute_doctor_groups(fix=True, door=DOOR_INSTALL, yes=yes)
+    groups = _compute_doctor_groups(fix=True, door=DOOR_INSTALL, yes=yes, install=True)
     counts = _print_doctor_groups(groups)
     logger.info("[doctor] install health check complete — pass=%d warn=%d error=%d", *counts)
     return groups, counts

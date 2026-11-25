@@ -3,7 +3,7 @@
 # Description: Tests for provider_wire — hook merges per CLI, backup and receipt first; doctor's codex, opencode rows
 # Version: 1.12.0
 # Created: 2026-08-01
-# Modified: 2026-11-14
+# Modified: 2026-11-24
 # =============================================
 
 """Tests for apps/handlers/provider_wire.py and the manifest-driven hook merge it drives."""
@@ -28,7 +28,7 @@ import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.tests.support_doctor import _home_at
 
-from aipass.aipass.apps.handlers import opencode_cli, provider_wire, settings_backup
+from aipass.aipass.apps.handlers import opencode_cli, provider_choice, provider_wire, settings_backup
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 from aipass.aipass.apps.modules.doctor import check_provider_manifest
 from aipass.aipass.apps.modules._doctor_wire import (
@@ -1152,3 +1152,41 @@ class TestOpenCodeDoctorRows:
         assert self._cli(monkeypatch, tmp_path, (1, "[]"))[1][1] == GLYPH_WARN
         assert rows[2][1] == GLYPH_WARN
         assert rows[2][2].startswith(f"{tmp_path / 'opencode.json'} unreadable")
+
+
+class TestWireTheChosenProvider:
+    """provider_choice.wire_provider: the pick alone is wired, through provider_wire's doors."""
+
+    _PW = "aipass.aipass.apps.handlers.provider_wire"
+
+    def _wire(self, tmp_path, key):
+        home = tmp_path / "AIPass"
+        (home / ".claude" / "templates").mkdir(parents=True)
+        (home / ".claude" / "templates" / "memo.md").write_text("memo", encoding="utf-8")
+        with (
+            patch(f"{self._PW}.refresh_provider_hooks", return_value=["hooks"]) as claude,
+            patch(f"{self._PW}.refresh_codex", return_value=["codex"]) as codex,
+            patch(f"{self._PW}.install_opencode_plugin", return_value=["plugin"]) as opencode,
+            patch("aipass.aipass.apps.handlers.provider_choice.subprocess.run") as run,
+            _home_at(tmp_path),
+        ):
+            run.return_value.returncode = 0
+            actions = provider_choice.wire_provider(key, home)
+        return actions, claude, codex, opencode, run
+
+    def test_codex_wires_codex_alone(self, tmp_path) -> None:
+        """Mutant: wire every provider -> red on the untouched doors."""
+        actions, claude, codex, opencode, run = self._wire(tmp_path, "codex")
+        assert actions == ["codex"]
+        claude.assert_not_called()
+        opencode.assert_not_called()
+        run.assert_not_called()
+        assert not (tmp_path / ".claude" / "commands" / "memo.md").exists()
+
+    def test_claude_takes_its_settings_rows_the_memo_command_and_the_boot_shim(self, tmp_path) -> None:
+        """setup.sh no longer copies memo.md: the Claude pick does. Mutant: memo copy dropped -> red."""
+        actions, _claude, codex, _opencode, run = self._wire(tmp_path, "claude")
+        codex.assert_not_called()
+        assert (tmp_path / ".claude" / "commands" / "memo.md").read_text(encoding="utf-8") == "memo"
+        assert run.call_args.args[0][-1].endswith("hooks/tools/install_boot_shim.sh")
+        assert actions[0] == "hooks" and actions[-1] == "boot shim installed"

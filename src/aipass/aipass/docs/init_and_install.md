@@ -24,13 +24,51 @@ with its fix step.
 | `install --path DIR` / `--here` | Choose the install home: an absolute path or `~/name`, with no whitespace, quote or shell character (the home lands in shell rc lines and three providers' configs; only a plain path survives them all). A refused path exits 2 with the reason; the terminal prompt asks again |
 | `install --source PATH\|URL` | Clone AIPass from this path or URL instead of the public repo (a local path clones its committed HEAD; for the install sandbox) |
 | `install --non-interactive` | Headless: no questions, stdin closed for `setup.sh`, no pairing QR, the default home `~/AIPass` |
-| `install --yes` | Consent to the machine changes up front: passed to the doctor's settings write, and `AIPASS_YES=1` exported to `setup.sh` |
+| `install --yes` | Consent to the machine changes up front: `AIPASS_YES=1` exported to `setup.sh` |
+| `install --provider NAME` | Answer the last question headless: `claude`, `codex` or `opencode`; any other name exits 2 |
 | `install --finish` | The Health check and the report alone, no clone and no `setup.sh`; `setup.sh`'s tail calls it |
 | `install --no-symlink` / `--force-symlink` | Control the global CLI symlinks |
 | `install --force-global-home` | Allow installing into `/tmp`: unsafe, never the default |
 | `install --no-baud` | Skip the phone face + baud-cli step |
 | `install --baud-tag TAG` | The baud release to install, default latest |
 | `install --dry-run` | Walk the steps, no side effects, no install lock |
+
+## The ending: one provider
+
+No AI CLI is installed or wired before the end. After the report, the install
+asks once which CLI talks to devpulse: `[1] Claude Code`, `[2] Codex`,
+`[3] OpenCode`, each marked `installed` when found (PATH, `~/.local/bin/claude`,
+`~/.opencode/bin/opencode`). A number or a name picks; Enter with nothing typed
+asks again; `q` skips and names `aipass provider <name>`. `--provider NAME`
+answers it headless; `--non-interactive` without it asks nothing, installs
+nothing and prints the three `aipass provider` lines.
+
+On a pick, a missing CLI is installed by its vendor's published installer, run
+with its output visible; no copy of an installer lives in this repo:
+
+| CLI | Installer | Page |
+|---|---|---|
+| Claude Code | `curl -fsSL https://claude.ai/install.sh \| bash` | https://code.claude.com/docs/en/setup |
+| Codex | `npm install -g @openai/codex` (no npm: the step names it and stops) | https://github.com/openai/codex#quickstart |
+| OpenCode | `curl -fsSL https://opencode.ai/v2/install \| bash` | https://github.com/sst/opencode#installation |
+
+An installer that fails prints the page and `aipass provider <name>`; AIPass
+itself is installed, the report is unchanged, and the exit is 1. Otherwise the
+report gains `"provider": "<name>"`, only that CLI is wired (Claude: the
+settings rows, `~/.claude/commands/memo.md` unless one exists, and the boot
+shim; Codex: its hooks and config pins; OpenCode: the plugin), and devpulse
+opens in it from `<home>/src/aipass/devpulse` with `AIPASS_HOME` set. Claude
+runs the boot shim's own entry, `<home>/.venv/bin/python3 -m
+aipass.hooks.apps.handlers.lifecycle.session_boot`, with no prompt: the shim's
+first-run rule starts the chat on the greeting. Codex opens as `codex
+<greeting>` and OpenCode as `opencode --prompt <greeting>` (the forms their
+`--help` gives). Code: [`apps/handlers/provider_choice.py`](../apps/handlers/provider_choice.py).
+
+`aipass provider NAME [--dry-run]` is the same ending any time, for the home in
+`$AIPASS_HOME`, else `~/AIPass` (no provider manifest there exits 2). A CLI
+already installed is never installed again: it is wired afresh and opened.
+Bare `aipass provider` lists each CLI and where it is installed. Code:
+[`apps/modules/provider.py`](../apps/modules/provider.py).
 
 The Health check runs the home's own doctor, `<home>/.venv/bin/aipass doctor
 --fix --rows-json <home>/.aipass/install_doctor_rows.json`, with the home as its
