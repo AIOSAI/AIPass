@@ -142,8 +142,12 @@ file must be followed by a regeneration** or the manifest and the tree disagree.
 
 Repair acts on ONE registry: the one it is given, else the nearest `*_REGISTRY.json` walking up
 from the cwd. `--rename` finds its registry by walking up from the cwd too, then each
-`projects/*/*_REGISTRY.json`; it looks a name up rather than enumerating citizens, and the door
-cannot answer it, because a renamed directory no longer holds the passport the door checks.
+`projects/*/*_REGISTRY.json`, then the `*_REGISTRY.json` at each active root `AIPASS_ROOTS.json`
+declares (memory's `declared_roots`, in declaration order). It looks a name up rather than
+enumerating citizens, and the door cannot answer it, because a renamed directory no longer holds
+the passport the door checks. The passport is matched by `citizenship.citizen_id` against the
+row's `registry_id`; a passport that already carries the new names is rewritten to the same
+values, and a passport with no `citizen_id` refuses.
 
 The bare scan is read-only ALWAYS: it reports pollution (duplicate branch directories) and
 registry path mismatches and writes nothing. Two submodes act, and each refuses to act

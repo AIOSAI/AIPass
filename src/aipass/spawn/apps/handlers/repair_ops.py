@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repair_ops.py
 # Description: Repair handler — move branches, update registry paths, clean pollution
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-05-15
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """Repair handler implementation for project structure fixes.
@@ -15,6 +15,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from aipass.memory import declared_roots
 from aipass.prax import logger
 
 from aipass.spawn.apps.handlers.registry import (
@@ -280,7 +281,9 @@ def rename_branch(old_name, new_name, registry_path=None, dry_run=True):
     old, new = old_name.lstrip("@").lower(), new_name.lstrip("@").lower()
     registry_path = Path(registry_path) if registry_path else _registry_holding(old)
     if registry_path is None:
-        return _rename_refused(f"'{old}' is not in AIPASS_REGISTRY.json or any projects/*/*_REGISTRY.json")
+        return _rename_refused(
+            f"'{old}' is not in AIPASS_REGISTRY.json, any projects/*/*_REGISTRY.json or a declared root"
+        )
     project_root = registry_path.resolve().parent
 
     registry = load_registry(registry_path)
@@ -386,12 +389,14 @@ def rename_branch(old_name, new_name, registry_path=None, dry_run=True):
 
 
 def _registry_holding(name):
-    """The first registry with a row named ``name``: AIPass's, then each projects/*/*_REGISTRY.json."""
+    """The first registry with a row named ``name``: AIPass's, each projects/*/*_REGISTRY.json, then each
+    active root AIPASS_ROOTS.json declares, in declaration order."""
     root_registry = find_registry()
     if root_registry is None:
         return None
     projects = root_registry.parent / "projects"
     dirs = sorted(d for d in projects.iterdir() if d.is_dir()) if projects.is_dir() else []
+    dirs += declared_roots(root_registry.parent)
     found = [(registry_files_in(d) or [None])[0] for d in dirs]
     for candidate in [root_registry, *[f for f in found if f is not None]]:
         rows = branches_as_list(load_registry(candidate).get("branches", []))
