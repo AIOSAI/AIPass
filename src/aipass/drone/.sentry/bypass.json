@@ -191,10 +191,10 @@
       "file": "apps/handlers/docker_handler.py",
       "standard": "help_text",
       "lines": [
-        84,
-        123
+        87,
+        93
       ],
-      "reason": "The python3 lines are not drone help: one is the Dockerfile's apt package list, the other the next command printed inside a fresh container, where AIPass and drone are not installed yet, so 'drone @branch' cannot be the instruction.",
+      "reason": "The python3 lines are not drone help: both are Dockerfile text, the apt package list and the venv created in the image, run inside a container where drone does not exist, so 'drone @branch' cannot be the instruction.",
       "anchor": "python3"
     }
   ],

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: docker.py
 # Description: Module orchestrator for drone docker: disposable test boxes it names, lists and removes
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-11-24
-# Modified: 2026-11-24
+# Modified: 2026-11-25
 # =============================================
 
 """Disposable docker boxes for testing AIPass: bare, local, dev, main; list, shell, rm.
@@ -211,8 +211,10 @@ removes only those; never any other container.
 
 Verbs:
   bare                 fresh image of this machine's OS, base tools, no AIPass, a shell
-  local                bare + a clone of this repo's committed HEAD (repo mounted read-only at /src)
-  dev | main           bare + a clone of that branch from origin on github
+  local                bare + this checkout's committed HEAD, cloned and pip-installed (repo ro at /src)
+  dev | main           bare + that branch cloned from origin on github (not this checkout), pip-installed
+                       local, dev and main have aipass on PATH and nothing else set up; your first
+                       command is: aipass install --source ~/AIPass-src
   list                 its boxes: name, verb, age, running or stopped, kept or rm on exit
   shell <name>         start a kept box if stopped and open a shell in it
   rm <name>... | --all stop and remove its boxes; a name it did not make is refused

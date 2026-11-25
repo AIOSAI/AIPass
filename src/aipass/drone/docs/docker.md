@@ -15,23 +15,27 @@ you kept it. The flags and examples are `drone docker --help`.
 | Verb | What it does |
 |---|---|
 | `bare` | A fresh image of this machine's OS with the base tools, no AIPass, a login shell |
-| `local` | `bare` plus a clone of this repo's committed HEAD; the working tree is mounted read-only at `/src` |
-| `dev`, `main` | `bare` plus a clone of that branch from origin on github |
+| `local` | `bare` plus this checkout's committed HEAD, cloned and pip-installed; the working tree is mounted read-only at `/src` |
+| `dev`, `main` | `bare` plus that branch cloned from origin on github, not from this checkout, and pip-installed |
 | `list` | Its boxes: name, verb, age, running or stopped, kept or removed on exit |
 | `shell <name>` | Starts a kept box if it is stopped, then opens a login shell in it |
 | `rm <name>...`, `rm --all` | Stops, then removes its boxes; records each removal |
 
-`local` clones `file:///src` to `~/AIPass-src`, so the box sees the committed HEAD, not uncommitted
-edits. It prints the HEAD line and the next commands, and never runs the install itself:
+`local` is the only verb that uses this checkout: it clones `file:///src` to `~/AIPass-src`, so
+the box sees the committed HEAD, not uncommitted edits. `dev` and `main` clone with `--branch dev`
+or `--branch main` from `https://github.com/OWNER/NAME`, where OWNER/NAME comes from the repo's own
+`origin` remote (the same reading `drone @git` uses), so they hold what is pushed, not what is here.
+
+After the clone, `local`, `dev` and `main` print the HEAD line and run
+`~/aipass-venv/bin/pip install ~/AIPass-src`, so the `aipass` command is on PATH when the shell or
+the `-- <command>` starts. That is all they install: the box has aipass and nothing else set up,
+and the one line it prints is the user's first command:
 
 ```
-python3 -m venv ~/aipass-venv && ~/aipass-venv/bin/pip install ~/AIPass-src
-aipass install --source /src
+aipass install --source ~/AIPass-src
 ```
 
-`dev` and `main` clone with `--branch dev` or `--branch main` from `https://github.com/OWNER/NAME`,
-where OWNER/NAME comes from the repo's own `origin` remote (the same reading `drone @git` uses), and
-print the same next commands with `--source ~/AIPass-src`.
+A failed pip install prints `pip install of ~/AIPass-src failed` and the box still opens.
 
 ## The options
 
@@ -54,13 +58,18 @@ TTY, which is how `-- <command>` runs unattended.
 ## The base image
 
 Each base ref has one cached image, `aipass-base:<ref>` with `:` and `/` turned into `-` (this
-host: `aipass-base:ubuntu-26.04`). It is built on first use, or on `--rebuild`, from a Dockerfile
-written to a temporary directory: the base, `apt-get install` of python3, python3-venv,
-python3-pip, git, curl, ca-certificates, nodejs, npm, tmux, ripgrep and jq, a user `aipass` with a
-home, `git config --system --add safe.directory '*'`, then `USER aipass` and `WORKDIR
-/home/aipass`. PATH holds `~/.local/bin`, `~/aipass-venv/bin` and `~/.opencode/bin`, and
-`NPM_CONFIG_PREFIX` is `~/.local`, so `npm install -g` works without root. The image carries no
-AIPass and no CLI.
+host: `aipass-base:ubuntu-26.04`). It is built from a Dockerfile written to a temporary directory:
+the base, `apt-get install` of python3, python3-venv, python3-pip, git, curl, ca-certificates,
+nodejs, npm, tmux, ripgrep and jq, a user `aipass` with a home,
+`git config --system --add safe.directory '*'`, then `USER aipass`, `WORKDIR /home/aipass` and an
+empty venv at `~/aipass-venv`. PATH holds `~/.local/bin`, `~/aipass-venv/bin` and
+`~/.opencode/bin`, set both as the image's `ENV` and in `~/.profile`, because a login shell's
+`/etc/profile` resets PATH. `NPM_CONFIG_PREFIX` is `~/.local`, so `npm install -g` works without
+root. The image carries no AIPass and no CLI.
+
+The image carries the label `aipass.base=<digest of the Dockerfile text>`. A cached image is reused
+only while its label matches the Dockerfile drone would write now; when drone's Dockerfile
+changes, or with `--rebuild` (which adds `--no-cache`), the base is built again.
 
 The image installs with apt, so a base whose image name is not `ubuntu` or `debian` is refused by
 name before docker is called.

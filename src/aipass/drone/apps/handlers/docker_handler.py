@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: docker_handler.py
 # Description: drone docker: the base Dockerfile, the docker argv per verb, names, the box ledger
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-24
-# Modified: 2026-11-24
+# Modified: 2026-11-25
 # =============================================
 
 """The pieces behind ``drone docker``: docs/docker.md.
@@ -13,6 +13,7 @@ Pure builders (Dockerfile text, argv, script, names) plus the few docker and led
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shlex
 import shutil
@@ -28,6 +29,7 @@ from aipass.drone.apps.handlers.json import json_handler
 
 LEDGER_NAME = "docker_boxes.jsonl"
 LABEL = "aipass.box"
+STAMP_LABEL = "aipass.base"
 APT_BASES = ("ubuntu", "debian")
 BOX_HOME = "/home/aipass"
 CLONE_DIR = "~/AIPass-src"
@@ -78,6 +80,7 @@ def base_tag(image_ref: str) -> str:
 def dockerfile_text(image_ref: str) -> str:
     """The base image: tools, user aipass, no AIPass and no CLI."""
     config_dirs = " ".join(f"{BOX_HOME}/{d}" for d in LOGIN_DIRS.values())
+    path = f"{BOX_HOME}/.local/bin:{BOX_HOME}/aipass-venv/bin:{BOX_HOME}/.opencode/bin:$PATH"
     return f"""FROM {image_ref}
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \\
@@ -87,10 +90,16 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \\
     && git config --system --add safe.directory '*'
 USER aipass
 WORKDIR {BOX_HOME}
-RUN mkdir -p {config_dirs}
+RUN mkdir -p {config_dirs} && python3 -m venv {BOX_HOME}/aipass-venv \\
+    && echo 'export PATH={path}' >> {BOX_HOME}/.profile
 ENV NPM_CONFIG_PREFIX={BOX_HOME}/.local
-ENV PATH={BOX_HOME}/.local/bin:{BOX_HOME}/aipass-venv/bin:{BOX_HOME}/.opencode/bin:$PATH
+ENV PATH={path}
 """
+
+
+def base_stamp(image_ref: str) -> str:
+    """A digest of the Dockerfile text, labelled on the image so a changed Dockerfile rebuilds a cached base."""
+    return hashlib.sha256(dockerfile_text(image_ref).encode("utf-8")).hexdigest()[:12]
 
 
 def check_mount(path_str: str, home: Path | None = None) -> Path:
@@ -115,13 +124,12 @@ def box_script(verb: str, with_clis: list[str], clone_url: str | None, command: 
         lines.append(f"echo {shlex.quote('== installing ' + cli + ': ' + INSTALLERS[cli])}")
         lines.append(f"{INSTALLERS[cli]} || echo {shlex.quote('install of ' + cli + ' failed')}")
     if verb != "bare":
-        source = "/src" if verb == "local" else CLONE_DIR
         branch = "" if verb == "local" else f"--branch {verb} "
         lines.append(f"git clone -q {branch}{shlex.quote(clone_url or '')} {CLONE_DIR}")
         lines.append(f"git -C {CLONE_DIR} log -1 --oneline")
+        lines.append(f"~/aipass-venv/bin/pip install -q {CLONE_DIR} || echo 'pip install of {CLONE_DIR} failed'")
         lines.append("echo 'Next:'")
-        lines.append(f"echo '  python3 -m venv ~/aipass-venv && ~/aipass-venv/bin/pip install {CLONE_DIR}'")
-        lines.append(f"echo '  aipass install --source {source}'")
+        lines.append(f"echo '  aipass install --source {CLONE_DIR}'")
     lines.append(command if command else "exec bash -l")
     return "\n".join(lines)
 
@@ -232,11 +240,15 @@ def docker_ready() -> tuple[bool, str]:
 def ensure_base(image_ref: str, rebuild: bool) -> int:
     """Build the base image when it is missing or ``--rebuild``; docker build's own exit code, 0 when cached."""
     tag = base_tag(image_ref)
-    if not rebuild and docker(["image", "inspect", tag]).returncode == 0:
-        return 0
+    stamp = base_stamp(image_ref)
+    if not rebuild:
+        seen = docker(["image", "inspect", "--format", f'{{{{index .Config.Labels "{STAMP_LABEL}"}}}}', tag])
+        if seen.returncode == 0 and seen.stdout.strip() == stamp:
+            return 0
     with tempfile.TemporaryDirectory(prefix="aipass_docker_") as tmp:
         Path(tmp, "Dockerfile").write_text(dockerfile_text(image_ref), encoding="utf-8")
-        argv = ["docker", "build"] + (["--no-cache"] if rebuild else []) + ["-t", tag, tmp]
+        flags = (["--no-cache"] if rebuild else []) + ["--label", f"{STAMP_LABEL}={stamp}"]
+        argv = ["docker", "build", *flags, "-t", tag, tmp]
         logger.info("docker: building %s", tag)
         return subprocess.run(argv).returncode
 

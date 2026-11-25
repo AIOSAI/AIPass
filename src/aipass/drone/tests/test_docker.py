@@ -36,6 +36,7 @@ class FakeDocker:
         self.calls: list[list[str]] = []
         self.info: tuple[int, str, str] = (0, "", "")
         self.image_cached = True
+        self.stamp: str | None = None
         self.live: dict[str, str] = {}
         self.dockerfile = ""
 
@@ -50,7 +51,8 @@ class FakeDocker:
         return self.info
 
     def _image(self, argv: list[str]) -> tuple[int, str, str]:
-        return (0 if self.image_cached else 1), "", ""
+        stamp = self.stamp if self.stamp is not None else docker_handler.base_stamp("ubuntu:26.04")
+        return (0, stamp + "\n", "") if self.image_cached else (1, "", "no such image")
 
     def _build(self, argv: list[str]) -> tuple[int, str, str]:
         self.dockerfile = Path(argv[-1], "Dockerfile").read_text(encoding="utf-8")
@@ -103,6 +105,9 @@ def seed(*rows: dict) -> None:
         docker_handler.record(row)
 
 
+PIP_INSTALL = "~/aipass-venv/bin/pip install -q ~/AIPass-src || echo 'pip install of ~/AIPass-src failed'"
+
+
 def script_of(argv: list[str]) -> str:
     return argv[argv.index("-lc") + 1]
 
@@ -122,6 +127,8 @@ class TestBaseImage:
         assert "git config --system --add safe.directory '*'" in text
         assert "USER aipass\n" in text and f"WORKDIR {BOX}\n" in text
         assert f"ENV PATH={BOX}/.local/bin:{BOX}/aipass-venv/bin:{BOX}/.opencode/bin:$PATH" in text
+        assert f"python3 -m venv {BOX}/aipass-venv" in text
+        assert f"export PATH={BOX}/.local/bin:{BOX}/aipass-venv/bin:{BOX}/.opencode/bin:$PATH" in text
         assert "aipass install" not in text and "claude" not in text.split("RUN mkdir")[0]
 
     def test_a_cached_base_is_not_rebuilt_and_rebuild_passes_no_cache(self, fake: FakeDocker) -> None:
@@ -130,6 +137,13 @@ class TestBaseImage:
         docker.run("bare", ["--image", "ubuntu:26.04", "--rebuild", "--", "true"])
         build = next(c for c in fake.calls if c[:2] == ["docker", "build"])
         assert "--no-cache" in build
+
+    def test_a_cached_base_built_from_an_older_dockerfile_is_rebuilt(self, fake: FakeDocker) -> None:
+        fake.stamp = "0123456789ab"
+        docker.run("bare", ["--image", "ubuntu:26.04", "--", "true"])
+        build = next(c for c in fake.calls if c[:2] == ["docker", "build"])
+        assert "--no-cache" not in build
+        assert build[build.index("--label") + 1] == f"aipass.base={docker_handler.base_stamp('ubuntu:26.04')}"
 
     def test_the_default_base_is_this_machines_os_release(
         self, fake: FakeDocker, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -178,17 +192,22 @@ class TestRunArgv:
         os.close(main)
         assert fake.runs()[0][2] == "-it"
 
-    def test_local_mounts_the_repo_read_only_clones_head_and_never_installs(self, fake: FakeDocker) -> None:
+    def test_local_mounts_the_repo_read_only_clones_head_and_pip_installs_it(self, fake: FakeDocker) -> None:
         docker.run("local", ["--image", "ubuntu:26.04"])
         argv = fake.runs()[0]
         root = Path.cwd().resolve()
         assert argv[argv.index("-v") + 1] == f"{root}:/src:ro"
         lines = script_of(argv).splitlines()
-        assert "git clone -q file:///src ~/AIPass-src" in lines
+        clone = lines.index("git clone -q file:///src ~/AIPass-src")
         assert "git -C ~/AIPass-src log -1 --oneline" in lines
-        assert "echo '  aipass install --source /src'" in lines
-        assert not [ln for ln in lines if ln.startswith(("aipass ", "pip", "python3 -m venv"))]
+        assert lines.index(PIP_INSTALL) > clone
+        assert "echo '  aipass install --source ~/AIPass-src'" in lines
+        assert not [ln for ln in lines if ln.startswith("aipass ")]
         assert lines[-1] == "exec bash -l"
+
+    def test_bare_installs_nothing(self, fake: FakeDocker) -> None:
+        docker.run("bare", ["--image", "ubuntu:26.04"])
+        assert "pip install" not in script_of(fake.runs()[0])
 
     @pytest.mark.parametrize("verb", ["dev", "main"])
     def test_dev_and_main_clone_that_branch_from_origins_https_url(self, fake: FakeDocker, verb: str) -> None:
@@ -196,7 +215,8 @@ class TestRunArgv:
         argv = fake.runs()[0]
         assert "-v" not in argv
         lines = script_of(argv).splitlines()
-        assert f"git clone -q --branch {verb} https://github.com/AIOSAI/AIPass ~/AIPass-src" in lines
+        clone = lines.index(f"git clone -q --branch {verb} https://github.com/AIOSAI/AIPass ~/AIPass-src")
+        assert lines.index(PIP_INSTALL) > clone
         assert "echo '  aipass install --source ~/AIPass-src'" in lines
         assert argv[argv.index("--name") + 1] == f"aipass-{verb}-1"
 
