@@ -562,13 +562,6 @@ if [ "$FAIL" -eq 0 ]; then
     echo "sentry is accessed via: drone @sentry"
     echo "No venv activation needed for CLI commands."
     echo ""
-    if [ "$MACHINE_CHANGES" = "yes" ]; then
-        echo "CLI integrations:"
-        echo "  Claude Code: hooks installed to ~/.claude/settings.json"
-        { command -v opencode &>/dev/null || [ -x "$HOME/.opencode/bin/opencode" ]; } && echo "  OpenCode:    plugin installed to ~/.config/opencode/plugins/aipass.ts"
-        command -v codex &>/dev/null && echo "  Codex CLI:   hooks merged into ${CODEX_HOME:-~/.codex}/hooks.json, pins in its config.toml (trust them once in codex)"
-        echo ""
-    fi
 
     print_action_needed
 

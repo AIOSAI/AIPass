@@ -145,8 +145,8 @@
       "standard": "through_the_command",
       "lines": [
         32,
-        1514,
-        1546
+        1508,
+        1540
       ],
       "reason": "Ruling (c), fleet green leg 7: run_install, the one public door, clones the repo (_clone_repo), runs setup.sh (_run_setup), fixes ownership (_check_and_fix_owner), fetches baud (_install_phone_face), then runs the health check and the final screen (_finish, which writes the install report and reads _registry_user_name and _setup_attention); _resolve_home and _looks_like_aipass_tree prompt and probe before the clone. Every helper is pinned with the far side stubbed (lines re-pinned 2026-10-15, DPLAN-0409 C3). _resolve_source (--source) is a pure check before the clone, also pinned through run_install. Re-pinned 2026-11-14 (FPLAN-0924; 1269 is a second _clone_repo pin). Re-pinned 2026-11-24 (home-validation pins moved them down)."
     },

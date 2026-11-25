@@ -100,8 +100,8 @@ The install then ends on its final screen and launches nothing:
   `user_name` (from `AIPASS_REGISTRY.json`), `outcome` (`installed`,
   `step_failed` or `doctor_errors`), `failed_steps` (`[]`, or `["phone face"]`), the doctor's
   `pass`/`warn`/`error` counts, and the `attention` rows.
-- One command that opens devpulse in its directory on that report:
-  `cd <home>/src/aipass/devpulse && claude "Read dropbox/install_report.json: ..."`.
+- No command naming a CLI: the provider question follows, and the pick opens
+  devpulse on the report.
 - A closing note: devpulse is the seat you talk to about projects; aipass is the
   machine concierge for host problems.
 

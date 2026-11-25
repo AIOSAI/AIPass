@@ -3,7 +3,7 @@
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + doctor + report)
 # Version: 1.9.0
 # Created: 2026-07-05
-# Modified: 2026-11-24
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -480,12 +480,6 @@ def install_report_path(home: Path) -> Path:
     return home / "src" / "aipass" / "devpulse" / "dropbox" / "install_report.json"
 
 
-def wake_command(home: Path) -> str:
-    """The one line that wakes devpulse on the report."""
-    devpulse = install_report_path(home).parent.parent
-    return f'cd {shlex.quote(str(devpulse))} && claude "{WAKE_PROMPT}"'
-
-
 def _aipass_version() -> str:
     try:
         return importlib.metadata.version("aipass")
@@ -544,8 +538,6 @@ def _final_screen(
         return 1
     json_handler.log_operation("install_report", {"path": str(report_path), "attention": len(attention)})
     console.print(f"Report: {report_path}", markup=False, highlight=False)
-    console.print("Wake devpulse on it:")
-    console.print(wake_command(home), markup=False, highlight=False, soft_wrap=True)
     console.print()
     for line in _CLOSING_NOTE:
         console.print(f"[dim]{line}[/dim]")

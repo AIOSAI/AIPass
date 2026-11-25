@@ -3,7 +3,7 @@
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
 # Version: 1.8.0
 # Created: 2026-07-05
-# Modified: 2026-11-24
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -50,7 +50,6 @@ from aipass.aipass.apps.modules.install import (
     print_introspection,
     run_finish,
     run_install,
-    wake_command,
 )
 
 _MOD = "aipass.aipass.apps.modules.install"
@@ -1085,27 +1084,22 @@ class TestInstallReport:
         assert row["detail"].startswith(f"setup.sh's action items unreadable at {items}: ")
         assert "utf-8" in row["detail"]
 
-    def test_the_final_screen_lists_each_row_then_the_report_then_one_quoted_wake_line(
+    def test_the_final_screen_lists_each_row_then_the_report_and_names_no_cli(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
-        """The wake line cds into the home: shlex-quoted, though the install refuses a home that needs it."""
+        """No provider is chosen yet when this screen prints: the ending opens the pick, so no
+        wake line names claude here. Mutant: the old claude wake line restored -> red."""
         home = tmp_path / "my-home"
         home.mkdir()
         rc, out, _err = _finish(home, monkeypatch, capsys)
 
         lines = out.splitlines()
-        devpulse = shlex.quote(str(home / "src" / "aipass" / "devpulse"))
-        wake = (
-            f'cd {devpulse} && claude "Read dropbox/install_report.json: a fresh AIPass install. '
-            'Greet me by name, then walk me through each attention item."'
-        )
         assert rc == 0
-        assert wake_command(home) == wake
         assert "".join(f"AIPass installed at {home}".split()) in "".join(out.split())
         assert "  error: wire verify: 2 orphan entries -> drone @hooks verify" in lines
         assert "  warning: hooks: 2 hook(s) missing -> aipass doctor --fix" in lines
-        assert lines.count(wake) == 1
-        assert lines.index(f"Report: {install_report_path(home)}") < lines.index(wake)
+        assert f"Report: {install_report_path(home)}" in lines
+        assert "&& claude" not in out
 
     def test_a_clean_doctor_is_installed_exit_0_with_the_success_line_and_nothing_needs_attention(
         self, tmp_path: Path, monkeypatch, capsys
