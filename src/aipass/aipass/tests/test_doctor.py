@@ -215,6 +215,34 @@ class TestClaudeCodeRow:
         out = self._system_out(tmp_path, monkeypatch, capsys, "Claude Code\n")
         assert "! claude code version unreadable: 'Claude Code'" in out
 
+    def _pinned_out(self, tmp_path, monkeypatch, capsys, pin: str | None, running: str | None) -> str:
+        """The System group with a project manifest pinning Claude Code at *pin* (None = no pin key)."""
+        project = tmp_path / "project"
+        (project / ".claude").mkdir(parents=True)
+        claude = {"pinned_version": pin} if pin else {}
+        (project / ".claude" / "provider_manifest.json").write_text(
+            json.dumps({"cli": {"claude": claude}}), encoding="utf-8"
+        )
+        monkeypatch.chdir(project)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("AIPASS_HOME", "")
+        return self._system_out(tmp_path, monkeypatch, capsys, f"{running} (Claude Code)\n" if running else None)
+
+    def test_a_claude_other_than_the_pin_is_one_info_row_naming_both(self, tmp_path, monkeypatch, capsys) -> None:
+        """Owner ruling: the version gap is information, never a warning.
+
+        Mutant: the row dropped -> red. Mutant: GLYPH_WARN -> red on the leading tick.
+        """
+        out = self._pinned_out(tmp_path, monkeypatch, capsys, "2.1.332", "2.1.340")
+        assert "✓ claude pin tested with Claude Code 2.1.332; you run 2.1.340" in out
+        assert "was verified with 2.1.332; if hooks or the boot menu misbehave" in out
+
+    @pytest.mark.parametrize(("pin", "running"), [("2.1.332", "2.1.332"), (None, "2.1.340"), ("2.1.332", None)])
+    def test_a_matching_missing_pin_or_absent_claude_is_no_row(self, pin, running, tmp_path, monkeypatch, capsys):
+        """Equal, unpinned, or no claude on PATH: nothing to say. Mutant: the equality check dropped -> red."""
+        out = self._pinned_out(tmp_path, monkeypatch, capsys, pin, running)
+        assert "claude pin" not in out
+
 
 # =============================================================================
 # TestRunDoctor

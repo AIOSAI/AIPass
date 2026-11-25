@@ -28,6 +28,13 @@ by name, then walk me through each attention item.` It does not when arguments w
 planted instead, because the transcript format is bound to the CLI version. Once a transcript exists the menu is
 offered as before.
 
+**The CLI pin is a tested-with fact, not a requirement.** `cli.claude.pinned_version` in
+`.claude/provider_manifest.json` is the Claude Code version the shim was verified against; the release merge
+playbook moves it at each release. The shim compares it with `claude --version` at boot and logs a WARNING
+(`CLI version drift: running X, pinned Y`) when they differ. It prints nothing: one line cannot say whether
+anything is broken, and a stranger on a newer CLI would read it as an order to downgrade. `aipass doctor` reads the
+same key and reports it as information.
+
 A fresh start opens a new tmux session named `<branch>-<id8>`, the first eight characters of the new
 session id. It never kills a tmux session: a bare `<branch>` name could belong to a live session.
 

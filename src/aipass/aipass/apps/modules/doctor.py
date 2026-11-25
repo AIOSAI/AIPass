@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import os
 import re
@@ -139,17 +140,50 @@ def _check_system() -> List[CheckResult]:
     method = detect_install_method()
     results.append(CheckResult("install", GLYPH_PASS, method, ""))
 
-    results.append(_claude_code_row())
+    claude = detect_claude_code()
+    results.append(_claude_code_row(claude))
+    results.extend(_claude_pin_row(claude))
 
     return results
 
 
-def _claude_code_row() -> CheckResult:
+def _claude_pin_row(claude: dict) -> list[CheckResult]:
+    """An info row when the running Claude Code is not the manifest's cli.claude.pinned_version.
+
+    No row when they match, when nothing is pinned or claude is absent; an unreadable
+    manifest is the services group's `hooks` row, so it adds nothing here.
+    """
+    manifest_path = _find_manifest() if claude["version"] else None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path else {}
+    except (OSError, ValueError) as exc:
+        logger.info("[doctor] manifest unreadable for the claude pin row: %s", exc)
+        manifest = {}
+    pinned = str(manifest.get("cli", {}).get("claude", {}).get("pinned_version") or "")
+    running = ".".join(str(part) for part in claude["version"] or ())
+    if not pinned or pinned == running:
+        return []
+    try:
+        aipass_version = importlib.metadata.version("aipass")
+    except importlib.metadata.PackageNotFoundError as exc:
+        logger.info("[doctor] aipass package metadata not found: %s", exc)
+        aipass_version = "unknown"
+    return [
+        CheckResult(
+            "claude pin",
+            GLYPH_PASS,
+            f"tested with Claude Code {pinned}; you run {running}",
+            f"AIPass {aipass_version} was verified with {pinned}; if hooks or the boot menu misbehave, "
+            "this gap is the first suspect.",
+        )
+    ]
+
+
+def _claude_code_row(claude: dict) -> CheckResult:
     """The `claude code` row: projects carry their instructions in AGENTS.md only.
 
     No claude on PATH is a plain row, since AIPass runs under other CLIs too.
     """
-    claude = detect_claude_code()
     if not claude["found"]:
         return CheckResult("claude code", GLYPH_PASS, "not on PATH", "")
     version = claude["version"]

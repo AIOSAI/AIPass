@@ -25,7 +25,11 @@ One pass produces seven groups, in this order:
 
 - **System** — OS, shell, Python, RAM, CPU, install method, and the Claude Code
   version (AGENTS.md is read from v2.1.277; below it the row warns)
-  ([`apps/handlers/system_detect/`](../apps/handlers/system_detect)).
+  ([`apps/handlers/system_detect/`](../apps/handlers/system_detect)). When the
+  provider manifest's `cli.claude.pinned_version` differs from the running
+  `claude --version`, an info row (the ok glyph) reads `claude pin  tested with
+  Claude Code <pinned>; you run <running>`, naming the AIPass version verified
+  with the pin; a match, no pin or no claude adds no row.
 - **Identity** — `AIPASS_HOME`, the trust list (one WARN row, `trust`, per
   enrolled project whose folder is gone, naming `aipass trust prune`), the
   registry and its shape, `hooks.json`, the passport's role, and the

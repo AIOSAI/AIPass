@@ -18,6 +18,7 @@
 # sentry: no-test-needed(log_level) — logger.info, logger.warning and logger.error prose; that row judges them
 
 import json
+import logging
 import signal
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -1213,102 +1214,96 @@ class TestChatLine:
         assert self._menu(tmp_path, fake_projects, capsys, "T", 350000).endswith("· 4d ago")
 
 
-def _drift_err(tmp_path, capsys):
-    """boot() to the no-live menu with the drift probe live; returns stderr."""
+def _drift(tmp_path, capsys, caplog):
+    """boot() to the no-live menu with the drift probe live; returns (stderr, drift log lines)."""
     root = tmp_path / "projects_root"
     make_transcript(root, tmp_path, "aaaaaaaa-1", "Earlier chat", 3)
-    with patch("aipass.hooks.apps.modules.cc_transcripts.PROJECTS_ROOT", root):
+    with patch("aipass.hooks.apps.modules.cc_transcripts.PROJECTS_ROOT", root), caplog.at_level(logging.INFO):
         result = _boot(tmp_path, [], "q", quiet=False)
     assert result["action"] == "quit"
-    return capsys.readouterr().err
+    drift = [r for r in caplog.records if "CLI version drift" in r.getMessage()]
+    return capsys.readouterr().err, drift
 
 
 class TestVersionDrift:
-    """The auto-updater self-ran from a process that started before
-    DISABLE_AUTOUPDATER was set and moved 234 -> 235 under us. Drift is silent
-    by nature; this is the line that makes it not."""
+    """The pin is the CLI version the shim was verified against: drift is logged for the record, never printed.
 
-    def test_warns_when_running_differs_from_pinned(self, tmp_path, capsys):
+    A boot-time line could not say whether anything is broken and read to a stranger as an order to downgrade."""
+
+    def test_drift_is_logged_and_nothing_is_printed(self, tmp_path, capsys, caplog):
         with (
             patch.object(session_boot, "_pinned_cli_version", return_value="2.1.228"),
             patch.object(session_boot, "_running_cli_version", return_value="2.1.235"),
         ):
-            err = _drift_err(tmp_path, capsys)
-        assert "running 2.1.235, pinned 2.1.228" in err
-        assert "DRIFT" in err.upper()
+            err, drift = _drift(tmp_path, capsys, caplog)
+        assert "VERSION DRIFT" not in err and "2.1.235" not in err and "ln -sfn" not in err
+        assert [(r.levelname, r.getMessage()) for r in drift] == [
+            ("WARNING", "[SESSION_BOOT] CLI version drift: running 2.1.235, pinned 2.1.228")
+        ]
 
-    def test_names_the_repin_command(self, tmp_path, capsys):
-        """A warning that does not say how to fix it gets ignored twice."""
-        with (
-            patch.object(session_boot, "_pinned_cli_version", return_value="2.1.228"),
-            patch.object(session_boot, "_running_cli_version", return_value="2.1.235"),
-        ):
-            err = _drift_err(tmp_path, capsys)
-        assert "ln -sfn ~/.local/share/claude/versions/2.1.228" in err
-
-    def test_silent_when_versions_match(self, tmp_path, capsys):
+    def test_silent_when_versions_match(self, tmp_path, capsys, caplog):
         with (
             patch.object(session_boot, "_pinned_cli_version", return_value="2.1.228"),
             patch.object(session_boot, "_running_cli_version", return_value="2.1.228"),
         ):
-            assert "DRIFT" not in _drift_err(tmp_path, capsys)
+            assert _drift(tmp_path, capsys, caplog)[1] == []
 
-    def test_no_pin_means_no_opinion(self, tmp_path, capsys):
-        """An unpinned repo must not nag — and must not call the binary."""
+    def test_no_pin_means_no_opinion(self, tmp_path, capsys, caplog):
+        """An unpinned repo must not call the binary."""
         with (
             patch.object(session_boot, "_pinned_cli_version", return_value=""),
             patch.object(session_boot, "_running_cli_version") as mock_run,
         ):
-            assert "DRIFT" not in _drift_err(tmp_path, capsys)
+            assert _drift(tmp_path, capsys, caplog)[1] == []
         mock_run.assert_not_called()
 
-    def test_unreadable_binary_is_silence_not_a_false_alarm(self, tmp_path, capsys):
+    def test_unreadable_binary_is_silence_not_a_false_alarm(self, tmp_path, capsys, caplog):
         with (
             patch.object(session_boot, "_pinned_cli_version", return_value="2.1.228"),
             patch.object(session_boot, "_running_cli_version", return_value=""),
         ):
-            assert "DRIFT" not in _drift_err(tmp_path, capsys)
+            assert _drift(tmp_path, capsys, caplog)[1] == []
 
-    def test_running_version_strips_the_trailing_words(self, tmp_path, capsys):
+    def test_running_version_strips_the_trailing_words(self, tmp_path, capsys, caplog):
         """`claude --version` answers '2.1.228 (Claude Code)'."""
         completed = MagicMock(stdout="2.1.235 (Claude Code)\n")
         with (
             patch.object(session_boot, "_pinned_cli_version", return_value="2.1.228"),
             patch.object(session_boot.subprocess, "run", return_value=completed) as mock_run,
         ):
-            err = _drift_err(tmp_path, capsys)
+            _, drift = _drift(tmp_path, capsys, caplog)
         mock_run.assert_called_once()
         assert mock_run.call_args[0][0] == [_CLAUDE, "--version"]
-        assert "running 2.1.235, pinned 2.1.228" in err
+        assert [r.getMessage() for r in drift] == ["[SESSION_BOOT] CLI version drift: running 2.1.235, pinned 2.1.228"]
 
-    def test_missing_binary_is_empty_not_an_exception(self, tmp_path, capsys):
+    def test_missing_binary_is_empty_not_an_exception(self, tmp_path, capsys, caplog):
         with (
             patch.object(session_boot, "_pinned_cli_version", return_value="2.1.228"),
             patch.object(session_boot.subprocess, "run", side_effect=OSError("no such file")),
         ):
-            assert "DRIFT" not in _drift_err(tmp_path, capsys)
+            assert _drift(tmp_path, capsys, caplog)[1] == []
 
-    def test_pin_lives_in_the_tracked_manifest(self, tmp_path, capsys):
-        """The pin must ship with a clone — a personal settings file could not
-        be reviewed and would not travel."""
+    def test_pin_lives_in_the_tracked_manifest(self, tmp_path, capsys, caplog):
+        """The pin must ship with a clone: doctor reads the same key."""
         here = Path(session_boot.__file__).resolve()
         candidates = [p / ".claude" / "provider_manifest.json" for p in here.parents]
         manifest = next(c for c in candidates if c.is_file())
         pinned = json.loads(manifest.read_text(encoding="utf-8"))["cli"]["claude"]["pinned_version"]
         with patch.object(session_boot, "_running_cli_version", return_value="0.0.0-drift"):
-            err = _drift_err(tmp_path, capsys)
-        assert f"running 0.0.0-drift, pinned {pinned}" in err
+            _, drift = _drift(tmp_path, capsys, caplog)
+        assert [r.getMessage() for r in drift] == [
+            f"[SESSION_BOOT] CLI version drift: running 0.0.0-drift, pinned {pinned}"
+        ]
 
-    def test_broken_manifest_is_no_pin_not_a_crash(self, tmp_path, monkeypatch, capsys):
+    def test_broken_manifest_is_no_pin_not_a_crash(self, tmp_path, monkeypatch, capsys, caplog):
         broken = tmp_path / "provider_manifest.json"
         broken.write_text("{ not json", encoding="utf-8")
         monkeypatch.setattr(session_boot, "_find_manifest", lambda: broken)
         with patch.object(session_boot, "_running_cli_version", return_value="9.9.9") as mock_run:
-            assert "DRIFT" not in _drift_err(tmp_path, capsys)
+            assert _drift(tmp_path, capsys, caplog)[1] == []
         mock_run.assert_not_called()
 
-    def test_boot_warns_before_the_menu(self, tmp_path, fake_projects):
-        """The line must land where a human is already looking."""
+    def test_boot_checks_drift_before_the_menu(self, tmp_path, fake_projects):
         make_transcript(fake_projects, tmp_path, "aaaaaaaa-1", "Earlier chat", 3)
         with (
             patch.dict("os.environ", _kept_redirect(), clear=True),

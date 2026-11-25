@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.8.0
+# Version: 4.9.0
 # Description: Boot wrapper — attach-first menu, resumes by pointer (0448), steps aside while dispatched (0449)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
@@ -356,9 +356,10 @@ def _running_cli_version(claude_bin: str) -> str:
 
 
 def _warn_on_version_drift(claude_bin: str) -> str:
-    """One loud line per boot when the running CLI is not the pinned one.
+    """Log a WARNING when the running CLI is not the pinned one; the seat is told nothing.
 
-    CLI versions change the session lifecycle rules this file depends on, and drift is silent.
+    The pin is the CLI version this shim was verified against, not a required one: a boot line could not say
+    whether anything is broken. doctor reads the same key and reports it as information.
     """
     pinned = _pinned_cli_version()
     if not pinned:
@@ -366,13 +367,7 @@ def _warn_on_version_drift(claude_bin: str) -> str:
     running = _running_cli_version(claude_bin)
     if not running or running == pinned:
         return ""
-    message = (
-        f"  !! CLI VERSION DRIFT: running {running}, pinned {pinned}\n"
-        f"     The session lifecycle rules differ between versions. Re-pin with:\n"
-        f'     ln -sfn ~/.local/share/claude/versions/{pinned} "$(dirname "$(readlink -f "$(command -v claude)")")"\n'
-    )
     logger.warning("[SESSION_BOOT] CLI version drift: running %s, pinned %s", running, pinned)
-    sys.stderr.write(message)
     return running
 
 
