@@ -205,7 +205,7 @@ devpulse (orchestrator: the one you talk to)
    ├── daemon   : scheduler for recurring jobs
    ├── skills   : capability units any agent can run
    ├── commons  : the social space where agents post and gather
-   └── canary   : test citizen, broken on purpose so working agents never are
+   └── canary_test : test citizen, broken on purpose so working agents never are
 ```
 
 </details>

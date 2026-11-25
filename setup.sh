@@ -316,7 +316,7 @@ bootstrap_branch "backup"   "$SCRIPT_DIR/src/aipass/backup" "specialist" "Local-
 bootstrap_branch "commons"  "$SCRIPT_DIR/src/aipass/commons" "specialist" "Community social space — posts, comments, votes"
 bootstrap_branch "daemon"   "$SCRIPT_DIR/src/aipass/daemon" "specialist" "Task scheduler — per-branch schedule discovery"
 bootstrap_branch "skills"   "$SCRIPT_DIR/src/aipass/skills" "specialist" "Capability framework — discoverable skill units"
-bootstrap_branch "canary"   "$SCRIPT_DIR/src/aipass/canary" "specialist" "Permanent test citizen — dispatch and gate verification"
+bootstrap_branch "canary_test" "$SCRIPT_DIR/src/aipass/canary_test" "specialist" "Permanent test citizen — dispatch and gate verification"
 
 # All 18 core branches in src/aipass/ are bootstrapped above. (A stale note here
 # once claimed backup/commons/daemon/skills were external — they returned to core

@@ -353,7 +353,8 @@ def _parity_command(args: list) -> bool:
     if wants_help(args):
         CONSOLE.print("[bold cyan]parity[/bold cyan] — the same scripted prompts on Claude, Codex, OpenCode, compared")
         CONSOLE.print(
-            "  drone @hooks parity [--branch @canary|<path>] [--lane A,B,C,D,E,F] [--provider claude,codex,opencode]"
+            "  drone @hooks parity [--branch @canary_test|<path>] [--lane A,B,C,D,E,F] "
+            "[--provider claude,codex,opencode]"
         )
         CONSOLE.print(
             "  --provider defaults to claude,codex; opencode loads its plugin from OPENCODE_CONFIG_DIR when set"
@@ -362,7 +363,7 @@ def _parity_command(args: list) -> bool:
         CONSOLE.print("Lane J is A,B,C with --branch at an external project's citizen. Exit 1 on DIFFERENT or no data.")
         return True
     parser = argparse.ArgumentParser(prog="drone @hooks parity", add_help=False)
-    parser.add_argument("--branch", default="@canary")
+    parser.add_argument("--branch", default="@canary_test")
     parser.add_argument("--lane", default=",".join(runner.LANES))
     parser.add_argument("--provider", default=",".join(runner.DEFAULT_PROVIDERS))
     parser.add_argument("--json", action="store_true")

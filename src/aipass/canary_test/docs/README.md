@@ -1,0 +1,21 @@
+[<- Back to the README](../README.md)
+
+# Docs
+
+Depth for the `CANARY` branch. The face is the [branch README](../README.md);
+these pages are what it points at.
+
+| Page | What it covers |
+|------|----------------|
+| [command_surface.md](command_surface.md) | Every routed form, the exit-code contract, subcommand help, and the help forms every module accepts |
+| [span_module.md](span_module.md) | The duration parser: the grammar, every refusal and why stdout stays empty, the JSON form, what its tests measure |
+| [top_module.md](top_module.md) | The leaderboard reader: the file shape, the tie-break and why it is not insertion order, every refusal, what its tests measure |
+| [align_module.md](align_module.md) | The column aligner: the layout, the four rulings the contract leaves open, every refusal, what its tests measure |
+| [kv_module.md](kv_module.md) | The key/value store: the verbs, the file, the six rulings, what guards the write, every refusal, what its tests measure |
+| [testing.md](testing.md) | Running the suite, the conftest seam, what continuous integration actually runs |
+| [branch_data.md](branch_data.md) | Everything this branch writes to disk: the json shim, `canary_test_json/`, `docs.local/`, `logs/`, archives |
+
+The directory tree and the working gotchas live in the branch prompt,
+`.aipass/aipass_local_prompt.md`, so they cannot disagree with themselves.
+
+[<- Back to the branch README](../README.md)

@@ -5,7 +5,7 @@
 `drone @hooks parity` runs the same scripted prompts headless on Claude Code, Codex and OpenCode from one branch's cwd and compares what the hooks did in each session, row by row. Exit 0 when every row is the same or an accepted difference; exit 1 on a real difference or a session that left no record, so a merge train can gate on it.
 
 ```
-drone @hooks parity [--branch @canary|<path>] [--lane A,B,C,D,E,F] [--provider claude,codex,opencode] [--json]
+drone @hooks parity [--branch @canary_test|<path>] [--lane A,B,C,D,E,F] [--provider claude,codex,opencode] [--json]
 ```
 
 `--branch` takes a path or `@name`, looked up in AIPass's registry, then in each project enrolled with `aipass trust`. Lane `J` expands to `A,B,C`; point `--branch` at an external project's citizen for it. `--json` also writes `artifacts/reports/parity_<date>.json`.

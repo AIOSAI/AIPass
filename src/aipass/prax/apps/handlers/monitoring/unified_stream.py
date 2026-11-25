@@ -55,7 +55,7 @@ BRANCH_COLORS = {
     "trigger": "bright_red",
     "speakeasy": "bright_white",
     "commons": "bright_green",
-    "canary": "bright_white",
+    "canary_test": "bright_white",
     "daemon": "blue",
     "hooks": "bright_blue",
     "skills": "bright_magenta",
@@ -132,5 +132,6 @@ def print_hook_event(branch: str, message: str, action: str = "unknown"):
         branch_color = BRANCH_COLORS.get(branch.lower(), "white")
         branch_label = f"[{branch_color}]{_plain(branch)}[/{branch_color}]"
         console.print(
-            f"[dim]{timestamp}[/dim] [{style}]{symbol} HOOK[/{style}] {branch_label} [{style}]{_plain(message)}[/{style}]"
+            f"[dim]{timestamp}[/dim] [{style}]{symbol} HOOK[/{style}] {branch_label} "
+            f"[{style}]{_plain(message)}[/{style}]"
         )

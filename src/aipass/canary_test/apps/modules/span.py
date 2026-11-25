@@ -1,0 +1,109 @@
+# =================== AIPass ====================
+# Name: span.py
+# Description: Duration command - drone @canary_test span TEXT prints the total in seconds
+# Version: 1.0.0
+# Created: 2026-09-19
+# Modified: 2026-11-25
+# =============================================
+
+"""Duration parser command: a written duration in, a total in seconds out.
+
+Reference: docs/span_module.md.
+"""
+
+import json
+from typing import List
+
+from aipass.canary_test.apps.handlers.duration import parser
+from aipass.canary_test.apps.handlers.json import json_handler
+from aipass.cli import console, error
+from aipass.prax import logger
+
+JSON_FLAG = "--json"
+
+USAGE_HINT = 'drone @canary_test span "2d 4h"'
+
+
+def print_introspection() -> None:
+    """Display the span module's usage, its units and its limit."""
+    console.print()
+    console.print("[bold cyan]span Module[/bold cyan]")
+    console.print()
+    console.print("[yellow]Usage:[/yellow]")
+    console.print("  [cyan]span TEXT[/cyan]          Print the duration as a total number of seconds")
+    console.print('  [cyan]span --json TEXT[/cyan]   Print {"seconds": N} and nothing else')
+    console.print()
+    console.print(f"[dim]Units: {parser.UNIT_LIST} - order free, whitespace optional, each unit once[/dim]")
+    console.print(f"[dim]Limit: {parser.MAX_DAYS} days ({parser.MAX_SECONDS} seconds)[/dim]")
+    console.print("[dim]Run 'drone @canary_test span --help' for usage[/dim]")
+    console.print()
+
+
+def print_help() -> None:
+    """Rich-formatted help for the span command."""
+    console.print()
+    console.print("[bold cyan]span - duration text to seconds[/bold cyan]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [green]drone @canary_test span TEXT[/green]          Print the total number of seconds")
+    console.print('  [green]drone @canary_test span --json TEXT[/green]   Print {"seconds": N}, nothing else on stdout')
+    console.print("  [green]drone @canary_test span[/green]               No text: this usage, exit 0")
+    console.print()
+
+    console.print("[yellow]The text:[/yellow]")
+    console.print(f"  Units are [cyan]{parser.UNIT_LIST}[/cyan], lowercase. Order is free and whitespace is")
+    console.print("  optional, so '1h30m', '1h 30m' and '30m 1h' are one and the same duration.")
+    console.print(f"  Leading zeros are fine. The total may not exceed {parser.MAX_DAYS} days.")
+    console.print()
+
+    console.print("[yellow]Refusals (exit 2):[/yellow]")
+    console.print("  The reason goes to stderr and nothing at all reaches stdout. Empty or")
+    console.print("  whitespace-only text; a unit given twice; an unknown unit ('2H' is unknown -")
+    console.print("  the parser never case-folds); a number that is not a plain non-negative")
+    console.print("  integer ('1.5h', '-3h', a non-ASCII digit); a bare number with no unit")
+    console.print(f"  ('90'); a total over {parser.MAX_DAYS} days.")
+    console.print()
+
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  $ drone @canary_test span '2d 4h'        [dim]-> 187200[/dim]")
+    console.print("  $ drone @canary_test span 1h30m          [dim]-> 5400[/dim]")
+    console.print('  $ drone @canary_test span --json 45s     [dim]-> {"seconds": 45}[/dim]')
+    console.print()
+
+
+def _span(text: str, as_json: bool) -> None:
+    """Print one duration as seconds, or refuse it by reason."""
+    try:
+        seconds = parser.parse_duration(text)
+    except parser.DurationInvalid as exc:
+        logger.warning("[span] refused %r - %s", text, exc.reason)
+        error(f"span refused: {exc.reason}", suggestion=USAGE_HINT)
+        return
+
+    json_handler.log_operation("span_parsed", {"seconds": seconds, "as_json": as_json})
+
+    # markup/highlight off: the JSON reaches stdout byte for byte, no Rich number styling.
+    payload = json.dumps({"seconds": seconds}) if as_json else str(seconds)
+    console.print(payload, markup=False, highlight=False, soft_wrap=True)
+
+
+def handle_command(command: str, args: List[str]) -> bool:
+    """Route 'span'.
+
+    True for 'span' even on a refusal - the exit code carries the failure.
+    """
+    if command != "span":
+        return False
+
+    if not args:
+        print_introspection()
+        return True
+
+    # Help anywhere never parses: 'span --help 2d' prints the page, no number.
+    if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
+        print_help()
+        return True
+
+    words = [arg for arg in args if arg != JSON_FLAG]
+    _span(" ".join(words), JSON_FLAG in args)
+    return True
