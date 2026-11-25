@@ -1294,7 +1294,7 @@ class TestPreflightWireDoor:
     """The install tail's doctor preflight wires the settings file under the install door (FPLAN-0645)."""
 
     def test_the_install_preflight_writes_no_provider_settings_and_sets_every_installed_cli_aside(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, capsys
     ) -> None:
         """The pick at the install's end is wired there, never by its health check, even with a yes.
 
@@ -1327,6 +1327,8 @@ class TestPreflightWireDoor:
 
         assert not (tmp_path / ".claude" / ".backup").exists()
         assert [r.label for r in groups["System"]] == []
+        # claude code + the manifest's two Claude rows: why a later plain doctor counts more. Mutant: no line -> red.
+        assert "3 provider row(s) wait for your pick at the end of the install" in capsys.readouterr().out
         info = [(r.label, r.glyph, r.detail) for r in groups["Services"] if r.detail.startswith("not chosen")]
         assert info == [
             ("claude", GLYPH_PASS, "not chosen: aipass provider claude"),

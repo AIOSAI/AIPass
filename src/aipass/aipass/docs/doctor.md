@@ -91,7 +91,7 @@ One pass produces seven groups, in this order:
   `.chroma`, `docs.local`, `dropbox`, `.spawn` or a `*_json` folder, or a
   `*_REGISTRY.json`, is one FAIL per folder or file with its count and
   `drone @git untrack [--recursive] <path>` as the fix; `--fix` never touches
-  the index. The AIPass source tree is not measured: its `.gitignore` ships
+  the index. The AIPass source tree gets no row: its `.gitignore` ships
   spawn's templates tracked on purpose
   ([`apps/handlers/structure_scan/`](../apps/handlers/structure_scan)).
 - **Scaffold** — the stamped scaffold version, tier0 drift, missing and retired
@@ -185,7 +185,9 @@ nothing and its row says `not applied: no tty — aipass doctor --fix --yes`;
 --fix --rows-json PATH` in the home, is install mode: it writes no provider
 settings, even with `--yes`, has no `claude code` row in System, and shows each
 installed CLI as one information row (the ok glyph), `not chosen: aipass
-provider <name>`, because the pick at the install's end wires the chosen one.
+provider <name>`, because the pick at the install's end wires the chosen one. Under the
+summary, one dim line counts the rows set aside, `N provider row(s) wait for
+your pick at the end of the install`: a later plain `aipass doctor` counts them.
 Every non-pass row and the counts go to PATH as JSON for the install report.
 
 Once the install report (`src/aipass/devpulse/dropbox/install_report.json`

@@ -95,8 +95,8 @@
       "file": "apps/modules/doctor.py",
       "standard": "logged_fallback",
       "lines": [
-        210,
-        663
+        211,
+        664
       ],
       "reason": "175: _configured_aipass_home's callers read \"\" as no setting: _check_home_agreement (doctor.py:385) skips the comparison and _owner_project_root (doctor.py:263) falls back to cwd; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home. 627: _registry_citizen_names's one caller, the drone row (doctor.py:676), compares only when names exist; an unreadable registry is the registry row's FAIL naming 'aipass doctor --fix', and the warning is logged. Re-pinned 2026-11-24 after the doctor cuts moved both lines. Re-pinned 2026-11-24 (claude pin row moved them 34 down)."
     },
@@ -179,7 +179,7 @@
       "file": "apps/modules/doctor.py",
       "standard": "fallback",
       "lines": [
-        208
+        209
       ],
       "reason": "_configured_aipass_home: an unreadable ~/.claude/settings.json reads as no setting so the home-agreement and owner-root lookups go on with the env AIPASS_HOME; the same doctor run's Identity group shows the FAIL row 'global settings ~/.claude/settings.json unreadable - Repair its JSON' (_check_global_aipass_home), plus the [doctor] info line in the aipass log Re-pinned 2026-11-24 (claude pin row moved them 34 down)."
     },
@@ -187,7 +187,7 @@
       "file": "apps/modules/doctor.py",
       "standard": "fallback",
       "lines": [
-        486
+        487
       ],
       "reason": "_find_manifest: an unreadable ~/.claude/settings.json only drops the settings route to AIPASS_HOME; the walk from cwd still runs. Who finds out: the Identity group's FAIL row 'global settings ... unreadable - Repair its JSON' in the same doctor run, and the hooks WARN row 'manifest not found' when no route finds it Re-pinned 2026-11-24 (claude pin row moved them 34 down)."
     },
@@ -195,7 +195,7 @@
       "file": "apps/modules/doctor.py",
       "standard": "fallback",
       "lines": [
-        661
+        662
       ],
       "reason": "_registry_citizen_names: an unreadable registry yields no names, so the drone row names no extras (it never claims more than its routed count). The same run's Identity group reads the same _find_registry file and shows the registry FAIL row naming 'aipass doctor --fix'; warning line '[doctor] could not read registry for citizen names' in the log Re-pinned 2026-11-24 (claude pin row moved them 34 down)."
     },

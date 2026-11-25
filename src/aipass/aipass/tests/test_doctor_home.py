@@ -3,7 +3,7 @@
 # Description: Tests for doctor's home, seating, preflight, citizen-count, skills, shadow, smoke, registry, scope rows
 # Version: 1.13.0
 # Created: 2026-10-08
-# Modified: 2026-11-24
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/modules/doctor.py and _doctor_smoke.py: home, seating, preflight, drone, skills, shadows, smoke."""
@@ -508,7 +508,7 @@ class TestRunDoctorPreflight:
         }
         with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups) as compute:
             assert run_doctor_preflight(yes=True) == (groups, (1, 1, 1))
-        compute.assert_called_once_with(fix=True, door="install", yes=True, install=True)
+        compute.assert_called_once_with(fix=True, door="install", yes=True, install=True, set_aside=[])
 
 
 class TestDroneCitizenCount:
@@ -1104,13 +1104,11 @@ class TestGitignoreCoverageRows:
             "no runtime file tracked",
         )
 
-    def test_the_aipass_source_tree_is_not_measured_its_templates_ship_tracked(self) -> None:
+    def test_the_aipass_source_tree_gets_no_row_its_templates_ship_tracked(self) -> None:
+        """A green tick reading 'not measured' misled a stranger. Mutant: the row back -> red."""
         self._track("src/aipass/spawn/templates/citizen/dropbox/README.md", "pyproject.toml")
 
-        rows = self._rows()
-
-        assert list(rows) == ["gitignore coverage"]
-        assert rows["gitignore coverage"].detail.startswith("not measured: the AIPass source tree")
+        assert self._rows() == {}
 
     def test_a_project_nested_in_a_parent_repo_reads_the_index_of_the_repo_that_holds_it(self) -> None:
         self._track("src/aipass/README.md")

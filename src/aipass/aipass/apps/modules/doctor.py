@@ -1124,6 +1124,7 @@ def _compute_doctor_groups(
     door: str = DOOR_DOCTOR_FIX,
     yes: bool = False,
     install: bool = False,
+    set_aside: Optional[List[CheckResult]] = None,
 ) -> Dict[str, List[CheckResult]]:
     """Run all six check groups (optionally auto-fixing). Returns them by group name.
 
@@ -1221,11 +1222,15 @@ def _compute_doctor_groups(
             structure = [r for r in groups.get("Structure", []) if not r.label.startswith("instruction shadow")]
             groups["Structure"] = structure + shadow_fix
 
-    return _set_aside_unchosen(groups, install)
+    return _set_aside_unchosen(groups, install, set_aside if set_aside is not None else [])
 
 
-def _set_aside_unchosen(groups: Dict[str, List[CheckResult]], install: bool) -> Dict[str, List[CheckResult]]:
+def _set_aside_unchosen(
+    groups: Dict[str, List[CheckResult]], install: bool, set_aside: List[CheckResult]
+) -> Dict[str, List[CheckResult]]:
     """Check only the chosen provider's rows; each other installed CLI is one info row.
+
+    Every row taken out is appended to *set_aside*, so the install can say how many wait for the pick.
 
     The choice is the install report's `provider`. With none recorded, a plain run checks every
     provider as before, and the install's own check (the pick still to come) sets all of them aside.
@@ -1234,6 +1239,7 @@ def _set_aside_unchosen(groups: Dict[str, List[CheckResult]], install: bool) -> 
     if chosen is None and not install:
         return groups
     if install:
+        set_aside.extend(r for r in groups.get("System", []) if r.label == "claude code")
         groups["System"] = [r for r in groups.get("System", []) if r.label != "claude code"]
     aside = [key for key in provider_choice.ORDER if key != chosen]
     manifest_path = _find_manifest()
@@ -1243,6 +1249,7 @@ def _set_aside_unchosen(groups: Dict[str, List[CheckResult]], install: bool) -> 
         """A settings-scalar row is labelled with its manifest key, so the label list cannot know it."""
         return "claude" if label in scalars else provider_choice.row_provider(label)
 
+    set_aside.extend(r for r in groups.get("Services", []) if owner(r.label) in aside)
     services = [r for r in groups.get("Services", []) if owner(r.label) not in aside]
     for key in aside:
         if provider_choice.cli_path(key):
@@ -1339,8 +1346,12 @@ def run_doctor_preflight(
     console.print("[bold cyan]Running aipass doctor --fix...[/bold cyan]")
     console.print()
 
-    groups = _compute_doctor_groups(fix=True, door=DOOR_INSTALL, yes=yes, install=True)
+    waiting: List[CheckResult] = []
+    groups = _compute_doctor_groups(fix=True, door=DOOR_INSTALL, yes=yes, install=True, set_aside=waiting)
     counts = _print_doctor_groups(groups)
+    if waiting:
+        console.print(f"  [dim]{len(waiting)} provider row(s) wait for your pick at the end of the install[/dim]")
+        console.print()
     logger.info("[doctor] install health check complete — pass=%d warn=%d error=%d", *counts)
     return groups, counts
 
