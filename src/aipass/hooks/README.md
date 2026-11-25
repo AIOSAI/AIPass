@@ -95,21 +95,16 @@ Other branches import from the package top file, `from aipass.hooks import <name
 verbs, the sandbox builders, the branch-prompt cap and the mute flag, each read from its home on access.
 
 Three layers. `apps/hooks.py` is a thin router: it discovers the modules beside it and dispatches each
-command to the one that claims it. `apps/modules/` holds one business-logic module per concern —
-`engine` (the dispatcher), `engine_closure` (the engine's imports, kept free of NameErrors),
-`cadence` (which turn a loader fires on),
-`injection_ledger` (what a seat was told, per turn), `grounding_receipt` (whether the grounding
-reached the model), `grounding_content` (the injected blocks and their budgets), `write_ownership`
-(whose file a write lands in), `write_grant` (whether a dispatch's grant covers a crossing write),
-`bash_writes`, `shell_reader`, `shell_programs` and `testwrite_targets` (a shell command's visible
-writes, its programs, its new tests), `admin_seat` and `testgate_policy` (who is exempt,
-and what the policy says), `promote` (source to live code), `protected_paths` (the files that switch
-the gates), `provider_launch` (a provider session started outside the caller's branch), `comment_scan` and `comments` (the comment budget), `hookstatus`, `hooksound`, `alert_dismiss`, `feedback`, `context_window`,
-`cc_sessions`, `cc_transcripts`, `diagnostics_state`, `hook_test`, `release_notice`, `sandbox` and
-`wire_verify`. `apps/handlers/` holds the implementation, one directory per concern: `bridges/` per
-platform, `prompt/` for injection, `security/` for the gates, `lifecycle/` for session and compaction
-events, `notification/` for sound and mail, `parity/`, plus `config/`, `cli/` and the `json/` service
-every branch shares.
+command to the one that claims it. `apps/modules/` holds one business-logic module per concern — `engine`
+(the dispatcher), `cadence` (which turn a loader fires on), `injection_ledger` and `grounding_receipt`
+(what a seat was told, and whether it arrived), `grounding_content` (the injected blocks and budgets),
+`write_ownership` and `write_grant` (whose file a write lands in, and the grant that may cover it),
+`bash_writes`, `shell_reader`, `shell_programs` and `testwrite_targets` (what a shell command writes and
+runs), `promote` (source to live code), `protected_paths` (the files that switch the gates), and more:
+bare `drone @hooks` lists them all live. `apps/handlers/` holds the implementation, one directory per
+concern: `bridges/` per platform, `prompt/` for injection, `security/` for the gates, `lifecycle/` for
+session and compaction events, `notification/` for sound and mail, `parity/`, plus `config/`, `cli/` and
+the `json/` service every branch shares.
 
 Handlers are imported dynamically by dotted path at dispatch time, never statically, which is why no
 handler is referenced anywhere in this tree and why static analysis cannot see them as used.
