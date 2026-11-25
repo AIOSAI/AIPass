@@ -4,7 +4,7 @@
 # Description: Tests for compass recall prompt handler
 # Branch: hooks
 # Created: 2026-07-16
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/handlers/prompt/compass_recall.py."""
@@ -590,7 +590,7 @@ class TestGovernanceKnobsAndWindow:
         candidates = [_candidate(312), _candidate(400)]
         assert _recall(tmp_path, "window", candidates, {"max_per_session": 10})["stdout"] == ""
 
-        with patch("aipass.hooks.apps.handlers.lifecycle.compact._get_git_info", return_value=None):
+        with patch("aipass.hooks.apps.handlers.lifecycle.compact._work_still_out", return_value=("window", [])):
             pre_compact({"session_id": "window", "cwd": str(tmp_path)})
         result = _recall(tmp_path, "window", candidates, {"max_per_session": 10})
 
