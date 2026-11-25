@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+### Changed
+
+- **install: no git identity step** (2026-11-24). `setup.sh` no longer asks for, checks or reports a git `user.name` and `user.email`, and no longer sets `pull.rebase`. Git names the gap the first time a commit needs an identity, and `aipass new` refuses with the two `git config` lines before its birth commit. The display name still comes from git's `user.name` when one is set, else the login.
+
 ### Fixed
 
 - **install: a home path with a space no longer kills every hook, and doctor notices when it would** (2026-11-24). A fresh-container install took the pasted line `source ~/.bashrc` as its home, wrote `/home/u/source ~/.bashrc` into the provider settings, and every hook died with `not found` while doctor printed 36 pass. Three cures: every provider manifest row double-quotes its two `$AIPASS_HOME` words, so `sh -c` keeps a spaced home whole (the OpenCode plugin, which runs no shell, unquotes them itself; existing installs show drift until `aipass doctor --fix` rewrites the rows, and Codex asks to re-trust them once); `aipass install` accepts a home only as an absolute path or `~/name` with no whitespace, quote or shell character, re-asking on a terminal and exiting 2 without one; doctor's `wire verify` row runs the first wired hook command through `sh -c` before inspecting the wiring, so a hook that cannot execute fails the row and the install's health check with it.

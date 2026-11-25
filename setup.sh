@@ -50,12 +50,6 @@ print_action_needed() {
     echo ""
 }
 
-# local@domain.tld — no whitespace, an @, a dot in the domain. Literal 'skip'
-# handled by the caller before this ever runs (never store junk as an email).
-is_valid_git_email() {
-    [[ "$1" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
-}
-
 # Own function (not an inline `[ -t 0 ]`) so tests can override it after
 # sourcing and drive the interactive prompts below without a real tty.
 # AIPASS_NON_INTERACTIVE=1 wins over the tty test: `aipass install --non-interactive`
@@ -174,63 +168,13 @@ if [ ! -f "$SECRETS_DIR/.env" ] && [ -f ".env.example" ]; then
     echo "  Copied .env.example → ~/.secrets/aipass/.env (add your API keys there)"
 fi
 
-# --- Git identity (commits fail without user.email / user.name) ---
-resolve_git_identity() {
-    GIT_EMAIL=$(git config --global user.email 2>/dev/null || true)
-    GIT_NAME=$(git config --global user.name 2>/dev/null || true)
-    GIT_IDENTITY_SKIPPED="no"
-    if [ -z "$GIT_EMAIL" ] || [ -z "$GIT_NAME" ]; then
-        echo ""
-        echo "Git identity not configured — commits will fail without it."
-        if is_interactive; then
-            # Interactive — no defaults. Git needs a real identity, not ours.
-            echo "  Git needs a name and email to attribute commits to you — this is yours, not ours."
-            echo "  Enter (or type 'skip') to skip for now and set it up later."
-            while true; do
-                read -r -p "  Git user.email: " GIT_EMAIL
-                if [ -z "$GIT_EMAIL" ] || [ "$GIT_EMAIL" = "skip" ]; then
-                    GIT_EMAIL=""
-                    GIT_IDENTITY_SKIPPED="yes"
-                    break
-                fi
-                if is_valid_git_email "$GIT_EMAIL"; then
-                    break
-                fi
-                echo "  Doesn't look like an email — needs an @ and a dot in the domain (or Enter/'skip' to skip)."
-            done
-            if [ "$GIT_IDENTITY_SKIPPED" = "no" ]; then
-                while [ -z "$GIT_NAME" ]; do
-                    read -r -p "  Git user.name: " GIT_NAME
-                    [ -z "$GIT_NAME" ] && echo "  Can't be blank — git needs a name to attribute commits."
-                done
-                git config --global user.email "$GIT_EMAIL"
-                git config --global user.name "$GIT_NAME"
-                git config --global pull.rebase true
-                echo "  Git identity set: $GIT_NAME <$GIT_EMAIL>"
-            else
-                echo "  Skipped. Set it later with:"
-                echo "    git config --global user.email \"you@example.com\""
-                echo "    git config --global user.name \"Your Name\""
-                ACTION_NEEDED+=("Git identity not set — run: git config --global user.email \"you@example.com\" && git config --global user.name \"Your Name\"")
-            fi
-        else
-            # Non-interactive — never guess an identity, and never make it homework
-            # (DPLAN-0407): a stranger's first five minutes do not commit. One line;
-            # git itself asks for a name the first time a commit needs one.
-            echo "  Not set (non-interactive); git will ask for one at your first commit."
-            GIT_IDENTITY_SKIPPED="yes"
-        fi
-    else
-        echo "Git identity: $GIT_NAME <$GIT_EMAIL>"
-    fi
-}
-resolve_git_identity
-
 # --- User's display name: git user.name, else $USER, never asked (the owner: no
 # questions about the user). Stored as registry metadata.user; the install report
-# carries it as user_name and devpulse greets by it. ---
+# carries it as user_name and devpulse greets by it. Git identity itself is never
+# asked here: git names the gap the first time a commit needs one. ---
 resolve_user_name() {
-    USER_NAME="${GIT_NAME:-${USER:-}}"
+    USER_NAME="$(git config --global user.name 2>/dev/null || true)"
+    USER_NAME="${USER_NAME:-${USER:-}}"
 }
 resolve_user_name
 
@@ -697,9 +641,6 @@ fi
 mkdir -p "$SCRIPT_DIR/.aipass"
 {
     if [ ${#ACTION_NEEDED[@]} -gt 0 ]; then printf '%s\n' "${ACTION_NEEDED[@]}"; fi
-    if [ "$GIT_IDENTITY_SKIPPED" = "yes" ]; then
-        echo "Git identity skipped: commits fail until git config --global user.name and user.email are set"
-    fi
 } > "$SCRIPT_DIR/.aipass/setup_attention.txt"
 
 # --- Result ---
