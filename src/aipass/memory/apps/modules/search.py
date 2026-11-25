@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: search.py
 # Description: Search Orchestration Module
-# Version: 0.8.1
+# Version: 0.9.0
 # Created: 2025-11-27
-# Modified: 2026-11-23
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -110,7 +110,12 @@ def handle_command(command: str, args: List[str]) -> bool:
             )
             return True
         show_search_results(
-            query, memory_type=memory_type, n_results=n_results, db_path=store["db_path"], owner=store.get("owner")
+            query,
+            memory_type=memory_type,
+            n_results=n_results,
+            db_path=store["db_path"],
+            owner=store.get("owner"),
+            seat=store["branch"],
         )
         return True
 
@@ -171,9 +176,9 @@ def print_help() -> None:
     console.print('  [dim]drone @memory search global "registry bugs" --branch sentry[/dim]')
     console.print()
     console.print("[bold]HOW IT WORKS:[/bold]")
-    console.print("  1. Convert query to 384-dim embedding (all-MiniLM-L6-v2)")
-    console.print("  2. Search ChromaDB collections for similar vectors")
-    console.print("  3. Display top N most relevant memories")
+    console.print("  1. Convert query to 384-dim embedding (all-MiniLM-L6-v2)", highlight=False)
+    console.print("  2. Search ChromaDB collections for similar vectors", highlight=False)
+    console.print("  3. Display top N most relevant memories", highlight=False)
     console.print()
 
 
@@ -184,8 +189,9 @@ def show_search_results(
     n_results: int = 5,
     db_path: Path | None = None,
     owner: str | None = None,
+    seat: str | None = None,
 ) -> bool:
-    """Execute semantic search via handler and display results with Rich; ``db_path`` None is the global store."""
+    """Search via the handler and render with Rich; ``db_path`` None is global, ``seat`` the local store's branch."""
     console.print()
     console.print(Panel.fit("[bold cyan]memory - Semantic Search[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
@@ -245,6 +251,8 @@ def show_search_results(
         similarity = item.get("similarity", 0)
 
         owner, mem_type = item.get("branch"), item.get("type")
+        if seat and collection == "flow_plans":  # a local flow_plans carries the global one's FLOW label
+            owner = seat
         heading = f"{owner} ({mem_type})" if owner and mem_type else collection
 
         # Entry identity first: a recovered entry is named, not matched on text that may not stay unique.

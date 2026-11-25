@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_chroma_source_match.py
 # Description: Tests for source_file matching in the ChromaDB subprocess handler
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-08-23
-# Modified: 2026-11-23
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/handlers/storage/chroma_subprocess.py."""
@@ -13,7 +13,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(covered_elsewhere) — _vectorize_and_store(): tests/test_chroma_vectorize.py
-# sentry: no-test-needed(external) — chromadb.PersistentClient behind _get_client(); a fake client stands in (the backfill pair runs a real one under tmp_path)
+# sentry: no-test-needed(external) — chromadb.PersistentClient behind _get_client(); a fake, or real under tmp_path
 
 import io
 import json
@@ -375,7 +375,7 @@ class TestSearchBranchScope:
 
 
 class _BrokenCollection(_SearchCollection):
-    def query(self, query_embeddings=None, n_results=5):
+    def query(self, query_embeddings=None, n_results=5, where=None):
         raise RuntimeError("segment unreadable")
 
 
@@ -454,6 +454,37 @@ class TestTheBackfillPairCopiesRowsAsStored:
         order = sorted(range(2), key=lambda i: read["ids"][i])
         assert {f: [read[f][i] for i in order] for f in self._ROWS} == self._ROWS
         assert read["metadata"]["branch"] == "FLOW"
+
+    def test_a_merge_moves_rows_as_stored_and_drops_the_source(self, run, tmp_path):
+        """A renamed branch's collection folds into its new name: ids, vectors and metadata intact, target meta kept."""
+        store = str(tmp_path / "local_chroma")
+        new_meta = {"branch": "canary_test", "type": "local", "hnsw:space": "cosine"}
+        run("add_missing", collection_name="old_local", metadata={"branch": "CANARY"}, db_path=store, **self._ROWS)
+        newer = {"ids": ["new_1"], "embeddings": [[0.1, 0.2, 0.3]], "documents": ["new"], "metadatas": [{"k": 1}]}
+        run("add_missing", collection_name="new_local", metadata=new_meta, db_path=store, **newer)
+
+        merged = run("merge_collection", source="old_local", target="new_local", db_path=store)
+        read = run("read_collection", collection_name="new_local", db_path=store)
+
+        assert (merged["moved"], merged["already_there"], merged["target_count"]) == (2, 0, 3)
+        assert run("read_collection", collection_name="old_local", db_path=store)["exists"] is False
+        order = sorted((i for i, doc_id in enumerate(read["ids"]) if doc_id != "new_1"), key=lambda i: read["ids"][i])
+        assert {f: [read[f][i] for i in order] for f in self._ROWS} == self._ROWS
+        assert read["metadata"] == new_meta
+
+    def test_a_merge_the_target_refuses_keeps_the_source(self, run, tmp_path, capsys):
+        """Write last: a copy that fails (vectors of another width) leaves the source whole."""
+        store = str(tmp_path / "local_chroma")
+        run("add_missing", collection_name="old_local", metadata={"branch": "CANARY"}, db_path=store, **self._ROWS)
+        narrow = {"ids": ["new_1"], "embeddings": [[0.1, 0.2]], "documents": ["new"], "metadatas": [{"k": 1}]}
+        run("add_missing", collection_name="new_local", metadata={"branch": "canary_test"}, db_path=store, **narrow)
+
+        with pytest.raises(SystemExit):
+            run("merge_collection", source="old_local", target="new_local", db_path=store)
+
+        assert json.loads(capsys.readouterr().out)["success"] is False
+        assert len(run("read_collection", collection_name="old_local", db_path=store)["ids"]) == 2
+        assert run("read_collection", collection_name="new_local", db_path=store)["ids"] == ["new_1"]
 
     def test_an_absent_collection_reads_as_a_state(self, run, tmp_path):
         read = run("read_collection", collection_name="flow_plans", db_path=str(tmp_path / "empty_chroma"))

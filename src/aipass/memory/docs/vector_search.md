@@ -84,7 +84,8 @@ runs. Whether a branch or type has vectors is the store's answer, after the mode
 carries `branch` (lowercased) and `type` from the metadata the collection was created with, because a
 collection name cannot be split back: `ai_mail_email_sent` is branch `ai_mail`, type `email_sent`.
 The result screen heads each hit `branch (type)`; a collection created without that metadata is
-headed by its own name.
+headed by its own name. A local store's `flow_plans` carries the global collection's metadata
+(`FLOW`, `plans`), so a local search heads its plan hits with the store's branch: `devpulse (plans)`.
 
 **The model is downloaded once, with network.** `embed_subprocess.py` loads
 `sentence-transformers/all-MiniLM-L6-v2` through fastembed, which reads it from its cache
@@ -117,6 +118,20 @@ with two models would put unsearchable vectors in one collection.
 **Read the payload, not the exit code.** An operation the handler does not know answers
 `{"success": false, "error": "Unknown operation: <name>"}` on stdout and exits 0; only an exception
 inside an operation exits 1. A caller that checks only the return code reads a refusal as a store.
+
+---
+
+## Folding a renamed branch's collections
+
+`merge_collection(source, target, db_path)` moves every row of `source` into `target` as stored (ids,
+embeddings, documents, row metadata) through `add_missing`, so an id already in `target` is left alone.
+`target` keeps its own collection metadata, or takes `source`'s when it is new. `source` is dropped only
+after every one of its ids reads back from `target`; a copy that raises or loses a row leaves it whole.
+A renamed branch needs this because a collection is named `<branch>_<type>`: the next rollover writes the new
+name and the old collection is no longer searched as that branch's own. There is no CLI verb; the operation
+is sent to `chroma_subprocess.py` as JSON on stdin, `{"operation": "merge_collection", "source": ...,
+"target": ..., "db_path": ...}`. Cosine collections store normalised float32 vectors, so a copied
+embedding can differ from the one read in the last float32 digit (about 1e-8).
 
 ---
 

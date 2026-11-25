@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_search.py
 # Description: Tests for the search orchestration module
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-11-23
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/modules/search.py."""
@@ -92,7 +92,9 @@ class TestHandleCommandRouting:
         result = search_mod.handle_command("search", ["hello", "world"])
 
         assert result is True
-        mock_show.assert_called_once_with("hello world", memory_type=None, n_results=5, db_path=_LOCAL, owner=None)
+        mock_show.assert_called_once_with(
+            "hello world", memory_type=None, n_results=5, db_path=_LOCAL, owner=None, seat="seed"
+        )
 
     def test_unknown_command_returns_false(self, monkeypatch):
         """An unrecognised command should return False."""
@@ -206,7 +208,9 @@ class TestHandleCommandArgParsing:
 
         search_mod.handle_command("search", ["test", "--type", "observations"])
 
-        mock_show.assert_called_once_with("test", memory_type="observations", n_results=5, db_path=_LOCAL, owner=None)
+        mock_show.assert_called_once_with(
+            "test", memory_type="observations", n_results=5, db_path=_LOCAL, owner=None, seat="seed"
+        )
 
     def test_n_option_parsed(self, monkeypatch):
         """--n value should override the default n_results."""
@@ -216,7 +220,9 @@ class TestHandleCommandArgParsing:
 
         search_mod.handle_command("search", ["test", "--n", "10"])
 
-        mock_show.assert_called_once_with("test", memory_type=None, n_results=10, db_path=_LOCAL, owner=None)
+        mock_show.assert_called_once_with(
+            "test", memory_type=None, n_results=10, db_path=_LOCAL, owner=None, seat="seed"
+        )
 
     def test_all_options_combined(self, monkeypatch):
         """All options together should be correctly parsed."""
@@ -677,6 +683,20 @@ class TestResultMetadataDisplay:
         assert search_mod.show_search_results("sent mail") is True
 
         assert self._titles(mocks)[0].startswith("Result 1 - ai_mail (email_sent) - ")
+
+    def test_a_local_plan_hit_is_headed_by_the_store_owner(self, monkeypatch):
+        """A local flow_plans carries the global collection's label: its hits read 'flow (plans)', not the owner."""
+        search_mod, mocks = _import_search(monkeypatch)
+        found = self._search_returning({})
+        found["results"][0].update(collection="flow_plans", branch="flow", type="plans")
+        mocks["execute_search"].return_value = found
+
+        assert search_mod.show_search_results("my plan", db_path=_LOCAL, seat="devpulse") is True
+        assert search_mod.show_search_results("my plan") is True
+
+        titles = self._titles(mocks)
+        assert titles[0].startswith("Result 1 - devpulse (plans) - ")
+        assert titles[1].startswith("Result 1 - flow (plans) - ")
 
     def test_a_result_with_no_owner_is_headed_by_its_collection(self, monkeypatch):
         search_mod, mocks = _import_search(monkeypatch)

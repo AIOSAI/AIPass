@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @memory
 # Version: 1.3.6
 # Created: 2026-03-08
-# Modified: 2026-11-23
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -234,7 +234,7 @@ def main() -> int:
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print(f"memory v{__version__}")
+        console.print(f"memory v{__version__}", highlight=False)
         return 0
 
     if args[0] in ["--help", "-h", "help"]:

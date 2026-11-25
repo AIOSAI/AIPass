@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: chroma_subprocess.py
 # Description: ChromaDB Subprocess Handler
-# Version: 1.10.0
+# Version: 1.11.0
 # Created: 2025-11-27
-# Modified: 2026-11-23
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -371,6 +371,40 @@ def _add_missing(collection_name, ids, embeddings, documents, metadatas, metadat
     return {"success": True, "collection": collection_name, "added": len(missing), "present": len(present)}
 
 
+def _merge_collection(source, target, db_path=None):
+    """Move every row of *source* into *target* as stored; *source* is dropped only once all its ids read back there."""
+    rows = _read_collection(source, db_path=db_path)
+    if not rows["exists"]:
+        return {"success": True, "exists": False, "source": source, "target": target, "moved": 0}
+    copied = _add_missing(
+        target,
+        rows["ids"],
+        rows["embeddings"],
+        rows["documents"],
+        rows["metadatas"],
+        metadata=rows["metadata"],
+        db_path=db_path,
+    )
+    client = _get_client(db_path)
+    landed = client.get_collection(target, embedding_function=None)
+    present = set()
+    for start in range(0, len(rows["ids"]), _BATCH):
+        present.update(landed.get(ids=rows["ids"][start : start + _BATCH], include=[])["ids"])
+    lost = len(rows["ids"]) - len(present)
+    if lost:
+        return {"success": False, "error": f"{lost} of {len(rows['ids'])} {source} ids not in {target} - {source} kept"}
+    client.delete_collection(source)
+    return {
+        "success": True,
+        "exists": True,
+        "source": source,
+        "target": target,
+        "moved": copied["added"],
+        "already_there": copied["present"],
+        "target_count": landed.count(),
+    }
+
+
 # Every archive that rolls over owns a "<name>_local" or "<name>_observations" collection.
 _OWNER_SUFFIXES = ("_local", "_observations")
 
@@ -511,6 +545,10 @@ def main(stdin: TextIO | None = None):
                 metadatas=input_data.get("metadatas"),
                 metadata=input_data.get("metadata"),
                 db_path=input_data.get("db_path"),
+            )
+        elif operation == "merge_collection":
+            result = _merge_collection(
+                input_data.get("source"), input_data.get("target"), db_path=input_data.get("db_path")
             )
         elif operation == "delete_by_source":
             result = _delete_by_source(
