@@ -208,3 +208,5 @@ src/aipass/*/.sentry/ratchet/
 !/tools/
 /tools/*
 !/tools/diagrams/
+src/aipass/devpulse/FLOW-LAB.md
+src/aipass/devpulse/AGENT-BEHAVIORS.md
