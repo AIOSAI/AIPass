@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: Rich CLI rendering for backup results (full 9-stage output)
-# Version: 3.2.0
+# Version: 3.2.1
 # Created: 2026-06-12
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Rich CLI rendering for backup — full output pipeline faithfully ported from gold source."""
@@ -25,8 +25,9 @@ MODULE_NAME = "display"
 def print_introspection():
     """Display module info."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
-    console.print("  Rich CLI rendering for backup results (full 9-stage output)")
+    console.print("  [dim]Rich CLI rendering for backup results (full 9-stage output)[/dim]")
     console.print("  Not a command module — used by snapshot/all")
+    console.print("  [dim]Run[/dim] [green]drone @backup display --help[/green] [dim]for usage[/dim]")
 
 
 def refuse_missing_root(mode: str, project_root: str, show_panels: bool = True) -> BackupResult:
@@ -84,6 +85,12 @@ def refuse_oversized_run(
 def print_help():
     """Display help for this module."""
     print_introspection()
+    console.print()
+    console.print("[yellow]Usage:[/yellow] display [dim](this page only; the lanes call its renderers)[/dim]")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @backup snapshot @myapp[/green]   [dim]# renders its stages through display[/dim]")
+    console.print("  [green]drone @backup all @myapp --quiet[/green] [dim]# the panels skipped[/dim]")
 
 
 def _show_lane_ages(title: str, project_root: str) -> None:
@@ -183,7 +190,7 @@ def show_drive_result(result: dict, project_root: str) -> None:
         },
     )
 
-    console.print(f"Processing completed: {total}/{total} files checked")
+    console.print(f"Processing completed: {total}/{total} files checked", highlight=False)
 
     if failed:
         warning(
@@ -225,7 +232,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if args[0] in ("--help", "-h", "help"):
-        print_introspection()
+        print_help()
         return True
 
     return False

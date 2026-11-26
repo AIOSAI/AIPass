@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: share.py
 # Description: Drive sharing — upload + permission + shareable link retrieval
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-07-01
-# Modified: 2026-11-18
+# Modified: 2026-11-26
 # =============================================
 
 """Drive file sharing."""
@@ -33,7 +33,7 @@ def _get_authenticated_email(client: DriveClient) -> str | None:
         if result and result.get("user"):
             return result["user"].get("emailAddress")
     except Exception as exc:
-        logger.info(f"Failed to get authenticated email: {exc}")
+        logger.warning(f"Failed to get authenticated email: {exc}")
     return None
 
 

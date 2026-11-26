@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stop.py
 # Description: Stop module — ends a project's running lanes by request, and the stopped report every lane prints
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-16
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Stop Module — ``stop <project_root|@name> [lane]`` ends the lanes running for a project.
@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from aipass.prax import logger
-from aipass.cli import console, error, mark_command_failed
+from aipass.cli import console, error, escape, mark_command_failed
 
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.json.json_handler import InvalidDocument
@@ -57,19 +57,26 @@ def exit_code(handled_code: int) -> int:
 def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
+    console.print("  [dim]End a project's running lanes by request: SIGTERM, wait, SIGKILL after[/dim]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: live -- SIGTERM, wait, SIGKILL after; the lane exits 130")
     console.print("  Handlers: state/progress, state/lane_process, state/stop_flag")
+    console.print("  [dim]Run[/dim] [green]drone @backup stop --help[/green] [dim]for usage[/dim]")
 
 
 def print_help():
     """Display help for this module."""
     print_introspection()
     console.print()
-    console.print(f"Usage: {USAGE}", markup=False)
-    console.print(f"  lane: one of {', '.join(LANE_WORDS)}; none stops every running lane of the project.")
-    console.print(f"  SIGTERM, then up to {STOP_WAIT_SECONDS}s for the lane to go, then SIGKILL.")
-    console.print("  The stopped lane saves what it must, prints its counts and exits 130.")
+    console.print(f"[yellow]Usage:[/yellow] {escape(USAGE)}")
+    console.print(f"  [cyan]lane[/cyan]: one of {', '.join(LANE_WORDS)}; none stops every running lane of the project.")
+    console.print(
+        f"  [dim]SIGTERM, then up to {STOP_WAIT_SECONDS}s for the lane to go, then SIGKILL.[/dim]", highlight=False
+    )
+    console.print("  [dim]The stopped lane saves what it must, prints its counts and exits 130.[/dim]", highlight=False)
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @backup stop @myapp[/green]")
+    console.print("  [green]drone @backup stop @myapp drive_sync[/green]")
 
 
 def report_stopped(
@@ -103,7 +110,7 @@ def _project_name(project_root: str) -> str:
     try:
         config = load_project_config(project_root)
     except InvalidDocument as exc:
-        logger.info(f"[backup] stop: config unreadable, naming the project by its directory: {exc}")
+        logger.warning(f"[backup] stop: config unreadable, naming the project by its directory: {exc}")
         config = {}
     return config.get("project_name") or Path(project_root).name
 

@@ -14,6 +14,11 @@ backup verb — it answers only to its own name (`drone @backup display` prints
 its introspection and does nothing else) and is intentionally undocumented as a
 command.
 
+**A module that fails to import does not take the others down.** The router
+logs it at error, prints a warning on stderr naming the module, and routes every
+other verb as usual; the broken verb answers `Unknown command`, exit 1. A
+nightly `all` still snapshots when `share` or a Drive module is broken.
+
 **A `--help` anywhere in the arguments prints help and runs nothing** — `drone
 @backup snapshot @myapp --help` is a safe probe, not a backup. The whole
 argument list is screened, not only the first argument, so a trailing `--help`
@@ -169,8 +174,10 @@ verbs do, and passes the rest to the verb, which refuses a stray word as above.
 Nothing in the tree calls the legacy form; it is documented here because it is
 live, not because it is recommended. Use the verbs.
 
-`--version` and `-V` both print the entry point's version; `help` on its own
-behaves like `--help`.
+`--version` and `-V` both print `backup v<X.Y.Z>`, read from the `# Version:`
+line of `apps/backup.py`'s header through `aipass.cli.header_version`; the
+header is the one version, no constant restates it. `help` on its own behaves
+like `--help`, and each verb's `--help`, `-h` or `help` prints its help page.
 
 ---
 

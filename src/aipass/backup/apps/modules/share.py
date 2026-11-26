@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: share.py
 # Description: Share module — single-file Drive upload with shareable link
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-07-01
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Share Module — upload a single file to Drive and return a shareable link."""
@@ -27,8 +27,9 @@ def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: Live — single-file Drive upload + share link")
+    console.print("  [dim]Uploads one file to Drive and prints a shareable link[/dim]")
     console.print("  Handlers: drive/client, drive/upload, drive/share")
+    console.print("  [dim]Run 'drone @backup share --help' for usage[/dim]")
 
 
 def print_help():
@@ -46,6 +47,10 @@ def print_help():
     console.print("[bold cyan]OUTPUT:[/bold cyan]")
     console.print()
     console.print("  Final stdout line is the shareable Google Drive link.")
+    console.print()
+    console.print("[bold cyan]EXAMPLES:[/bold cyan]")
+    console.print()
+    console.print("  [cyan]drone @backup share report.pdf --public[/cyan]")
     console.print()
 
 

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_ceiling_guard.py
 # Description: Tests for the per-run size/file-count ceiling (runaway guard)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-20
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/scan/ceiling.py and the per-run size/file-count ceiling."""
@@ -12,7 +12,7 @@
 # sentry: no-test-needed(ruff) — that scan/ceiling and modules/snapshot, all parse and import
 # sentry: no-test-needed(documentation) — that check_ceiling and breach methods carry docstrings
 # sentry: no-test-needed(constant) — DEFAULT_MAX_TOTAL_GB and DEFAULT_MAX_FILES values (the latter tested as the limit)
-# sentry: no-test-needed(stdlib) — the byte count os.path.getsize() returns; its OSError skip is tested here
+# sentry: no-test-needed(stdlib) — the byte count os.path.getsize() returns; its skip and refusal are tested here
 
 import json
 from pathlib import Path
@@ -127,6 +127,16 @@ class TestCheckCeiling:
         files = _files(tmp_path, ["src/a.py"])
         files.append((str(tmp_path / "src" / "ghost.py"), "src/ghost.py"))
         assert check_ceiling(files, {"max_backup_files": 100, "max_backup_size_gb": 10}) is None
+
+    def test_unmeasurable_file_refuses(self, tmp_path: Path) -> None:
+        """A file that exists but cannot be stat'ed refuses the run: the size gate never passes blind."""
+        files = _files(tmp_path, ["src/a.py"])
+        # A path under a regular file stats as NotADirectoryError: an OSError that is not absence.
+        files.append((str(tmp_path / "src" / "a.py" / "b.py"), "src/a.py/b.py"))
+        breach = check_ceiling(files, {"max_backup_files": 100, "max_backup_size_gb": 10})
+        assert breach is not None
+        assert breach.reason == "unmeasured"
+        assert "src/a.py/b.py" in breach.summary()
 
     def test_absent_max_backup_files_uses_default_limit(self, tmp_path: Path) -> None:
         """Without max_backup_files a small set passes and one file past DEFAULT_MAX_FILES refuses."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: prune.py
 # Description: Prune module — lists, and with --apply removes, stored copies the ignore spec now matches
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-16
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Prune Module — stored copies of paths the ignore spec now matches.
@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from aipass.prax import logger
-from aipass.cli import console, error
+from aipass.cli import console, error, escape
 
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.cleanup.prune import apply_prune, find_prunable
@@ -35,19 +35,24 @@ def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: implemented 2026-10-16")
+    console.print("  [dim]Stored copies the ignore spec now matches; --apply deletes them[/dim]")
     console.print("  Handlers: cleanup/prune, ignore/patterns, ignore/whitelist")
+    console.print("  [dim]Run 'drone @backup prune --help' for usage[/dim]")
 
 
 def print_help():
     """Display help for this module."""
     print_introspection()
     console.print()
-    console.print(f"Usage: {USAGE}")
+    console.print(f"[yellow]Usage:[/yellow] {escape(USAGE)}")
     console.print("  Lists, per top-level directory, the snapshots/ files whose project")
     console.print("  path the ignore spec now matches. Snapshot files only.")
-    console.print("  Without --apply nothing is deleted. --apply deletes them,")
+    console.print("  Without [green]--apply[/green] nothing is deleted. [green]--apply[/green] deletes them,")
     console.print("  one trail row each.")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [cyan]drone @backup prune @backup[/cyan]")
+    console.print("  [cyan]drone @backup prune @backup --apply[/cyan]")
 
 
 def show_listing(project_root: str, found: dict, applying: bool) -> None:
@@ -59,11 +64,11 @@ def show_listing(project_root: str, found: dict, applying: bool) -> None:
     for lane, unit in UNITS.items():
         groups = found["groups"][lane]
         lane_bytes = sum(group["bytes"] for group in groups.values())
-        console.print(f"  {lane}/  {len(found[lane]):,} {unit}, {_human_bytes(lane_bytes)}")
+        console.print(f"  {lane}/  {len(found[lane]):,} {unit}, {_human_bytes(lane_bytes)}", highlight=False)
         for top, group in groups.items():
             line = f"    {top:<32} {group['count']:>10,} {unit:<12} {_human_bytes(group['bytes']):>10}"
             console.print(line, markup=False, highlight=False)
-    console.print(f"  Total: {found['count']:,} stored paths, {_human_bytes(found['bytes'])}")
+    console.print(f"  Total: {found['count']:,} stored paths, {_human_bytes(found['bytes'])}", highlight=False)
 
 
 def run_prune(project_root: str, apply: bool = False) -> bool:
@@ -87,14 +92,17 @@ def run_prune(project_root: str, apply: bool = False) -> bool:
         trail.log_operation("prune_dry_run", {"project_root": project_root, "count": found["count"]})
         console.print(
             f"Dry run -- nothing deleted. {found['count']:,} stored paths ({_human_bytes(found['bytes'])}) "
-            "would go with --apply."
+            "would go with --apply.",
+            highlight=False,
         )
         return True
 
     outcome = apply_prune(project_root, found)
     for line in outcome["errors"]:
         error(f"Not removed: {line}")
-    console.print(f"Removed {outcome['removed']:,} stored paths, {_human_bytes(outcome['bytes'])} freed.")
+    console.print(
+        f"Removed {outcome['removed']:,} stored paths, {_human_bytes(outcome['bytes'])} freed.", highlight=False
+    )
     return not outcome["errors"]
 
 

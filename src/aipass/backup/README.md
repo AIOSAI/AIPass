@@ -4,7 +4,6 @@
 
 **Purpose:** Project-owned, local-first backups for any directory on this machine
 **Module:** `aipass.backup`
-**Version:** 1.3.0
 **Created:** 2026-04-16
 
 ---

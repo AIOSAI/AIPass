@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drive_stats.py
 # Description: Drive stats module — shows file tracker statistics and the Drive account quota
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-04-17
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Drive Stats Module — displays tracker statistics for a project and the Drive account quota."""
@@ -25,18 +25,22 @@ PRIMARY_COMMAND = "drive_stats"
 def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
+    console.print("  [dim]Tracker statistics for a project, and the Drive account quota[/dim]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: Phase 4 -- tracker statistics, account quota")
     console.print("  Handlers: drive/tracker, drive/client")
+    console.print("  [dim]Run 'drone @backup drive_stats --help' for usage[/dim]")
 
 
 def print_help():
     """Display help for this module."""
     print_introspection()
     console.print()
-    console.print("Usage: drive_stats <project_root>")
-    console.print("  Prints the project's tracker, then the Drive account's storage used and limit")
-    console.print("  (about.get storageQuota) -- one live, read-only Drive call.")
+    console.print("[yellow]Usage:[/yellow] [cyan]drive_stats[/cyan] <project_root>")
+    console.print("  [dim]Prints the project's tracker, then the Drive account's storage used and limit[/dim]")
+    console.print("  [dim](about.get storageQuota) -- one live, read-only Drive call.[/dim]")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [cyan]drone @backup drive_stats .[/cyan]")
 
 
 def show_drive_quota() -> bool:
@@ -59,13 +63,13 @@ def show_drive_quota() -> bool:
         return False
 
     usage = quota["usage"]
-    console.print(f"  Drive used:  {_human_bytes(usage)} ({usage:,} bytes)")
+    console.print(f"  Drive used:  {_human_bytes(usage)} ({usage:,} bytes)", highlight=False)
     limit = quota["limit"]
     if limit is None:
         console.print("  Drive limit: none reported -- Drive sends no limit for unlimited storage")
         logger.info(f"[backup] Drive quota: {usage} used, no limit reported")
         return False
-    console.print(f"  Drive limit: {_human_bytes(limit)} ({limit:,} bytes)")
+    console.print(f"  Drive limit: {_human_bytes(limit)} ({limit:,} bytes)", highlight=False)
     logger.info(f"[backup] Drive quota: {usage} used of {limit}")
     return True
 

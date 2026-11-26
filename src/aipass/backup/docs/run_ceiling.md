@@ -25,6 +25,8 @@ A refusal names the directories that caused it, at a depth you can paste straigh
 
 The guard sits in `snapshot` **and** `all`. `all` walks the tree once and hands the filtered set to the snapshot lane (`pre_scanned`), which measures that set again, so a snapshot run on its own and one run from `all` are guarded alike.
 
+A check that cannot run refuses too. A file that exists but cannot be stat'ed (a permission error, a path under a regular file) cannot be measured, so the run is refused, naming the file and the error: make it readable or add it to `.backupignore`, then re-run. A file that vanished between the walk and the measure is skipped, logged at info; it is no longer in the set.
+
 **Limit:** the ceiling refuses a run before it copies. A store an earlier run already filled is shrunk by prune, not by the ceiling — see [store cleanup](store_cleanup.md).
 
 ---

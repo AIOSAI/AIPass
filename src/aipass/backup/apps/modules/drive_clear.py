@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drive_clear.py
 # Description: Drive clear module — clears Drive file tracker (requires --force)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-17
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Drive Clear Module — clears the Drive file tracker for a project."""
@@ -24,17 +24,21 @@ PRIMARY_COMMAND = "drive_clear"
 def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
+    console.print("  [dim]Clears a project's local Drive tracker; remote files stay[/dim]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: Phase 4 -- tracker clear")
     console.print("  Handlers: drive/tracker (requires --force)")
+    console.print("  [dim]Run 'drone @backup drive_clear --help' for usage[/dim]")
 
 
 def print_help():
     """Display help for this module."""
     print_introspection()
     console.print()
-    console.print("Usage: drive_clear <project_root> --force")
-    console.print("  --force   Required to confirm tracker deletion")
+    console.print("[yellow]Usage:[/yellow] [cyan]drive_clear[/cyan] <project_root> --force")
+    console.print("  [green]--force[/green]   Required to confirm tracker deletion")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [cyan]drone @backup drive_clear . --force[/cyan]")
 
 
 def run_drive_clear(project_root: str, force: bool = False) -> bool:

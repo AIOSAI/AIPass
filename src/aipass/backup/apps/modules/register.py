@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: register.py
 # Description: Register module — adds a project to backup and creates .backup/
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-04-17
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Register Module — register a project for backup and scaffold its .backup/."""
@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from aipass.prax import logger
-from aipass.cli import console, error
+from aipass.cli import console, error, escape
 
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.path.caller import resolve_caller_path
@@ -48,19 +48,29 @@ def resolve_project(target: str) -> str | None:
 
 MODULE_NAME = "register"
 PRIMARY_COMMAND = "register"
+USAGE = "register <project_path> [--name <name>] | register --remove <name>"
 
 
 def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
+    console.print("  [dim]Add a project to backup and scaffold its .backup/, or remove it[/dim]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: Phase 3 — implemented")
     console.print("  Handlers: project/setup, project/registry")
+    console.print("  [dim]Run[/dim] [green]drone @backup register --help[/green] [dim]for usage[/dim]")
 
 
 def print_help():
     """Display help for this module."""
     print_introspection()
+    console.print()
+    console.print(f"[yellow]Usage:[/yellow] {escape(USAGE)}")
+    console.print("  [cyan]--name[/cyan]    register under a short name, so @name resolves")
+    console.print("  [cyan]--remove[/cyan]  drop a project from the registry and its scheduled job; its .backup/ stays")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @backup register /path/to/project --name myapp[/green]")
+    console.print("  [green]drone @backup register --remove myapp[/green]")
 
 
 def remove_project(name: str) -> None:
@@ -97,7 +107,7 @@ def handle_command(command: str, args: list) -> bool:
     # verb for real. Bare "help" stays first-position-only: later
     # positions are user values (filenames), not flags.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
-        print_introspection()
+        print_help()
         return True
 
     if args[0] == "--remove":

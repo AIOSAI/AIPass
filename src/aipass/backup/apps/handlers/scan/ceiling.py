@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ceiling.py
 # Description: Per-run size/file-count ceiling — refuses runaway backups loudly
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-20
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Per-run backup ceiling.
@@ -42,6 +42,8 @@ class CeilingBreach:
 
     def summary(self) -> str:
         """One-line statement of what broke."""
+        if self.reason == "unmeasured":
+            return f"{self.offenders[0][0]} could not be measured, so the {self.limit}GB ceiling cannot be checked"
         if self.reason == "file_count":
             return f"{self.measured:,} files exceeds the {self.limit:,}-file ceiling"
         measured_gb = self.measured / _BYTES_PER_GB
@@ -49,6 +51,8 @@ class CeilingBreach:
 
     def detail_lines(self) -> list[str]:
         """Operator-facing lines naming the offenders and the way out."""
+        if self.reason == "unmeasured":
+            return ["Make the file readable or add it to .backupignore, then re-run."]
         lines: list[str] = []
         if self.offenders:
             lines.append("Largest directories in this run:")
@@ -117,10 +121,21 @@ def check_ceiling(
     for abs_path, rel_path in files:
         try:
             size = os.path.getsize(abs_path)
-        except OSError as e:
-            # A file that vanished since the filter counts nothing; never abort over a live tree.
+        except FileNotFoundError as e:
+            # A file that vanished since the filter has nothing left to copy; never abort over a live tree.
             logger.info(f"[backup] Ceiling measure skipped {rel_path}: {e}")
             continue
+        except OSError as e:
+            # Unmeasured bytes could hide a runaway: the gate refuses rather than pass blind.
+            breach = CeilingBreach(
+                reason="unmeasured",
+                measured=0,
+                limit=max_gb,
+                config_key="max_backup_size_gb",
+                offenders=[(f"{rel_path} ({e})", 0, 0)],
+            )
+            _log_breach(breach)
+            return breach
         sizes[rel_path] = size
         total += size
 

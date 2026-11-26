@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: snapshot.py
 # Description: Snapshot module — full-copy backup of a project
-# Version: 2.2.2
+# Version: 2.2.3
 # Created: 2026-04-17
-# Modified: 2026-10-24
+# Modified: 2026-11-26
 # =============================================
 
 """Snapshot Module — full mirror backup of a project directory."""
@@ -13,7 +13,7 @@ import sys
 import time
 
 from aipass.prax import logger
-from aipass.cli import console, error
+from aipass.cli import console, error, escape
 
 from aipass.backup.apps.handlers.copy.snapshot import copy_snapshot
 from aipass.backup.apps.handlers.json.json_handler import WriteFailed
@@ -52,14 +52,22 @@ USAGE = "snapshot <project_path|@name> [--quiet]"
 def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
+    console.print("  [dim]Full-copy backup of a project into its .backup/ store[/dim]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: Phase 3 — implemented")
     console.print("  Handlers: scan, copy/snapshot, state, ignore, path, report")
+    console.print("  [dim]Run[/dim] [green]drone @backup snapshot --help[/green] [dim]for usage[/dim]")
 
 
 def print_help():
     """Display help for this module."""
     print_introspection()
+    console.print()
+    console.print(f"[yellow]Usage:[/yellow] {escape(USAGE)}")
+    console.print("  [cyan]--quiet[/cyan]  skip the stage panels")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @backup snapshot @myapp[/green]")
+    console.print("  [green]drone @backup snapshot /path/to/project --quiet[/green]")
 
 
 def _build_current_timestamps(
@@ -74,7 +82,7 @@ def _build_current_timestamps(
         try:
             timestamps[rel_p] = os.path.getmtime(abs_p)
         except OSError as e:
-            logger.info(f"[backup] Quick-check mtime read failed for {rel_p}: {e}")
+            logger.warning(f"[backup] Quick-check mtime read failed for {rel_p}, copying every file: {e}")
             return None
     return timestamps
 
@@ -91,7 +99,7 @@ def _build_saved_timestamps(
         try:
             timestamps[rel_p] = os.path.getmtime(abs_p)
         except OSError as e:
-            logger.info(f"[backup] Vanished before timestamp save, skipping {rel_p}: {e}")
+            logger.warning(f"[backup] Vanished before timestamp save, skipping {rel_p}: {e}")
     return timestamps
 
 
@@ -255,7 +263,7 @@ def _snapshot_run(
         )
         return result
 
-    console.print(f"Processing completed: {len(filtered)}/{len(filtered)} files checked")
+    console.print(f"Processing completed: {len(filtered)}/{len(filtered)} files checked", highlight=False)
 
     metadata = build_metadata(result)
     append_changelog(project_root, metadata)
@@ -291,7 +299,7 @@ def handle_command(command: str, args: list) -> bool:
     # Screen every arg: the standalone __main__ skips the router's help normalisation.
     # Bare "help" is first-position only; later args are user values.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
-        print_introspection()
+        print_help()
         return True
 
     stray = [arg for arg in args[1:] if arg != "--quiet"]

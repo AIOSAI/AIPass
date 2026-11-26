@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: upload.py
 # Description: Google Drive upload engine — single + batch with threading
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-04-16
-# Modified: 2026-10-31
+# Modified: 2026-11-26
 # =============================================
 
 """Google Drive upload engine."""
@@ -21,6 +21,7 @@ from aipass.prax import logger
 from ..audit import trail
 from ..state.stop_flag import stop_requested
 from . import tracker as tracker_mod
+from .client import GOOGLE_PACKAGES, DriveError
 
 try:
     from googleapiclient.http import MediaFileUpload  # pyright: ignore[reportMissingImports]
@@ -60,7 +61,7 @@ def upload_single_file(
     try:
         rel_path = local_file.relative_to(backup_root)
     except ValueError:
-        logger.info(f"File {local_file} not relative to {backup_root}")
+        logger.warning(f"File {local_file} not relative to {backup_root}")
         rel_path = Path(local_file.name)
 
     parent_dir = str(Path(lane_folder) / rel_path.parent)
@@ -77,7 +78,7 @@ def upload_single_file(
     try:
         rel_key = str(local_file.relative_to(backup_root))
     except ValueError:
-        logger.info(f"File {local_file} not relative to {backup_root}, using absolute path")
+        logger.warning(f"File {local_file} not relative to {backup_root}, using absolute path")
         rel_key = str(local_file)
 
     existing_drive_id = client.file_tracker.get(rel_key, {}).get("drive_id")
@@ -94,7 +95,7 @@ def upload_single_file(
 
     try:
         if not MEDIA_UPLOAD_AVAILABLE:
-            return False
+            raise DriveError(f"Google API HTTP library not installed. Install: pip install {GOOGLE_PACKAGES}")
 
         media = MediaFileUpload(  # type: ignore[misc]
             str(local_file),
@@ -150,7 +151,7 @@ def _file_size(path: Path) -> int:
     try:
         return path.stat().st_size
     except OSError as exc:
-        logger.info(f"Could not stat {path}: {exc}")
+        logger.warning(f"Could not stat {path}: {exc}")
         return 0
 
 
@@ -231,7 +232,7 @@ def upload_batch(
         try:
             return str(path.relative_to(backup_root))
         except ValueError as exc:
-            logger.info(f"File {path} not relative to {backup_root}, naming it whole: {exc}")
+            logger.warning(f"File {path} not relative to {backup_root}, naming it whole: {exc}")
             return str(path)
 
     def _maybe_batch_save(count: int) -> None:

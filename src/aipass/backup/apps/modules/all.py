@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: all.py
 # Description: All module — full cycle: snapshot + drive (shared scan)
-# Version: 5.0.0
+# Version: 5.0.1
 # Created: 2026-04-17
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """All Module — runs snapshot with a shared scan, then drive sync when the project has it on.
@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 from aipass.prax import logger
-from aipass.cli import console, error
+from aipass.cli import console, error, escape
 
 from aipass.backup.apps.handlers.ignore.patterns import load_spec
 from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist
@@ -43,15 +43,23 @@ REGISTERED_FLAG = "--registered"
 def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
+    console.print("  [dim]Full cycle on one shared scan: snapshot, then drive sync when it is on[/dim]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: Phase 4 -- shared scan + drive sync")
     console.print("  Orchestration: scan -> snapshot -> drive (when drive_sync is on)")
-    console.print(f"  Usage: {USAGE}", markup=False)
+    console.print("  [dim]Run[/dim] [green]drone @backup all --help[/green] [dim]for usage[/dim]")
 
 
 def print_help():
     """Display help for this module."""
     print_introspection()
+    console.print()
+    console.print(f"[yellow]Usage:[/yellow] {escape(USAGE)}")
+    console.print("  [cyan]--registered[/cyan]  every registered project in turn, a summary line each")
+    console.print("  [cyan]--quiet[/cyan]       skip the stage panels")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @backup all @myapp[/green]")
+    console.print("  [green]drone @backup all --registered --quiet[/green]")
 
 
 def run_all(project_root: str, show_panels: bool = True) -> dict:
@@ -237,7 +245,7 @@ def handle_command(command: str, args: list) -> bool:
     # Screen every arg: the standalone __main__ skips the router's help normalisation.
     # Bare "help" is first-position only; later args are user values.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
-        print_introspection()
+        print_help()
         return True
 
     show_panels = "--quiet" not in args

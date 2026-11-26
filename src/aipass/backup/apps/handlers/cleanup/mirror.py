@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mirror.py
 # Description: Mirror cleanup handler — removes snapshot files whose source no longer exists
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-06-12
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Mirror cleanup handler — removes snapshot files whose source no longer exists."""
@@ -76,7 +76,7 @@ def _remove_empty_dirs(
             if not source_d.exists() and not dry_run:
                 d.rmdir()
         except OSError as e:
-            logger.info(f"[cleanup] Could not remove dir {d}: {e}")
+            logger.warning(f"[cleanup] Could not remove dir {d}, leaving it: {e}")
 
 
 def cleanup_deleted_files(
