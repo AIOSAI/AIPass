@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests_lane.py
 # Description: Tests Lane Module — the retire lane and the test-template distribution
-# Version: 1.2.4
+# Version: 1.2.5
 # Created: 2026-09-21
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """Tests Lane Module
@@ -140,7 +140,11 @@ def _refuse(subcommand: str) -> None:
 
 def _handle_retired() -> None:
     """List what the retire lane holds."""
-    rows = retire_ops.list_retired(BRANCH)
+    try:
+        rows = retire_ops.list_retired(BRANCH)
+    except retire_ops.CorruptRetireLog as exc:
+        display_error(f"Cannot list retired tests: {exc}")
+        raise CommandRefused(EXIT_NOT_STAMPED, "tests retired") from exc
     folder = retire_ops.retire_root(BRANCH)
 
     console.print()

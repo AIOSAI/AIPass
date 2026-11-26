@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: subprocess_text_true_check.py
 # Description: Subprocess Text True Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-25
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -133,7 +133,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         tree = ast.parse(source)
     except (SyntaxError, ValueError) as exc:
         logger.info("[subprocess_text_true] Unparseable %s: %s", module_path, exc)
-        return _result(True, _one_check(True, "Not judged: the file does not parse (ruff convicts that)"), 100)
+        # Ruff owns the syntax error; a declined check stands the file down instead of averaging a measured 100.
+        checks = [{**_one_check(True, "Not judged: the file does not parse (ruff convicts that)")[0], "declined": True}]
+        return _result(True, checks, 100)
 
     hits = [hit for hit in scan(tree) if not is_bypassed(module_path, STANDARD_KEY, hit[0], bypass_rules)]
     if not hits:

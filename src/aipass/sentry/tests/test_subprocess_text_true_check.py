@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_subprocess_text_true_check.py
 # Description: subprocess_text_true_check — a text-mode subprocess call in a test that names no encoding
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-25
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/subprocess_text_true_check.py."""
@@ -215,6 +215,12 @@ class TestTheEdges:
     def test_an_unparseable_file_is_not_judged(self, tmp_path):
         score, message = _verdict(tmp_path, "def test_x(:\n    subprocess.run(['x'], text=True)\n")
         assert (score, message) == (100, "Not judged: the file does not parse (ruff convicts that)")
+
+    def test_an_unparseable_file_stands_down_rather_than_averaging_a_100(self, tmp_path):
+        path = tmp_path / "tests" / "test_specimen.py"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("def test_x(:\n    pass\n", encoding="utf-8")
+        assert checker.check_module(str(path))["checks"][0].get("declined") is True
 
     def test_a_bypass_for_the_standard_passes_the_file(self, tmp_path):
         path = tmp_path / "tests" / "test_specimen.py"
