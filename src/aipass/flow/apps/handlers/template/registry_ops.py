@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_ops.py
 # Description: Template registry CRUD operations
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-18
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Template Registry CRUD Operations.
@@ -334,22 +334,7 @@ def add_type(
     if not save_registry(registry):
         return False
 
-    plan_registry_path = FLOW_ROOT / "flow_json" / f"{shorthand}_registry.json"
-    if not plan_registry_path.exists():
-        empty_plan_registry: Dict[str, Any] = {
-            "next_number": 1,
-            "plans": {},
-            "last_updated": _today(),
-        }
-        try:
-            with open(plan_registry_path, "w", encoding="utf-8") as fh:
-                json.dump(empty_plan_registry, fh, indent=2, ensure_ascii=False)
-        except OSError as exc:
-            logger.warning(
-                "[%s] Created type but failed to create plan registry: %s",
-                MODULE_NAME,
-                exc,
-            )
+    _create_plan_registry(shorthand)
 
     json_handler.log_operation(
         "add_type",

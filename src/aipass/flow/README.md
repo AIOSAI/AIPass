@@ -4,7 +4,6 @@
 
 **Purpose:** Plan lifecycle management for AIPass — creates, tracks, closes and archives numbered work plans across every registered plan type.
 **Module:** `aipass.flow`
-**Version:** 2.7.0
 **Created:** 2025-11-15
 
 ---

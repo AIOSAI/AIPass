@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: push_central.py
 # Description: Push to Plans Central Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2025-11-21
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Push to Plans Central Handler"""
@@ -43,47 +43,44 @@ CENTRAL_FILE = AI_CENTRAL_DIR / "plans.central.json"
 
 
 def _get_all_registry_files() -> List[str]:
-    """Return per-type registry filenames via plan-type discovery."""
-    try:
-        from aipass.flow.apps.handlers.template.plan_type_loader import discover_plan_types
+    """Return per-type registry filenames via plan-type discovery.
 
-        files: List[str] = []
-        for _key, config in discover_plan_types().items():
-            rf = config.get("registry_file")
-            if rf and rf not in files:
-                files.append(rf)
-        if files:
-            return files
-    except Exception as exc:
-        logger.warning("[push_central] Failed to discover plan types, falling back to default registry: %s", exc)
-    return [REGISTRY_FILE.name]
+    A discovery failure raises: pushing only the default registry would rewrite central without
+    every other type's plans.
+    """
+    from aipass.flow.apps.handlers.template.plan_type_loader import discover_plan_types
+
+    files: List[str] = []
+    for _key, config in discover_plan_types().items():
+        rf = config.get("registry_file")
+        if rf and rf not in files:
+            files.append(rf)
+    return files or [REGISTRY_FILE.name]
 
 
 def _load_registry() -> Dict[str, Any]:
     """Load all per-type plan registries and merge into a single dict.
     Keys are PREFIX-NNNN so registries sharing a plan number (FPLAN-0013, DPLAN-0013) do not collide.
+    An unreadable registry raises: skipping it would rewrite central without its plans.
     """
     merged: Dict[str, Any] = {"plans": {}, "next_number": 1}
     for registry_file in _get_all_registry_files():
         target = FLOW_JSON_DIR / registry_file
         reg_prefix = registry_file.replace("_registry.json", "").upper()
-        try:
-            if not target.exists():
-                continue
-            with open(target, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            for plan_num, plan_data in data.get("plans", {}).items():
-                file_path = plan_data.get("file_path", "")
-                filename = Path(file_path).name if file_path else ""
-                prefix_match = re.match(r"^([A-Z]+PLAN)", filename)
-                prefix = prefix_match.group(1) if prefix_match else reg_prefix
-                composite_key = f"{prefix}-{plan_num.zfill(4)}"
-                merged["plans"][composite_key] = plan_data
-            nn = data.get("next_number", 1)
-            if nn > merged["next_number"]:
-                merged["next_number"] = nn
-        except Exception as exc:
-            logger.warning("Failed to load registry '%s': %s", target, exc)
+        if not target.exists():
+            continue
+        with open(target, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        for plan_num, plan_data in data.get("plans", {}).items():
+            file_path = plan_data.get("file_path", "")
+            filename = Path(file_path).name if file_path else ""
+            prefix_match = re.match(r"^([A-Z]+PLAN)", filename)
+            prefix = prefix_match.group(1) if prefix_match else reg_prefix
+            composite_key = f"{prefix}-{plan_num.zfill(4)}"
+            merged["plans"][composite_key] = plan_data
+        nn = data.get("next_number", 1)
+        if nn > merged["next_number"]:
+            merged["next_number"] = nn
     return merged
 
 

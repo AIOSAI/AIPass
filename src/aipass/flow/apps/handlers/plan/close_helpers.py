@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: close_helpers.py
 # Description: Plan Closure Helper Functions
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-05-16
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -140,6 +140,7 @@ def _self_heal_unregistered_plan(
                 continue
     except Exception as e:
         logger.warning(f"[{MODULE_NAME}] Cross-prefix collision check failed: {e}")
+        messages.append({"type": "warning", "text": f"  Cross-prefix collision check skipped: {e}"})
 
     stem = plan_file.stem
     subject = "Manually created plan"

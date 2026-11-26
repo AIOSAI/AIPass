@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_push_branch_dashboard.py
 # Description: Tests for push_branch_dashboard handler — branch dashboard push
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-04-26
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/dashboard/push_branch_dashboard.py and aipass.prax's dashboard module."""
@@ -16,6 +16,8 @@ import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from aipass.flow.apps.handlers.dashboard import push_branch_dashboard
 from aipass.prax import DASHBOARD_CHAR_BUDGET, SUBJECT_CAP, dashboard_lock
@@ -420,6 +422,16 @@ class TestGetAllRegistryFiles:
             result = mod._get_all_registry_files()
         assert result == [mod.REGISTRY_FILE.name]
 
+    def test_corrupt_template_registry_raises(self, tmp_path):
+        """A corrupt template_registry.json raises, not a quiet answer of the default registry alone.
+
+        Mutant: a restored `except Exception` answering [REGISTRY_FILE.name] reddens this.
+        """
+        mod = push_branch_dashboard
+        (tmp_path / "template_registry.json").write_text("not json!", encoding="utf-8")
+        with patch.object(mod, "FLOW_JSON_DIR", tmp_path), pytest.raises(json.JSONDecodeError):
+            mod._get_all_registry_files()
+
     def test_deduplicates_prefixes(self, tmp_path):
         """Does not duplicate registry filenames for repeated prefixes."""
         mod = push_branch_dashboard
@@ -496,8 +508,11 @@ class TestLoadRegistry:
             result = mod._load_registry()
         assert result["next_number"] == 50
 
-    def test_handles_corrupt_registry_gracefully(self, tmp_path):
-        """Skips a corrupt registry file and continues with others."""
+    def test_corrupt_registry_raises(self, tmp_path):
+        """A corrupt registry raises: no card is counted without its plans.
+
+        Mutant: a restored per-file `except Exception` that skips the file reddens this.
+        """
         mod = push_branch_dashboard
         (tmp_path / "bad_registry.json").write_text("not json!", encoding="utf-8")
         good_reg = {"plans": {"1": {"subject": "good", "file_path": "/p/GOOD-0001_test.md"}}, "next_number": 5}
@@ -510,11 +525,9 @@ class TestLoadRegistry:
                 "_get_all_registry_files",
                 return_value=["bad_registry.json", "good_registry.json"],
             ),
+            pytest.raises(json.JSONDecodeError),
         ):
-            result = mod._load_registry()
-
-        assert "GOOD-0001" in result["plans"]
-        assert result["next_number"] == 5
+            mod._load_registry()
 
 
 # ═══════════════════════════════════════════════════════════

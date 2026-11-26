@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aggregate_central.py
 # Description: Aggregate Central Plans Module
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2025-11-30
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -11,14 +11,6 @@ Aggregate Central Plans Module
 
 Thin orchestrator for central plans aggregation.
 All business logic delegated to handlers/plan/aggregate_ops.py.
-
-Features:
-- Validates all plans in branches.* sections have files on disk
-- Auto-closes plans with missing files in their branch registries
-- Aggregates active plans from all branches into top-level active_plans array
-- Builds recently_closed array from all branches
-- Updates statistics across all branches
-- Preserves unknown branch sections
 
 Usage:
     from aipass.flow.apps.modules.aggregate_central import aggregate_central
@@ -176,7 +168,8 @@ def main():
 
     if len(sys.argv) < 2:
         console.print("Usage: drone @flow aggregate \\[options]")
-        console.print("Commands:")
+        console.print("[bold cyan]Commands:[/bold cyan]")
+        console.print("[dim]The aggregate verb and its heal switches[/dim]")
         console.print("  aggregate         - Aggregate central plans (with healing)")
         console.print("  aggregate --heal  - Aggregate with explicit healing")
         console.print("  aggregate --no-heal - Aggregate without healing")

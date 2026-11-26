@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_list_plans.py
 # Description: Unit tests for apps/modules/list_plans.py
-# Version: 1.3.0
+# Version: 1.3.2
 # Created: 2026-03-24
-# Modified: 2026-11-23
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/list_plans.py."""
@@ -278,11 +278,17 @@ class TestListPlansOrchestrator:
             "filter_type": "open",
         }
 
-        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), patch(f"{_MOD}.error") as mock_error:
+        with (
+            patch(f"{_MOD}.list_plans_impl", return_value=mock_result),
+            patch(f"{_MOD}.error") as mock_error,
+            patch(f"{_MOD}.logger") as mock_logger,
+        ):
             mock_error.side_effect = BrokenPipeError("pipe closed")
 
             result = list_plans("open")
             assert result is False
+            # The unshown error must reach a level a person reads, not info.
+            assert "something broke" in mock_logger.warning.call_args[0][0]
 
 
 class TestListIsScopedToTheCallersProject:
@@ -363,3 +369,19 @@ class TestListIsScopedToTheCallersProject:
         assert "fplan_registry.json cannot be read" in err
         assert "No plans found" not in out + err
         assert command_failed()
+
+    def test_a_broken_pipe_inside_the_listing_is_a_failure_not_an_empty_list(self, seats, monkeypatch, capsys):
+        """The display's closed stdout is caught by the module; one raised while reading is a real failure."""
+        host, _ext, _tmp, sit = seats
+
+        def load_registry(registry_file=None):
+            raise BrokenPipeError("pipe to the registry broke")
+
+        monkeypatch.setattr(f"{_MOD}.load_registry", load_registry)
+        sit(host / "src" / "a")
+
+        assert list_plans("all") is False
+
+        out, err = capsys.readouterr()
+        assert "pipe to the registry broke" in err
+        assert "No plans found" not in out + err

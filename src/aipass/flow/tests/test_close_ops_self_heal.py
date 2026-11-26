@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_close_ops_self_heal.py
 # Description: Tests for close's self-heal of an unregistered plan, split from test_close_ops.py (oversize, leg 12)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-06
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for close_plan_impl's self-heal in apps/handlers/plan/close_ops.py and close_helpers.py."""
@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
 from aipass.flow.apps.handlers.plan.close_ops import close_plan_impl
+from aipass.flow.apps.handlers.registry.load_registry import RegistryUnreadableError
 from aipass.flow.tests.support_close_ops import _make_deps
 
 
@@ -122,7 +123,9 @@ class TestSelfHealNoCollision:
     """
 
     @staticmethod
-    def _close_unregistered(plan_id: str, plan_file: Path, next_number: int, types=None, other=None):
+    def _close_unregistered(
+        plan_id: str, plan_file: Path, next_number: int, types=None, other=None, template_error=None
+    ):
         """Close a plan whose file exists and no row names: (result, registries saved, loads)."""
         saved: list = []
         loads: list = []
@@ -147,6 +150,7 @@ class TestSelfHealNoCollision:
             patch(
                 "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
                 return_value={"types": types or {}},
+                side_effect=template_error,
             ),
             patch("aipass.flow.apps.handlers.plan.close_helpers.json_handler", spec=True),
             patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None),
@@ -203,6 +207,20 @@ class TestSelfHealNoCollision:
 
         assert "0013" in saved[0][1]["plans"]
         assert any("FPLAN-0013 also exists" in m.get("text", "") for m in result["messages"])
+
+    def test_an_unreadable_template_registry_says_the_cross_prefix_check_was_skipped(self, tmp_path):
+        plan_file = tmp_path / "DPLAN-0013_design_2026-03-01.md"
+        plan_file.write_text("# DPLAN-0013: design", encoding="utf-8")
+
+        result, saved, _loads = self._close_unregistered(
+            "DPLAN-0013", plan_file, next_number=13, template_error=RegistryUnreadableError("boom")
+        )
+
+        assert "0013" in saved[0][1]["plans"]
+        assert any(
+            m["type"] == "warning" and m["text"] == "  Cross-prefix collision check skipped: boom"
+            for m in result["messages"]
+        )
 
 
 class TestClosePlanImplSelfHeal:

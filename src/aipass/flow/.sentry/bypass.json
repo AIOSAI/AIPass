@@ -127,15 +127,111 @@
       "file": "apps/handlers/plan/aggregate_ops.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [71, 252, 374],
+      "lines": [71, 248, 367],
       "reason": "Each False means 'not done' on every path; no success path answers False. save_branch_registry: its callers, auto_close_plan and repoint_plan, log the failure and return False, and the plan is then not reported healed. 434 save_central: its one caller, aggregate_central_impl, logs it and returns False. 601 aggregate_central_impl: the aggregate command prints 'Central plans aggregation failed'; push_to_plans_central now raises it into its own failure (leg 10), and close, create and restore warn on that (flow's decision, leg 10)."
     },
     {
       "file": "apps/flow.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [76],
+      "lines": [78],
       "reason": "route_command's True means 'a module handled this command'. A BrokenPipeError is the reader closing stdout early (`drone @flow list | head`): the command ran and its output was cut by the reader, not failed. False would print 'unknown command' for a known one (flow's decision, leg 5)."
+    },
+    {
+      "file": "apps/flow.py",
+      "standard": "fallback",
+      "functions": ["route_command"],
+      "reason": "(flow, FPLAN-1229) The BrokenPipeError handler is the reader closing stdout early (drone @flow list | head): the command ran and only its output was cut, so True ('a module handled this') is the fact, not a stand-in; the info log records it. A raise or warning would turn a normal pipe into an error; False would print 'unknown command' for a known one."
+    },
+    {
+      "file": "apps/modules/aggregate_central.py",
+      "standard": "fallback",
+      "functions": ["aggregate_central"],
+      "reason": "(flow, FPLAN-1229) Read as a check only because 'aggregate' contains 'gate'. On a registry_lock TimeoutError it returns False, meaning 'not done', never 'passed'; its one caller, handle_command, shows error('Central plans aggregation failed') and exits 2, the timeout text logged. A raise would pass route_command's catch-all and end in 'Unknown command'."
+    },
+    {
+      "file": "apps/modules/list_plans.py",
+      "standard": "fallback",
+      "functions": ["list_plans"],
+      "reason": "(flow, FPLAN-1229) The BrokenPipeError after a successful listing is the reader closing stdout (drone @flow list | head): the listing succeeded and the reader stopped, so True is the true answer. The error-display pipe in the same function logs at warning and returns False."
+    },
+    {
+      "file": "apps/handlers/repo_root.py",
+      "standard": "fallback",
+      "functions": ["exists_exactly"],
+      "reason": "(flow, FPLAN-1229) Documented contract: exists() has already confirmed the path; only the exact-spelling check cannot run when the parent cannot be listed, so True is the known answer. A raise would break every location lookup (find_repo_root walks every parent) over a permission quirk on a directory that does exist."
+    },
+    {
+      "file": "apps/handlers/repo_root.py",
+      "standard": "fallback",
+      "functions": ["_record_fallback"],
+      "reason": "(flow, FPLAN-1229) The fallback itself is logged at warning on the line before; this except covers only the optional audit-log record, which must never take an import down: repo_root runs at import time for many callers. The detector flags the word 'fallback' in the name."
+    },
+    {
+      "file": "apps/handlers/template/registry_ops.py",
+      "standard": "fallback",
+      "functions": ["_read_or_seed"],
+      "reason": "(flow, FPLAN-1229) template_registry.json is rebuilt from templates/ on disk with deterministic prefixes: a corrupt or unreadable file is logged at warning, reseeded, rediscovered and saved once. A raise would block every plan command over a rebuildable file. Limit: a prefix registered by hand to dodge a collision is not rediscovered."
+    },
+    {
+      "file": "apps/handlers/template/registry_ops.py",
+      "standard": "fallback",
+      "functions": ["_create_plan_registry"],
+      "reason": "(flow, FPLAN-1229) Pre-creating a type's plan registry is a convenience: load_registry reads an absent file as empty and the first save creates it. A failed pre-create is logged at warning and loses nothing; failing add_type or discovery for it would be worse."
+    },
+    {
+      "file": "apps/handlers/runner/lock_ops.py",
+      "standard": "fallback",
+      "functions": ["_pid_alive", "is_lock_stale", "_pidless_lock_is_stale"],
+      "reason": "(flow, FPLAN-1229) Each except is the answer, not a failure: PermissionError from os.kill(pid, 0) means alive under another user; FileNotFoundError on the lock means its holder released it (take over); ValueError on the pid means no pid yet, so the lock is aged. Normal contention paths, logged at info; any other OSError re-raises. Same contract as the logged_fallback row."
+    },
+    {
+      "file": "apps/handlers/dashboard/push_central.py",
+      "standard": "fallback",
+      "functions": ["_load_central"],
+      "reason": "(flow, FPLAN-1229) plans.central.json is derived data: the push replaces branches, statistics and generated_at wholesale, and aggregate rebuilds the lists from the registries, the source of truth. An unreadable file is rebuilt with a warning logged; a raise would leave a corrupt central in place for good."
+    },
+    {
+      "file": "apps/handlers/registry/monitor_ops.py",
+      "standard": "fallback",
+      "functions": ["is_plan_file", "_fire_event"],
+      "reason": "(flow, FPLAN-1229) is_plan_file answers None (a sentinel, not a bool) for an unreadable file, logged at warning; every caller reads None as never rename, register or close, and the scan carries on. _fire_event answers False (not handled) on a missing trigger package with a warning, so the scan never counts it as a change. A raise would abort the whole scan over one file."
+    },
+    {
+      "file": "apps/handlers/mbank/process.py",
+      "standard": "fallback",
+      "functions": ["_get_all_registry_files"],
+      "reason": "(flow, FPLAN-1229) A plan-type discovery failure processes fplan_registry.json alone, with a warning. Nothing is lost: other types' closed plans keep processed != True and drain on the next run. A raise would stop FPLAN archiving too over a discovery fault."
+    },
+    {
+      "file": "apps/handlers/plan/aggregate_ops.py",
+      "standard": "fallback",
+      "functions": ["load_branch_registry"],
+      "reason": "(flow, FPLAN-1229) Its one caller, _own_row, finds no row in the empty stand-in, so the plan stays open and nothing is saved; the stand-in can never be written over the real registry. Logged at error naming the file. A raise would abort aggregation of every other branch for one unreadable registry."
+    },
+    {
+      "file": "apps/handlers/plan/aggregate_ops.py",
+      "standard": "fallback",
+      "functions": ["aggregate_central_impl"],
+      "reason": "(flow, FPLAN-1229) Read as a check because 'aggregate' contains 'gate'. False is its only failure value (success is True): the aggregate command prints 'Central plans aggregation failed' and push_to_plans_central raises it. The logged_fallback row covers the same except."
+    },
+    {
+      "file": "apps/handlers/registry/heal_registry.py",
+      "standard": "fallback",
+      "functions": ["_heal_type_registry"],
+      "reason": "(flow, FPLAN-1229) Heal isolates each plan type: an unreadable type registry is skipped this run with a warning naming it, while load_registry refuses it loudly (RegistryUnreadableError) on every command path. A raise would only reach heal_registry_doctrine_impl's per-type except and log the same skip."
+    },
+    {
+      "file": "apps/handlers/registry/heal_registry.py",
+      "standard": "fallback",
+      "functions": ["_id_matches_registry_row"],
+      "reason": "(flow, FPLAN-1229) Classifier input: False means 'not verified', which sends the seat to the repository check or quarantine, never to a re-attribution. An unverifiable seat must not be trusted, so False is the safe answer, logged at warning. A raise would stop the orphan sweep for every other row."
+    },
+    {
+      "file": "apps/handlers/registry/heal_registry.py",
+      "standard": "fallback",
+      "functions": ["_citizen_seat_index"],
+      "reason": "(flow, FPLAN-1229) A smaller seat index only under-attributes: rows go to quarantine, never to a wrong owner, and registry status shows quarantine. Each skipped source is logged at warning. A raise would block the whole heal over one unreadable registry."
     }
   ],
   "notes": {

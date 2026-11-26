@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_aggregate_ops.py
 # Description: Tests for aggregate_ops -- registry, central file, and aggregation helpers
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-29
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/plan/aggregate_ops.py."""
@@ -337,13 +337,12 @@ class TestLoadCentral:
         assert result["branches"] == {}
         assert result["global_statistics"]["total_active"] == 0
 
-    def test_returns_empty_structure_on_corrupt_file(self, tmp_path):
-        load_central = _import("load_central")
+    def test_a_corrupt_central_fails_the_aggregation_not_reads_as_no_branches(self, tmp_path):
         central = tmp_path / "plans.central.json"
         central.write_text("{{invalid", encoding="utf-8")
-        result = load_central(central)
-        assert result["active_plans"] == []
-        assert result["branches"] == {}
+        result = mod.aggregate_central_impl(heal=True, central_file=central, central_dir=tmp_path)
+        assert result is False
+        assert central.read_text(encoding="utf-8") == "{{invalid"
 
 
 class TestSaveCentral:

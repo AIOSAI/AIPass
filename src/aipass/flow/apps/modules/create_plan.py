@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: create_plan.py
 # Description: PLAN creation module with location awareness
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2025-11-16
-# Modified: 2026-11-23
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -134,7 +134,7 @@ def print_help():
     console.print()
 
     console.print("[yellow]TEMPLATE SELECTION:[/yellow]")
-    console.print("  The 4th arg selects a non-default template within a type.")
+    console.print("  The 4th arg selects a non-default template within a type.", highlight=False)
     console.print("  Any .md file stem in the type's templates/ dir works.")
     console.print('  [dim]drone @flow create . "Subject" merge pplan[/dim]')
     console.print('  [dim]drone @flow create . "Subject" master[/dim]        # FPLAN master')
@@ -147,9 +147,9 @@ def print_help():
     console.print()
 
     console.print("[bold]ADD A NEW PLAN TYPE:[/bold]")
-    console.print("  1. Create templates/<dirname>/ with .md template files")
-    console.print("  2. drone @flow register <dirname> <PREFIX>")
-    console.print('  3. drone @flow create . "Subject" <shorthand>')
+    console.print("  1. Create templates/<dirname>/ with .md template files", highlight=False)
+    console.print("  2. drone @flow register <dirname> <PREFIX>", highlight=False)
+    console.print('  3. drone @flow create . "Subject" <shorthand>', highlight=False)
     console.print("  [dim]See: drone @flow templates --help[/dim]")
     console.print()
 

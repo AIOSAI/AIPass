@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_routing.py
 # Description: Plan-type Registry Routing Helpers
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-07-28
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Plan-Type Registry Routing
@@ -15,9 +15,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
-from aipass.prax import logger
-
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.registry.load_registry import RegistryUnreadableError
 
 MODULE_NAME = "registry_routing"
 
@@ -49,14 +48,16 @@ def _resolve_registry_file(plan_num_raw: str) -> str | None:
 
 
 def _load_template_registry() -> Dict[str, Any]:
-    """Read template_registry.json directly (avoids cross-handler import)."""
+    """Read template_registry.json directly (avoids cross-handler import).
+    Absent means no types; unreadable raises: an empty type list reads as 'no such plan'."""
     registry_path = FLOW_ROOT / "flow_json" / "template_registry.json"
+    if not registry_path.exists():
+        return {"types": {}}
     try:
         with open(registry_path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception as e:
-        logger.warning(f"[{MODULE_NAME}] Failed to read template_registry.json: {e}")
-        return {"types": {}}
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise RegistryUnreadableError(f"Template registry {registry_path} cannot be read: {e}") from e
 
 
 def _find_plan_across_registries(plan_key: str, load_registry_fn: Any) -> str | None:

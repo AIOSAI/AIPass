@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: flow.py
 # Description: Entry point CLI for drone @flow — plan lifecycle management
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-03-08
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -25,7 +25,7 @@ from typing import List, Any
 
 from aipass.prax import logger
 
-from aipass.cli import console, header, error, reset_command_state, resolve_exit
+from aipass.cli import console, err_console, header, error, header_version, reset_command_state, resolve_exit
 
 MODULES_DIR = Path(__file__).parent / "modules"
 
@@ -59,6 +59,8 @@ def discover_modules() -> List[Any]:
 
         except Exception as e:
             logger.error(f"[flow] Failed to load module {module_name}: {e}")
+            # Its verbs vanish from the menu: say so, or they read as "Unknown command".
+            err_console.print(f"flow: module {file_path.stem} failed to load: {e}", markup=False, highlight=False)
 
     return modules
 
@@ -112,7 +114,7 @@ def _main_impl():
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print(f"flow v{BRANCH_VERSION}")
+        console.print(f"flow v{header_version(__file__)}", highlight=False)
         return 0
 
     if args[0] in ["--help", "-h", "help"]:
@@ -161,10 +163,6 @@ def print_introspection(modules: List[Any]):
     console.print()
     console.print("[dim]Run 'drone @flow --help' for usage information[/dim]")
     console.print()
-
-
-# Must match the version in the README header.
-BRANCH_VERSION = "2.7.0"
 
 
 def module_verbs(module: Any) -> str:

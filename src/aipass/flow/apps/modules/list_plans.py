@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: list_plans.py
 # Description: PLAN listing module with filtering
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2025-11-21
-# Modified: 2026-11-23
+# Modified: 2026-11-26
 # =============================================
 
 """List PLAN module: a thin orchestrator; list_ops gathers the rows, this prints them. See drone @flow list --help."""
@@ -105,7 +105,7 @@ def list_plans(filter_type: str = "open") -> bool:
         try:
             error(f"ERROR: {error_msg}")
         except BrokenPipeError:
-            logger.info(f"[{MODULE_NAME}] Broken pipe while displaying error (stdout closed early)")
+            logger.warning(f"[{MODULE_NAME}] Broken pipe, error not shown: {error_msg}")
         return False
 
     try:

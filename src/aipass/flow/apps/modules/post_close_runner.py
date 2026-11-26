@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: post_close_runner.py
 # Description: Background post-close processing
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-02-14
-# Modified: 2026-11-23
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -80,6 +80,10 @@ def print_help():
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
     console.print("  drone @flow post")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [dim]drone @flow post[/dim]          # Show connected handlers")
+    console.print("  [dim]drone @flow post --help[/dim]   # This help")
     console.print()
     console.print("[yellow]NOTES:[/yellow]")
     console.print("  Background utility — called by close_plan.py via subprocess.")

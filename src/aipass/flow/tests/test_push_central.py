@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_push_central.py
 # Description: Tests for push_central handler -- push to Plans Central
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-05-12
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/dashboard/push_central.py."""
@@ -68,6 +68,9 @@ def _push(tmp_path, registries=None, plan_types=None, central=None):
         patch.object(mod, "aggregate_central_impl") as mock_agg,
     ):
         result = mod.push_to_plans_central()
+    if result is False:
+        mock_agg.assert_not_called()
+        return result, None
     mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
     return result, json.loads(central_file.read_text(encoding="utf-8"))
 
@@ -242,10 +245,10 @@ class TestGetAllRegistryFiles:
         assert result is True
         assert _plan_ids(written) == {"FPLAN-0001", "DPLAN-0002"}
 
-    def test_falls_back_on_discovery_exception(self, tmp_path):
-        """Falls back to REGISTRY_FILE.name when discover_plan_types raises.
+    def test_discovery_exception_fails_the_push(self, tmp_path, mock_logger):
+        """A discover_plan_types failure fails the push: no central rewritten with FPLAN rows alone.
 
-        Mutant: `return [REGISTRY_FILE.name]` -> `return []` reddens this.
+        Mutant: a restored `except Exception` answering [REGISTRY_FILE.name] reddens this.
         """
         result, written = _push(
             tmp_path,
@@ -256,8 +259,9 @@ class TestGetAllRegistryFiles:
             plan_types=RuntimeError("boom"),
         )
 
-        assert result is True
-        assert _plan_ids(written) == {"FPLAN-0001"}
+        assert result is False
+        assert written is None
+        assert "boom" in str(mock_logger.error.call_args)
 
     def test_falls_back_when_no_registry_file_key(self, tmp_path):
         """Falls back to default when config dicts lack registry_file key."""
@@ -323,8 +327,11 @@ class TestLoadRegistry:
         assert written["branches"] == {}
         mock_logger.warning.assert_not_called()
 
-    def test_handles_corrupt_registry_gracefully(self, tmp_path):
-        """Skips a corrupt registry file and continues with others."""
+    def test_corrupt_registry_fails_the_push(self, tmp_path, mock_logger):
+        """A corrupt registry fails the push: central is not rewritten without its plans.
+
+        Mutant: a restored per-file `except Exception` that skips the file reddens this.
+        """
         result, written = _push(
             tmp_path,
             {
@@ -333,9 +340,9 @@ class TestLoadRegistry:
             },
         )
 
-        # Mutant: the per-file `except Exception` -> `except KeyError` reddens this.
-        assert result is True
-        assert _plan_ids(written) == {"GOOD-0001"}
+        assert result is False
+        assert written is None
+        assert "Failed to push" in str(mock_logger.error.call_args)
 
     def test_uses_prefix_from_filename(self, tmp_path):
         """Extracts prefix from plan file_path filename, not the registry's name."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for flow's entry point routing, help and introspection
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-04
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/flow.py, the CLI entry point."""
@@ -13,7 +13,7 @@
 
 import pytest
 
-from aipass.cli import error, mark_command_failed, reset_command_state
+from aipass.cli import error, header_version, mark_command_failed, reset_command_state
 from aipass.flow.apps import flow as branch_entry
 
 
@@ -88,7 +88,7 @@ def test_version_flag_prints_version(monkeypatch, capsys, flag):
     assert _run(monkeypatch, [flag]) == 0
 
     out = capsys.readouterr().out
-    assert "flow v" in out
+    assert out.strip() == f"flow v{header_version(branch_entry.__file__)}"
 
 
 def test_route_command_returns_true_for_known_command(stub_module):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aggregate_ops.py
 # Description: Central Plans Aggregation Implementation Handler
-# Version: 1.6.1
+# Version: 1.6.2
 # Created: 2026-03-08
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -214,7 +214,7 @@ def _resolve_total_closed(branch_name: str, *, upstream_total: Any, healed_count
 
 
 def load_central(central_file: Path) -> Dict[str, Any]:
-    """Load plans.central.json"""
+    """Load plans.central.json; absent is empty, unreadable raises so the aggregation fails, not 'no branches'."""
     empty_structure = {
         "generated_at": "",
         "active_plans": [],
@@ -227,12 +227,8 @@ def load_central(central_file: Path) -> Dict[str, Any]:
     if not central_file.exists():
         return empty_structure
 
-    try:
-        with open(central_file, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"[{MODULE_NAME}] Failed to load {central_file}: {e}")
-        return empty_structure
+    with open(central_file, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def save_central(central_file: Path, central_dir: Path, central_data: Dict[str, Any]) -> bool:
@@ -348,17 +344,14 @@ def aggregate_central_impl(
                 len(recently_closed),
             )
 
-            try:
-                from aipass.trigger import trigger
+            from aipass.trigger import trigger
 
-                trigger.fire(
-                    "central_aggregated",
-                    active_count=len(all_active),
-                    closed_count=len(recently_closed),
-                    branches_count=len(branches),
-                )
-            except ImportError as e:
-                logger.warning(f"[{MODULE_NAME}] Trigger module not available, skipping central_aggregated event: {e}")
+            trigger.fire(
+                "central_aggregated",
+                active_count=len(all_active),
+                closed_count=len(recently_closed),
+                branches_count=len(branches),
+            )
 
             json_handler.log_operation(
                 "central_aggregated",
