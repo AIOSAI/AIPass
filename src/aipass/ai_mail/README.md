@@ -107,6 +107,7 @@ Depth lives in [docs/](docs/), one file per handler group, each small enough for
 |---|---|
 | [docs/README.md](docs/README.md) | What belongs in `docs/` and what belongs in a local scratch directory |
 | [docs/wake_pipeline.md](docs/wake_pipeline.md) | The wake path end to end: the spawn lanes, safety limits, the scheduled lane, unattended wakes, the Fable grant, and the recipient dashboard refresh |
+| [docs/wake_providers.md](docs/wake_providers.md) | The Codex and OpenCode providers: argv, stream parsing, model selection and process scans |
 | [docs/wake_lanes.md](docs/wake_lanes.md) | The admin lane, the cross-project bridge, `@all` scope, out-of-scope addresses, and the reply return path |
 | [docs/dispatch_register_and_feed.md](docs/dispatch_register_and_feed.md) | The append-only register, completion reports, crash coverage and its latency, and the notification feed |
 | [docs/mail_kinds.md](docs/mail_kinds.md) | The kind every delivered mail carries (medic, rounds, job_failed, notice, mail), how it is decided, and the feed's rate limit |
