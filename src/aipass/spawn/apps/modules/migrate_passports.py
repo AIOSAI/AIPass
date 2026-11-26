@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: migrate_passports.py
 # Description: Passport 2.0 fleet migration — thin CLI layer over passport_migration
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-28
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """One-shot fleet passport migration to schema 2.0 (DPLAN-0319).
@@ -26,7 +26,7 @@ def print_introspection():
     """Display module introspection info."""
     console.print()
     console.print("[bold cyan]migrate_passports Module[/bold cyan]")
-    console.print("Passport 2.0 migration — one-shot fleet upgrade of every .trinity/passport.json")
+    console.print("Passport 2.0 migration — one-shot fleet upgrade of every .trinity/passport.json", highlight=False)
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/[/cyan]")
@@ -121,7 +121,7 @@ def print_help():
         "\\[--dry-run|--confirm] \\[--root <path>] \\[--only <branch>]"
     )
     console.print()
-    console.print("  Migrate every live passport to schema 2.0 (DPLAN-0319): block order,")
+    console.print("  Migrate every live passport to schema 2.0 (DPLAN-0319): block order,", highlight=False)
     console.print("  principles into identity, residency, class renames, casing and path fixes.")
     console.print()
     console.print(
@@ -133,6 +133,10 @@ def print_help():
     console.print("  [green]--only[/green] <branch>  Restrict to one branch (@ optional)")
     console.print()
     console.print("[dim]Re-running is a measured no-op: an already-2.0 passport reports 0 changes.[/dim]")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  drone @spawn migrate-passports --dry-run")
+    console.print("  drone @spawn migrate-passports --only @devpulse --confirm")
     console.print()
 
 
@@ -188,13 +192,14 @@ def _print_field_counts(receipt: dict) -> None:
     console.print("[bold]Field changes:[/bold]")
     width = max(len(name) for name in counts)
     for name, count in counts.items():
-        console.print(f"  {name:<{width}}  {count}")
+        console.print(f"  {name:<{width}}  {count}", highlight=False)
 
 
 def _print_per_branch(receipt: dict) -> None:
     """Print one line per scanned passport."""
     console.print()
     console.print("[bold]Per branch:[/bold]")
+    console.print("  [dim]each scanned passport's result, one line per branch[/dim]")
     for rec in receipt["files"]:
         if rec["error"]:
             continue

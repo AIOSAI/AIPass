@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_registry.py
 # Description: Registry repair — thin CLI layer for registry synchronization
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-03-07
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Registry synchronization for branch lifecycle management.
@@ -41,6 +41,7 @@ def print_introspection():
         " (sync_registry — scan filesystem, detect stale/unregistered, auto-repair)[/dim]"
     )
     console.print()
+    console.print("[dim]Run drone @spawn sync-registry --help for usage[/dim]")
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -53,10 +54,44 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if "--help" in args:
-        print_introspection()
+        print_help()
         return True
 
     return handle_sync_registry(args) == 0
+
+
+def print_help():
+    """Display sync-registry help."""
+    console.print(
+        "[bold cyan]Usage:[/bold cyan] drone @spawn sync-registry "
+        "\\[project-path] [--fix|--check|--rebuild|--lowercase] [--json] [--dry-run] [--confirm]"
+    )
+    console.print()
+    console.print("  [green](no args)[/green]      Report mismatches between registry and filesystem")
+    console.print("  [green]--fix[/green]          Auto-repair: stale/unregistered + owner/identity reconcile")
+    console.print("  [green]--fix --dry-run[/green] Show planned owner/identity fixes without applying")
+    console.print("  [green]--check[/green]        Read-only owner/identity health check (exit 0=clean)")
+    console.print("  [green]--check --json[/green]  Machine-readable check output")
+    console.print("  [green]--rebuild[/green]      Preview rebuilding a CORRUPT registry from its passports")
+    console.print(
+        "  [green]--rebuild --confirm[/green] Move the corrupt file aside as <name>.corrupt-<stamp>, write the"
+        " rebuilt one; admin and ci_cure are not restored (re-run grant-admin, grant-ci-cure)"
+    )
+    console.print(
+        "  [green]--lowercase[/green]    Preview lowercasing row names, certificate owners and passport names,"
+        " and relative paths"
+        " (exit 0 nothing to convert, 1 rows to convert, 2 refused)"
+    )
+    console.print(
+        "  [green]--lowercase --confirm[/green] Copy the registry to <name>.pre-convert-<stamp>, then convert it;"
+        " project-path may name the registry file itself"
+    )
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  drone @spawn sync-registry")
+    console.print("  drone @spawn sync-registry --fix --dry-run")
+    console.print("  drone @spawn sync-registry --check --json")
+    console.print()
 
 
 def handle_sync_registry(args: list[str]) -> int:
@@ -65,30 +100,7 @@ def handle_sync_registry(args: list[str]) -> int:
     Returns exit code (0=success/clean, 1=failure/issues).
     """
     if args and args[0] in ["--help", "-h"]:
-        console.print(
-            "[bold cyan]Usage:[/bold cyan] drone @spawn sync-registry "
-            "\\[project-path] [--fix|--check|--rebuild|--lowercase] [--json] [--dry-run] [--confirm]"
-        )
-        console.print()
-        console.print("  [green](no args)[/green]      Report mismatches between registry and filesystem")
-        console.print("  [green]--fix[/green]          Auto-repair: stale/unregistered + owner/identity reconcile")
-        console.print("  [green]--fix --dry-run[/green] Show planned owner/identity fixes without applying")
-        console.print("  [green]--check[/green]        Read-only owner/identity health check (exit 0=clean)")
-        console.print("  [green]--check --json[/green]  Machine-readable check output")
-        console.print("  [green]--rebuild[/green]      Preview rebuilding a CORRUPT registry from its passports")
-        console.print(
-            "  [green]--rebuild --confirm[/green] Move the corrupt file aside as <name>.corrupt-<stamp>, write the"
-            " rebuilt one; admin and ci_cure are not restored (re-run grant-admin, grant-ci-cure)"
-        )
-        console.print(
-            "  [green]--lowercase[/green]    Preview lowercasing row names, certificate owners and passport names,"
-            " and relative paths"
-            " (exit 0 nothing to convert, 1 rows to convert, 2 refused)"
-        )
-        console.print(
-            "  [green]--lowercase --confirm[/green] Copy the registry to <name>.pre-convert-<stamp>, then convert it;"
-            " project-path may name the registry file itself"
-        )
+        print_help()
         return 0
 
     project_path = None

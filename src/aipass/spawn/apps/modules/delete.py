@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delete.py
 # Description: Branch deletion — thin CLI layer for archive and deregister
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Delete orchestrator for branch lifecycle management."""
@@ -26,6 +26,29 @@ def print_introspection():
     console.print("  [cyan]handlers/[/cyan]")
     console.print("    [dim]- delete_ops.py (delete_branch — resolve path, archive, remove from registry)[/dim]")
     console.print()
+    console.print("[dim]Run drone @spawn delete --help for usage[/dim]")
+
+
+def print_help(usage_error: bool = False):
+    """Display usage for drone @spawn delete; a bare call prints it as a usage warning."""
+    usage = "drone @spawn delete <@branch | path> [--retire] [--yes] [--dry-run]"
+    if usage_error:
+        warning(f"Usage: {usage}")
+    else:
+        console.print(f"[bold cyan]Usage:[/bold cyan] {usage}")
+    console.print()
+    console.print("  [green]@branch[/green]    Branch to archive and deregister, from the cwd's registry")
+    console.print("  [green]path[/green]       Branch directory; its own project's registry is read")
+    console.print("  [green]--retire[/green]   Retire an active citizen: its archived passport reads registered false")
+    console.print("  [green]--yes[/green]      Skip confirmation prompt")
+    console.print("  [green]--dry-run[/green]  Preview what would happen without changes, from any seat")
+    console.print()
+    console.print("  [dim]The real run is the verified admin seat's; any other seat mails @devpulse.[/dim]")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  drone @spawn delete @api --dry-run", highlight=False)
+    console.print("  drone @spawn delete @api --yes", highlight=False)
+    console.print("  drone @spawn delete @api --retire", highlight=False)
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -38,7 +61,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if "--help" in args:
-        print_introspection()
+        print_help()
         return True
 
     return handle_delete(args) == 0
@@ -48,22 +71,8 @@ def handle_delete(args: list[str]) -> int:
     """Parse args and execute delete; returns exit code (0=success, 1=failure)."""
     help_asked = "--help" in args or "-h" in args
     if help_asked or not args:
-        usage = "drone @spawn delete <@branch | path> [--retire] [--yes] [--dry-run]"
         # Asked-for help is output; a bare call is a usage error.
-        if help_asked:
-            console.print(f"[bold cyan]Usage:[/bold cyan] {usage}")
-        else:
-            warning(f"Usage: {usage}")
-        console.print()
-        console.print("  [green]@branch[/green]    Branch to archive and deregister, from the cwd's registry")
-        console.print("  [green]path[/green]       Branch directory; its own project's registry is read")
-        console.print(
-            "  [green]--retire[/green]   Retire an active citizen: its archived passport reads registered false"
-        )
-        console.print("  [green]--yes[/green]      Skip confirmation prompt")
-        console.print("  [green]--dry-run[/green]  Preview what would happen without changes, from any seat")
-        console.print()
-        console.print("  [dim]The real run is the verified admin seat's; any other seat mails @devpulse.[/dim]")
+        print_help(usage_error=not help_asked)
         return 0 if help_asked else 1
 
     dry_run = "--dry-run" in args

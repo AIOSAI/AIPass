@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: grant_admin.py
 # Description: Seat-flag ceremonies — thin CLI layer for the registry admin, ci_cure and owner flags
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-12
-# Modified: 2026-10-31
+# Modified: 2026-11-26
 # =============================================
 
 """Seat-flag ceremonies: admin on the devpulse entry, ci_cure on the trigger entry, a project's owner seat.
@@ -39,6 +39,24 @@ def print_introspection():
     console.print(f"    [dim]- registry.py (ensure_ci_cure — {CI_CURE_BRANCH}-only, one holder)[/dim]")
     console.print("    [dim]- registry.py (move_owner — one owner per project registry, never AIPASS_REGISTRY)[/dim]")
     console.print()
+    console.print("[dim]Run drone @spawn grant-admin --help for usage[/dim]")
+    console.print()
+
+
+def print_help():
+    """Print the usage of the three seat-flag verbs, then examples."""
+    console.print()
+    _print_usage()
+    console.print()
+    _print_ci_cure_usage()
+    console.print()
+    _print_owner_usage()
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  drone @spawn grant-admin")
+    console.print("  drone @spawn grant-ci-cure --registry /path/to/AIPASS_REGISTRY.json")
+    console.print("  drone @spawn owner @devpulse --apply")
+    console.print()
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -57,7 +75,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if "--help" in args:
-        print_introspection()
+        print_help()
         return True
 
     return handler(args) == 0

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adopt_citizen.py
 # Description: adopt-citizen CLI — preview or apply moving a citizen into another project
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-11-08
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """adopt-citizen orchestrator: parse, plan, apply on --apply, print the stable preview."""
@@ -31,6 +31,7 @@ def print_introspection():
     console.print("  [cyan]handlers/[/cyan]")
     console.print("    [dim]- adopt_citizen_ops.py (plan_adoption, apply_adoption)[/dim]")
     console.print()
+    console.print("[dim]Run drone @spawn adopt-citizen --help for usage[/dim]")
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -41,26 +42,31 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
     if "--help" in args or "-h" in args:
-        _print_help()
+        print_help()
         return True
     return handle_adopt_citizen(args) == 0
 
 
-def _print_help():
+def print_help():
     """Display adopt-citizen help."""
     console.print(f"[bold cyan]Usage:[/bold cyan] {escape(USAGE)}")
     console.print()
     console.print("  Preview by default: every path as create, move, append, edit, skip or clash. Writes nothing.")
     console.print("  [green]--apply[/green]  Execute the writes listed, then prove the citizen's identity")
     console.print("  [green]--json[/green]   Machine-readable result")
-    console.print("  Exit 0 ready or done, 1 refused or blocked (nothing written), 2 usage.")
+    console.print("  Exit 0 ready or done, 1 refused or blocked (nothing written), 2 usage.", highlight=False)
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  drone @spawn adopt-citizen @scout ../other_project")
+    console.print("  drone @spawn adopt-citizen @scout ../other_project --apply")
+    console.print("  drone @spawn adopt-citizen @scout ../other_project --json")
     console.print()
 
 
 def handle_adopt_citizen(args: list[str]) -> int:
     """Parse args, plan, apply on --apply, print. Returns the exit code."""
     if "--help" in args or "-h" in args:
-        _print_help()
+        print_help()
         return 0
     positional = [a for a in args if a not in {"--apply", "--json"}]
     if len(positional) != 2 or any(a.startswith("--") for a in positional):

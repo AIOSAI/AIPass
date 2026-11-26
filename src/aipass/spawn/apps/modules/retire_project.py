@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: retire_project.py
 # Description: Project retirement — thin CLI layer for retiring a whole project from the admin seat
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-22
-# Modified: 2026-10-22
+# Modified: 2026-11-26
 # =============================================
 
 """retire-project: the admin seat retires a whole project, owner included, with one receipt row per removal."""
@@ -29,6 +29,19 @@ def print_introspection():
     console.print("    [dim]- delete_ops.py (retire_project — guards, archive, trust revoke, removal)[/dim]")
     console.print("    [dim]- deletion_receipts.py (measure, validate and write the receipt rows)[/dim]")
     console.print()
+    console.print("[dim]Run drone @spawn retire-project --help for usage[/dim]")
+    console.print()
+
+
+def print_help():
+    """Print the verb's usage, then examples."""
+    console.print()
+    _print_usage()
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  drone @spawn retire-project /path/to/project --dry-run")
+    console.print("  drone @spawn retire-project /path/to/project --yes")
+    console.print()
 
 
 def _print_usage() -> None:
@@ -51,7 +64,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
     if "--help" in args:
-        print_introspection()
+        print_help()
         return True
     return handle_retire_project(args) == 0
 
@@ -94,5 +107,5 @@ def _print_rows(result: dict, dry_run: bool) -> None:
     if dry_run:
         seat = "yes" if result["admin"] else "no - --yes would be refused"
         console.print(f"  Admin seat: {seat}")
-        console.print(f"  Receipt rows: {len(result['rows'])}, written only by --yes")
+        console.print(f"  Receipt rows: {len(result['rows'])}, written only by --yes", highlight=False)
     console.print()

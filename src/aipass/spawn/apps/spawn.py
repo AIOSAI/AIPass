@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-03-05
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -324,8 +324,8 @@ def _dry_run_create(target_path, citizen_class, parsed, template_dir=None):
 
     console.print()
     console.print("  [bold cyan]Would create:[/bold cyan]")
-    console.print(f"    Files:       ~{file_count}")
-    console.print(f"    Directories: ~{dir_count}")
+    console.print(f"    Files:       ~{file_count}", highlight=False)
+    console.print(f"    Directories: ~{dir_count}", highlight=False)
     registry = Path(parsed.registry).resolve() if parsed.registry else find_registry(target.parent)
     if registry is None:
         error(f"No registry above {target}: create would refuse", suggestion="pass --registry <path>")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: regenerate_registry.py
 # Description: CLI module for regenerating template registries
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-25
-# Modified: 2026-10-17
+# Modified: 2026-11-26
 # =============================================
 
 """Regenerate template registry — thin CLI layer."""
@@ -35,6 +35,7 @@ def print_introspection():
         " (regenerate_template_registry — walk template, hash files, build registry)[/dim]"
     )
     console.print()
+    console.print("[dim]Run drone @spawn regenerate-registry --help for usage[/dim]")
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -47,7 +48,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if "--help" in args:
-        print_introspection()
+        print_help()
         return True
 
     return handle_regenerate_registry(args) == 0
@@ -56,7 +57,7 @@ def handle_command(command: str, args: list) -> bool:
 def handle_regenerate_registry(args: list[str]) -> int:
     """Parse args and execute template registry regeneration."""
     if args and args[0] in ["--help", "-h"]:
-        _print_help()
+        print_help()
         return 0
 
     regen_all = "--all" in args
@@ -124,7 +125,7 @@ def handle_regenerate_registry(args: list[str]) -> int:
     return 0
 
 
-def _print_help() -> None:
+def print_help() -> None:
     """Print usage help for regenerate-registry command."""
     console.print("[bold cyan]Usage:[/bold cyan] drone @spawn regenerate-registry \\[class_name | --all]")
     console.print()
@@ -135,6 +136,11 @@ def _print_help() -> None:
     console.print("[dim]Available classes:[/dim]")
     for cls in get_available_classes():
         console.print(f"  [green]{cls}[/green]")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @spawn regenerate-registry[/green]")
+    console.print("  [green]drone @spawn regenerate-registry specialist[/green]")
+    console.print("  [green]drone @spawn regenerate-registry --all[/green]")
     console.print()
 
 

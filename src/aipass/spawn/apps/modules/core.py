@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Main orchestrator for agent spawning
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-03-05
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -82,6 +82,28 @@ def print_introspection():
         "    [dim]- seed_ops.py (find_seed, load_seed, mint_from_seed — mint a citizen from its passport vault)[/dim]"
     )
     console.print()
+    console.print("[dim]Run drone @spawn create --help for usage[/dim]")
+
+
+def print_help():
+    """Display create command help."""
+    console.print()
+    console.print(
+        "[bold cyan]Usage:[/bold cyan] drone @spawn create \\[class] <target_path> "
+        "\\[--role <text>] \\[--traits <text>] \\[--purpose <text>] \\[--template <class|dir>] \\[--registry <path>]"
+    )
+    console.print()
+    console.print("  [green]--role[/green]      Agent role description")
+    console.print("  [green]--traits[/green]    Agent personality traits")
+    console.print("  [green]--purpose[/green]   Agent purpose (brief)")
+    console.print("  [green]--template[/green]  Template class name (manager, specialist) or custom directory path")
+    console.print("  [green]--registry[/green]  Registry path; default: nearest *_REGISTRY.json above the target")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print('  [green]drone @spawn create /path/to/new_agent --role "Analyst" --purpose "Reports"[/green]')
+    console.print("  [green]drone @spawn create specialist ./new_agent[/green]")
+    console.print("  [green]drone @spawn create ./new_agent --template manager[/green]")
+    console.print()
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -91,7 +113,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     if "--help" in args:
-        print_introspection()
+        print_help()
         return True
 
     if command == "create":
