@@ -319,6 +319,156 @@
         685
       ],
       "reason": "_spawn_pty is called with its close_fd seam so a failed openpty or set_winsize shows which PTY ends were closed and that the reserved slot came back; the same seam as test_host_perf.py's 713 row. open_attach and open_monitor reach _spawn_pty but cannot hand it close_fd, and a public door would exist for these tests alone (api, 2026-10-24). Lines shifted by the Linux-only purge (2026-11-14): 705 -> 691, 691 -> 685 with the straggler sweep."
+    },
+    {
+      "file": "apps/modules/openrouter_client.py",
+      "standard": "fallback",
+      "functions": ["check_status"],
+      "reason": "check_status is the status display: an ImportError of the openai SDK is the answer it reports, shown to the operator as a warning line 'OpenAI SDK not installed' and logged at warning. Nothing stands in for the SDK here; the probe imports nothing in its place."
+    },
+    {
+      "file": "apps/handlers/google/auth.py",
+      "standard": "fallback",
+      "lines": [38],
+      "reason": "The google libraries are the optional [drive] extra. Without them GOOGLE_AUTH_AVAILABLE is False and every entry point checks it first: is_available() says so, google_client's validate/reauth commands show 'Google auth libraries not installed' and get_google_service raises RuntimeError with the install hint, so no caller ever runs on the None names."
+    },
+    {
+      "file": "apps/handlers/google/service_factory.py",
+      "standard": "fallback",
+      "lines": [22],
+      "reason": "googleapiclient is the optional [drive] extra, installed together with google-auth. Without it GOOGLE_BUILD_AVAILABLE is False, build_service/build_thread_safe_service return None before touching build, and google_client.get_google_service raises RuntimeError on that None, so the caller (@backup's DriveClient) sees a failure, never a stand-in service."
+    },
+    {
+      "file": "apps/handlers/auth/secrets.py",
+      "standard": "fallback",
+      "functions": ["_json_entry"],
+      "reason": "migrate_store's survey: an unparseable or unreadable JSON file is neither imported nor shredded. _place files it under the report's 'left' list, which migrate shows the owner, and the warning names the provider, so the file stays untouched and visible rather than read as an empty secret."
+    },
+    {
+      "file": "apps/handlers/openrouter/client.py",
+      "standard": "fallback",
+      "lines": [22],
+      "reason": "openai is the optional [llm] extra. Without it OPENAI_AVAILABLE is False, the ERROR line names the install, create_client refuses before it touches OpenAI (logged at error, pinned by test_create_client_returns_none_when_sdk_unavailable) and `drone @api openrouter status` shows 'OpenAI SDK not installed'; the None name is never called."
+    },
+    {
+      "file": "apps/handlers/host/machine_route.py",
+      "standard": "fallback",
+      "lines": [25],
+      "reason": "fastapi is the optional [host] extra. register() is called only from server.create_app, which raises RuntimeError with the install hint when HOST_API_AVAILABLE is False, so no route is ever built on the None names."
+    },
+    {
+      "file": "apps/handlers/host/pair_route.py",
+      "standard": "fallback",
+      "lines": [26],
+      "reason": "fastapi is the optional [host] extra. register() is called only from server.create_app, which raises RuntimeError with the install hint when HOST_API_AVAILABLE is False, so no route is ever built on the None names."
+    },
+    {
+      "file": "apps/handlers/host/agent_route.py",
+      "standard": "fallback",
+      "lines": [31],
+      "reason": "fastapi is the optional [host] extra. register() is called only from server.create_app, which raises RuntimeError with the install hint when HOST_API_AVAILABLE is False, so no route is ever built on the None names."
+    },
+    {
+      "file": "apps/handlers/host/new_project_route.py",
+      "standard": "fallback",
+      "lines": [24],
+      "reason": "fastapi is the optional [host] extra. register() is called only from server.create_app, which raises RuntimeError with the install hint when HOST_API_AVAILABLE is False, so no route is ever built on the None names."
+    },
+    {
+      "file": "apps/handlers/host/backup_route.py",
+      "standard": "fallback",
+      "lines": [25],
+      "reason": "fastapi is the optional [host] extra. register() is called only from server.create_app, which raises RuntimeError with the install hint when HOST_API_AVAILABLE is False, so no route is ever built on the None names."
+    },
+    {
+      "file": "apps/handlers/host/agent_extras_route.py",
+      "standard": "fallback",
+      "lines": [28],
+      "reason": "fastapi is the optional [host] extra. register() is called only from server.create_app, which raises RuntimeError with the install hint when HOST_API_AVAILABLE is False, so no route is ever built on the None names."
+    },
+    {
+      "file": "apps/handlers/host/statics.py",
+      "standard": "fallback",
+      "lines": [26, 36],
+      "reason": "fastapi and starlette are the optional [host] extra. face_file_route and bundle_response are reached only from routes server.create_app builds, and create_app raises RuntimeError with the install hint when HOST_API_AVAILABLE is False, so neither None Request nor the None static-serving names ever serve a request."
+    },
+    {
+      "file": "apps/handlers/host/server.py",
+      "standard": "fallback",
+      "lines": [64, 90],
+      "reason": "64: the [host] extra; HOST_API_AVAILABLE False makes create_app raise RuntimeError with the install hint and is_available() report it, so the server never runs on the None names. 90: python-multipart; without it MULTIPART_AVAILABLE is False and POST /v1/files/upload answers 503 upload_unavailable with MULTIPART_HINT, so the phone sees the refusal instead of the server failing to start."
+    },
+    {
+      "file": "apps/handlers/host/server.py",
+      "standard": "fallback",
+      "functions": ["_outside_room_for"],
+      "reason": "A census that cannot answer leaves the attach on the ordinary naming rule, the same as no outside room; ruled by devpulse 2026-10-10 (3ef9df96) and kept as the logged_fallback row on this function. The attach still refuses downstream when the room is wrong, so the outage costs only the outside-room improvement."
+    },
+    {
+      "file": "apps/handlers/host/attach.py",
+      "standard": "fallback",
+      "functions": ["read"],
+      "reason": "AttachSession.read: an OSError (EIO) from os.read is how a PTY reports its child ended. b'' is the end-of-room signal run_pump acts on: it closes the socket with code 4000 'room ended', so the phone sees the room end."
+    },
+    {
+      "file": "apps/handlers/host/attach.py",
+      "standard": "fallback",
+      "functions": ["hangup"],
+      "reason": "hangup is idempotent teardown: a tmux client already gone (ProcessLookupError/OSError on SIGHUP) or a descriptor already closed is the state the detach wants. Raising here would mask whatever ended the pump, and host_api_attach_closed is still logged."
+    },
+    {
+      "file": "apps/handlers/host/feed.py",
+      "standard": "fallback",
+      "functions": ["_load_events"],
+      "reason": "One torn or malformed line in @ai_mail's append-only notification feed is skipped so the rest of the feed still answers; an unreadable feed file raises FeedUnavailable above it. The skipped line is a per-line answer of 'not an event', not a stand-in for the feed."
+    },
+    {
+      "file": "apps/handlers/host/agent_notices.py",
+      "standard": "fallback",
+      "functions": ["_mail_lines"],
+      "reason": "One torn or malformed line in @ai_mail's append-only notification feed is skipped so the other mail notices still show; a missing or unreadable feed is logged at error by _events. The skipped line is a per-line answer of 'not a notice', not a stand-in for the feed."
+    },
+    {
+      "file": "apps/handlers/host/lifetime.py",
+      "standard": "fallback",
+      "functions": ["_alive"],
+      "reason": "ChildProcessError from waitpid(pid, WNOHANG) means the pid is not our child, so there is nothing to reap; that is an answer, not a failure, and the liveness question is then settled by os.kill(pid, 0) below (see this function's logged_fallback row)."
+    },
+    {
+      "file": "apps/handlers/host/agent_usage.py",
+      "standard": "fallback",
+      "functions": ["_rows", "_retry_after"],
+      "reason": "_rows: a transcript line still being written, or cut mid-way, is skipped so the usage read uses the whole rows around it; it is display data for one panel. _retry_after: None for an absent or unparseable Retry-After is documented; claude_limits then applies its own 5-minute doubling backoff, so a bad header never shortens the wait."
+    },
+    {
+      "file": "apps/handlers/host/pump.py",
+      "standard": "fallback",
+      "functions": ["room_to_socket", "_handle_control"],
+      "reason": "room_to_socket: closing a socket the client already closed raises RuntimeError; the room has ended and the pump stops either way. _handle_control: an unparseable control frame from the client is dropped with a warning; one bad frame must not end a live terminal session, and the client's next frame is read as usual."
+    },
+    {
+      "file": "apps/handlers/host/tokens.py",
+      "standard": "fallback",
+      "functions": ["_drop_lock", "touch_token"],
+      "reason": "_drop_lock: a lock file already gone is the state the release wants. touch_token: last_used is telemetry; a store that cannot be written is logged at warning and never fails the request the token already authorised, while issue and revoke raise on the same store."
+    },
+    {
+      "file": "apps/handlers/host/uploads.py",
+      "standard": "fallback",
+      "functions": ["_pictures_from_user_dirs"],
+      "reason": "No readable ~/.config/user-dirs.dirs means no configured Pictures dir: the caller then uses ~/Pictures, the same lookup order the desktop (Tauri's picture_dir) uses, so the upload lands where the operator's desktop looks."
+    },
+    {
+      "file": "apps/handlers/host/agent_transcript.py",
+      "standard": "fallback",
+      "functions": ["codex_tool_lines", "codex_lines", "current_model"],
+      "reason": "Display-only rendering of another tool's transcript: a Codex command that is not a JSON string is shown as written, a tool call with unreadable arguments is shown by its verb alone, and a torn transcript line is skipped while reading the model name. Each keeps the chat view honest about what it could read; nothing is written or decided from these values."
+    },
+    {
+      "file": "apps/handlers/host/agent_chat.py",
+      "standard": "fallback",
+      "functions": ["engine_rows"],
+      "reason": "None means 'no engine log to read' (absent: the hooks engine has not written yet; unreadable: logged at warning). Callers then read agent state from the transcripts, the documented second source, so the chat view still answers."
     }
   ],
   "notes": {

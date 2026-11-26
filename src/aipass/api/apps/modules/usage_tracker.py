@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: usage_tracker.py
 # Description: Usage Tracking Module
-# Version: 1.0.6
+# Version: 1.0.7
 # Created: 2025-11-15
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Usage Tracking Module"""
@@ -23,10 +23,10 @@ CALLER_MAX_CHARS = 100
 def print_introspection():
     """Show module introspection - connected handlers and capabilities"""
     console.print()
-    header("Usage Tracker Module Introspection")
+    console.print("[bold cyan]Usage Tracker Module Introspection[/bold cyan]")
     console.print()
 
-    console.print("[cyan]Purpose:[/cyan] API usage monitoring and cost tracking")
+    console.print("[cyan]Purpose:[/cyan] [dim]API usage monitoring and cost tracking[/dim]")
     console.print()
 
     console.print("[cyan]Connected Handlers:[/cyan]")
@@ -42,6 +42,8 @@ def print_introspection():
     console.print("  • show_session() - Show session")
     console.print("  • show_caller_usage() - Caller stats")
     console.print("  • cleanup_data() - Clean old data")
+    console.print()
+    console.print("Run [green]'drone @api --help'[/green] for usage information")
     console.print()
 
 
@@ -161,7 +163,7 @@ def show_stats():
 
     if stats:
         console.print(f"  Total Requests: {stats.get('total_requests', 0)}")
-        console.print(f"  Total Cost: ${stats.get('total_cost', 0.0):.6f}")
+        console.print(f"  Total Cost: ${stats.get('total_cost', 0.0):.6f}", highlight=False)
         console.print(f"  Total Tokens: {stats.get('total_tokens', 0)}")
         console.print(f"  Callers: {stats.get('callers', 0)}")
         models = stats.get("models_used", [])
@@ -180,7 +182,7 @@ def show_session():
 
     if summary:
         console.print(f"  Session Requests: {summary.get('total_requests', 0)}")
-        console.print(f"  Session Cost: ${summary.get('total_cost', 0.0):.6f}")
+        console.print(f"  Session Cost: ${summary.get('total_cost', 0.0):.6f}", highlight=False)
         console.print(f"  Session Tokens: {summary.get('total_tokens', 0)}")
     else:
         warning("No session data available")
@@ -205,7 +207,7 @@ def show_caller_usage(args: List[str]):
 
     if usage:
         console.print(f"  Requests: {usage.get('requests', 0)}")
-        console.print(f"  Total Cost: ${usage.get('total_cost', 0.0):.6f}")
+        console.print(f"  Total Cost: ${usage.get('total_cost', 0.0):.6f}", highlight=False)
         console.print(f"  Total Tokens: {usage.get('total_tokens', 0)}")
     else:
         warning(f"No usage data found for caller: {caller}")
@@ -237,12 +239,10 @@ def cleanup_data(args: List[str], data_path: Optional[Path] = None):
     if removed > 0:
         success(f"Cleaned up {removed} entries older than {days} days")
 
-        try:
-            from aipass.trigger import trigger
+        # aipass.trigger ships in this package: a failed import is a broken install, never an optional event.
+        from aipass.trigger import trigger
 
-            trigger.fire("usage_data_cleaned", days=days, data_path=str(data_path))
-        except ImportError:
-            logger.warning("Trigger module not available — skipping event fire")
+        trigger.fire("usage_data_cleaned", days=days, data_path=str(data_path))
     else:
         success(f"Nothing to clean — no entries older than {days} days")
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_api_key.py
 # Description: Tests for API Key Management Module
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-24
-# Modified: 2026-11-20
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/api_key.py, the API key management module."""
@@ -405,14 +405,12 @@ def test_handle_command_logs_operation(
 
 
 @patch(PATCH_CONSOLE)
-@patch(PATCH_HEADER)
-def test_print_introspection_shows_handlers(mock_header, mock_console):
+def test_print_introspection_shows_handlers(mock_console):
     """print_introspection titles itself and lists its connected handlers."""
     api_key.print_introspection()
 
-    mock_header.assert_called_once_with("API Key Module Introspection")
-
     print_calls = [str(c) for c in mock_console.print.call_args_list]
+    assert any("API Key Module Introspection" in c for c in print_calls), "Expected the title line"
     found_keys = any("auth.keys" in c for c in print_calls)
     found_env = any("auth.env" in c for c in print_calls)
     found_provider = any("config.provider" in c for c in print_calls)

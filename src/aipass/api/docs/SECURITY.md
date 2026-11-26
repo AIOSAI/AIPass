@@ -12,7 +12,7 @@ Every secret value rests in the owner's login keyring, reached through the pytho
 |---------|------------------------------------------------------|
 | Linux   | SecretService (GNOME Keyring, KWallet) over D-Bus    |
 
-- One entry per secret: service `aipass`, username `<provider>/<slug>`, the value as the password. A value written with `as_json` is stored as a JSON document.
+- One entry per secret: service `aipass`, username `<provider>/<slug>`, the value as the password. A value written with `as_json` is stored as a JSON document; reading a plain entry with `as_json` raises `SecretsUnavailable`, never hands back the raw string.
 - `aipass` / `<provider>/` is the provider's index entry, a JSON list of its slugs, kept by `set_secret` so `list_secrets` needs no file on disk.
 - Examples: `openrouter/api_key`, `google/creds`, `google/client_secret`.
 - The owner inspects the keyring with `secret-tool search service aipass` (package `libsecret-tools`) or Seahorse. No seat runs either.

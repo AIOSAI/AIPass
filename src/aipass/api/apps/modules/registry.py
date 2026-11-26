@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Auto-discovery walker for apps/integrations/*/driver.py
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-04-15
-# Modified: 2026-10-17
+# Modified: 2026-11-26
 # =============================================
 """
 Driver auto-discovery for @api integrations layer.
@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 from aipass.api.apps.handlers.json import json_handler
-from aipass.cli import console, header
+from aipass.cli import console
 from aipass.prax import logger
 
 _INTEGRATIONS_DIR = Path(__file__).parent.parent / "integrations"
@@ -26,14 +26,35 @@ _loaded: bool = False
 def print_introspection() -> None:
     """Show registry introspection."""
     console.print()
-    header("Registry — Driver Auto-Discovery")
+    console.print("[bold cyan]Registry — Driver Auto-Discovery[/bold cyan]")
     console.print()
-    console.print("[cyan]Purpose:[/cyan] Auto-discover and load integration drivers from apps/integrations/*/driver.py")
+    console.print(
+        "[cyan]Purpose:[/cyan] [dim]Auto-discover and load integration drivers from apps/integrations/*/driver.py[/dim]"
+    )
     console.print()
     console.print(f"[cyan]Integrations dir:[/cyan] {_INTEGRATIONS_DIR}")
     console.print(f"[cyan]Loaded:[/cyan] {_loaded}")
     console.print()
+    console.print("Run [green]'drone @api --help'[/green] for the commands the loaded drivers serve")
+    console.print()
     json_handler.log_operation("registry_introspection", {"loaded": _loaded, "dir": str(_INTEGRATIONS_DIR)})
+
+
+def print_help() -> None:
+    """Show how a caller uses the registry; it owns no drone commands."""
+    console.print()
+    console.print("[bold cyan]REGISTRY — driver auto-discovery (in-process, no drone commands)[/bold cyan]")
+    console.print()
+    console.print("[yellow]USAGE:[/yellow]")
+    console.print("  [dim]from aipass.api.apps.modules.registry import load_drivers[/dim]")
+    console.print(
+        "  [cyan]load_drivers()[/cyan]  [dim]Import each apps/integrations/*/driver.py and call its register()[/dim]"
+    )
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [dim]# Load every driver once; a second call returns without walking again[/dim]")
+    console.print("  [cyan]load_drivers()[/cyan]")
+    console.print()
 
 
 def load_drivers(integrations_dir: Path | None = None) -> int:

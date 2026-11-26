@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_api.py
 # Description: Host API Module — server lifecycle and token administration
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-08-14
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -38,10 +38,10 @@ HELP_FLAGS = ("--help", "-h", "help")
 def print_introspection() -> None:
     """Show module introspection — connected handlers and capabilities."""
     console.print()
-    header("Host API Module Introspection")
+    console.print("[bold cyan]Host API Module Introspection[/bold cyan]")
     console.print()
 
-    console.print("[cyan]Purpose:[/cyan] Stage 0 host API for the BAUD phone face")
+    console.print("[cyan]Purpose:[/cyan] [dim]Stage 0 host API for the BAUD phone face[/dim]")
     console.print()
 
     console.print("[cyan]Connected Handlers:[/cyan]")
@@ -72,12 +72,17 @@ def print_introspection() -> None:
 
     console.print(f"[cyan]Tokens:[/cyan] {len(host_tokens.list_tokens())} issued")
     console.print()
+    console.print("Run [green]'drone @api host-api --help'[/green] for usage information")
+    console.print()
 
 
 def print_help() -> None:
     """Print drone-compliant help output with Rich markup"""
     console.print()
     console.print("[bold cyan]HOST_API — Stage 0 host API for the BAUD phone face[/bold cyan]")
+    console.print()
+    console.print("[yellow]USAGE:[/yellow]")
+    console.print("  [cyan]drone @api host-api <command>[/cyan] \\[options]")
     console.print()
     console.print("[yellow]COMMANDS:[/yellow]  [dim](via drone @api)[/dim]")
     console.print("  [cyan]host-api serve[/cyan]                 [dim]Run the server on the configured bind[/dim]")

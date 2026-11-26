@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_secrets.py
 # Description: Tests for the keyring-backed secrets handler, its module door, migrate and get_secret_cmd
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-06-15
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/auth/secrets.py, apps/modules/secrets.py, and api_key.get_secret_cmd."""
@@ -141,6 +141,12 @@ class TestTheKeyringHoldsTheValues:
         set_secret("discord", "creds", {"token": "second", "api_key": "first"}, as_json=True)
 
         assert get_secret("discord", "creds") == "first"
+
+    def test_a_plain_entry_asked_for_as_json_is_refused(self, quiet: dict) -> None:
+        set_secret("example", "bot", RAW_VALUE)
+
+        with pytest.raises(SecretsUnavailable, match="not a JSON document"):
+            get_secret("example", "bot", as_json=True)
 
     def test_a_json_entry_with_no_token_key_reads_as_its_document(self, quiet: dict) -> None:
         set_secret("custom", "config", {"username": "admin"}, as_json=True)

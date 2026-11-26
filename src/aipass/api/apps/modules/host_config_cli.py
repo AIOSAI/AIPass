@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_config_cli.py
 # Description: Host API Config Module — showing and setting what the server binds, serves and execs
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-14
-# Modified: 2026-11-06
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -237,7 +237,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     if any(arg in ("--help", "-h", "help") for arg in args):
-        print_introspection()
+        print_help()
         return True
 
     if args[0] == "config":
@@ -258,4 +258,26 @@ def print_introspection() -> None:
     console.print("  [cyan]host-api config[/cyan]      [dim]The effective bind, face and baud binary[/dim]")
     console.print("  [cyan]host-api set-config[/cyan]  [dim]Bind, face dir or baud binary (validated first)[/dim]")
     console.print("  [cyan]host-api store import[/cyan] [dim]Copy the host store out of the keyring, once[/dim]")
+    console.print()
+    console.print("Run [green]'drone @api host-api config --help'[/green] for usage information")
+    console.print()
+
+
+def print_help() -> None:
+    """Show the stored-settings subcommands with their flags."""
+    console.print()
+    console.print("[bold cyan]host_config_cli — what the host API binds, serves and execs[/bold cyan]")
+    console.print()
+    console.print("[yellow]USAGE:[/yellow]")
+    console.print("  [cyan]drone @api host-api config[/cyan]")
+    console.print(
+        "  [cyan]drone @api host-api set-config[/cyan] \\[--host HOST] \\[--port PORT]"
+        " \\[--face-dir DIR|default] \\[--baud-bin PATH|default]"
+    )
+    console.print("  [cyan]drone @api host-api store import[/cyan]")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [dim]# Serve the default face, then read back the effective settings[/dim]")
+    console.print("  [cyan]drone @api host-api set-config --face-dir default[/cyan]")
+    console.print("  [cyan]drone @api host-api config[/cyan]")
     console.print()

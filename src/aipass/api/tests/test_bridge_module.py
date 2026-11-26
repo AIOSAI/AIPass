@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bridge_module.py
 # Description: Tests for bridge contract registry module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-12
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/bridge.py, the contract registry."""
@@ -14,32 +14,17 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
 from aipass.api.apps.modules.bridge import (
     clear,
     handle_command,
     list_contracts,
+    print_help,
     print_introspection,
     register,
     resolve,
 )
-from aipass.api.apps.modules import bridge as bridge_module
-
-
-def _spy_on_header(monkeypatch: pytest.MonkeyPatch) -> list:
-    """Record the titles bridge hands to header at api's own border, calling the real header."""
-    titles: list = []
-    real_header = bridge_module.header
-
-    def recording_header(title: str, *args: Any, **kwargs: Any) -> Any:
-        titles.append(title)
-        return real_header(title, *args, **kwargs)
-
-    monkeypatch.setattr(bridge_module, "header", recording_header)
-    return titles
 
 
 @pytest.fixture(autouse=True)
@@ -98,33 +83,47 @@ class TestClear:
 class TestPrintIntrospection:
     """Verifies introspection output for empty and populated registries."""
 
-    def test_with_contracts(self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_with_contracts(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Introspection prints registered contract names."""
         register("search", lambda: None)
         register("memory", lambda: None)
-        titles = _spy_on_header(monkeypatch)
-
         print_introspection()
 
         out = capsys.readouterr().out
-        assert titles == ["Bridge — Contract Registry"]
         assert "Bridge — Contract Registry" in out
         assert "Registered contracts:" in out
         assert "• memory" in out
         assert "• search" in out
         assert "No contracts registered." not in out
 
-    def test_without_contracts(self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_without_contracts(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Introspection on empty registry says it holds no contracts."""
-        titles = _spy_on_header(monkeypatch)
-
         print_introspection()
 
         out = capsys.readouterr().out
-        assert titles == ["Bridge — Contract Registry"]
         assert "Bridge — Contract Registry" in out
         assert "No contracts registered." in out
         assert "Registered contracts:" not in out
+
+    def test_points_to_help(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Introspection closes with the pointer to the branch help."""
+        print_introspection()
+
+        assert "drone @api --help" in capsys.readouterr().out
+
+
+class TestPrintHelp:
+    """Verifies the help names the registry's Python API."""
+
+    def test_names_every_function(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Each public function of the registry appears in the help."""
+        print_help()
+
+        out = capsys.readouterr().out
+        for name in ("register(", "resolve(", "list_contracts(", "clear("):
+            assert name in out
+        assert "Usage" in out
+        assert "Examples:" in out
 
 
 class TestHandleCommand:

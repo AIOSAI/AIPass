@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_google_client.py
 # Description: Tests for Google API client module
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-11-20
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/google_client.py and the apps/handlers/google/auth.py it drives."""
@@ -117,7 +117,7 @@ def test_handle_command_help_gate(_warn, _err, _succ, _hdr, _json, _factory, moc
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_handle_command_google_introspection(_warn, _err, _succ, mock_hdr, _json, _factory, mock_auth, capsys):
+def test_handle_command_google_introspection(_warn, _err, _succ, _hdr, _json, _factory, mock_auth, capsys):
     """handle_command prints introspection when command='google' and args=[]."""
     mock_auth.is_available.return_value = True
     mock_auth.has_credentials.return_value = True
@@ -126,8 +126,8 @@ def test_handle_command_google_introspection(_warn, _err, _succ, mock_hdr, _json
     result = google_client.handle_command("google", [])
 
     assert result is True
-    mock_hdr.assert_called_once_with("Google Client Module Introspection")
     out = capsys.readouterr().out
+    assert "Google Client Module Introspection" in out
     assert "Google Libraries: installed" in out
     assert "Credentials: found" in out
     assert "Client Secret: found" in out

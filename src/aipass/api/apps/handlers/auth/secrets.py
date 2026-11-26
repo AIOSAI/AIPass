@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: secrets.py
 # Description: Secrets Store Handler — values rest in the login keyring; files are only the import source
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-06-15
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Secrets Store Handler"""
@@ -169,6 +169,8 @@ def _decode(stored: str, as_json: bool) -> Any:
     try:
         data = json.loads(stored)
     except ValueError:
+        if as_json:
+            raise SecretsUnavailable("A keyring entry asked for as JSON is not a JSON document") from None
         logger.debug("A stored value is not a JSON document; returned as stored")
         return stored
 

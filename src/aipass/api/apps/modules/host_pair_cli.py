@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_pair_cli.py
 # Description: Host API Pair Module — a one-use pairing QR for the phone's camera, or a code for the extension
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-13
-# Modified: 2026-11-05
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -16,6 +16,8 @@ Reference: docs/host_api.md
 import sys
 from datetime import datetime
 from typing import List
+
+from rich.markup import escape
 
 from aipass.cli import console, error
 from aipass.api.apps.handlers.json import json_handler
@@ -102,7 +104,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     if any(arg in ("--help", "-h", "help") for arg in args):
-        print_introspection()
+        print_help()
         return True
 
     _cmd_pair(args[1:])
@@ -119,4 +121,26 @@ def print_introspection() -> None:
         "  [cyan]host-api pair extension[/cyan]  [dim]A one-use code and the host URL as text, operate scope, "
         "loopback allowed; paste both into the browser extension's options page[/dim]"
     )
+    console.print()
+    console.print("Run [green]'drone @api host-api --help'[/green] for usage information")
+    console.print()
+
+
+def print_help() -> None:
+    """Show how to pair a phone or the browser extension."""
+    console.print()
+    console.print("[bold cyan]host_pair_cli — a phone signs in by its camera[/bold cyan]")
+    console.print()
+    console.print("[dim]Mints a one-use pairing code; no token is printed and no receipt is written.[/dim]")
+    console.print()
+    console.print(f"[bold]Usage:[/bold] {escape(USAGE)}")
+    console.print()
+    console.print("  [cyan]<label>[/cyan]          [dim]The device's name; prints a QR, its URL and expiry[/dim]")
+    console.print("  [cyan]extension[/cyan]        [dim]The code and host URL as text, operate, loopback allowed[/dim]")
+    console.print("  [cyan]--scope <s>[/cyan]      [dim]read or operate (default: read; extension: operate)[/dim]")
+    console.print("  [cyan]--ttl <seconds>[/cyan]  [dim]The code's life, 30 to 900 (default: 300)[/dim]")
+    console.print()
+    console.print("[bold]Examples:[/bold]")
+    console.print("  [cyan]drone @api host-api pair phone --scope operate[/cyan]")
+    console.print("  [cyan]drone @api host-api pair extension[/cyan]")
     console.print()

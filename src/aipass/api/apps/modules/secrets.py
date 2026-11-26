@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: secrets.py
 # Description: Secrets Module — cross-branch in-process door
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-06-15
-# Modified: 2026-11-06
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -28,10 +28,10 @@ SecretsUnavailable = _handler.SecretsUnavailable
 def print_introspection():
     """Show module introspection - connected handlers and capabilities"""
     console.print()
-    header("Secrets Module Introspection")
+    console.print("[bold cyan]Secrets Module Introspection[/bold cyan]")
     console.print()
 
-    console.print("[cyan]Purpose:[/cyan] Cross-branch secrets access (in-process)")
+    console.print("[cyan]Purpose:[/cyan] [dim]Cross-branch secrets access (in-process)[/dim]")
     console.print()
 
     console.print("[cyan]Connected Handlers:[/cyan]")
@@ -43,6 +43,8 @@ def print_introspection():
     console.print("  • set_secret() - Write secret to the keyring entry <provider>/<slug>")
     console.print("  • list_secrets() - List slugs for a provider")
     console.print("  • secrets migrate - Import the store's files into the keyring and shred them")
+    console.print()
+    console.print("Run [green]'drone @api secrets --help'[/green] for usage information")
     console.print()
 
 
@@ -58,6 +60,10 @@ def print_help():
     console.print("  [dim]lines, google_client_secret.json and google_creds.json into the keyring, then zeroes[/dim]")
     console.print("  [dim]and unlinks each file. Anything else is left and named. --dry-run changes nothing.[/dim]")
     console.print("  [dim]The owner's run: a seat never runs it unasked.[/dim]")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [dim]# See what would be imported, changing nothing[/dim]")
+    console.print("  [cyan]drone @api secrets migrate --dry-run[/cyan]")
     console.print()
 
 

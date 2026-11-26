@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: integrations_manager.py
 # Description: Integrations command module — list and call generic contracts
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-04-15
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 """Integrations Module"""
 
@@ -22,13 +22,15 @@ from aipass.api.apps.handlers.integrations.call import invoke
 def print_introspection() -> None:
     """Show module introspection — connected handlers and capabilities."""
     console.print()
-    header("Integrations Module Introspection")
+    console.print("[bold cyan]Integrations Module Introspection[/bold cyan]")
     console.print()
-    console.print("[cyan]Purpose:[/cyan] Generic contract dispatch for private integration drivers")
+    console.print("[cyan]Purpose:[/cyan] [dim]Generic contract dispatch for private integration drivers[/dim]")
     console.print()
     console.print("[cyan]Subcommands:[/cyan]")
     console.print("  • integrations list              — list registered contracts")
     console.print("  • integrations call <name> ...   — invoke a contract driver")
+    console.print()
+    console.print("Run [green]'drone @api integrations --help'[/green] for usage information")
     console.print()
     json_handler.log_operation("integrations_introspection", {})
 
@@ -43,6 +45,10 @@ def print_help() -> None:
     console.print("  drone @api integrations call <contract> \\[args...]")
     console.print()
     console.print("[dim]Drivers live in apps/integrations/{project}/driver.py (gitignored)[/dim]")
+    console.print()
+    console.print("[bold cyan]EXAMPLES:[/bold cyan]")
+    console.print("  drone @api integrations list")
+    console.print("  drone @api integrations call <contract> \\[args...]")
     console.print()
 
 

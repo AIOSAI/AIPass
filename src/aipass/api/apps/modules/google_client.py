@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: google_client.py
 # Description: Google API Client Module — public API for Google services
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-14
-# Modified: 2026-11-20
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -28,10 +28,10 @@ IMPORT_HINT = "Put google_client_secret.json in the store, then run: drone @api 
 def print_introspection() -> None:
     """Show module introspection — connected handlers and capabilities."""
     console.print()
-    header("Google Client Module Introspection")
+    console.print("[bold cyan]Google Client Module Introspection[/bold cyan]")
     console.print()
 
-    console.print("[cyan]Purpose:[/cyan] Google API authentication and service factory")
+    console.print("[cyan]Purpose:[/cyan] [dim]Google API authentication and service factory[/dim]")
     console.print()
 
     console.print("[cyan]Connected Handlers:[/cyan]")
@@ -43,7 +43,7 @@ def print_introspection() -> None:
     console.print("[cyan]Available Workflows:[/cyan]")
     console.print("  - get_drive_service()     - Get authenticated Drive client")
     console.print("  - get_google_service()    - Get any Google API service")
-    console.print("  - authenticate_google()   - Run OAuth2 authentication")
+    console.print("  - authenticate_google()   - Run OAuth2 authentication", highlight=False)
     console.print("  - reauth_google()         - Force re-authentication")
     console.print()
 
@@ -53,6 +53,8 @@ def print_introspection() -> None:
 
     console.print(f"[cyan]Credentials:[/cyan] {_entry_status(google_auth.has_credentials)}")
     console.print(f"[cyan]Client Secret:[/cyan] {_entry_status(google_auth.has_client_secret)}")
+    console.print()
+    console.print("Run [green]'drone @api validate google --help'[/green] for usage information")
     console.print()
 
 
@@ -83,6 +85,14 @@ def print_help() -> None:
     console.print("[yellow]COMMANDS:[/yellow]  [dim](via drone @api)[/dim]")
     console.print("  [cyan]validate google[/cyan]  [dim]Check Google OAuth2 credentials[/dim]")
     console.print("  [cyan]reauth google[/cyan]   [dim]Re-run OAuth2 flow for Google[/dim]")
+    console.print()
+    console.print("[yellow]USAGE:[/yellow]")
+    console.print("  [cyan]drone @api validate google[/cyan]")
+    console.print("  [cyan]drone @api reauth google[/cyan]")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [dim]# Check the stored Google credentials before using Drive[/dim]")
+    console.print("  [cyan]drone @api validate google[/cyan]")
     console.print()
     console.print("[yellow]CROSS-BRANCH API:[/yellow]")
     console.print("  [dim]from aipass.api.apps.modules.google_client import get_drive_service[/dim]")

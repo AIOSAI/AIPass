@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: api.py
 # Description: Entry point CLI for drone @api — external clients, secrets, usage and the host API
-# Version: 1.2.3
+# Version: 1.2.4
 # Created: 2026-03-08
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """api Branch - Main Orchestrator"""
@@ -16,7 +16,7 @@ from typing import Any, List
 
 from aipass.prax import logger
 
-from aipass.cli import console, header, error, reset_command_state, resolve_exit
+from aipass.cli import console, header, header_version, error, reset_command_state, resolve_exit
 from rich.panel import Panel
 from rich.table import Table
 from rich.columns import Columns
@@ -230,7 +230,7 @@ def main():
             return 0
 
         if args[0] in ["--version", "-V"]:
-            console.print("api v1.0.0")
+            console.print(f"api v{header_version(__file__)}", highlight=False)
             return 0
 
         if args[0] in ["--help", "-h", "help"]:

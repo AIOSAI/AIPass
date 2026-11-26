@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_serve.py
 # Description: Host API Serve Module — starting, watching and stopping the server
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-08-19
-# Modified: 2026-10-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -284,7 +284,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     if any(arg in ("--help", "-h", "help") for arg in args):
-        print_introspection()
+        print_help()
         return True
 
     subcommand, rest = args[0], args[1:]
@@ -310,4 +310,24 @@ def print_introspection() -> None:
     console.print("  [cyan]host-api status[/cyan]            [dim]Is a server up, who holds it, and where[/dim]")
     console.print("  [cyan]host-api stop[/cyan]              [dim]Stop it, through whoever owns it[/dim]")
     console.print("  [cyan]host-api autostart[/cyan]         [dim]Render the boot unit + the install steps[/dim]")
+    console.print()
+    console.print("Run [green]'drone @api host-api serve --help'[/green] for usage information")
+    console.print()
+
+
+def print_help() -> None:
+    """Show the lifecycle subcommands with their flags."""
+    console.print()
+    console.print("[bold cyan]host_serve — the host API server's lifecycle[/bold cyan]")
+    console.print()
+    console.print("[yellow]USAGE:[/yellow]")
+    console.print("  [cyan]drone @api host-api serve[/cyan] \\[--host HOST] \\[--port PORT] \\[--detach]")
+    console.print("  [cyan]drone @api host-api status[/cyan]")
+    console.print("  [cyan]drone @api host-api stop[/cyan]")
+    console.print("  [cyan]drone @api host-api autostart[/cyan] \\[--host HOST] \\[--port PORT]")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [dim]# Run the server in its own session, then see who holds it[/dim]")
+    console.print("  [cyan]drone @api host-api serve --detach[/cyan]")
+    console.print("  [cyan]drone @api host-api status[/cyan]")
     console.print()
