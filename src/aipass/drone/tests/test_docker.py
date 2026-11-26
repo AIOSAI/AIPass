@@ -187,7 +187,7 @@ class TestBaseImage:
         assert build[build.index("-t") + 1] == "aipass-base:ubuntu-26.04"
         text = fake.dockerfile
         assert text.startswith("FROM ubuntu:26.04\n")
-        pkgs = "python3 python3-venv python3-pip git curl ca-certificates nodejs npm tmux ripgrep jq".split()
+        pkgs = "python3 python3-venv python3-pip pipx git curl ca-certificates nodejs npm tmux ripgrep jq".split()
         assert set(pkgs) <= set(text.split())
         assert "useradd -m -s /bin/bash aipass" in text
         assert "git config --system --add safe.directory '*'" in text

@@ -40,7 +40,7 @@
 
 ## Install
 
-**You need:** Python 3.10+, [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it, and Ubuntu (native or WSL2). [Codex](https://github.com/openai/codex) and [OpenCode](https://opencode.ai) if you want them: with a binary on your PATH, install sets it up as another CLI for the same agents, and each agent runs on any of them, your choice per task.
+**You need:** Python 3.10+ with [pipx](https://pipx.pypa.io) (`sudo apt install pipx` on Ubuntu; a bare `pipx: command not found` means it is missing), [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it, and Ubuntu (native or WSL2). [Codex](https://github.com/openai/codex) and [OpenCode](https://opencode.ai) if you want them: with a binary on your PATH, install sets it up as another CLI for the same agents, and each agent runs on any of them, your choice per task.
 
 ```bash
 pipx install aipass

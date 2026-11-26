@@ -93,7 +93,8 @@ code is docker's (125 for a docker refusal).
 Each base ref has one cached image, `aipass-base:<ref>` with characters outside ASCII letters,
 digits, `_`, `.` and `-` turned into `-`, including the `@` and `:` in digest-pinned references (this
 host: `aipass-base:ubuntu-26.04`). It is built from a Dockerfile written to a temporary directory:
-the base, `apt-get install` of python3, python3-venv, python3-pip, git, curl, ca-certificates,
+the base, `apt-get install` of python3, python3-venv, python3-pip, pipx (so the README's
+`pipx install aipass` runs in a `bare` box as a stranger would run it), git, curl, ca-certificates,
 nodejs, npm, tmux, ripgrep and jq, a user `aipass` with a home,
 `git config --system --add safe.directory '*'`, then `USER aipass`, `WORKDIR /home/aipass` and an
 empty venv at `~/aipass-venv`. PATH holds `~/.local/bin`, `~/aipass-venv/bin` and

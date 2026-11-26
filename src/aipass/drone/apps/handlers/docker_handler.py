@@ -107,7 +107,7 @@ def dockerfile_text(image_ref: str) -> str:
     return f"""FROM {image_ref}
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \\
-      python3 python3-venv python3-pip git curl ca-certificates nodejs npm tmux ripgrep jq \\
+      python3 python3-venv python3-pip pipx git curl ca-certificates nodejs npm tmux ripgrep jq \\
     && rm -rf /var/lib/apt/lists/* \\
     && useradd -m -s /bin/bash aipass \\
     && git config --system --add safe.directory '*'
