@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.4.3
+# Version: 1.5.0
 # Created: 2026-08-27
 # Modified: 2026-11-26
 # =============================================
@@ -19,6 +19,7 @@ import copy
 import json
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -487,7 +488,15 @@ class TestTheMachineFrame:
 
     def test_a_missing_created_does_not_invent_a_false_history(self):
         meta = tp.build_doc_metadata({}, "local", "guinea")
-        assert meta["created"] == meta["last_updated"]
+        assert meta["created"] == datetime.now().strftime("%Y-%m-%d")
+
+    def test_the_header_is_the_eight_standard_fields_without_last_updated(self):
+        """No reader but a Freshness row and every entry carries its own date: the field is dropped, not stamped."""
+        standard = ["document_type", "document_name", "version", "schema_version", "created", "managed_by", "tags"]
+        assert list(tp.build_doc_metadata({"last_updated": "2026-01-01"}, "local", "guinea")) == [*standard, "_usage"]
+        for name in ("LOCAL.template.json", "OBSERVATIONS.template.json"):
+            gold = json.loads((_MEMORY_ROOT / "templates" / name).read_text(encoding="utf-8"))
+            assert list(gold["document_metadata"]) == [*standard, "_usage"], name
 
     def test_managed_by_is_the_exact_branch_directory_name(self):
         """The owner's ruling, and what sentry's checker compares against."""
@@ -522,13 +531,13 @@ class TestTheMachineFrame:
         assert list(frame) == list(template)
 
     def test_the_frame_report_names_what_it_prunes(self, tmp_path):
-        before = {"document_metadata": {"status": {}, "weird": 1}, "active_tasks": {}, "sessions": []}
+        before = {"document_metadata": {"status": {}, "last_updated": "2026-11-26"}, "active_tasks": {}, "sessions": []}
         root = _branch(tmp_path, "guinea", before)
 
         plan = tp.plan_branch("guinea", root, _config(), backlog_path=tmp_path / "backlog.json")
         [changes] = [item["frame_changes"] for item in plan["files"] if item["file_key"] == "local"]
 
-        assert any("status" in change and "prune" in change for change in changes)
+        assert "document_metadata: prune non-standard key(s) last_updated, status" in changes
         assert any("active_tasks" in change for change in changes)
 
     def test_the_gold_templates_spell_the_branch_placeholder_as_spawn_does(self):

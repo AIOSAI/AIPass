@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trinity_push.py
 # Description: The trinity push — frame rebuild, vectorize-verify-prune, todos to the backlog file
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-08-27
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Trinity Push Handler
@@ -60,7 +60,6 @@ DOC_META_FIELDS = (
     "version",
     "schema_version",
     "created",
-    "last_updated",
     "managed_by",
     "tags",
     "_usage",
@@ -379,7 +378,6 @@ def build_doc_metadata(current: Any, file_key: str, branch_name: str) -> dict:
         "version": tmpl_meta.get("version", ""),
         "schema_version": tmpl_meta.get("schema_version", ""),
         "created": created,
-        "last_updated": _today(),
         "managed_by": branch_name,
         "tags": _template_tags(template, branch_name),
         "_usage": tab_renderer.template_usage(file_key),
@@ -397,8 +395,6 @@ def _frame_changes(before: dict, after: dict, file_key: str) -> list[str]:
     if dropped:
         changes.append(f"document_metadata: prune non-standard key(s) {', '.join(sorted(dropped))}")
     for field in DOC_META_FIELDS:
-        if field == "last_updated":
-            continue
         if old_meta.get(field) != new_meta[field]:
             changes.append(f"document_metadata.{field}: rewritten from the standard")
 
