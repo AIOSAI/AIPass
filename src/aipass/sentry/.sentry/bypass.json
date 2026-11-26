@@ -571,17 +571,9 @@
       "file": "apps/handlers/aipass_standards/trinity_check.py",
       "standard": "logged_fallback",
       "lines": [
-        204
+        203
       ],
       "reason": "The checker is wrong on this line (fleet green leg 14): an unlistable fleet dir answers 'not a clean checkout', the STRICT answer, which keeps a missing .trinity a violation. The comment above it gives the reason, and the case is logged as a warning."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/trinity_groups.py",
-      "standard": "logged_fallback",
-      "lines": [
-        992
-      ],
-      "reason": "The checker is wrong on this line (fleet green leg 14): an impossible date is no date, and both callers make None a violation. _newest_entry_date lists the entry as bad, and the last_updated check fails by name with the value found. The value is logged as a warning."
     },
     {
       "file": "tests/test_checkers_batch3.py",
@@ -621,7 +613,7 @@
       "file": "tests/test_trinity_check_file_shape.py",
       "standard": "through_the_command",
       "lines": [
-        633
+        629
       ],
       "reason": "No public route (2026-10-24): trinity_groups._top_level_items pads an unmeasurable file to the same nine items a measured one yields; all_groups reaches it only with a whole branch context of both trinity files, config and templates."
     },

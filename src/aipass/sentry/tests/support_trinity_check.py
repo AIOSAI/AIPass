@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_trinity_check.py
 # Description: Shared gold data and builders for the trinity_check test files (split from test_trinity_check.py)
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """Shared helpers for the tests of apps/handlers/aipass_standards/trinity_check.py (not test_: never collected)."""
@@ -181,7 +181,6 @@ def _canonical_local() -> dict:
             "version": "2.0.0",
             "schema_version": "3.0.0",
             "created": "2026-01-01",
-            "last_updated": "2026-08-25",
             "managed_by": _BRANCH,
             "tags": ["session_tracking", "work_log"],
             "_usage": _LOCAL_USAGE,
@@ -243,7 +242,6 @@ def _canonical_observations() -> dict:
             "version": "1.0.0",
             "schema_version": "3.0.0",
             "created": "2026-01-01",
-            "last_updated": "2026-08-25",
             "managed_by": _BRANCH,
             "tags": ["collaboration", "patterns"],
             "_usage": _OBSERVATIONS_USAGE,

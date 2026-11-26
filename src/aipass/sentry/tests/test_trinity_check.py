@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_check.py
 # Description: Unit tests for trinity_check - trinity memory file standards checker
-# Version: 1.6.1
+# Version: 1.6.2
 # Created: 2026-08-25
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/trinity_check.py and trinity_groups.py."""
@@ -42,7 +42,6 @@ _GROUP_NAMES = (
     "File set",
     "Meta lines & _usage",
     "Receipt",
-    "Freshness",
 )
 
 # Fleet acceptance bar -- see TestFleetAcceptanceBar for why this is coupled
@@ -125,7 +124,6 @@ class TestTheOneLaw:
         _assert_failed(_group(result, "Top-level keys"), "local.json", "not valid json")
         _assert_failed(_group(result, "Entry shapes"), "local.json")
         _assert_failed(_group(result, "Char caps"), "local.json")
-        _assert_failed(_group(result, "Freshness"), "local.json")
         _assert_failed(_group(result, "Meta lines & _usage"), "local.json")
 
     def test_corrupt_observations_json_fails_and_never_passes(self, trinity, tmp_path):
@@ -136,7 +134,6 @@ class TestTheOneLaw:
         _assert_failed(_group(result, "Top-level keys"), "observations.json", "not valid json")
         _assert_failed(_group(result, "Entry shapes"), "observations.json")
         _assert_failed(_group(result, "Char caps"), "observations.json")
-        _assert_failed(_group(result, "Freshness"), "observations.json")
 
     def test_empty_file_is_not_valid_json_and_fails_loud(self, trinity, tmp_path):
         branch = _write_branch(tmp_path, local="")
@@ -486,26 +483,24 @@ class TestScoringMechanics:
     def test_group_weights_sum_to_one_hundred(self, trinity):
         assert sum(trinity.GROUP_WEIGHTS.values()) == 100
 
-    def test_group_weights_hold_the_eight_pinned_names(self, trinity):
+    def test_group_weights_hold_the_seven_pinned_names(self, trinity):
         assert set(trinity.GROUP_WEIGHTS) == set(_GROUP_NAMES)
 
     def test_group_weights_are_the_pinned_numbers(self, trinity):
-        """Todos hygiene retired 2026-09-15 (DPLAN-0345); its 5 moved to Entry shapes with the defect."""
+        """Retired groups' points moved to Entry shapes: Todos hygiene's 5, then Freshness's 3."""
         assert trinity.GROUP_WEIGHTS == {
-            "Entry shapes": 30,
+            "Entry shapes": 33,
             "Top-level keys": 15,
             "Ordering & numbering": 12,
             "Char caps": 12,
             "File set": 10,
             "Meta lines & _usage": 10,
             "Receipt": 8,
-            "Freshness": 3,
         }
 
-    def test_shape_weighs_heaviest_and_freshness_lightest(self, trinity):
+    def test_shape_weighs_heaviest(self, trinity):
         weights = trinity.GROUP_WEIGHTS
         assert weights["Entry shapes"] == max(weights.values())
-        assert weights["Freshness"] == min(weights.values())
 
     def test_check_branch_returns_the_pinned_result_shape(self, trinity, tmp_path):
         branch = _write_branch(tmp_path)
@@ -518,12 +513,12 @@ class TestScoringMechanics:
         assert isinstance(result["passed"], bool)
         assert isinstance(result["checks"], list)
 
-    def test_check_branch_returns_exactly_eight_named_checks(self, trinity, tmp_path):
+    def test_check_branch_returns_exactly_seven_named_checks(self, trinity, tmp_path):
         branch = _write_branch(tmp_path)
 
         result = trinity.check_branch(str(branch))
 
-        assert len(result["checks"]) == 8
+        assert len(result["checks"]) == 7
         assert [check["name"] for check in result["checks"]] == list(_GROUP_NAMES)
 
     def test_every_check_carries_the_four_pinned_keys(self, trinity, tmp_path):
@@ -531,8 +526,8 @@ class TestScoringMechanics:
 
         result = trinity.check_branch(str(branch))
 
-        # Floor: eight groups are always reported, even on an unparseable local.json, so an empty checks list cannot walk green.
-        assert len(result["checks"]) == 8
+        # Floor: seven groups are always reported, even on an unparseable local.json, so an empty checks list cannot walk green.
+        assert len(result["checks"]) == 7
         for check in result["checks"]:
             assert set(check) == {"name", "passed", "message", "score"}
             assert isinstance(check["score"], int)
@@ -541,7 +536,6 @@ class TestScoringMechanics:
     def test_overall_score_is_the_weighted_sum_of_group_subscores(self, trinity, tmp_path):
         local = _canonical_local()
         local["sessions"][0]["summary"] = "s" * 400
-        local["document_metadata"]["last_updated"] = "2026-01-02"
         branch = _write_branch(tmp_path, local=local, receipt=None)
 
         result = trinity.check_branch(str(branch))
@@ -590,9 +584,9 @@ class TestScoringMechanics:
         result = trinity.check_branch(str(branch))
 
         # Failing groups are selected and counted first, so the guard is not vacuous when every group passes:
-        # 6 of the 8 fail on an unparseable local.json; File set and Receipt survive it.
+        # 5 of the 7 fail on an unparseable local.json; File set and Receipt survive it.
         failing = [check for check in result["checks"] if not check["passed"]]
-        assert len(failing) == 6, f"expected 6 failing groups, got {[c['name'] for c in failing]}"
+        assert len(failing) == 5, f"expected 5 failing groups, got {[c['name'] for c in failing]}"
         for check in failing:
             assert check["score"] < 100
 
@@ -770,11 +764,10 @@ class TestTheGroupSplitKeepsEveryGroup:
             "File set",
             "Meta lines & _usage",
             "Receipt",
-            "Freshness",
         ]
         assert set(names) == set(trinity.GROUP_WEIGHTS), "a group is weighted but never run, or run but never weighted"
 
-    def test_check_branch_reports_the_same_eight(self, trinity, tmp_path):
+    def test_check_branch_reports_the_same_seven(self, trinity, tmp_path):
         branch = _write_branch(tmp_path)
 
         result = trinity.check_branch(str(branch))

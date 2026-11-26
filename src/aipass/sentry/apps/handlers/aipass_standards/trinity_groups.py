@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: trinity_groups.py
-# Description: Trinity standard - the eight group checkers and their shared helpers
-# Version: 1.4.1
+# Description: Trinity standard - the seven group checkers and their shared helpers
+# Version: 1.5.0
 # Created: 2026-08-27
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
-Trinity standard -- the eight group checkers.
+Trinity standard -- the seven group checkers.
 
 Each ``_group_*`` takes ``trinity_check._build_context``'s dict and returns one
 ``{"name", "passed", "score", "message"}``; none touches the disk. A field the
@@ -15,7 +15,6 @@ checker cannot measure is a violation, never a silent pass. Reference: trinity.m
 """
 
 import re
-from datetime import date
 from functools import partial
 from pathlib import Path
 
@@ -64,16 +63,16 @@ _DOC_META_FIELDS = (
     "version",
     "schema_version",
     "created",
-    "last_updated",
     "managed_by",
     "tags",
     "_usage",
 )
+# Retired from the set, tolerated until memory's push strips it from every file.
+_LAGGING_META_FIELDS = ("last_updated",)
 
 _DOC_NAME_SUFFIX = {"local": ".LOCAL", "observations": ".OBSERVATIONS"}
 
 _ALL_SECTIONS = ("todos", "key_learnings", "sessions", "observations")
-_LOCAL_SECTIONS = ("todos", "key_learnings", "sessions")
 _SECTION_FILE = {
     "todos": "local",
     "key_learnings": "local",
@@ -120,7 +119,6 @@ _UNKNOWN_NEXT = "?"
 _RENDERED_INT_RE = re.compile(r"0|-?[1-9][0-9]*")
 
 _PLACEHOLDER_RE = re.compile(r"^\{\{[A-Z0-9_]+\}\} (?P<prose>.+)$", re.DOTALL)
-_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 _META_SOURCE = {
     "todos": ("local", "todos_meta"),
@@ -713,7 +711,8 @@ def _doc_meta_items(ctx: dict, file_key: str, data: dict) -> list:
 
 def _extra_meta_fields_item(name: str, meta: dict) -> tuple:
     """Item: document_metadata carries no field outside the closed set (``status`` has its own item)."""
-    extra = [key for key in meta if key not in _DOC_META_FIELDS and key != "status"]
+    tolerated = (*_DOC_META_FIELDS, *_LAGGING_META_FIELDS, "status")
+    extra = [key for key in meta if key not in tolerated]
     if not extra:
         return (True, None)
     return (False, f"{name}: document_metadata has unexpected field(s) {', '.join(sorted(extra))} -- the set is closed")
@@ -978,78 +977,6 @@ def _group_meta_lines(ctx: dict) -> dict:
     return _items_check("Meta lines & _usage", items, "All meta lines and _usage strings byte-match the gold source")
 
 
-def _parse_date(value: object) -> date | None:
-    """Parse the YYYY-MM-DD part of a date or datetime string, or None."""
-    if not isinstance(value, str):
-        return None
-    match = _DATE_RE.match(value.strip())
-    if match is None:
-        return None
-    try:
-        return date.fromisoformat(match.group(0))
-    except ValueError:
-        logger.warning("trinity_check: %s has the date shape but is not a real date", value)
-        return None
-
-
-def _scan_section_dates(entries: list, newest: date | None) -> tuple:
-    """Fold *entries* into (newest date, labels of unparseable dates)."""
-    bad: list[str] = []
-    for index, entry in enumerate(entries):
-        parsed = _parse_date(entry.get("date")) if isinstance(entry, dict) else None
-        if parsed is None:
-            bad.append(_entry_label(entry, index))
-        elif newest is None or parsed > newest:
-            newest = parsed
-    return newest, bad
-
-
-def _newest_entry_date(ctx: dict, sections: tuple) -> tuple:
-    """Return (newest entry date, reasons freshness is unmeasurable)."""
-    newest: date | None = None
-    bad: list[str] = []
-    for section in sections:
-        entries, error = _section_entries(ctx, section)
-        if entries is None:
-            bad.append(f"{section} {error}")
-            continue
-        newest, section_bad = _scan_section_dates(entries, newest)
-        bad.extend(f"{section} {label}" for label in section_bad)
-    return newest, bad
-
-
-def _freshness_item(ctx: dict, file_key: str, sections: tuple) -> tuple:
-    """Item: last_updated is at least as new as the newest entry date."""
-    name = _FILE_NAMES[file_key]
-    fileref = ctx[file_key]
-    if fileref["error"] is not None:
-        return (False, f"{name}: {fileref['error']} -- freshness unmeasurable")
-
-    meta = _as_dict(_as_dict(fileref["data"]).get("document_metadata"))
-    stamped = _parse_date(meta.get("last_updated"))
-    if stamped is None:
-        return (
-            False,
-            f"{name}: document_metadata.last_updated is not a YYYY-MM-DD date, found {_found(meta, 'last_updated')}",
-        )
-
-    newest, bad = _newest_entry_date(ctx, sections)
-    if bad:
-        return (False, f"{name}: {len(bad)} entry date(s) unmeasurable ({', '.join(bad[:_MAX_SAMPLE_NUMBERS])})")
-    if newest is not None and stamped < newest:
-        return (False, f"{name}: last_updated {stamped.isoformat()} predates newest entry date {newest.isoformat()}")
-    return (True, None)
-
-
-def _group_freshness(ctx: dict) -> dict:
-    """Group 7: last_updated >= the newest entry date in the same file."""
-    items = [
-        _freshness_item(ctx, "local", _LOCAL_SECTIONS),
-        _freshness_item(ctx, "observations", ("observations",)),
-    ]
-    return _items_check("Freshness", items, "last_updated is at least as new as the newest entry in both files")
-
-
 def _receipt_versions_shape(data: dict) -> tuple:
     """Item: template_versions is a dict of two string versions."""
     versions = data.get("template_versions")
@@ -1086,7 +1013,7 @@ def _receipt_string_items(data: dict) -> list:
 
 
 def _group_receipt(ctx: dict) -> dict:
-    """Group 8: the machine-written template version receipt."""
+    """Group 7: the machine-written template version receipt."""
     fileref = ctx["receipt"]
     if fileref["error"] is not None:
         message = f"{_RECEIPT_NAME}: {fileref['error']} -- no receipt means no lookup for who carries the standard"
@@ -1099,7 +1026,7 @@ def _group_receipt(ctx: dict) -> dict:
 
 
 def all_groups(ctx: dict) -> list:
-    """Run the eight group checkers against one branch context.
+    """Run the seven group checkers against one branch context.
 
     The reporting order is fixed here so no call site can drop a group.
     """
@@ -1111,7 +1038,6 @@ def all_groups(ctx: dict) -> list:
         _group_file_set(ctx),
         _group_meta_lines(ctx),
         _group_receipt(ctx),
-        _group_freshness(ctx),
     ]
     json_handler.log_operation(
         "trinity_groups_scored",

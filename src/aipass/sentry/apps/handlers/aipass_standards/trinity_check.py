@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trinity_check.py
 # Description: Trinity Memory File Standards Checker
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-08-25
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -63,14 +63,13 @@ AUDIT_SCOPE = "branch_level"
 BRANCH_INPUTS = (".trinity/*",)
 
 GROUP_WEIGHTS: dict[str, int] = {
-    "Entry shapes": 30,
+    "Entry shapes": 33,
     "Top-level keys": 15,
     "Ordering & numbering": 12,
     "Char caps": 12,
     "File set": 10,
     "Meta lines & _usage": 10,
     "Receipt": 8,
-    "Freshness": 3,
 }
 _REGISTRY_NAME = "AIPASS_REGISTRY.json"
 
@@ -252,7 +251,7 @@ def _build_context(branch_path: Path) -> dict:
 
 
 def _weighted_score(checks: list) -> int:
-    """Weighted mean of the eight group subscores, never rounded up to a pass."""
+    """Weighted mean of the seven group subscores, never rounded up to a pass."""
     total = sum(check["score"] * GROUP_WEIGHTS[check["name"]] / 100 for check in checks)
     score = round(total)
     if score >= 100 and any(check["score"] < 100 for check in checks):

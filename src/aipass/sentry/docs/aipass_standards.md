@@ -74,7 +74,7 @@ beside its checker, `drone @sentry standards_query aipass_standards <name>`.
 | readme_quality | entry_point | production | README content depth and section quality |
 | template *(advisory)* | branch_level | everywhere | No unresolved spawn template markers |
 | todo | all_files | everywhere | No unresolved TODO/FIXME/HACK comments |
-| trinity | branch_level | production | `.trinity/` document set — schema, caps, ordering, freshness |
+| trinity | branch_level | production | `.trinity/` document set — schema, caps, ordering, receipt |
 
 ## errors
 
