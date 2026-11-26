@@ -34,3 +34,7 @@ dropbox/
 **/docs.local/refs/
 # Things at rest, not records: the archive is out of the backup (the owner, 2026-11-06; replaces the 10-21 ruling)
 .archive/
+# Memory's pool archive is text already vectorized, grows forever, and was 6k of 21k files (the owner, 2026-11-26)
+memory_pool_archive/
+# Hosted projects back themselves up: each carries its own .backupignore and .backup store (the owner, 2026-11-26)
+projects/
