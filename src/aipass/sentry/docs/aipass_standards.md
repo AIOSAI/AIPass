@@ -9,90 +9,146 @@
 
 ## How to read the table
 
-`Scope` is the checker's own `AUDIT_SCOPE` — where a result is REPORTED (`all_files`,
-`entry_point`, `branch_level`). `Applies to` is its `APPLIES_TO` — which files are
-ELIGIBLE, default `everywhere`. Two different axes; `applicability.py` is where they meet.
+`Scope` is the checker's own `AUDIT_SCOPE`, where a result is REPORTED (`all_files`,
+`entry_point`, `branch_level`). `Applies to` is its `APPLIES_TO`, which files are ELIGIBLE,
+default `everywhere`; `applicability.py` is where the two axes meet. Both columns are read
+from the checker sources. If this page and the directory disagree, the directory is right.
 
-Both columns are read from the checker sources, not maintained by hand. The row count is
-verified against `discover_checkers()` on every regeneration, never carried forward: a
-count can match by accident while a row is missing. If this table and the directory
-disagree, the directory is right.
+**The corpus is `apps/` plus `tests/`** (`test_*.py` and `conftest.py`, under the same
+exclusions `apps/` gets).
 
-**The corpus is `apps/` plus `tests/`** — `test_*.py` and `conftest.py`, under the same
-exclusions `apps/` gets. Every checker declares an `APPLIES_TO`; `everywhere` is the default
-for a checker that forgets, because forgetting should cost noise and never a missed bug.
+Rows are grouped by `apps/handlers/aipass_standards/groups.py`, and each section below is one
+of its groups, in its order. The audit prints a clean group as one line and opens a group with
+any row under 100; `drone @sentry audit aipass @branch --group NAME` prints one group alone.
+A checker file registered in no group fails the `pack_registry` row.
 
-The rows whose `Applies to` is `tests` live on two pages of their own, because with them this
-page would exceed the docs-page size cap:
-[aipass_standards_tests_1.md](aipass_standards_tests_1.md) (calendar_bound to literal_path) and
-[aipass_standards_tests_2.md](aipass_standards_tests_2.md) (module_scope_side_effect to weak_oracle).
-The table below carries every other row.
+Each row is the rule's one-line meaning; the full detail lives in the standard's own `.md`
+beside its checker, `drone @sentry standards_query aipass_standards <name>`.
+
+## architecture
 
 | Standard | Scope | Applies to | What It Checks |
 |----------|-------|-----------|----------------|
-| accepted_and_never_used_parameter *(production only)* | all_files | production | A product function accepts a parameter and no path in its body reads it. `cleanup_deleted_files(..., should_ignore, ...)` documents the callable and never calls it, while `copy/snapshot.py:93` builds a lambda to pass in; ONE defect, two lines, and the verdict lands on the ACCEPTING side where the cure lives. HOW A PROTOCOL IS TOLD APART, four shapes that all say somebody else owns this signature: the branch never calls the function (`pytest_runtest_logfinish` is pytest's hookspec — whether it should exist at all is `unused_function`'s verdict, not this one's); the name is handed off as a VALUE, a bare mention that is not a call, not its own `def` line and NOT an import (an import is not a hand-off); the def sits inside an `except ImportError` handler, so it is a shim that must match the real module; the name is defined more than once in the branch. Ordinary exemptions: `self`/`cls`, `*args`/`**kwargs`, dunders, decorated, a stub body, and any `_`-prefixed parameter. The corpus is stripped of strings and comments with the tokenizer — so a docstring or comment that names a function never counts as a hand-off |
 | architecture | all_files | production | Module/handler separation, entry point structure; `shared/` beside `apps/` is the library layer |
-| caller_file_depth | all_files | production | `__file__` handed to a depth function (climbs 2+ levels from a parameter) from a layout it does not fit: another depth, outside `<branch>/apps/`, or a copy beside `apps/` on disk. One finding per call |
-| clear_text_secret_logging *(production only)* | all_files | production | CodeQL `py/clear-text-logging-sensitive-data` (specimen: PR #774): the CALLER line. A prax logger call whose message (argument, f-string piece, `%`/`.format()`/`+` operand) is a Name/Attribute/Call named as a secret (whole segment: secret(s), token(s), password(s), passwd, api_key, apikey, credential(s), bearer, auth_header, access_key, private_key, trusted, confidential; not untrusted), or a value built in the same file from a secret-named SOURCE: a module-level binding (`SECRETS_BASE = ...`) or an attribute read (`secrets_store.SECRETS_BASE`), a token word seeding neither, or the result of a call on CodeQL's source words secret(s)/trusted/confidential (`secret = _get_secret(bot_id)`), not one holding hash/md5/sha/random/encode/encrypt/public/user/login/logging/clear/redact or a setter verb (set_secret); never a parameter, loop/with target or local. One parameter seed: in a file defining a secret lister (`list_secrets(provider)`), inside a secret reader (a get/read/load/fetch segment on the call-seed words, no setter verb, no `list` segment), a required positional parameter the lister does not take (`slug`, never `provider`) in the log call's MESSAGE (first argument or `msg=`: f-string piece, `%`/`+` side, `.format()`, str/repr) is a row; a `%s` argument is not. That seed judges the message only, which is CodeQL's reach; the other seeds judge arguments too. From a source it follows assignments, comprehensions, the wrappers sorted/list/tuple/set/dict/str/repr/join/format/f-strings, same-file returns and parameters, attributes, and the same-file hop (a built argument to a same-file function whose return carries that parameter taints that call's result, per call: `strays = non_secret_keys(secret)`), and reads and adds on a built value: `.get/.pop/.setdefault/.items/.keys/.values` carry the receiver on (`records = stored.get("tokens")`), `.append/.extend/.add/.insert(i, x)` bind the named list or set, a dict literal or `dict(...)` holding a built value is built (str/repr/f-string/`%r` stay rows; `len()`, `type(x).__name__` and a slice of ≤4 chars stay clean); a non_/not_ prefix acquits nothing. Identifiers acquit (token_id, n_tokens, secret_path, TOKEN_SLUG), so do redactions (redact/mask/scrub, `len()`, a slice of ≤4 chars). A cross-file value (`token_id` from another module) is out of reach. The cure for a false hit is the rename |
+| encapsulation | all_files | production | No cross-branch imports, proper isolation |
+| front_door | all_files | everywhere | A cross-branch import goes through the branch's package top file, `from aipass.<branch> import <name>`; one reaching beneath it is one finding per site |
+| gateway_boundary | all_files | production | A branch writes only its own private storage; another branch's goes through that branch's door. Outside @api, nothing imports, paths into or calls @api's secrets store |
+| handlers | all_files | production | Handler directory structure + handler independence |
+| imports | all_files | everywhere | Import ordering and grouping; a production file that logs routes through prax (stdlib `logging` use fails, a file that never logs owes no prax import) |
+| module_scope_side_effect *(tests; signal_disposition everywhere)* | all_files | everywhere | A side effect that runs when a `test_*.py` is imported (host reads, `os.environ`/`sys.modules`/`sys.path` writes, `os.chdir`); module-scope `signal` calls are judged in every file |
+| modules | all_files | production | Module structure and naming |
+| stdlib_only | branch_level | production | Each file in `CLAIMS` is proven stdlib-only: no aipass, relative or I/O import, no disk, environment or process call; a proven claim is skipped by json_structure |
+| trigger | all_files | production | Trigger integration patterns |
+
+## cli
+
+| Standard | Scope | Applies to | What It Checks |
+|----------|-------|-----------|----------------|
 | cli | all_files | production | Rich console usage, no bare print() |
 | cli_flags | entry_point | production | --help, --version flag handling |
-| cli_ux | all_files | production | Two-tier help in the entry point and every module; each print styled on purpose; --version prints the header |
-| commented_logger | all_files | everywhere | No commented-out logger/logging calls |
-| dead_code | branch_level | production | Unreachable functions and dead imports; a dotted path in the project's `.aipass/*.json` or the branch's door table (top `__init__.py`) is a reference |
-| debug_print | all_files | everywhere | No debug print/pprint statements |
-| deep_nesting | all_files | everywhere | Max nesting depth 4 (AST-measured) |
-| developer_home | all_files | everywhere | No developer's home directory (`/home/<x>`, `/Users/<x>`, `C:\Users\<x>`, any slash) naming a real login in any text file — comments and prose included; `TEXT_FILES = True` lets the checklist judge non-`.py` text, and `drone @sentry home-paths scan` gates the whole tracked tree in CI |
-| docs_page | entry_point | production | Every docs/*.md in one shape: a README back-link and one H1, a purpose paragraph, depth ≤3, links resolve, size under the context pack's cap, and no retired defect register by name — plus advisory story and defect-prose lines |
-| documentation | all_files | production | Docstrings on public functions |
-| encapsulation | all_files | production | No cross-branch imports, proper isolation |
-| error_handling | all_files | production | Try/except patterns, error propagation |
-| exception_text_in_response *(production only)* | all_files | production | CodeQL `py/stack-trace-exposure` (specimen: PR #774): inside an `except`, the bound exception (or an attribute, `str()`/`repr()`, f-string, local carrying it) or `traceback.format_exc()` reaches `HTTPException(detail=)`, a `*Response` content, a `deny`/`refuse`/`error_response`/`respond` helper, or a returned dict/str. Only modules importing fastapi/starlette or defining a route; any other file declines. Logger-only and `type(e).__name__` acquit. A cross-branch flow (through `ReadCache.get`) is out of its reach; the `.md` says why |
-| fixed_depth_path | all_files | production | A fixed-depth climb off `__file__` (also through a bound or same-branch imported name) that leaves `src/aipass`, or is joined to a name the wheel does not ship (`logs`, `*_json`, a dot name, a `.gitignore` name). A dot folder at the branch's own root passes. One finding per site |
-| front_door | all_files | everywhere | A cross-branch import goes through the branch's package top file, `from aipass.<branch> import <name>`; one that reaches beneath another branch's top file (statement, TYPE_CHECKING, or an import/patch string) is one finding per site (line, enclosing function). `drone @sentry front-door scan` counts the fleet with the same reading |
-| gateway_boundary | all_files | production | A branch writes its OWN private storage; another branch's goes through that branch's door. Outside @api, no file imports, paths into or calls @api's secrets store (`~/.secrets`): agents get actions, never values |
-| handlers | all_files | production | Handler directory structure + handler independence |
-| hardcoded_key | all_files | everywhere | No hardcoded API keys or secrets |
-| hardcoded_path | all_files | everywhere | No hardcoded absolute paths |
+| cli_ux | all_files | production | Two-tier help, each print styled on purpose, --version from the header: two_tier_help, rich_console, title_markup, purpose_line, help_pointer, usage_section, examples_section, no_internal_modules, markup_kept, help_styled, heading_styled, group_explained, highlight_deliberate, version_from_header |
 | help_flag_safety | all_files | production | A help flag ANYWHERE means explain, never execute |
 | help_text | all_files | production | --help content quality |
-| host_portability | branch_level | everywhere | Assumptions about the author's own host — non-portable binaries (arm B), a direct `Path` subclass (3.10/3.11, arm D), and a `resolve()`d path compared in the same function with `Path.home()` / `Path.cwd()` / `os.getcwd()` / `tempfile` as given (arm E, file-local), and a file that empties git's config (`GIT_CONFIG_GLOBAL` / `GIT_CONFIG_NOSYSTEM`) with no commit email (arm F, file-local), and a stdlib import newer than pyproject's `requires-python` floor whose guard never imports the backport (arm G, `tomllib` without `tomli`), and a `.git` existence test an empty directory passes in product code (arm H) (corpus: apps/, tests/ **and** lib/) |
-| fallback *(advisory, production only)* | all_files | production | An `except` that answers a failure with a stand-in and neither raises, exits, shows nor carries it: an import-failure stand-in, an unreadable file read as a default, a check that cannot run read as passed, one named "best effort"/"graceful"/"legacy"/"compat"/"fall back", or one logged below warning; plus `if not shutil.which(...): return`. `ProcessLookupError` alone around a signal call is the answer, not a stand-in. A warning log does not acquit the first four. Waived one site per row (`lines`/`functions`); a whole-file row waives nothing. Review rule, not a check: `dict.get` defaults, env-or-default, a helper that swallows. |
-| imports | all_files | everywhere | Import ordering and grouping; a production file that logs routes through prax (stdlib `logging` use fails, a file that never logs owes no prax import) |
 | introspection | all_files | production | No-args introspection gate |
-| json_handler | branch_level | production | The canonical json shim by sha256 (a claimed branch: that shim binding `for_branch("<own name>")`, proven against the same hash) + bidirectional config/data/log triplet completeness |
+| output_routing | all_files | production | Status output via @cli helpers, not raw console.print |
+| rich_markup | all_files | production | Literal `[placeholders]` Rich silently eats at render time |
+| stderr_routing | all_files | production | Proper stderr vs stdout usage |
+| subcommand_help | branch_level | production | Subcommand --help interception before dispatch |
+
+## code
+
+| Standard | Scope | Applies to | What It Checks |
+|----------|-------|-----------|----------------|
+| accepted_and_never_used_parameter *(production only)* | all_files | production | A product function accepts a parameter no path in its body reads; a signature somebody else owns (a hook, a handed-off name, an ImportError shim, a name defined twice) is exempt |
+| dead_code | branch_level | production | Unreachable functions and dead imports; a dotted path in the project's `.aipass/*.json` or the branch's door table (top `__init__.py`) is a reference |
+| deep_nesting | all_files | everywhere | Max nesting depth 4 (AST-measured) |
+| unused_function | branch_level | production | No unreferenced public functions |
+
+## docs
+
+| Standard | Scope | Applies to | What It Checks |
+|----------|-------|-----------|----------------|
+| documentation | all_files | production | Docstrings on public functions |
+| docs_page | entry_point | production | Every docs/*.md in one shape: README back-link, one H1, a purpose paragraph, depth ≤3, resolving links, size under the cap, no retired defect register; plus advisory story and defect-prose lines |
+| readme | entry_point | production | README.md exists and is current — plus the advisory lane: docs index, named paths, rot bait, and the eight `##` sections in order |
+| readme_quality | entry_point | production | README content depth and section quality |
+| template *(advisory)* | branch_level | everywhere | No unresolved spawn template markers |
+| todo | all_files | everywhere | No unresolved TODO/FIXME/HACK comments |
+| trinity | branch_level | production | `.trinity/` document set — schema, caps, ordering, freshness |
+
+## errors
+
+| Standard | Scope | Applies to | What It Checks |
+|----------|-------|-----------|----------------|
+| error_handling | all_files | production | Try/except patterns, error propagation |
+| exception_text_in_response *(production only)* | all_files | production | Inside an `except`, the exception text or `traceback.format_exc()` reaches an HTTP response, a refusal helper or a returned dict/str (CodeQL `py/stack-trace-exposure`); web modules only |
+| fallback *(advisory, production only)* | all_files | production | An `except` that answers a failure with a stand-in and neither raises, exits, shows nor carries it, plus `if not shutil.which(...): return`; waived one site per row |
+| silent_catch | all_files | everywhere | No bare except/pass patterns |
+
+## header
+
+| Standard | Scope | Applies to | What It Checks |
+|----------|-------|-----------|----------------|
+| lowercase_name | branch_level | production | An agent name is lowercase wherever it runs: registry, passport, certificate and dashboard names, and code that capitalises one or prints it in capitals |
+| meta | all_files | production | File header metadata block |
+| naming | all_files | everywhere | snake_case, column-0 constants |
+| shebang | all_files | everywhere | No shebang lines in library code |
+
+## json
+
+| Standard | Scope | Applies to | What It Checks |
+|----------|-------|-----------|----------------|
+| json_handler | branch_level | production | The canonical json shim by sha256 (a claimed branch: that shim bound with `for_branch("<own name>")`) plus bidirectional config/data/log triplet completeness |
 | json_structure | all_files | production | json_handler import + log_operation calls |
-| one_logger *(advisory, production only)* | all_files | production | Prax is the only logger. Convicts, by AST: K0 any stdlib `logging` import; K1 a class with two or more level methods; K2 a file opened for writing whose path resolves to a `.log` name; K3 a write wrapper sending its message to stderr or printing it time-stamped. No bypass row waives it; K0 and K1 pass only the files prax's `LOGGING_ALLOWED` and `LOGGER_DOORS` name (read with `ast`; either unreadable refuses every file), and `logging_allowed.py` names the rest by exact path, with its reason: the hooks bridges' crash record, a plain append of the break outside the logger, allowed only where the logger itself can be what broke. A file that logs nothing owes no import. |
+
+## logging
+
+| Standard | Scope | Applies to | What It Checks |
+|----------|-------|-----------|----------------|
+| commented_logger | all_files | everywhere | No commented-out logger/logging calls |
+| debug_print | all_files | everywhere | No debug print/pprint statements |
 | log_handler | all_files | production | Prax logger usage (not stdlib logging) |
 | log_level | all_files | production | Correct log level usage |
 | log_structure | all_files | production | Structured log message format |
 | log_visibility | all_files | production | Log output in key operations |
-| logged_fallback *(production only)* | all_files | production | `silent_catch`'s sibling: an `except` that does not raise and ENDS in `return` of a literal default (constant, empty container, or a string built from the exception) in a function whose success path can return the SAME value -- an equal literal (same type: `False` is not `0`) in a return outside every handler, or a name first bound to it. Logging never acquits. Sentinels pass (`None` beside dict returns, `-1` beside counts); raises, generators, `finally` returns, calls/params and assign-and-fall-through are not read. |
-| lowercase_name | branch_level | production | An agent name is lowercase wherever it runs: registry row, passport, certificate and dashboard names, and code that capitalises one or prints it in capitals. Comments, docstrings and markdown are not read. |
-| meta | all_files | production | File header metadata block |
-| modules | all_files | production | Module structure and naming |
-| naming | all_files | everywhere | snake_case, column-0 constants |
-| os_walk_onerror *(production only)* | all_files | production | An `os.walk` call with no `onerror=` (or `onerror=None`) — `scandir` errors are swallowed, so an unreadable subtree drops out and the run reports success. Specimen @backup `scan/walk.py:34`. A third positional arg or `**kwargs` acquits; any named hook passes (a hook that only logs is not a cure, the page says so; the checker cannot see it). `rglob` has no hook: counted, not judged |
-| output_routing | all_files | production | Status output via @cli helpers, not raw console.print |
-| permission_flags | all_files | everywhere | No dangerous permission overrides |
-| readme | entry_point | production | README.md exists and is current — plus the advisory lane: docs index, named paths, rot bait, and the eight `##` sections in order |
-| readme_quality | entry_point | production | README content depth and section quality |
-| rich_markup | all_files | production | Literal `[placeholders]` Rich silently eats at render time |
-| ruff | branch_level | everywhere | Ruff lint + format compliance — a violation fails the row and counts in the score |
-| shebang | all_files | everywhere | No shebang lines in library code |
-| silent_catch | all_files | everywhere | No bare except/pass patterns |
-| stderr_routing | all_files | production | Proper stderr vs stdout usage |
-| stdlib_only | branch_level | production | Each file in `CLAIMS` is proven stdlib-only: no aipass, relative or I/O import, no disk, environment or process call. A missing path fails; a proven claim is skipped by json_structure. No claim: not applicable |
-| subcommand_help | branch_level | production | Subcommand --help interception before dispatch |
-| template *(advisory)* | branch_level | everywhere | No unresolved spawn template markers |
-| todo | all_files | everywhere | No unresolved TODO/FIXME/HACK comments |
-| trigger | all_files | production | Trigger integration patterns |
-| trinity | branch_level | production | `.trinity/` document set — schema, caps, ordering, freshness |
-| unused_function | branch_level | production | No unreferenced public functions |
+| logged_fallback *(production only)* | all_files | production | An `except` that does not raise and returns a literal default its function's success path can also return, so a failure reads as a success; logging never acquits, sentinels pass |
+| one_logger *(advisory, production only)* | all_files | production | Prax is the only logger: no stdlib `logging` import, no home-made level-method class, no hand-written `.log` file, no time-stamped stderr writer, outside the files prax and `logging_allowed.py` name |
 
-The audit consults one entry more than this table has rows: `diagnostics` (pyright) has no
-`_check.py` of its own. `.github/scripts/sentry_audit.py` pins that consulted total in
-`EXPECTED_STANDARDS` and fails CI when the live number differs — a standard that leaves the
-gate silently, or one added without moving the pin, both trip it.
+## paths
+
+| Standard | Scope | Applies to | What It Checks |
+|----------|-------|-----------|----------------|
+| caller_file_depth | all_files | production | `__file__` handed to a depth function from a layout it does not fit: another depth, outside `<branch>/apps/`, or a copy beside `apps/` on disk. One finding per call |
+| developer_home | all_files | everywhere | No developer's home directory (`/home/<x>`, `/Users/<x>`, `C:\Users\<x>`) naming a real login in any text file, comments and prose included |
+| fixed_depth_path | all_files | production | A fixed-depth climb off `__file__` that leaves `src/aipass`, or is joined to a name the wheel does not ship (`logs`, `*_json`, a dot name, a `.gitignore` name). One finding per site |
+| hardcoded_path | all_files | everywhere | No hardcoded absolute paths |
+| host_portability | branch_level | everywhere | Host assumptions: non-portable binaries, a direct `Path` subclass, a `resolve()`d path compared to home/cwd, an emptied git config, a too-new stdlib import, a `.git` existence test (apps/, tests/, lib/) |
+| os_walk_onerror *(production only)* | all_files | production | An `os.walk` with no `onerror=`: an unreadable subtree drops out and the run reports success. Any named hook passes; `rglob` is counted, not judged |
+
+## security
+
+| Standard | Scope | Applies to | What It Checks |
+|----------|-------|-----------|----------------|
+| clear_text_secret_logging *(production only)* | all_files | production | A prax logger call whose message carries a secret-named value, or one built from a secret-named source in the same file (CodeQL `py/clear-text-logging-sensitive-data`); the cure for a false hit is the rename |
+| hardcoded_key | all_files | everywhere | No hardcoded API keys or secrets |
+| permission_flags | all_files | everywhere | No dangerous permission overrides |
+
+## tests
+
+The 30 rows of the `tests` group live on two pages of their own:
+[aipass_standards_tests_1.md](aipass_standards_tests_1.md) (calendar_bound to literal_path) and
+[aipass_standards_tests_2.md](aipass_standards_tests_2.md) (mock_console to weak_oracle).
+
+## tooling
+
+| Standard | Scope | Applies to | What It Checks |
+|----------|-------|-----------|----------------|
+| diagnostics | branch_level | everywhere | Pyright type errors; the audit adds this row itself and runs it through the audit pipeline |
+| pack_registry | branch_level | sentry only | Every `*_check.py` is registered under exactly one group in `groups.py`, every registered name is backed by a file, and every file loads as a checker |
+| ruff | branch_level | everywhere | Ruff lint + format compliance — a violation fails the row and counts in the score |
+
+`diagnostics` and `pack_registry` have no `_check.py` of their own. `.github/scripts/sentry_audit.py`
+pins the consulted total in `EXPECTED_STANDARDS` and fails CI when the live number differs.
 
 ---
 
@@ -103,12 +159,13 @@ A standard is a **triplet** in `apps/handlers/aipass_standards/`, and the `tripl
 
 | File | Contract |
 |---|---|
-| `<name>_check.py` | `AUDIT_SCOPE` + optional `APPLIES_TO`; a `check_module(module_path, bypass_rules=None)` or `check_branch(branch_path)` returning `{passed, checks[], score, standard}`. `discover_checkers()` picks up any `*_check.py` exporting one of those two — nothing registers a name by hand. |
+| `<name>_check.py` | `AUDIT_SCOPE` + optional `APPLIES_TO`; a `check_module(module_path, bypass_rules=None)` or `check_branch(branch_path)` returning `{passed, checks[], score, standard}`. `discover_checkers()` picks up any `*_check.py` exporting one of those two. |
 | `<name>_content.py` | `get_<name>_standards() -> str`, the Rich-markup text `drone @sentry standard <name>` prints. |
 | `<name>.md` | The prose: what it is, why it matters, the failure case, the bypass position. |
 
 Then, in the same change:
 
+1. Register the name under one group in `groups.py`, or the `pack_registry` row fails on sentry.
 1. Move `EXPECTED_STANDARDS` in `.github/scripts/sentry_audit.py`, or every branch trips the
    tripwire on the next CI run.
 2. Prove it both ways before it lands — break a real file, see the violation, then fix it.
@@ -157,7 +214,7 @@ anywhere under `tests/`; a substring scan manufactures tests instead of measurin
 Its checker, content module and `.md` are in
 `apps/handlers/aipass_standards/.archive/`, and it is not discovered.
 
-Test files are judged by AST rules instead: this pack's `APPLIES_TO = tests` rows (the two
+Test files are judged by AST rules instead: this pack's `tests` group (the two
 pages above), scored per test file, and [pytest_quality.md](pytest_quality.md), a shadow pack
 that scores and gates nothing.
 
@@ -166,7 +223,7 @@ that scores and gates nothing.
 ## Related
 
 - [aipass_standards_tests_1.md](aipass_standards_tests_1.md) — the test-file rows, calendar_bound to literal_path
-- [aipass_standards_tests_2.md](aipass_standards_tests_2.md) — the test-file rows, module_scope_side_effect to weak_oracle
+- [aipass_standards_tests_2.md](aipass_standards_tests_2.md) — the test-file rows, mock_console to weak_oracle
 - [audit_engine.md](audit_engine.md) — how a pack is discovered, scored, cached and rendered
 - [checklist_and_hooks.md](checklist_and_hooks.md) — the per-file lane the PostToolUse hook runs
 - [proof_and_coverage.md](proof_and_coverage.md) — the proof pack that audits this pack

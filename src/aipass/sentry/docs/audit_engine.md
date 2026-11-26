@@ -16,7 +16,8 @@ pack inventory.
 |---|---|
 | `audit/branch_audit.py` | The per-branch scoring engine. `discover_checkers()` loads every `*_check.py` in a pack directory that exports `check_module` or `check_branch`; the branch score is the mean over consulted standards, with `ADVISORY = True` standards kept out of it. |
 | `audit/discovery.py` | Branch discovery, CWD-first registry. |
-| `audit/audit_display.py` | Rich result formatting — the score grid, the violation detail, the info lines. |
+| `audit/audit_display.py` | Rich result formatting — the grouped score grid, the violation detail, the info lines. |
+| `audit/grouping.py` | The grid's groups (read from the pack's `groups.py`), the per-rule scores, and the `pack_registry` row. |
 | `audit/incremental_cache.py` | Content-hash cache: a branch whose inputs did not change replays its stored score instead of re-running every checker, and a branch where one checker changed re-runs that checker alone. |
 | `audit/artifact.py` | The untruncated violation set → `.sentry/last_audit.json` for a default-pack fleet run (a branch, `--no-bypass` or other-pack run gets a suffix, e.g. `last_audit_<branch>.json`), because the console view is capped and the full set is what you actually debug against. |
 | `registry_scan.py` | Case-EXACT registry discovery — the one reader every lane uses. |
@@ -41,6 +42,23 @@ counts them for you.
 **CWD-first registry.** `_find_registry()` walks the CWD's parents first — that is what lets
 the audit run inside an external project — then falls back to the `__file__` parents. It
 globs `*_REGISTRY.json` rather than hardcoding a filename.
+
+---
+
+## The grid: groups, rule rows, the registry
+
+The pack registers every checker under one group in `aipass_standards/groups.py`; the audit
+prints by those groups, alphabetical. A group whose rows and rules are all 100 prints as one line;
+any row under 100 opens its group, and its rows read down two columns. A rule is one named check
+inside a checker (`cli_ux`'s `version_from_header`); its score is the share of judged files
+where that check passed, and a rule under 100 prints by name under its row. `--group NAME` prints
+one group, open, every row and rule; an unknown name refuses with the list (exit 7) before
+the audit runs. The fleet run's STANDARD AVERAGES groups the same way.
+
+`pack_registry` is a scored row on the branch that holds the pack (sentry) and stands down on
+every other: it fails a `*_check.py` registered in no group, a registered name with no file,
+a name in two groups, and a file that does not load as a checker. `groups.py` carries no cache
+stamp, so a cached audit reads the registry and the groups live.
 
 ---
 

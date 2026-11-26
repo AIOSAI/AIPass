@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: standards_audit.py
 # Description: Standards Audit Module
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-03-05
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -27,10 +27,12 @@ from aipass.sentry.apps.handlers.json import json_handler
 
 from aipass.sentry.apps.handlers.audit import argv as audit_argv
 from aipass.sentry.apps.handlers.audit import discovery
+from aipass.sentry.apps.handlers.audit import grouping
 from aipass.sentry.apps.handlers.audit.discovery import discover_branches, _is_branch_private, check_internal_access
 from aipass.sentry.apps.handlers.audit.branch_audit import audit_branch_incremental
 from aipass.sentry.apps.handlers.audit.audit_display import (
     cache_tag,
+    group_names,
     print_branch_summary,
     print_system_summary,
 )
@@ -274,6 +276,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         )
         raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, "--artifact with no path")
 
+    if parsed.group_missing:
+        error("--group needs a group name", suggestion="Usage: drone @sentry audit aipass --group <name>")
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, "--group with no name")
+
     if len(positional) >= 1:
         if positional[0].startswith("@"):
             if len(positional) >= 2:
@@ -356,6 +362,15 @@ def handle_command(command: str, args: List[str]) -> bool:
             'Next: restore the file (drone @git diff shows the change) or write {"bypass": []}, then re-run.'
         )
 
+    # A registered pack names its groups up front, so a typo refuses before a cold audit, not after.
+    known = grouping.group_choices(pack_path)
+    if parsed.group is not None and known and parsed.group not in known:
+        error(
+            f"Unknown group: '{parsed.group}'",
+            suggestion=f"Available groups: {', '.join(known)}. Usage: drone @sentry audit {pack_name} --group <name>",
+        )
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, parsed.group)
+
     total_branches = len(branches)
     console.print(f"[dim]Discovered {total_branches} branch{'es' if total_branches != 1 else ''} to audit...[/dim]")
     console.print()
@@ -406,12 +421,22 @@ def handle_command(command: str, args: List[str]) -> bool:
     console.print(f"[dim]Audit complete — {total_branches} branches in {total_elapsed:.1f}s[/dim]")
     console.print()
 
+    group = parsed.group
+    # Groups come from the results, so the name is checked only once the audit has run.
+    if group is not None and group not in group_names(audit_results):
+        error(
+            f"Unknown group: '{group}'",
+            suggestion=f"Available groups: {', '.join(group_names(audit_results))}. "
+            f"Usage: drone @sentry audit {pack_name} --group <name>",
+        )
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, group)
+
     if not is_compact:
         for result in audit_results:
-            print_branch_summary(result, no_bypass=no_bypass)
+            print_branch_summary(result, no_bypass=no_bypass, group=group)
 
     if is_compact:
-        print_system_summary(audit_results, no_bypass=no_bypass)
+        print_system_summary(audit_results, no_bypass=no_bypass, group=group)
 
     # A registry nobody could read changes no verdict; it is said once, here.
     for note in registry_notes():
@@ -443,6 +468,7 @@ def print_help():
     console.print("Pack-aware audit — check compliance across all branches")
     console.print()
     console.print("[yellow]Usage:[/yellow] drone @sentry audit <pack|tests> <@branch> <flags>")
+    console.print("[dim]Flags: --no-bypass --full --artifact <path> --no-artifact --group <name>[/dim]")
     console.print()
 
     console.print("[yellow]COMMANDS:[/yellow]")
@@ -454,6 +480,7 @@ def print_help():
     console.print("  [green]drone @sentry audit aipass --full[/green]        [dim]Force full re-scan[/dim]")
     console.print("  [green]drone @sentry audit aipass --artifact <path>[/green]  [dim]Artifact destination[/dim]")
     console.print("  [green]drone @sentry audit aipass --no-artifact[/green]      [dim]Skip the artifact[/dim]")
+    console.print("  [green]drone @sentry audit aipass @cli --group cli[/green]   [dim]One grid group, every row[/dim]")
     console.print("  [green]drone @sentry audit --help[/green]               [dim]This help message[/dim]")
     console.print()
 
@@ -470,6 +497,10 @@ def print_help():
 
     console.print("  [dim]# Force a full re-scan, bypassing the incremental fingerprint cache[/dim]")
     console.print("  [green]drone @sentry audit aipass --full[/green]")
+    console.print()
+
+    console.print("  [dim]# One group of the grid, open, every row and rule at 100 too[/dim]")
+    console.print("  [green]drone @sentry audit aipass @cli --group cli[/green]")
     console.print()
 
     console.print("  [dim]# The execution lane: run @backup's suite under the hygiene gate[/dim]")

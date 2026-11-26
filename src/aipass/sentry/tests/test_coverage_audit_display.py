@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_coverage_audit_display.py
 # Description: audit coverage, render phase: the branch and system summaries audit_display prints
-# Version: 1.0.1
+# Version: 1.0.3
 # Created: 2026-10-08
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/audit/audit_display.py."""
@@ -104,6 +104,14 @@ class TestRenderViolations:
         out = self._naming(capsys, [{"path": f"/file{i}.py", "score": 10, "issues": []} for i in range(5)])
         assert "/file4.py" in out
         assert "... and" not in out
+
+    def test_a_path_wider_than_the_screen_stays_on_its_cross_line(self, capsys, monkeypatch):
+        """A long absolute path is never wrapped off its cross, leaving a cross with no text, on an 80-column screen."""
+        monkeypatch.setattr(audit_display.console, "width", 80)
+        path = "/srv/agents/Projects/AIPass/src/aipass/sentry/apps/handlers/pytest_quality_standards/corpus.py"
+        out = self._naming(capsys, [{"path": path, "score": 0, "issues": ["why"]}])
+        cross = next(line for line in out.splitlines() if "✗" in line)
+        assert path in cross
 
     def test_no_path_no_file_key(self, capsys):
         """Both path and file missing prints an empty path. Mutant: the empty default replaced in apps/handlers/audit/audit_display.py — killed."""
@@ -762,20 +770,20 @@ class TestPrintSystemSummary:
         assert not [line for line in lines if line.startswith("  Type errors:") and "branches)" in line]
 
     def test_odd_standard_count(self, capsys):
-        """An odd standard count renders the last one alone, at any tier of averages."""
+        """An odd standard count reads down two columns, the left one longer, at any tier. Mutant: the old zigzag pairing in apps/handlers/audit/audit_display.py — killed."""
         cases = [
             (
                 {"arch": 80, "naming": 85, "meta": 90},
                 [
-                    "  Arch             80% ⚠️    Meta             90% ✅",
-                    "  Naming           85% ⚠️",
+                    "  Arch             80% ⚠️    Naming           85% ⚠️",
+                    "  Meta             90% ✅",
                 ],
             ),
             (
                 {"high": 95, "mid": 80, "low": 50},
                 [
-                    "  High             95% ✅    Low              50% ❌",
-                    "  Mid              80% ⚠️",
+                    "  High             95% ✅    Mid              80% ⚠️",
+                    "  Low              50% ❌",
                 ],
             ),
         ]
@@ -812,3 +820,96 @@ class TestPrintSystemSummary:
         """Control: a normal fleet summary carries no such label. Mutant: no_bypass forced True in apps/handlers/audit/audit_display.py — killed."""
         printed = _rendered(capsys, audit_display.print_system_summary, [self._make_result("a", 95)]).upper()
         assert "BYPASSES DISABLED" not in printed
+
+
+def _grouped(**scores_over) -> dict:
+    """A branch with a clean header group and a cli group whose cli_ux rule version_from_header sits at 88."""
+    scores = {"meta": 100, "naming": 100, "cli": 100, "cli_ux": 96, "help_text": 100, "rich_markup": 100}
+    scores.update(scores_over)
+    return {
+        "branch": {"name": "cli"},
+        "scores": scores,
+        "average": 99,
+        "files_checked": 12,
+        "results": {},
+        "groups": {"cli": ["cli", "cli_ux", "help_text", "rich_markup"], "header": ["meta", "naming"]},
+        "rule_scores": {"cli_ux": {"heading_styled": 100, "version_from_header": 88}},
+    }
+
+
+class TestGroupedGrid:
+    """The score grid by group, on the branch summary and the fleet averages."""
+
+    @staticmethod
+    def _lines(capsys, audit_result: dict, **kwargs) -> list:
+        return _rendered(capsys, audit_display.print_branch_summary, audit_result, **kwargs).splitlines()
+
+    def test_a_group_at_99_stays_open_with_its_rows(self, capsys):
+        """Mutant: every group collapsed in apps/handlers/audit/audit_display.py — killed."""
+        lines = self._lines(capsys, _grouped())
+        assert "  cli 4 rows, average 99% ✅" in lines
+        assert "  Cli             100% ✅    Help_Text       100% ✅" in lines
+        assert "  Cli_Ux           96% ✅    Rich_Markup     100% ✅" in lines
+
+    def test_a_clean_group_prints_one_line_and_none_of_its_rows(self, capsys):
+        """Mutant: the clean group left open in apps/handlers/audit/audit_display.py — killed."""
+        lines = self._lines(capsys, _grouped())
+        assert "  header         2 rows  100% ✅" in lines
+        assert not [line for line in lines if "Meta" in line or "Naming" in line]
+
+    def test_rows_read_down_the_column_not_across(self, capsys):
+        """Mutant: the old zigzag order in apps/handlers/audit/audit_display.py — killed."""
+        result = _grouped()
+        result["scores"] = {name: 90 for name in "abcde"}
+        result["groups"] = {"code": list("abcde")}
+        result["rule_scores"] = {}
+        lines = self._lines(capsys, result)
+        assert "  A                90% ✅    D                90% ✅" in lines
+        assert "  B                90% ✅    E                90% ✅" in lines
+        assert "  C                90% ✅" in lines
+
+    def test_a_rule_below_100_prints_by_name_and_a_rule_at_100_does_not(self, capsys):
+        """Mutant: rule rows dropped in apps/handlers/audit/audit_display.py — killed."""
+        lines = self._lines(capsys, _grouped())
+        assert "      cli_ux › version_from_header 88%" in lines
+        assert "      cli_ux › heading_styled 100%" not in lines
+
+    def test_group_prints_only_that_group_with_its_rows_and_rules_at_100(self, capsys):
+        """Mutant: the group filter ignored in apps/handlers/audit/audit_display.py — killed."""
+        result = _grouped(cli_ux=100)
+        result["rule_scores"] = {"cli_ux": {"heading_styled": 100, "version_from_header": 100}}
+        lines = self._lines(capsys, result, group="cli")
+        assert "  cli 4 rows, average 100% ✅" in lines
+        assert "      cli_ux › heading_styled 100%" in lines
+        assert "      cli_ux › version_from_header 100%" in lines
+        assert not [line for line in lines if line.startswith("  header")]
+        assert "  Overall:          99% ✅" in lines
+
+    def test_group_prints_only_that_groups_violations(self, capsys):
+        """Mutant: violations rendered for every group in apps/handlers/audit/audit_display.py — killed."""
+        result = _grouped(meta=90)
+        result["meta_violations"] = [{"path": "a.py", "score": 90, "issues": ["no header"]}]
+        assert "  META VIOLATIONS (1 files):" in self._lines(capsys, result)
+        assert "  META VIOLATIONS (1 files):" not in self._lines(capsys, result, group="cli")
+
+    def test_a_result_without_groups_prints_every_row_under_standards_and_says_so(self, capsys):
+        """Mutant: the legacy group collapsed at 100 in apps/handlers/audit/audit_display.py — killed."""
+        result = {"branch": {"name": "old"}, "scores": {"meta": 100}, "average": 100, "results": {}}
+        lines = self._lines(capsys, result)
+        assert "  this result carries no groups: its rows print under 'standards'" in lines
+        assert "  Meta            100% ✅" in lines
+
+    def test_the_fleet_averages_print_by_group_with_rule_averages(self, capsys):
+        """Mutant: the fleet grid ignores rule_scores in apps/handlers/audit/audit_display.py — killed."""
+        other = _grouped(cli_ux=100)
+        other["rule_scores"] = {"cli_ux": {"heading_styled": 100, "version_from_header": 100}}
+        lines = _rendered(capsys, audit_display.print_system_summary, [_grouped(), other]).splitlines()
+        assert "  header         2 rows  100% ✅" in lines
+        assert "  Cli_Ux           98% ✅    Rich_Markup     100% ✅" in lines
+        assert "      cli_ux › version_from_header 94%" in lines
+        assert not [line for line in lines if "Help_Text" in line and "Meta" in line]
+
+    def test_group_names_lists_what_group_accepts(self):
+        """Mutant: the legacy group left out of the names in apps/handlers/audit/audit_display.py — killed."""
+        legacy = {"branch": {"name": "old"}, "scores": {"meta": 100}, "average": 100}
+        assert audit_display.group_names([_grouped(), legacy]) == ["cli", "header", "standards"]

@@ -85,6 +85,8 @@ Before reporting a leg, run the touched tests as a clean checkout too: `PYTHONPA
 
 When fixing own compliance: eat own dogfood. Sentry can't pass own audit → nothing else matters.
 
+After any change under `apps/`, run `drone @sentry audit aipass @sentry` and bring it to 100% before reporting. A new checker file is registered under one group in `aipass_standards/groups.py`, or the `pack_registry` row fails.
+
 ## Access
 
 Sentry + devpulse have **system-wide file access**. "No cross-branch edits" rule does not apply — sentry needs edit system files (`.aipass/`, global prompts) + inspect any branch's code standards enforcement.

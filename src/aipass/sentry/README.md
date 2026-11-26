@@ -12,6 +12,7 @@
 
 ```bash
 drone @sentry audit aipass @flow        # Score one branch against the standards pack
+drone @sentry audit aipass @flow --group cli   # One group of the grid, every row and rule
 drone @sentry checklist <file>          # One file, every eligible standard
 drone @sentry standard cli              # Look up what a standard actually checks
 ```

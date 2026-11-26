@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: incremental_cache.py
 # Description: Audit Fingerprint Cache Handler
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-07-31
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """One file per cache key so concurrent runs on different branches cannot clobber each other.
@@ -25,7 +25,7 @@ from aipass.sentry.apps.handlers.json import json_handler
 # Bump when the stamp algorithm or branch_audit's corpus changes: no stamp covers either.
 CACHE_VERSION = "3"
 # Bump when the on-disk doc shape changes: an entry of another version reads as a miss.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _JSON_DIR = json_handler.get_json_path("audit", "data").parent
 
 CACHE_DIR = _JSON_DIR / "audit_cache"

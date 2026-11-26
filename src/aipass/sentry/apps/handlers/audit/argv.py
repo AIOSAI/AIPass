@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: argv.py
 # Description: audit verb argument grammar, read once and answered as data
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-07
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -19,7 +19,7 @@ from aipass.sentry.apps.handlers.cli.help_flags import DASHED_HELP_TOKENS
 from aipass.sentry.apps.handlers.json import json_handler
 
 #: Every flag this verb accepts — the list a mistyped token is offered against.
-AUDIT_FLAGS: tuple = tuple("--no-bypass --full --artifact --no-artifact --help -h".split())
+AUDIT_FLAGS: tuple = tuple("--no-bypass --full --artifact --no-artifact --group --help -h".split())
 
 #: Pack, then @branch. A third bare word fills no slot: refused, never dropped.
 MAX_POSITIONAL = 2
@@ -41,12 +41,16 @@ class AuditArgv:
     write_artifact: bool = True
     artifact_path: Optional[str] = None
     artifact_path_missing: bool = False
+    #: The one grid group to print; checked against the results' groups once they exist.
+    group: Optional[str] = None
+    group_missing: bool = False
 
 
 def parse(args: Sequence[str]) -> AuditArgv:
     """Read the whole argument list and answer what it says."""
     parsed = AuditArgv()
     expect_artifact_path = False
+    expect_group = False
     for arg in args:
         # Before the value slot: `--artifact --help` prints help, not an artifact named `--help`.
         if arg in DASHED_HELP_TOKENS:
@@ -55,6 +59,16 @@ def parse(args: Sequence[str]) -> AuditArgv:
         if expect_artifact_path:
             parsed.artifact_path = arg
             expect_artifact_path = False
+            continue
+        if expect_group:
+            parsed.group = arg
+            expect_group = False
+            continue
+        if arg == "--group":
+            expect_group = True
+            continue
+        if arg.startswith("--group="):
+            parsed.group = arg.split("=", 1)[1]
             continue
         if arg == "--no-bypass":
             parsed.no_bypass = True
@@ -81,13 +95,14 @@ def parse(args: Sequence[str]) -> AuditArgv:
             continue
         parsed.unrecognized.append(arg)
     parsed.artifact_path_missing = expect_artifact_path
+    parsed.group_missing = expect_group
     _log_anomalies(args, parsed)
     return parsed
 
 
 def _log_anomalies(args: Sequence[str], parsed: AuditArgv) -> None:
     """Record what argv held when the grammar left something unclaimed; a clean parse writes nothing."""
-    if not parsed.unrecognized and not parsed.artifact_path_missing:
+    if not parsed.unrecognized and not parsed.artifact_path_missing and not parsed.group_missing:
         return
     json_handler.log_operation(
         "audit_argv_unclaimed",
@@ -95,5 +110,6 @@ def _log_anomalies(args: Sequence[str], parsed: AuditArgv) -> None:
             "args": list(args),
             "unrecognized": list(parsed.unrecognized),
             "artifact_path_missing": parsed.artifact_path_missing,
+            "group_missing": parsed.group_missing,
         },
     )
