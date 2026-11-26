@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.10.1
+# Version: 2.10.2
 # Created: 2026-03-05
 # Modified: 2026-11-26
 # =============================================
@@ -505,7 +505,7 @@ def _bypass_hygiene(
         files_with_init = _collect_py_files(branch_path, include_init=True)
     corpus = [fi["file"] for fi in files_with_init]
     return {
-        "bypass_dead": dead_rules.dead_rules(branch_path, bypass_rules, known),
+        "bypass_dead": dead_rules.dead_rules(branch_path, bypass_rules, known, listers=checkers),
         "bypass_markers": dead_rules.bypass_markers(branch_path, corpus),
     }
 

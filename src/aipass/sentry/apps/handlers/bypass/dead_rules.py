@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dead_rules.py
 # Description: Bypass rules that match nothing, and inline bypass comments nothing reads
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-09-25
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Bypass hygiene: rules that can never match, rules that cover nothing, and comments that claim a rule.
@@ -111,23 +111,39 @@ def covers_nothing(
     return f"covers nothing: {rule['standard']} answers the same or passes clean with this rule removed"
 
 
+def _absent_targets(branch_path: Path, checkers: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Per standard, the paths its checker judges though they are absent; a row naming one is live by construction."""
+    found = {}
+    for name, checker in checkers.items():
+        lister = getattr(checker, "absent_targets", None)
+        if lister is not None:
+            found[name] = lister(str(branch_path))
+    return found
+
+
 def dead_rules(
     branch_path: Path,
     rules: List[Dict[str, Any]],
     known_standards: Set[str],
     checkers: Optional[Dict[str, Any]] = None,
     handed_by: Optional[Dict[str, List[str]]] = None,
+    listers: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Every rule in the list that can never match, with its index, fields, why, and its own reason.
 
     With ``checkers`` (standard -> checker module), a rule that matches but waives nothing is dead too;
     ``handed_by`` (standard -> the files the audit hands that checker) limits each checker to its own files.
+    ``listers`` (standard -> checker) are asked only for their absent targets, never re-run per rule.
     """
     if not rules:
         return []
     handed = handed_files(branch_path)
+    absent = _absent_targets(branch_path, {**(listers or {}), **(checkers or {})})
     dead = []
     for index, rule in enumerate(rules):
+        needle = Path(rule.get("file") or "").as_posix()
+        if needle and any(needle in target for target in absent.get(rule.get("standard") or "", [])):
+            continue
         why = why_dead(rule, handed, known_standards)
         if why is None and checkers and rule.get("standard") in checkers:
             checker = checkers[rule["standard"]]

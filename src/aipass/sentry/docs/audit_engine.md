@@ -223,6 +223,9 @@ substring of no file on disk (the matcher's own semantics; retired directories a
 names are never handed to a checker), its `standard` is not a checker, or every line it names
 lies past the end of every file it matches. A rule with a blank `file` or blank `standard` is
 never convicted: a blank field means *every*, and that breadth is not judged.
+A rule naming a path its checker judges as absent is live with no file on disk: a checker that
+exports `absent_targets(branch_path)` (architecture: the template paths the branch lacks) lists
+them, and a rule whose `file` is a substring of one is never dead.
 
 An inline `# sentry:bypass …` comment is also named. No code path reads one, so each is
 a comment that claims an exception nobody grants; the only way to grant one is a rule in
