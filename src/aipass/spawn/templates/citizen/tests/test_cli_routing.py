@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for {{BRANCH}}'s entry point routing, help and introspection
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: {{DATE}}
 # Modified: {{DATE}}
 # =============================================
@@ -14,6 +14,7 @@ import sys
 
 import pytest
 
+from aipass.cli import header_version
 from aipass.{{BRANCH}}.apps import {{BRANCH}} as branch_entry
 
 
@@ -92,8 +93,7 @@ def test_version_flag_prints_version(monkeypatch, capsys, flag):
     assert _run(monkeypatch, [flag]) == 0
 
     out = capsys.readouterr().out
-    assert "{{BRANCH}}" in out
-    assert branch_entry.__version__ in out
+    assert out.strip() == f"{{BRANCH}} v{header_version(branch_entry.__file__)}"
 
 
 
@@ -168,7 +168,7 @@ def test_branch_name_is_set_at_import_time(monkeypatch):
     reloaded = importlib.reload(sys.modules["aipass.{{BRANCH}}.apps.{{BRANCH}}"])
 
     assert os.environ["AIPASS_BRANCH_NAME"] == "{{BRANCH}}"
-    assert reloaded.__version__ == branch_entry.__version__
+    assert reloaded.__file__ == branch_entry.__file__
 
 
 def test_failed_module_import_is_reported_by_its_package_name(monkeypatch, tmp_path, mock_logger):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-05
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -14,7 +14,7 @@ import sys
 import argparse
 
 from aipass.prax import logger
-from aipass.cli import console, header, error, warning, reset_command_state, resolve_exit
+from aipass.cli import console, header, header_version, error, warning, reset_command_state, resolve_exit
 
 
 def print_help():
@@ -398,7 +398,7 @@ def main():
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print("spawn v1.0.0")
+        console.print(f"spawn v{header_version(__file__)}", highlight=False)
         return 0
 
     command = args[0]

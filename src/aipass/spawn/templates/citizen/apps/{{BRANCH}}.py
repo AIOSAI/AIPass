@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: {{BRANCH}}.py
 # Description: Entry point CLI for drone @{{BRANCH}}
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: {{DATE}}
 # Modified: {{DATE}}
 # =============================================
@@ -20,10 +20,8 @@ from typing import Any, List, Tuple
 # so a later setdefault would name the wrong branch in every log line.
 os.environ.setdefault("AIPASS_BRANCH_NAME", "{{BRANCH}}")
 
-from aipass.cli import console, error
+from aipass.cli import console, error, header_version
 from aipass.prax import logger
-
-__version__ = "1.0.0"
 
 
 MODULES_DIR = Path(__file__).parent / "modules"
@@ -157,7 +155,7 @@ def main() -> int:
         return 0
 
     if args[0] in ("--version", "-V"):
-        console.print(f"{{BRANCH}} v{__version__}")
+        console.print(f"{{BRANCH}} v{header_version(__file__)}", highlight=False)
         return 0
 
     command = args[0]

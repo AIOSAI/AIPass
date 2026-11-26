@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-05
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/modules/core.py (spawn_agent) and apps/handlers/registry.py."""
@@ -100,13 +100,14 @@ class TestCreateFlags:
         )
         assert done.returncode == 0, done.stderr[-600:]
 
-    def test_a_src_package_newborn_passes_its_own_fence_tests(self, tmp_path):
-        """The fence probe builds names at runtime (f"aipass.{BRANCH}"). Mutant: that form unrewritten -> red."""
+    def test_a_src_package_newborn_passes_its_own_fence_and_routing_tests(self, tmp_path):
+        """Fence names built at runtime, and --version read from the header. Mutant: either unrewritten -> red."""
         target = tmp_path / "src" / "shop" / "clerk"
         assert handle_create([str(target), "--registry", str(tmp_path / "SHOP_REGISTRY.json")]) == 0
 
         done = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_handlers_fence.py"],
+            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+            + ["tests/test_handlers_fence.py", "tests/test_cli_routing.py"],
             cwd=str(target),
             env={**os.environ, "PYTHONPATH": str(tmp_path / "src")},
             capture_output=True,

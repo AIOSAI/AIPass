@@ -56,7 +56,7 @@ written down on this page and cannot go stale:
 
 - `drone @spawn` — the self-map: every discovered module with its one-line description.
 - `drone @spawn --help` — the command surface, its flags and its examples.
-- `drone @spawn --version` — the version string.
+- `drone @spawn --version` — `spawn v` plus the `# Version` header of `apps/spawn.py`.
 
 ---
 

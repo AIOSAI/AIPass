@@ -46,7 +46,9 @@ real. `delete` is stricter: its real run is the admin seat's alone ([retire.md](
 The module and command inventory is generated from the code that runs it, so it is never
 written down on a page and cannot go stale: the bare branch command prints the discovered
 modules with their one-line descriptions, `--help` prints the command surface, and
-`--version` prints the version string. The help flag is intercepted before argument parsing,
+`--version` prints `spawn v` plus the `# Version` line of `apps/spawn.py`'s header, read by
+`aipass.cli.header_version`; no other constant holds a number. A newborn's entry point does the
+same from its own header, so it starts at the template's entry-point version. The help flag is intercepted before argument parsing,
 because the parser is built with `add_help=False`.
 
 ---
