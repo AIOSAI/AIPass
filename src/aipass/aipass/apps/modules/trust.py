@@ -3,7 +3,7 @@
 # Description: Trust management — aipass trust / aipass revoke commands
 # Version: 1.0.4
 # Created: 2026-07-15
-# Modified: 2026-11-24
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -42,6 +42,7 @@ def print_introspection() -> None:
 
     console.print()
     console.print("[bold cyan]aipass trust[/bold cyan] — trusted-project registry")
+    console.print("[dim]Projects whose hook config you have enrolled.[/dim]")
     console.print()
 
     if not projects:
@@ -58,6 +59,7 @@ def print_introspection() -> None:
 
     console.print()
     console.print("[dim]Use 'aipass trust <path>' to enroll or 'aipass revoke <path>' to remove.[/dim]")
+    console.print("[dim]Run 'aipass trust --help' for usage and examples.[/dim]")
     console.print()
 
 
@@ -75,6 +77,10 @@ def print_help() -> None:
     console.print(
         "  [green]aipass trust prune[/green]      [dim]# Drop entries whose project path no longer exists[/dim]"
     )
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]aipass trust .[/green]")
+    console.print("  [green]aipass trust prune[/green]")
     console.print()
 
 

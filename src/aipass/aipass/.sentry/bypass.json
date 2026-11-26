@@ -69,7 +69,7 @@
       "file": "apps/aipass.py",
       "standard": "logged_fallback",
       "lines": [
-        239
+        178
       ],
       "reason": "main() returns a process exit code. 1 is the failure code at every return that carries it (crash, unknown command, @target, import failure); success is 0 through resolve_exit, and a refusal is 2. The caller is the shell, and it tells failure from success. The crash also goes to stderr through error() and its traceback to the log (_log_crash, which never raises from the log). Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13."
     },
@@ -77,7 +77,7 @@
       "file": "apps/modules/new_project.py",
       "standard": "logged_fallback",
       "lines": [
-        148
+        155
       ],
       "reason": "_prompt_agent answers the no_agent flag. EOFError is end of input, which is no answer, so it takes the prompt's printed default Y (False = create the agent), the same as an empty Enter on the line below. That is the answer, not a failure. Ctrl-C raises to handle_command. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-17 (+14: the module door for the host API, FPLAN-0649)."
     },
@@ -87,9 +87,9 @@
       "lines": [
         186,
         239,
-        714
+        715
       ],
-      "reason": "186: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:211). 239: _pid_alive, a PermissionError from signal 0 means the process exists under another user, so True is the answer. 714: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them; again 2026-10-24 (FPLAN-0665 moved them 4 down). Again 2026-11-24 (home validation moved them 17-20 down)."
+      "reason": "186: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:211). 239: _pid_alive, a PermissionError from signal 0 means the process exists under another user, so True is the answer. 714: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them; again 2026-10-24 (FPLAN-0665 moved them 4 down). Again 2026-11-24 (home validation moved them 17-20 down). 714 -> 715 2026-11-26 (a dim line added above)."
     },
     {
       "file": "apps/modules/doctor.py",
@@ -459,10 +459,10 @@
       "file": "apps/modules/init_flow.py",
       "standard": "logged_fallback",
       "lines": [
-        272,
-        313
+        279,
+        320
       ],
-      "reason": "272 and 313: handle_command's init forms return process exit code 1 after cli_error prints the failure and the warning is logged; success returns 0, and the caller is sys.exit, so the shell tells failure from success."
+      "reason": "279 and 320: handle_command's init forms return process exit code 1 after cli_error prints the failure and the warning is logged; success returns 0, and the caller is sys.exit, so the shell tells failure from success."
     },
     {
       "file": "tests/test_bootstrap.py",
@@ -556,6 +556,21 @@
         234
       ],
       "reason": "chosen_provider: no install report, or one without a provider, is the answer 'nothing chosen yet' (docstring); doctor then checks every provider row as before. Logged at info. 2026-11-26."
+    },
+    {
+      "file": "apps/modules/_phone_print.py",
+      "standard": "modules",
+      "reason": "Private helper module (leading underscore) holding baud.py's phone print and pairing QR; discover_modules skips underscore names, so it is never a routed command and has no handle_command to give. Its caller's handle_command is the door. 2026-11-26."
+    },
+    {
+      "file": "apps/modules/_doctor_smoke.py",
+      "standard": "modules",
+      "reason": "Private helper module (leading underscore) holding doctor's opt-in --smoke turn; discover_modules skips underscore names, so it is never a routed command and has no handle_command to give. Its caller's handle_command is the door. 2026-11-26."
+    },
+    {
+      "file": "apps/modules/_doctor_fix.py",
+      "standard": "modules",
+      "reason": "Private helper module (leading underscore) holding doctor's --fix remediation report; discover_modules skips underscore names, so it is never a routed command and has no handle_command to give. Its caller's handle_command is the door. 2026-11-26."
     }
   ]
 }

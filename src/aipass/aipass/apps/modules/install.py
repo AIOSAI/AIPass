@@ -533,6 +533,7 @@ def _final_screen(
     console.print()
     if attention:
         console.print("[bold]Needs attention:[/bold]")
+        console.print("[dim]Checks that did not pass, each with its fix.[/dim]")
         for item in attention:
             fix = f" -> {item['remediation']}" if item["remediation"] else ""
             line = f"  {item['severity']}: {item['label']}: {item['detail']}{fix}"
@@ -802,6 +803,9 @@ def print_help() -> None:
     console.print()
     console.print("[bold cyan]aipass install[/bold cyan] — one-command bootstrap of AIPass")
     console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]aipass install[/green]  /  [green]aipass install --non-interactive[/green]")
+    console.print()
     console.print("[yellow]USAGE:[/yellow]")
     console.print("  [green]aipass install[/green]                      [dim]# interactive, ends at the report[/dim]")
     console.print(
@@ -854,6 +858,7 @@ def print_introspection() -> None:
     console.print(f"[dim]Default home: {DEFAULT_HOME}[/dim]")
     console.print(f"[dim]Source: {REPO_URL}[/dim]")
     console.print()
+    console.print("[dim]Run 'aipass install --help' for usage and examples.[/dim]")
 
 
 def _flag_value(args: list[str], flag: str) -> str | None:

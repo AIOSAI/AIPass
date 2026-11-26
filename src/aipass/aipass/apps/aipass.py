@@ -69,6 +69,7 @@ def _print_commands(modules: List[Any]) -> None:
     commands = sorted((m.COMMAND, _description(m)) for m in modules if getattr(m, "COMMAND", None))
     if commands:
         console.print("[yellow]Commands:[/yellow]")
+        console.print("[dim]Each command below is a module of this CLI.[/dim]")
         for name, desc in commands:
             console.print(f"  [green]{name:16}[/green] [dim]{desc}[/dim]")
         console.print()

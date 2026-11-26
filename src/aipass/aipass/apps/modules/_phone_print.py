@@ -3,7 +3,7 @@
 # Description: aipass install's last print: the phone's bind, boot unit, server, guide, pause and pairing QR
 # Version: 1.1.0
 # Created: 2026-10-13
-# Modified: 2026-11-24
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -95,7 +95,7 @@ def _print_dry_run_phone(
 ) -> None:
     """The dry run's phone lines: what each door would do, nothing done."""
     now = f"now {ready.host}:{ready.port}" if ready.api else "@api's config unreadable here"
-    console.print(f"{_DRY} would read this host's tailnet address: tailscale ip -4")
+    console.print(f"{_DRY} would read this host's tailnet address: tailscale ip -4", highlight=False)
     if bind is not None and bind.state == BIND_KEPT:
         console.print(f"{_DRY} would keep @api's bind ({now}), already a tailnet address")
     else:

@@ -3,7 +3,7 @@
 # Description: aipass baud: install @baud's phone face and baud-cli from a release and point @api at them
 # Version: 1.5.1
 # Created: 2026-09-13
-# Modified: 2026-11-24
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -149,12 +149,15 @@ def _print_dry_run(
         lands_binary = bin_asset is not None
         assets = f"{phone_asset_name(shown)}{f', {bin_asset}' if bin_asset else ''} and {SUMS_ASSET}"
         console.print(f"  {prefix} would fetch {assets} from the {tag} baud release")
-        console.print(f"  {prefix} would verify every file's sha256 against {SUMS_ASSET}")
+        console.print(f"  {prefix} would verify every file's sha256 against {SUMS_ASSET}", highlight=False)
         if not bin_asset:
             console.print(f"  {prefix} no baud-cli build for {platform_slug()}: the phone face only")
     console.print(f"  {prefix} would unpack the face (safety filter, staging swap) into {dest}")
     if lands_binary:
-        console.print(f"  {prefix} would land baud-cli at {bin_path(baud_root(dest))} (0755, old one kept as .prev)")
+        console.print(
+            f"  {prefix} would land baud-cli at {bin_path(baud_root(dest))} (0755, old one kept as .prev)",
+            highlight=False,
+        )
     cli = " and at baud-cli" if lands_binary else ""
     console.print(
         f"  {prefix} would point @api's host server at {dest}{cli}" if repoint else f"  {prefix} {_KEEP_POINT}"
@@ -395,6 +398,10 @@ def print_help() -> None:
     console.print(
         "  [green]aipass baud status[/green] [dim]\\[--dest DIR][/dim]      [dim]# installed tags, @api settings[/dim]"
     )
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]aipass baud install --dry-run[/green]")
+    console.print("  [green]aipass baud status[/green]")
     console.print()
     console.print("[yellow]STEPS:[/yellow] fetch -> verify SHA256SUMS -> unpack face -> land baud-cli -> point @api")
     console.print()

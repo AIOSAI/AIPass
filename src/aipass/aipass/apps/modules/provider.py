@@ -3,7 +3,7 @@
 # Description: aipass provider NAME: the install's last step, callable any time
 # Version: 1.0.0
 # Created: 2026-11-24
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """aipass provider claude|codex|opencode: install the CLI if missing, wire it, open devpulse in it.
@@ -18,7 +18,7 @@ import os
 import sys
 from pathlib import Path
 
-from aipass.cli import console, error
+from aipass.cli import console, error, escape
 from aipass.aipass.apps.handlers import provider_choice
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.aipass.apps.handlers.json import json_handler
@@ -31,15 +31,20 @@ COMMAND = "provider"
 def print_introspection() -> None:
     """Each provider and whether its CLI is on this machine."""
     console.print("[bold cyan]aipass provider[/bold cyan]")
+    console.print("[dim]Each provider CLI and where it is installed.[/dim]")
     for key in provider_choice.ORDER:
         where = provider_choice.cli_path(key) or "not installed"
-        console.print(f"  {key:<9} {provider_choice.PROVIDERS[key].title:<12} {where}", markup=False)
+        console.print(f"  {key:<9} {provider_choice.PROVIDERS[key].title:<12} {escape(where)}")
+    console.print("[dim]Run 'aipass provider --help' for usage and examples.[/dim]")
 
 
 def print_help() -> None:
     """Usage for aipass provider."""
     console.print()
     console.print("[bold cyan]aipass provider[/bold cyan]: talk to devpulse with one CLI")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]aipass provider codex --dry-run[/green]")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
     console.print("  [green]aipass provider[/green]                 [dim]# each CLI and where it is installed[/dim]")

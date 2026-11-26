@@ -3,7 +3,7 @@
 # Description: aipass adopt — bring an existing directory anywhere on disk into AIPass
 # Version: 2.0.1
 # Created: 2026-07-20
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -40,6 +40,8 @@ def print_introspection() -> None:
         "[dim]Usage: aipass adopt <name-or-path> [--mode framework|contractor] "
         "[--citizen @name | --no-agent] [--dry-run][/dim]"
     )
+    console.print("[dim]Bring an existing directory under AIPass, additively.[/dim]")
+    console.print("[dim]Run 'aipass adopt --help' for usage and examples.[/dim]")
     console.print()
 
 
@@ -58,13 +60,19 @@ def print_help() -> None:
         "  [green]aipass adopt <path> --dry-run[/green]          [dim]# every path and clash, nothing written[/dim]"
     )
     console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  aipass adopt ~/code/myrepo --dry-run")
+    console.print("  aipass adopt myrepo --mode contractor --no-agent")
+    console.print()
     console.print("[yellow]MODES:[/yellow]")
     console.print("  framework   The AIPass layout: registry, .aipass/.claude scaffold, switch files and a")
     console.print("              fresh resident agent, all additive. .gitignore gets the AIPass local-state")
     console.print("              block first: the target may be a public repo.")
     console.print("  contractor  The project keeps its own stack: no tracked file and no .gitignore is")
     console.print("              written. Only the registry and the local hook scaffold (.aipass/hooks.json,")
-    console.print("              tier0/tier1, .claude/settings.local.json), each listed in .git/info/exclude.")
+    console.print(
+        "              tier0/tier1, .claude/settings.local.json), each listed in .git/info/exclude.", highlight=False
+    )
     console.print("              A tracked AIPass file is a clash: named, never overwritten, apply refused.")
     console.print("              Needs --citizen or --no-agent: a fresh resident would land in src/.")
     console.print()

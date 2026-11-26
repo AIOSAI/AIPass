@@ -3,7 +3,7 @@
 # Description: Auto-wire provider settings from manifest into user config
 # Version: 1.8.0
 # Created: 2026-05-08
-# Modified: 2026-11-24
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -491,12 +491,14 @@ def _print_manual_wire_warning(
     console.print("\n[bold]Provider settings not wired. Required for full AIPass functionality:[/bold]\n")
     if missing_hooks:
         console.print("[bold]Hooks (code quality enforcement):[/bold]")
+        console.print("[dim]Scripts Claude Code runs around tool calls.[/dim]")
         for hook in missing_hooks:
             desc = HOOK_DESCRIPTIONS.get(hook, hook)
             console.print(f"  [dim]•[/dim] {hook} — {desc}")
         console.print()
     if missing_env:
         console.print("[bold]Env vars:[/bold]")
+        console.print("[dim]Environment variables set in the provider settings.[/dim]")
         for var in missing_env:
             desc = ENV_DESCRIPTIONS.get(var, var)
             console.print(f"  [dim]•[/dim] {var} — {desc}")
@@ -504,11 +506,13 @@ def _print_manual_wire_warning(
     if missing_deny or missing_ask:
         console.print(
             f"{len(missing_deny)} deny rules + {len(missing_ask)} ask rules"
-            " (protect ~/.secrets/, block destructive git)"
+            " (protect ~/.secrets/, block destructive git)",
+            highlight=False,
         )
         console.print()
     if missing_settings:
         console.print("[bold]Settings (personal ~/.claude/settings.json):[/bold]")
+        console.print("[dim]Personal preferences AIPass expects in that file.[/dim]")
         for key in missing_settings:
             desc = SETTINGS_DESCRIPTIONS.get(key, key)
             console.print(f"  [dim]•[/dim] {key} — {desc}")

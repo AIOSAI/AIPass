@@ -3,7 +3,7 @@
 # Description: The install's last question: which CLI talks to devpulse; install, wire, open it
 # Version: 1.0.0
 # Created: 2026-11-24
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """provider_choice: one provider picked at the end of the install, installed by its vendor, wired, opened.
@@ -209,7 +209,7 @@ def run_ending(
     found = cli_path(key)
     argv = open_argv(key, found or provider.binary, greeting, home)
     # A fresh installer's bin (~/.local/bin) is not on this process's PATH; the shim looks claude up there.
-    path = os.pathsep.join([str(Path(found).parent)] * bool(found) + [os.environ.get("PATH", "")])
+    path = os.pathsep.join(([str(Path(found).parent)] if found else []) + [os.environ.get("PATH", "")])
     subprocess.run(argv, cwd=devpulse, env={**os.environ, "AIPASS_HOME": str(home), "PATH": path}, check=False)
     return 0
 

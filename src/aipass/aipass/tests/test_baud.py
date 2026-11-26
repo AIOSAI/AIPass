@@ -3,7 +3,7 @@
 # Description: Tests for aipass baud's command line: each value flag reaches the function it feeds
 # Version: 1.6.1
 # Created: 2026-10-08
-# Modified: 2026-11-24
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/baud.py: the install and status flags as a user types them, and the phone print."""
@@ -838,8 +838,9 @@ class TestInstallPhoneThenReport:
         assert installs == [{"tag": "v0.2.1", "dry_run": True, "best_effort": True}]
         out = capsys.readouterr().out.rstrip()
         report = tmp_path / "AIPass" / "src" / "aipass" / "devpulse" / "dropbox" / "install_report.json"
-        phone, report_line = out.rsplit("\n", 1)
+        # The provider ending follows the report line; the phone lines still come right before it.
+        report_line = f"[dry-run] would write the install report: {report}"
+        phone, _ending = out.split(f"\n{report_line}\n", 1)
         assert phone.rstrip().endswith(_PAIR_PLAN_NONE)
-        assert report_line == f"[dry-run] would write the install report: {report}"
         assert not runs.exists()
         assert not (tmp_path / "AIPass").exists()

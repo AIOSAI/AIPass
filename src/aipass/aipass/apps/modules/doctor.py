@@ -3,7 +3,7 @@
 # Description: System health aggregation — aipass doctor command
 # Version: 1.20.0
 # Created: 2026-04-16
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -1390,10 +1390,12 @@ def print_introspection() -> None:
     console.print()
     console.print("[bold cyan]doctor Module[/bold cyan]")
     console.print("System health aggregation — flutter-doctor-style output")
+    console.print("[dim]Checks the install, identity, services and structure, and says what to fix.[/dim]")
     console.print()
     console.print("[yellow]Groups:[/yellow] System, Identity, Services, Community, Structure, Scaffold")
     console.print("[yellow]Next:[/yellow]  [green]aipass doctor[/green] / [green]aipass doctor --fix[/green]")
     console.print()
+    console.print("[dim]Run 'aipass doctor --help' for usage and examples.[/dim]")
 
 
 def print_help() -> None:
@@ -1417,6 +1419,9 @@ def print_help() -> None:
     )
     console.print("    [dim]--smoke spends one model turn per installed provider and needs each one's login;[/dim]")
     console.print("    [dim]not installed, no login, or a spent quota is a skip. Never part of --fix.[/dim]")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]aipass doctor[/green]  /  [green]aipass doctor --fix[/green]")
     console.print()
     console.print("[yellow]OUTPUT:[/yellow]  pass / warn / error (color-coded)")
     console.print("[yellow]EXIT:[/yellow]    0 = pass/warn  |  1 = errors found")
