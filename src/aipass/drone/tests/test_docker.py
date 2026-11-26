@@ -48,6 +48,10 @@ class FakeDocker:
         self.rm_result: tuple[int, str, str] | None = None
         self.volumes: list[str] = []
         self.volume_rm: tuple[int, str, str] | None = None
+        self.images: list[str] = []
+        self.ref = "ubuntu:26.04"
+        self.on_build = None
+        self.build_rc = 0
 
     def __call__(self, argv, *args, **kwargs):
         argv = list(argv)
@@ -60,12 +64,19 @@ class FakeDocker:
         return self.info
 
     def _image(self, argv: list[str]) -> tuple[int, str, str]:
+        if argv[2] == "ls":
+            return 0, "\n".join(self.images), ""
         stamp = self.stamp if self.stamp is not None else docker_handler.base_stamp("ubuntu:26.04")
-        return (0, stamp + "\n", "") if self.image_cached else (1, "", "no such image")
+        if not self.image_cached:
+            return 1, "", "no such image"
+        # Two labels asked (stamp and ref) answer tab-separated, as docker's template prints them.
+        return 0, (f"{stamp}\t{self.ref}" if "\t" in argv[4] else stamp) + "\n", ""
 
     def _build(self, argv: list[str]) -> tuple[int, str, str]:
         self.dockerfile = Path(argv[-1], "Dockerfile").read_text(encoding="utf-8")
-        return 0, "", ""
+        if self.on_build is not None:
+            self.on_build()
+        return self.build_rc, "", ""
 
     def _remote(self, argv: list[str]) -> tuple[int, str, str]:
         return 0, ORIGIN + "\n", ""
@@ -148,6 +159,7 @@ def fake(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FakeDocker:
     project = tmp_path / "project"
     project.mkdir()
     (project / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+    (project / "pyproject.toml").write_text('[project]\nname = "aipass"\n', encoding="utf-8")
     monkeypatch.chdir(project)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()
@@ -625,6 +637,111 @@ class TestShellAndList:
         out = capsys.readouterr().out
         assert "login volume  aipass-login-claude" in out and "login volume  aipass-login-codex" in out
         assert "no login volumes" not in out
+
+
+class TestBuildVerb:
+    def test_a_cached_base_is_reported_cached_and_not_built(
+        self, fake: FakeDocker, capsys: pytest.CaptureFixture
+    ) -> None:
+        """Mutant: build skips the stamp check and always builds."""
+        assert docker.run("build", ["--image", "ubuntu:26.04"]) == 0
+        out, err = capsys.readouterr()
+        assert not [c for c in fake.calls if c[:2] == ["docker", "build"]]
+        assert out.startswith("aipass-base:ubuntu-26.04  cached  ") and out.rstrip().endswith("s")
+        assert err == ""
+
+    def test_a_stale_base_says_so_before_it_builds_then_reports_built(
+        self, fake: FakeDocker, capsys: pytest.CaptureFixture
+    ) -> None:
+        """The line is on stderr before docker build runs; mutant: the line printed after the build."""
+        fake.stamp = "0123456789ab"
+        before: list[str] = []
+        fake.on_build = lambda: before.append(capsys.readouterr().err)
+        assert docker.run("build", ["--image", "ubuntu:26.04"]) == 0
+        build = next(c for c in fake.calls if c[:2] == ["docker", "build"])
+        assert "--no-cache" not in build
+        assert build[build.index("--label", build.index("--label") + 1) + 1] == "aipass.base.ref=ubuntu:26.04"
+        assert before == [
+            "base image aipass-base:ubuntu-26.04 is stale (Dockerfile changed): building, a few minutes; "
+            "next time it is cached. To build ahead: drone docker build\n"
+        ]
+        assert capsys.readouterr().out.startswith("aipass-base:ubuntu-26.04  built  ")
+        assert [r["event"] for r in ledger_rows()] == ["base_built"]
+
+    def test_the_line_names_the_last_build_time_and_rebuild_passes_no_cache(
+        self, fake: FakeDocker, capsys: pytest.CaptureFixture
+    ) -> None:
+        """Mutant: last_build_seconds ignored — the line always says a few minutes."""
+        seed({"event": "base_built", "tag": "aipass-base:ubuntu-26.04", "seconds": 240})
+        assert docker.run("build", ["--image", "ubuntu:26.04", "--rebuild"]) == 0
+        build = next(c for c in fake.calls if c[:2] == ["docker", "build"])
+        assert "--no-cache" in build
+        assert "rebuilds (--rebuild, no cache): building, about 4m last time;" in capsys.readouterr().err
+
+    def test_a_box_on_a_missing_base_says_so_and_a_failed_build_records_nothing(
+        self, fake: FakeDocker, capsys: pytest.CaptureFixture
+    ) -> None:
+        fake.image_cached = False
+        fake.build_rc = 3
+        assert docker.run("bare", ["--image", "ubuntu:26.04", "--", "true"]) == 3
+        err = capsys.readouterr().err
+        assert "base image aipass-base:ubuntu-26.04 is not built yet: building" in err
+        assert "docker build of aipass-base:ubuntu-26.04 failed (exit 3)" in err
+        assert not fake.runs()
+        assert not docker_handler.ledger_path().exists()
+
+    def test_build_refuses_any_other_option(self, fake: FakeDocker, capsys: pytest.CaptureFixture) -> None:
+        assert docker.run("build", ["--keep"]) == 1
+        assert "drone docker build takes only --image <ref> and --rebuild" in capsys.readouterr().err
+        assert not fake.calls
+
+
+class TestAipassCheckout:
+    @pytest.mark.parametrize("verb", ["local", "dev", "main"])
+    def test_a_project_root_that_is_not_aipass_is_refused_before_any_box(
+        self, verb: str, fake: FakeDocker, capsys: pytest.CaptureFixture
+    ) -> None:
+        """A hosted project's root, with its own pyproject, is refused in one line; mutant: the check removed."""
+        project = Path.cwd()
+        (project / "pyproject.toml").write_text('[project]\nname = "baud"\n', encoding="utf-8")
+        assert docker.run(verb, ["--", "true"]) == 1
+        err = capsys.readouterr().err
+        assert f"cwd is inside {project}, a project, not an AIPass checkout; run from inside the AIPass repo" in err
+        assert not fake.runs()
+        assert not [c for c in fake.calls if c[:2] == ["docker", "build"]]
+
+    def test_aipass_named_outside_the_project_table_is_refused_and_bare_needs_none(self, fake: FakeDocker) -> None:
+        """Mutant: the [project] anchor dropped from the pattern — a tool table's name passes."""
+        pyproject = Path.cwd() / "pyproject.toml"
+        pyproject.write_text('[project]\nname = "baud"\n\n[tool.x]\nname = "aipass"\n', encoding="utf-8")
+        assert docker.run("local", ["--", "true"]) == 1
+        assert docker.run("bare", ["--", "true"]) == 0
+
+
+class TestListBaseImages:
+    def test_list_judges_each_base_against_the_dockerfile_text(
+        self, fake: FakeDocker, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """current, stale, and unknown when no ref is labelled on a base that is not this machine's.
+
+        Mutant: the stamp compared against the host's ref instead of the labelled one."""
+        os_release = tmp_path / "os-release"
+        os_release.write_text('ID=ubuntu\nVERSION_ID="26.04"\n', encoding="utf-8")
+        monkeypatch.setattr(docker_handler, "OS_RELEASE", os_release)
+        fake.images = ["aipass-base:debian-12\t3 days ago"]
+        fake.ref = "debian:12"
+        fake.stamp = docker_handler.base_stamp("debian:12")
+        assert docker.run("list", []) == 0
+        line = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("base image"))
+        assert line.split() == ["base", "image", "aipass-base:debian-12", "3", "days", "ago", "current"]
+        assert docker_handler.base_images() == [("aipass-base:debian-12", "3 days ago", "current")]
+        fake.stamp = "0123456789ab"
+        assert docker_handler.base_images()[0][2] == "stale"
+        fake.ref = "<no value>"
+        assert docker_handler.base_images()[0][2] == "unknown (no base ref labelled)"
+        fake.images = ["aipass-base:ubuntu-26.04\t1 hour ago"]
+        fake.stamp = docker_handler.base_stamp("ubuntu:26.04")
+        assert docker_handler.base_images()[0][2] == "current"
 
 
 class TestLoginVolumes:

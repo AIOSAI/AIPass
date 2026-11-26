@@ -20,7 +20,7 @@ from rich.table import Table
 from rich.text import Text
 
 from aipass.prax import logger
-from aipass.cli import console, err_console, escape
+from aipass.cli import console, err_console, escape, header_version
 from aipass.drone.apps.modules import (
     BranchNotFoundError,
     CommandExecutionError,
@@ -40,7 +40,6 @@ from aipass.drone.apps.modules.module_registry import (
 )
 from aipass.drone.apps.modules.config import missing_home_tip, passport_fault, resolve_aipass_home
 
-VERSION = "1.1.0"
 # The commands main() answers itself, before any @target or module lane; systems lists them as routes.
 BUILT_INS = ("systems", "scan", "activate", "list", "remove", "rm", "docker")
 MODULES_DIR = Path(__file__).parent / "modules"
@@ -136,7 +135,7 @@ def print_help() -> None:
     )
     table.add_row(
         "docker <verb> [options]",
-        "Disposable test boxes: bare, local, dev, main; list, shell, rm (drone docker --help)",
+        "Disposable test boxes: bare, local, dev, main; build, list, shell, rm (drone docker --help)",
     )
     table.add_row(
         "@target ... --drone-timeout <n>",
@@ -146,7 +145,7 @@ def print_help() -> None:
     table.add_row("--version", "Show version")
 
     console.print()
-    console.print(f"[bold cyan]drone[/bold cyan] [dim]v{VERSION}[/dim] — Command Router & Discovery")
+    console.print(f"[bold cyan]drone[/bold cyan] [dim]v{header_version(__file__)}[/dim] — Command Router & Discovery")
     console.print()
     console.print("[dim]Routes commands to registered AIPass branches and modules.[/dim]")
     console.print()
@@ -241,7 +240,7 @@ def _handle_systems() -> int:
     console.print("[bold cyan]Infrastructure:[/bold cyan]")
     console.print("[dim]  drone itself: the router every command walks through[/dim]")
     console.print(
-        f"  [cyan]@{'drone':<18}[/cyan] [dim]Command routing and module discovery (v{VERSION})[/dim]",
+        f"  [cyan]@{'drone':<18}[/cyan] [dim]Command routing and module discovery (v{header_version(__file__)})[/dim]",
         highlight=False,
     )
     # Modules are routes, not citizens: named here so a reader learns where @git lives.
@@ -660,7 +659,7 @@ def main() -> int:
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print(f"drone v{VERSION}", highlight=False)
+        console.print(f"drone v{header_version(__file__)}", highlight=False)
         return 0
 
     if args[0] in ["--help", "-h", "help"]:

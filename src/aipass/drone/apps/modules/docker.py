@@ -18,7 +18,7 @@ import sys
 import time
 
 from aipass.prax import logger
-from aipass.cli import console, error, escape
+from aipass.cli import console, err_console, error, escape
 from aipass.drone.apps.handlers import docker_handler as box
 from aipass.drone.apps.handlers.help_flags import wants_help
 from aipass.drone.apps.handlers.json import json_handler
@@ -28,7 +28,7 @@ from aipass.drone.apps.handlers.router_handler import find_project_root
 DRONE_MODULE = {
     "name": "docker",
     "version": "1.0.0",
-    "description": "Disposable docker boxes: bare, local, dev, main; list, shell, rm",
+    "description": "Disposable docker boxes: bare, local, dev, main; build, list, shell, rm",
 }
 
 CREATE_VERBS = ("bare", "local", "dev", "main")
@@ -61,6 +61,8 @@ def run(command: str | None = None, args: list[str] | None = None) -> int:
     try:
         if command in CREATE_VERBS:
             return create(command, args)
+        if command == "build":
+            return build(args)
         if command == "list" and not args:
             return list_boxes()
         if command == "shell" and len(args) == 1:
@@ -122,15 +124,62 @@ def create(verb: str, args: list[str]) -> int:
     repo_root = find_project_root() if verb != "bare" else None
     if verb != "bare" and repo_root is None:
         raise box.BoxRefusal(f"drone docker {verb} needs the AIPass project root, and none was found from here")
+    if repo_root is not None:
+        box.check_aipass_checkout(repo_root)
     url = box.clone_url(verb, repo_root) if repo_root is not None else None
-    built = box.ensure_base(image_ref, opts["rebuild"])
+    state = "rebuild" if opts["rebuild"] else box.base_state(image_ref)
+    built = _build(image_ref, state) if state != "current" else 0
     if built:
-        error(f"docker build of {box.base_tag(image_ref)} failed (exit {built})")
         return built
     name = opts["name"] or box.next_name(verb, box.read_rows())
     box.check_free(name)
     console.print(f"{name}  ({verb}, {image_ref}{', kept' if opts['keep'] else ''})", markup=False, highlight=False)
     return box.launch(verb, name, image_ref, opts, mounts, repo_root, url, tty=sys.stdin.isatty())
+
+
+def build(args: list[str]) -> int:
+    """Warm or refresh the cached base and exit, no box: the tag, cached or built, and the wall time."""
+    rebuild = "--rebuild" in args
+    rest = [a for a in args if a != "--rebuild"]
+    if rest and (rest[0] != "--image" or len(rest) != 2):
+        raise box.BoxRefusal("drone docker build takes only --image <ref> and --rebuild (drone docker --help)")
+    image_ref = rest[1] if rest else box.host_image_ref()
+    box.check_apt_base(image_ref)
+    if _ready():
+        return EXIT_NO_DOCKER
+    started = time.monotonic()
+    state = "rebuild" if rebuild else box.base_state(image_ref)
+    if state != "current":
+        built = _build(image_ref, state)
+        if built:
+            return built
+    outcome = "cached" if state == "current" else "built"
+    console.print(
+        f"{box.base_tag(image_ref)}  {outcome}  {time.monotonic() - started:.1f}s", markup=False, highlight=False
+    )
+    return 0
+
+
+def _build(image_ref: str, state: str) -> int:
+    """Say why the base builds and how long it took last time, then build it; 0, or docker build's exit code."""
+    tag = box.base_tag(image_ref)
+    last = box.last_build_seconds(tag)
+    took = "a few minutes" if not last else f"about {format_age(last) if last >= 60 else f'{last}s'} last time"
+    why = {
+        "stale": "is stale (Dockerfile changed)",
+        "missing": "is not built yet",
+        "rebuild": "rebuilds (--rebuild, no cache)",
+    }
+    err_console.print(
+        f"base image {tag} {why[state]}: building, {took}; next time it is cached. To build ahead: drone docker build",
+        markup=False,
+        highlight=False,
+        soft_wrap=True,
+    )
+    built = box.build_base(image_ref, state == "rebuild")
+    if built:
+        error(f"docker build of {tag} failed (exit {built})")
+    return built
 
 
 def list_boxes() -> int:
@@ -150,6 +199,8 @@ def list_boxes() -> int:
         console.print("no drone docker boxes on this machine", markup=False)
     if gone:
         console.print(f"{gone} earlier box(es) gone (ran with --rm, or removed outside drone)", markup=False)
+    for tag, age, state in box.base_images():
+        console.print(f"base image  {tag:<28} {age:<19} {state}", markup=False, highlight=False)
     for vol in box.login_volumes() or ["no login volumes"]:
         console.print(f"login volume  {vol}" if vol.startswith("aipass-") else vol, markup=False)
     return 0
@@ -223,7 +274,7 @@ def print_introspection() -> None:
     console.print()
     console.print("[bold cyan]docker — Disposable Test Boxes[/bold cyan]")
     console.print()
-    console.print("[dim]Containers that match this machine: bare, local, dev, main; list, shell, rm.[/dim]")
+    console.print("[dim]Containers that match this machine: bare, local, dev, main; build, list, shell, rm.[/dim]")
     console.print()
     console.print("Run [green]'drone docker --help'[/green] for usage information")
     console.print()
@@ -271,8 +322,11 @@ removes only those; never any other container.""",
   dev | main           bare + that branch cloned from origin on github (not this checkout), pip-installed
                        local, dev and main have aipass on PATH and nothing else set up; your first
                        command is: aipass install --source ~/AIPass-src
-  list                 its boxes: name, verb, age, running or stopped, kept or rm on exit;
-                       then the aipass-login-* volumes, or "no login volumes"
+  build                warm or refresh the cached base (--image <ref>, --rebuild) and exit, no box:
+                       the tag, cached or built, and the wall time. Run it after the Dockerfile changes
+  list                 its boxes: name, verb, age, running or stopped, kept or rm on exit; then each
+                       base image, current or stale against the Dockerfile text; then the
+                       aipass-login-* volumes, or "no login volumes"
   shell <name>         start a kept box if stopped, open a shell in it, stop it again on exit
   rm <name>... | --all stop and remove its boxes; a name it did not make is refused
   rm --login           remove the aipass-login-* volumes: this is how a sign-in is cleared

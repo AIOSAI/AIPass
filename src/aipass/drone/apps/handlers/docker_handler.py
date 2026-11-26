@@ -31,6 +31,7 @@ from aipass.drone.apps.handlers.json import json_handler
 LEDGER_NAME = "docker_boxes.jsonl"
 LABEL = "aipass.box"
 STAMP_LABEL = "aipass.base"
+REF_LABEL = "aipass.base.ref"
 APT_BASES = ("ubuntu", "debian")
 BOX_HOME = "/home/aipass"
 CLONE_DIR = "~/AIPass-src"
@@ -263,6 +264,21 @@ def attach(argv: list[str]) -> int:
     return subprocess.run(argv).returncode
 
 
+def check_aipass_checkout(root: Path) -> None:
+    """Refuse a project root that is not an AIPass checkout: its pyproject.toml must name the aipass package.
+
+    A hosted project (projects/<p>) is its own git repo and project root; cloning it gives a box with no aipass.
+    """
+    try:
+        text = (root / "pyproject.toml").read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.info("docker: %s has no readable pyproject.toml: %s", root, exc)
+        text = ""
+    # tomllib is 3.11+ and the floor is 3.10: read the one key, name = "aipass", inside the [project] table.
+    if not re.search(r"""^\[project\][^\[]*?^name\s*=\s*["']aipass["']\s*$""", text, re.MULTILINE):
+        raise BoxRefusal(f"cwd is inside {root}, a project, not an AIPass checkout; run from inside the AIPass repo")
+
+
 def clone_url(verb: str, repo_root: Path) -> str:
     """``file:///src`` for local, else origin's github https URL."""
     if verb == "local":
@@ -296,20 +312,57 @@ def docker_ready() -> tuple[bool, str]:
     return False, "the docker daemon is not running (docker info failed)"
 
 
-def ensure_base(image_ref: str, rebuild: bool) -> int:
-    """Build the base image when it is missing or ``--rebuild``; docker build's own exit code, 0 when cached."""
+def _labels(tag: str, *labels: str) -> subprocess.CompletedProcess:
+    """docker image inspect of *tag*, printing each label's value, tab-separated."""
+    fmt = "\t".join(f'{{{{index .Config.Labels "{label}"}}}}' for label in labels)
+    return docker(["image", "inspect", "--format", fmt, tag])
+
+
+def base_state(image_ref: str) -> str:
+    """``current`` (built from today's Dockerfile text), ``stale`` (from other text) or ``missing``."""
+    seen = _labels(base_tag(image_ref), STAMP_LABEL)
+    if seen.returncode != 0:
+        return "missing"
+    return "current" if seen.stdout.strip() == base_stamp(image_ref) else "stale"
+
+
+def build_base(image_ref: str, no_cache: bool) -> int:
+    """docker build the base, labelled with its stamp and ref; a success records its wall time. Build's exit code."""
     tag = base_tag(image_ref)
-    stamp = base_stamp(image_ref)
-    if not rebuild:
-        seen = docker(["image", "inspect", "--format", f'{{{{index .Config.Labels "{STAMP_LABEL}"}}}}', tag])
-        if seen.returncode == 0 and seen.stdout.strip() == stamp:
-            return 0
+    started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="aipass_docker_") as tmp:
         Path(tmp, "Dockerfile").write_text(dockerfile_text(image_ref), encoding="utf-8")
-        flags = (["--no-cache"] if rebuild else []) + ["--label", f"{STAMP_LABEL}={stamp}"]
-        argv = ["docker", "build", *flags, "-t", tag, tmp]
+        flags = ["--no-cache"] if no_cache else []
+        flags += ["--label", f"{STAMP_LABEL}={base_stamp(image_ref)}", "--label", f"{REF_LABEL}={image_ref}"]
         logger.info("docker: building %s", tag)
-        return subprocess.run(argv).returncode
+        returncode = subprocess.run(["docker", "build", *flags, "-t", tag, tmp]).returncode
+    if returncode == 0:
+        record({"event": "base_built", "tag": tag, "seconds": round(time.monotonic() - started)})
+    return returncode
+
+
+def last_build_seconds(tag: str) -> int | None:
+    """How long the last recorded build of *tag* took, or None when none is recorded."""
+    built = [r for r in read_rows() if r.get("event") == "base_built" and r.get("tag") == tag]
+    return built[-1].get("seconds") if built else None
+
+
+def base_images() -> list[tuple[str, str, str]]:
+    """``(tag, age, state)`` per aipass-base image; state is current, stale, or unknown when no ref is labelled."""
+    listing = docker(
+        ["image", "ls", "--filter", "reference=aipass-base", "--format", "{{.Repository}}:{{.Tag}}\t{{.CreatedSince}}"]
+    )
+    host = host_image_ref()
+    images = []
+    for line in listing.stdout.splitlines():
+        tag, _, age = line.partition("\t")
+        stamp, _, ref = _labels(tag, STAMP_LABEL, REF_LABEL).stdout.strip().partition("\t")
+        # An image built before the ref label was added: only the host's own base can be judged.
+        if ref in ("", "<no value>"):
+            ref = host if base_tag(host) == tag else ""
+        state = "unknown (no base ref labelled)" if not ref else "current" if stamp == base_stamp(ref) else "stale"
+        images.append((tag, age, state))
+    return images
 
 
 def ledger_path() -> Path:

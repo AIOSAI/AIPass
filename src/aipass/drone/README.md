@@ -36,6 +36,7 @@ drone @git status                 # Read-only git, available to every branch
   rather than written down.
 - **Makes disposable test boxes.** `drone docker` runs clean Ubuntu or Debian containers, blocks
   credential mounts, and records both creation and removal so throwaway names can be reused.
+  `drone docker build` warms the cached base ahead, and a box says so before it builds one.
 
 Not a task runner, not a scheduler, and never a writer of another branch's files.
 
@@ -110,7 +111,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/external_repo_door.md](docs/external_repo_door.md) | `--repo <path>`: the admin-seat door into a repository that is not AIPass, and its ledger |
 | [docs/rm_and_the_record.md](docs/rm_and_the_record.md) | The delete record, the sibling-branch guard, the contains-a-citizen fence, dot names, and stale mode |
 | [docs/broker.md](docs/broker.md) | The broker removal lane, its one decision with drone rm, and its server-side path verification |
-| [docs/docker.md](docs/docker.md) | Disposable test boxes: the verbs, the base image, names and the record, no host credentials, `--login` |
+| [docs/docker.md](docs/docker.md) | Disposable test boxes: the verbs, the base image and when it builds, names and the record, no host credentials, `--login` |
 | [docs/testing.md](docs/testing.md) | How the suite is run and judged, the standards lanes, the mutation bar |
 
 ---

@@ -17,10 +17,17 @@ you kept it. The flags and examples are `drone docker --help`.
 | `bare` | A fresh image of this machine's OS with the base tools, no AIPass, a login shell |
 | `local` | `bare` plus this checkout's committed HEAD, cloned and pip-installed; the working tree is mounted read-only at `/src` |
 | `dev`, `main` | `bare` plus that branch cloned from origin on github, not from this checkout, and pip-installed |
-| `list` | Its boxes: name, verb, age, running or stopped, kept or removed on exit; then one line per `aipass-login-*` volume, or `no login volumes` |
+| `build [--image <ref>] [--rebuild]` | Builds or refreshes the cached base image and exits, with no box: prints the tag, `cached` or `built`, and the wall time |
+| `list` | Its boxes: name, verb, age, running or stopped, kept or removed on exit; then one line per `aipass-base` image with its age and `current` or `stale` against the Dockerfile text; then one line per `aipass-login-*` volume, or `no login volumes` |
 | `shell <name>` | Starts a kept box if it is stopped, opens a login shell in it, and stops it again when you leave |
 | `rm <name>...`, `rm --all` | Stops, then removes its boxes; records each removal |
 | `rm --login` | Removes the `aipass-login-*` volumes, which clears every sign-in (see Login volumes) |
+
+`local`, `dev` and `main` take the project root above the current directory, and that root must be
+an AIPass checkout: its `pyproject.toml` names `aipass` in its `[project]` table. A hosted project
+(`projects/<p>`) is its own git repo and root, so from inside one they refuse in one line before
+any build or box: `cwd is inside <root>, a project, not an AIPass checkout; run from inside the
+AIPass repo`. `bare` needs no checkout.
 
 `local` is the only verb that uses this checkout: it clones `file:///src` to `~/AIPass-src`, so
 the box sees the committed HEAD, not uncommitted edits. `dev` and `main` clone with `--branch dev`
@@ -102,9 +109,31 @@ empty venv at `~/aipass-venv`. PATH holds `~/.local/bin`, `~/aipass-venv/bin` an
 `/etc/profile` resets PATH. `NPM_CONFIG_PREFIX` is `~/.local`, so `npm install -g` works without
 root. The image carries no AIPass and no CLI.
 
-The image carries the label `aipass.base=<digest of the Dockerfile text>`. A cached image is reused
-only while its label matches the Dockerfile drone would write now; when drone's Dockerfile
-changes, or with `--rebuild` (which adds `--no-cache`), the base is built again.
+The image carries the label `aipass.base=<digest of the Dockerfile text>` and
+`aipass.base.ref=<ref>`. A cached image is reused only while its digest label matches the
+Dockerfile drone would write now. When drone's Dockerfile changes, or with `--rebuild` (which adds
+`--no-cache`), the base is built again.
+
+A build never runs silently. Before `docker build` starts, `bare`, `local`, `dev`, `main` and
+`build` print one line on stderr saying why and how long it took last time:
+
+```
+base image aipass-base:ubuntu-26.04 is stale (Dockerfile changed): building, about 4m last time; next time it is cached. To build ahead: drone docker build
+```
+
+`is not built yet` and `rebuilds (--rebuild, no cache)` are the other two reasons. With no build of
+that tag on record, the time reads `a few minutes`. Each successful build appends a `base_built`
+row (tag, seconds) to the box record, and that row supplies the time.
+
+`list` judges each `aipass-base` image against the Dockerfile text for its `aipass.base.ref`
+label. An image built before that label existed is judged only if its tag is this machine's own
+base, and otherwise reads `unknown (no base ref labelled)`. A `drone docker build --image <ref>`
+labels it.
+
+**The habit.** A seat that changes the Dockerfile text (`dockerfile_text()` in
+`apps/handlers/docker_handler.py`) runs `drone docker build` in the background right after, so the
+next box starts from a cached base and nobody waits through the rebuild in the foreground. The
+verb exits once the base is current, so a scheduled task can run it too.
 
 The image installs with apt, so a base whose image name is not `ubuntu` or `debian` is refused by
 name before docker is called.
