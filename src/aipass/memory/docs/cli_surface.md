@@ -45,6 +45,8 @@ call `error()`, which marks the failure (`cli/display.mark_command_failed`); `ma
 `reset_command_state()` at its top and `resolve_exit(True)` on the routed path, and the `__main__` block passes
 the result to `sys.exit`, the same idiom @ai_mail and @devpulse carry. `--help`, `--version`, a bare
 `drone @memory` and every working verb exit 0, pinned alongside the three refusals in `TestUnknownArgumentExitsNonZero`.
+`--version` prints `memory v` plus the entry point's own `# Version` header, read through
+`header_version(__file__)` from `aipass.cli`: the header is the only version.
 
 ---
 

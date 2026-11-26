@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watch.py
 # Description: Memory Watcher Module
-# Version: 0.2.1
+# Version: 0.2.2
 # Created: 2026-08-13
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -96,7 +96,7 @@ def _start_session() -> None:
         ready = stats.get("files_ready", 0)
         total = stats.get("files_checked", 0)
         status_marker = "[red]![/red]" if ready > 0 else "[green]OK[/green]"
-        console.print(f"{status_marker} Current: {total} files monitored, {ready} ready for rollover")
+        console.print(f"{status_marker} Current: {total} files monitored, {ready} ready for rollover", highlight=False)
         console.print()
 
     console.print("[dim]Watcher active. Waiting for file changes...[/dim]")
@@ -112,6 +112,9 @@ def print_introspection() -> None:
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/monitor/[/cyan]  [dim]watch_runner.py, memory_watcher.py, detector.py[/dim]")
     console.print()
+    console.print("[yellow]Next:[/yellow]")
+    console.print("  [green]drone @memory watch --help[/green]   [dim]# Full usage guide[/dim]")
+    console.print()
 
 
 def print_help() -> None:
@@ -126,10 +129,13 @@ def print_help() -> None:
     console.print("  [cyan]watch[/cyan]   Start the watcher (runs until Ctrl+C)")
     console.print("  [cyan]help[/cyan]    Show this help message")
     console.print()
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  [dim]drone @memory watch[/dim]")
+    console.print()
     console.print("[bold]HOW IT WORKS:[/bold]")
-    console.print("  1. Watch every branch directory listed in AIPASS_REGISTRY.json")
-    console.print("  2. On a .trinity/ file change, re-check entry counts against limits")
-    console.print("  3. Roll the oldest entries into vectors when a file is over cap")
+    console.print("  1. Watch every branch directory listed in AIPASS_REGISTRY.json", highlight=False)
+    console.print("  2. On a .trinity/ file change, re-check entry counts against limits", highlight=False)
+    console.print("  3. Roll the oldest entries into vectors when a file is over cap", highlight=False)
     console.print()
     console.print("[dim]Rollover also runs automatically at every PreCompact — the watcher[/dim]")
     console.print("[dim]is for watching a live session, not a requirement for archiving.[/dim]")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lint.py
 # Description: Lint module — CLI routing for entry limit auditing
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-06-13
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -379,7 +379,7 @@ def print_introspection() -> None:
     console.print("  [green]drone @memory lint run[/green]          [dim]# Scan all branches[/dim]")
     console.print("  [green]drone @memory lint @devpulse[/green]    [dim]# Scan one branch[/dim]")
     console.print("  [green]drone @memory lint fields[/green]       [dim]# Field inventory vs the closed shape[/dim]")
-    console.print("  [green]drone @memory lint help[/green]         [dim]# Full usage guide[/dim]")
+    console.print("  [green]drone @memory lint --help[/green]       [dim]# Full usage guide[/dim]")
     console.print()
 
 
@@ -400,19 +400,24 @@ def print_help() -> None:
     console.print("  registered branch. Checks each entry against configured character")
     console.print("  caps from memory.config.json. Reports violations sorted worst-first.")
     console.print("  Also names damage: a file that is empty or not JSON, a container of the wrong")
-    console.print("  kind (both exit 2), and in sessions / key_learnings / observations an entry with")
+    console.print("  kind (both exit 2), and in sessions / key_learnings / observations an entry with", highlight=False)
     console.print("  no number, a repeated number, or a list not stored newest-first.")
     console.print()
     console.print("[bold]FIELDS MODE:[/bold]")
     console.print("  [cyan]lint fields[/cyan] measures every OTHER field against the closed shape")
     console.print("  (entry_types.<type>.fields in memory.config.json): every string field")
-    console.print("  is listed by characters with max and p95 beside its cap, and anything")
+    console.print("  is listed by characters with max and p95 beside its cap, and anything", highlight=False)
     console.print("  outside the shape is flagged — unknown fields, missing required ones,")
     console.print("  wrong types, and fields over their own cap or item count.")
-    console.print("  The passport row comes with it: the whole file against 6,000 chars and")
-    console.print("  any single string in it against 600.")
+    console.print("  The passport row comes with it: the whole file against 6,000 chars and", highlight=False)
+    console.print("  any single string in it against 600.", highlight=False)
     console.print("  The canonical field is listed but not flagged here — [cyan]lint run[/cyan] owns it,")
     console.print("  so no entry is ever reported twice for one defect.")
+    console.print()
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  [dim]drone @memory lint run[/dim]")
+    console.print("  [dim]drone @memory lint @devpulse[/dim]")
+    console.print("  [dim]drone @memory lint fields[/dim]")
     console.print()
     console.print("[bold]NOTE:[/bold]")
     console.print("  This command is strictly [green]read-only[/green]. It never modifies any file.")

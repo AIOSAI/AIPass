@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: limits.py
 # Description: Entry-limits module — introspection of the shape, the caps and the budgets
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-15
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -37,6 +37,24 @@ def print_introspection() -> None:
     console.print(f"  draft_target(max_chars)                   -> {draft_percent()}% of one cap, floored")
     console.print()
     console.print("[dim]Library names — import from: aipass.memory[/dim]")
+    console.print("[dim]Run drone @memory limits --help for more[/dim]")
+
+
+def print_help() -> None:
+    """Display limits help (sentry standard)."""
+    from aipass.cli import console
+
+    console.print()
+    console.print("[bold cyan]limits[/bold cyan] - introspection of the entry-limits library")
+    console.print()
+    console.print("[bold]USAGE:[/bold]")
+    console.print("  drone @memory limits            Show the public API")
+    console.print("  drone @memory limits --help     Show this help")
+    console.print("  Library module, imported from aipass.memory; this verb only describes it")
+    console.print()
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  [dim]drone @memory limits[/dim]")
+    console.print()
 
 
 def handle_command(command: str, args: list) -> bool:

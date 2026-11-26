@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: verify.py
 # Description: Plan Verification Module
-# Version: 0.1.0
+# Version: 0.1.1
 # Created: 2026-03-18
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -142,9 +142,9 @@ def print_help() -> None:
     console.print("  [dim]drone @memory verify HPLAN-0001[/dim]")
     console.print()
     console.print("[bold]HOW IT WORKS:[/bold]")
-    console.print("  1. Query the flow_plans ChromaDB collection")
-    console.print("  2. Filter entries by source_file metadata matching the plan label")
-    console.print("  3. Report vectorization status and chunk count")
+    console.print("  1. Query the flow_plans ChromaDB collection", highlight=False)
+    console.print("  2. Filter entries by source_file metadata matching the plan label", highlight=False)
+    console.print("  3. Report vectorization status and chunk count", highlight=False)
     console.print()
 
 

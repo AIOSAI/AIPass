@@ -1,16 +1,14 @@
 # =================== AIPass ====================
 # Name: memory.py
 # Description: Entry point CLI for drone @memory
-# Version: 1.3.6
+# Version: 1.3.7
 # Created: 2026-03-08
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """
 Memory System - Central Memory Archive & Rollover System
 """
-
-__version__ = "1.3.5"
 
 import sys
 
@@ -23,7 +21,7 @@ from rich import box
 from rich.table import Table
 
 from aipass.prax import logger
-from aipass.cli import console, error, reset_command_state, resolve_exit
+from aipass.cli import console, error, header_version, reset_command_state, resolve_exit
 
 _PACKAGE_BASE = "aipass.memory.apps.modules"
 
@@ -234,7 +232,7 @@ def main() -> int:
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print(f"memory v{__version__}", highlight=False)
+        console.print(f"memory v{header_version(__file__)}", highlight=False)
         return 0
 
     if args[0] in ["--help", "-h", "help"]:

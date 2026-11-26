@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: templates.py
 # Description: Gold-source template lane — spawn scaffold propagation, receipt status, and the bump site
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-02-14
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Template Lane
@@ -98,6 +98,7 @@ def _announce_retired(verb: str) -> None:
     error(f"'{verb}' was retired on 2026-08-27 — {reason}.")
     console.print()
     console.print("[bold]Run instead:[/bold]")
+    console.print("[dim]The live lane that replaced this verb[/dim]")
     console.print(f"  {replacement}")
     console.print()
     console.print("[dim]Its handlers scanned a pre-.trinity layout: zero real memory files matched.[/dim]")
@@ -279,6 +280,7 @@ def print_introspection() -> None:
     console.print(
         Panel.fit("[bold cyan]Templates Module - The Gold Source[/bold cyan]", border_style="cyan", box=box.ROUNDED)
     )
+    console.print("[dim]Gold-source memory templates: propagate, report, heal[/dim]")
     console.print()
     console.print("[bold]PURPOSE:[/bold]")
     console.print("  @memory owns the gold-source memory templates. Propagate them into")
@@ -298,6 +300,8 @@ def print_introspection() -> None:
     console.print("  pre-.trinity layout and could never match a real memory file. They still")
     console.print("  route, and name the live lane instead of failing silently.")
     console.print()
+    console.print("[dim]Run drone @memory templates --help for full usage[/dim]")
+    console.print()
 
 
 def print_help() -> None:
@@ -311,6 +315,10 @@ def print_help() -> None:
     console.print("  drone @memory templates template-status             Who carries which version")
     console.print("  drone @memory templates bump                        Bump dry run (the gate report)")
     console.print("  drone @memory templates bump --confirm              Heal the fleet for real")
+    console.print()
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  # Who carries which template version")
+    console.print("  [dim]drone @memory templates template-status[/dim]")
     console.print()
     console.print("[bold]THE BUMP LANE:[/bold]")
     console.print("  A bump is trigger-driven, never polled: nothing watches the templates.")

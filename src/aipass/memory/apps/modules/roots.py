@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: roots.py
 # Description: Declared-roots module — the operator lane for AIPASS_ROOTS.json
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-30
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -64,6 +64,25 @@ def print_introspection() -> None:
     console.print()
     console.print("[dim]heal never restores declarations — a rebuild that repopulates has re-declared[/dim]")
     console.print(f"[dim]template: {roots_file.template_path()}[/dim]")
+    console.print("[dim]Run drone @memory roots --help for more[/dim]")
+
+
+def print_help() -> None:
+    """Display roots help (sentry standard)."""
+    from aipass.cli import console
+
+    console.print()
+    console.print("[bold cyan]roots[/bold cyan] - declared repo roots on this machine")
+    console.print()
+    console.print("[bold]USAGE:[/bold]")
+    console.print("  drone @memory roots list|init|heal")
+    console.print("  drone @memory roots add PATH \\[LABEL]")
+    console.print("  drone @memory roots remove PATH")
+    console.print()
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  [dim]drone @memory roots list[/dim]")
+    console.print("  [dim]drone @memory roots add /path/to/repo[/dim]")
+    console.print()
 
 
 def handle_command(command: str, args: list) -> bool:

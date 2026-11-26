@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "created": "2026-03-07T23:23:54.979418",
     "description": "Standards bypass configuration for this branch",
-    "last_updated": "2026-11-15"
+    "last_updated": "2026-11-26"
   },
   "bypass": [
     {
@@ -124,91 +124,129 @@
     {
       "file": "tests/test_symbolic_parked.py",
       "standard": "import_site",
-      "lines": [80, 88],
+      "lines": [
+        80,
+        88
+      ],
       "reason": "The import is what is under test: the parked symbolic package (the owner's ruling of 2026-08-14) must refuse every import, the package and each submodule, naming the ruling. A top-of-file import would raise at collection and pin nothing. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "tests/test_import_isolation.py",
       "standard": "import_site",
-      "lines": [92],
+      "lines": [
+        92
+      ],
       "reason": "The test is about the import itself: it proves conftest's mock still shadows json_handler through `from X import y` at call time. A top-of-file import would bind before the autouse fixture runs and test nothing. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "tests/test_trinity_standard.py",
       "standard": "import_site",
-      "lines": [375],
+      "lines": [
+        375
+      ],
       "reason": "The subject is import time: memory_files is evicted and imported fresh to prove a removed attribute is not re-created by a fresh import. A top-of-file binding is the already-imported module and could not see that. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/handlers/intake/auto_process.py",
       "standard": "logged_fallback",
-      "lines": [96],
+      "lines": [
+        96
+      ],
       "reason": "_reclaim_stale_lock answers 'is the lane free now'. False after a failed unlink means the lane is NOT free, which is true; the caller's decision (do not run) is the same as for a live lock, and the failure is logged at error. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/handlers/monitor/memory_watcher.py",
       "standard": "logged_fallback",
-      "lines": [62],
+      "lines": [
+        62
+      ],
       "reason": "_check_vector_deps answers 'are chromadb and numpy confirmed importable'. A check that could not run has not confirmed them, so False is the true answer; the self-report reads it as degraded either way. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/handlers/monitor/registry_scope.py",
       "standard": "logged_fallback",
-      "lines": [201],
+      "lines": [
+        201
+      ],
       "reason": "declared_roots: an unreadable AIPASS_ROOTS.json answers [] (no external roots), logged at error. Never None: ai_mail registry/read.py 474 and drone registry_handler.py 458 loop over the answer outside their try. Not a raise: detector.py 298 (read_scope, feeding health and lint) calls it bare. No caller writes [] out as truth. Rollover's write scope (detector.write_scope), the push, the todo lane and the normalizer all exclude the external tier. read_scope only reports, and an external name then answers 'Unknown branch', never another branch. Leg 12 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/handlers/monitor/registry_scope.py",
       "standard": "logged_fallback",
-      "lines": [66, 198],
+      "lines": [
+        66,
+        198
+      ],
       "reason": "Both lines are FileNotFoundError: an absent passport declares nothing (None), and an absent declared-roots file declares no roots ([]). That is the answer for an absent file, not a failure value; the unreadable roots branch (470) is not covered here. Leg 8 of DPLAN-0354, @memory's decision; lines moved in leg 10."
     },
     {
       "file": "apps/handlers/monitor/registry_scope.py",
       "standard": "logged_fallback",
-      "lines": [69],
+      "lines": [
+        69
+      ],
       "reason": "declared_residency: an unreadable passport declares nothing, logged at error. None cannot add or swap a citizen: a core citizen is kept (the sealed registry is the anchor) and a resident candidate is refused, the same policy as for an absent passport. The contract was asked for by @daemon (5031a591), whose scheduler calls it. Leg 10 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/handlers/templates/receipt.py",
       "standard": "logged_fallback",
-      "lines": [89],
+      "lines": [
+        89
+      ],
       "reason": "_write answers 'written'. False on every path that did not write (fence refusal, failed write); the success path returns True only. The checker reads the fence refusal as success. Logged at error. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/handlers/templates/spawn_pusher.py",
       "standard": "logged_fallback",
-      "lines": [84],
+      "lines": [
+        84
+      ],
       "reason": "_write_json answers 'written'. False on every path that did not write (fence refusal, failed write); the success path returns True only. The checker reads the fence refusal as success. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/handlers/templates/template_bump.py",
       "standard": "logged_fallback",
-      "lines": [50],
+      "lines": [
+        50
+      ],
       "reason": "_read_ledger merges absent and unreadable on purpose: bump_pending counts both as PENDING ('a missing record of a push is not a record of a push') and its reason names both ('never pushed, or lost'). The unreadable case is logged at error. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/modules/rollover_config.py",
       "standard": "logged_fallback",
-      "lines": [117, 167],
+      "lines": [
+        117,
+        167
+      ],
       "reason": "_resolve_branch and _validate_count return None only after _refuse(ctx, ...) has recorded the refusal and its reason; every None is a refusal and no success returns None. The checker reads the other refusals as success. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/modules/search.py",
       "standard": "logged_fallback",
-      "lines": [67],
+      "lines": [
+        67
+      ],
       "reason": "handle_command answers 'was this command routed here', not 'did it succeed'. An invalid --n is handled: the error is printed to the user and logged, so True is correct and False would send the router looking for another handler. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "tests/conftest.py",
       "standard": "import_site",
-      "lines": [68, 69, 70, 71, 80, 81],
+      "lines": [
+        68,
+        69,
+        70,
+        71,
+        80,
+        81
+      ],
       "reason": "The stub is the cure (compass 493; @devpulse's leg 11 ruling (a)). Each keeps a far side off the disk or the bus. 88-91 aipass.prax: the real logger writes every module's log file under logs/, and its json service writes operation logs. 115-116 handlers.json.json_handler: log_operation writes memory_json operation logs. 123-126 aipass.trigger: Trigger.fire posts real events to the bus. Leg 11 of DPLAN-0354; lines moved +1 by the four-rows split (2026-10-08), which added the support_config_verbs import; moved -6 when the three unrequested fixtures and their imports were cut (2026-10-10)."
     },
     {
       "file": "tests/test_config_loader.py",
       "standard": "import_site",
-      "lines": [49],
+      "lines": [
+        49
+      ],
       "reason": "The stub is the cure (ruling (a)). _get_module re-imports config_loader after the fixture evicted the json package, so it binds conftest's json_handler stand-in; with the real one bound, load/save write memory_json operation logs. Leg 11 of DPLAN-0354."
     },
     {
@@ -249,25 +287,59 @@
     {
       "file": "tests/test_rollover.py",
       "standard": "import_site",
-      "lines": [35, 36, 63, 64, 65, 133, 173, 190, 210],
+      "lines": [
+        35,
+        36,
+        63,
+        64,
+        65,
+        133,
+        173,
+        190,
+        210
+      ],
       "reason": "Not stubs: each importlib.import_module fetches the REAL module. 54/55 first-import rollover_config and rollover_json before any stand-in lands, because what they bind at import they keep. 107-109 take the real cli flag helpers so the routing guards are real. 203/291 fetch the parent package to evict its cached attribute (monkeypatch restores it). 267/316 fetch the real handlers.cli package to compare with. Leg 11 of DPLAN-0354."
     },
     {
       "file": "tests/test_rollover.py",
       "standard": "import_site",
-      "lines": [84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 107, 108, 130, 137],
+      "lines": [
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        107,
+        108,
+        130,
+        137
+      ],
       "reason": "The stub is the cure (ruling (a)). rollover.py imports these at import time, and each far side writes. orchestrator.execute_rollover writes .trinity, the backups and the vector stores. memory_watcher.check_and_rollover runs that same rollover. detector's walk recreates a missing .trinity file. todo_report.roll_pad writes the .backup todo backlogs. plans_processor.process_plans embeds and writes the flow_plans store. 134-137 register the REAL cli flag helpers under the stand-in package, which has no __path__. 139/140 are the parent packages. 199 is the eviction of the cached rollover (del under the module constant _ROLLOVER_MODULE, after setitem so teardown restores it) that the re-import at 207 needs; the checker read the constant key from sentry leg 17 on, and devpulse added the line on 2026-10-05 as part of this same ruling. 207 is the deliberate re-import of rollover against them. Leg 11 of DPLAN-0354."
     },
     {
       "file": "tests/test_trinity_push.py",
       "standard": "through_the_command",
-      "lines": [1540],
+      "lines": [
+        1540
+      ],
       "reason": "Ruling (b): tp._RULES_CACHE.clear() empties the module's cache of the global rules file so the test reads its own tmp copy and can count re-reads; there is no public reset, and no door is added for the test. Leg 11 of DPLAN-0354."
     },
     {
       "file": "tests/test_trinity_standard.py",
       "standard": "through_the_command",
-      "lines": [301, 310, 319, 628, 644],
+      "lines": [
+        301,
+        310,
+        319,
+        628,
+        644
+      ],
       "reason": "Contracts pinned on a tmp file: the meta line is tab then template semantics, a refresh restores _usage from the template and never leaves a bare tab, and the receipt is bumped after a refresh (or the refresh succeeds with no receipt). The public caller refreshes every live branch's .trinity files, which is live state. Leg 11 of DPLAN-0354."
     },
     {
@@ -279,6 +351,191 @@
       "file": "apps/handlers/templates/push_store.py",
       "standard": "json_structure",
       "reason": "Its two operations are logged by storage/lane.run_json, the one subprocess runner, as subprocess_lane rows labelled vectorize_and_store and get_by_ids."
+    },
+    {
+      "file": "apps/modules/rollover.py",
+      "standard": "fallback",
+      "lines": [
+        425
+      ],
+      "reason": "Frame normalize is a post-roll tidy step: when the scope cannot resolve it is skipped, logged at warning; the roll itself already landed. Raising would fail a completed rollover over cosmetics. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/repo_root.py",
+      "standard": "fallback",
+      "lines": [
+        45
+      ],
+      "reason": "_is_listed: an unlistable parent cannot disprove exists(), so it trusts exists() (the documented contract in the docstring). Fires on permission-limited dirs in normal runs; debug by design. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/repo_root.py",
+      "standard": "fallback",
+      "lines": [
+        71
+      ],
+      "reason": "Audit-record side write: the repo_root fallback line must never take an import down. The resolution it records stands either way; failure is logged. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/write_fence.py",
+      "standard": "fallback",
+      "lines": [
+        70
+      ],
+      "reason": "Audit-record side write: the refusal is returned whether or not its record lands. Raising here would hide the refusal itself. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "fallback",
+      "lines": [
+        60
+      ],
+      "reason": "_check_vector_deps answers 'are chromadb and numpy confirmed importable'. A check that could not run has not confirmed them, so False is the true answer; logged at warning. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "fallback",
+      "lines": [
+        120
+      ],
+      "reason": "check_and_rollover: one unreadable memory file is logged at warning and skipped; the scan reports every other file. Raising would stop the watcher for the whole fleet. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "fallback",
+      "lines": [
+        135
+      ],
+      "reason": "Rollover handler is lazily imported; when absent the rollover is not executed and that is logged at warning. The watcher keeps running instead of crashing its thread. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "fallback",
+      "lines": [
+        223
+      ],
+      "reason": "Plans manifest: an unreadable manifest is logged at warning and read as empty, which re-processes plans (idempotent) rather than skipping them. Safe direction. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/monitor/registry_scope.py",
+      "standard": "fallback",
+      "lines": [
+        67
+      ],
+      "reason": "declared_residency: an unreadable passport declares nothing, logged at error. None means 'no residency declared'; callers already treat that as not resident. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/monitor/registry_scope.py",
+      "standard": "fallback",
+      "lines": [
+        199
+      ],
+      "reason": "declared_roots: an unreadable AIPASS_ROOTS.json answers [] (no external roots), logged at error. Never None: ai_mail and drone loop over the answer outside their try; detector.read_scope calls it bare. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/monitor/roots_file.py",
+      "standard": "fallback",
+      "lines": [
+        105
+      ],
+      "reason": "_spell: a root that is not a sibling is spelled absolute, which is the correct spelling, not a degraded one. Normal for external roots; debug by design. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/templates/spawn_pusher.py",
+      "standard": "fallback",
+      "lines": [
+        68
+      ],
+      "reason": "_read_json returns None on unreadable JSON (documented), logged at warning; callers skip that file rather than overwrite unknowable content. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/templates/template_bump.py",
+      "standard": "fallback",
+      "lines": [
+        48
+      ],
+      "reason": "_read_ledger merges absent and unreadable on purpose (None), logged at error; bump_pending counts None as 'not bumped', the safe direction. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/intake/plans_processor.py",
+      "standard": "fallback",
+      "lines": [
+        328
+      ],
+      "reason": "A plan that cannot be checked against its manifest row is re-processed (idempotent), logged at warning. Safe direction: never skipped silently. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/intake/auto_process.py",
+      "standard": "fallback",
+      "lines": [
+        61
+      ],
+      "reason": "An unparsable lock is aged by its mtime, logged at warning, so a corrupt lock can still go stale instead of wedging the lane forever. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/intake/auto_process.py",
+      "standard": "fallback",
+      "lines": [
+        74
+      ],
+      "reason": "FileExistsError is the O_EXCL lock contract: None means 'held elsewhere'. Fires whenever two runs overlap; debug by design. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/intake/auto_process.py",
+      "standard": "fallback",
+      "lines": [
+        116
+      ],
+      "reason": "FileNotFoundError on release means the lock is already gone, the desired end state. Other OSErrors log at error. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/rollover/todo_roll.py",
+      "standard": "fallback",
+      "lines": [
+        150
+      ],
+      "reason": "_display: a path outside the repo root is shown relative to its backup root or in full. Display-only; normal for external projects. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/rollover/todo_roll.py",
+      "standard": "fallback",
+      "lines": [
+        247
+      ],
+      "reason": "_resolved: an unresolvable path is compared by its spelling (documented). Compare helper; debug by design. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/json/entry_limits.py",
+      "standard": "fallback",
+      "lines": [
+        647
+      ],
+      "reason": "Per-string budget only: unparseable text is logged at warning and the raw size check above has already run, so the file is not read as compliant. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/json/config_loader.py",
+      "standard": "fallback",
+      "lines": [
+        359,
+        650
+      ],
+      "reason": "Unreadable config is logged at error and NOT written over: loaded stays None and the write path refuses. The default protects unknowable content. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/json/lint_handler.py",
+      "standard": "fallback",
+      "lines": [
+        361
+      ],
+      "reason": "_read_trinity_file returns ('', None) on failure (documented), logged at warning; lint reports the file as unreadable rather than passing it. Fallback group, 2026-11-26, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/json/memory_files.py",
+      "standard": "fallback",
+      "lines": [
+        89
+      ],
+      "reason": "Diff baseline only: an unparseable previous file is logged at warning and diffed as empty, so every entry shows as new. Over-reports, never hides. Fallback group, 2026-11-26, @memory's decision."
     }
   ],
   "notes": {

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rollover.py
 # Description: Rollover Orchestration Module
-# Version: 0.12.0
+# Version: 0.12.1
 # Created: 2025-11-16
-# Modified: 2026-11-23
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -251,14 +251,20 @@ def print_help() -> None:
     console.print("              At the repo root or outside every branch, no pad is touched and one line says so.")
     console.print("              The sessions / key_learnings / observations file list stays fleet-wide.")
     console.print("  [cyan]--json[/cyan]      Machine output for [cyan]push[/cyan] — one JSON document, no Rich")
-    console.print('              {"ok": true, "verb": "rollover push", "branches": 17}')
+    console.print('              {"ok": true, "verb": "rollover push", "branches": 17}', highlight=False)
     console.print("              Rides in any slot. A help flag still outranks it.")
     console.print()
     console.print("[bold]LIMITS:[/bold]")
-    console.print("  v2 entry-count based (sessions, key_learnings, observations) from config")
-    console.print("  A container held as a dict (schema 2.0.0) cannot be drained: check, run and status")
-    console.print("  list it as UNDRAINABLE, never as ready, until it is migrated to the 3.0.0 list shape")
-    console.print("  A DAMAGED file is never rolled and exits 2: empty or not JSON, a capped container that")
+    console.print("  v2 entry-count based (sessions, key_learnings, observations) from config", highlight=False)
+    console.print(
+        "  A container held as a dict (schema 2.0.0) cannot be drained: check, run and status", highlight=False
+    )
+    console.print(
+        "  list it as UNDRAINABLE, never as ready, until it is migrated to the 3.0.0 list shape", highlight=False
+    )
+    console.print(
+        "  A DAMAGED file is never rolled and exits 2: empty or not JSON, a capped container that", highlight=False
+    )
     console.print("  is not a list, or a list over its count with an entry missing or repeating its number")
     console.print("  todos: count only (rollover.defaults.local.todos.count) — own branch, never the fleet walk")
     console.print()
@@ -268,10 +274,15 @@ def print_help() -> None:
     console.print("  after every rolled todo reads back json-equal. check says 'ready for rollover' when over.")
     console.print()
     console.print("[bold]WORKFLOW:[/bold]")
-    console.print("  1. Detect files exceeding v2 entry-count limits")
-    console.print("  2. Extract oldest entries")
-    console.print("  3. Generate embeddings via fastembed")
-    console.print("  4. Store vectors in local + global ChromaDB")
+    console.print("  1. Detect files exceeding v2 entry-count limits", highlight=False)
+    console.print("  2. Extract oldest entries", highlight=False)
+    console.print("  3. Generate embeddings via fastembed", highlight=False)
+    console.print("  4. Store vectors in local + global ChromaDB", highlight=False)
+    console.print()
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  [dim]drone @memory rollover check[/dim]")
+    console.print("  [dim]drone @memory rollover run --branch @memory[/dim]")
+    console.print("  [dim]drone @memory rollover backfill-local[/dim]")
     console.print()
 
 
@@ -365,7 +376,7 @@ def run_rollover(branch: str | None = None) -> bool:
     console.print()
     # 0/N is a result, not a reason to say nothing: it must not look like a run with nothing to do.
     marker = "[green]>[/green]" if success_count else "[yellow]>[/yellow]"
-    console.print(f"{marker} Rollover complete: {success_count}/{triggers_count} successful")
+    console.print(f"{marker} Rollover complete: {success_count}/{triggers_count} successful", highlight=False)
 
     # A declined trigger is neither win nor break; unprinted, "0/1 successful" sat above an empty failure list.
     # error(), so the exit is non-zero: a skipped trigger is a file over its limit left unrolled.

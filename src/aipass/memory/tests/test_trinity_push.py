@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.4.2
+# Version: 1.4.3
 # Created: 2026-08-27
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
@@ -614,7 +614,7 @@ class TestScope:
         lane that has a registry at all.
         """
         names = {item["name"] for item in tp.resolve_scope()["branches"]}
-        assert {"memory", "canary", "hooks"} <= names
+        assert {"memory", "canary_test", "hooks"} <= names
 
     def test_the_fleet_scope_holds_the_named_residents(self, live_residents):
         """The other half — true only where the residents are actually installed."""
@@ -637,8 +637,8 @@ class TestScope:
         assert "registry_scope.fleet_branches(" in source
 
     def test_a_single_branch_resolves_with_or_without_the_at_sign(self, live_fleet):
-        assert tp.resolve_scope("@canary")["branches"][0]["name"] == "canary"
-        assert tp.resolve_scope("canary")["branches"][0]["name"] == "canary"
+        assert tp.resolve_scope("@canary_test")["branches"][0]["name"] == "canary_test"
+        assert tp.resolve_scope("canary_test")["branches"][0]["name"] == "canary_test"
 
     def test_an_unknown_branch_is_an_error_not_an_empty_run(self):
         """Silence would read as 'nothing to do' for a name that was mistyped."""
