@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: cli_ux_content.py
 # Description: CLI UX Standards Content Handler
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-07-17
 # Modified: 2026-11-25
 # =============================================
@@ -47,6 +47,9 @@ def get_cli_ux_standards() -> str:
         "  [yellow]usage_section[/yellow]      print_help() has a Usage section",
         "  [yellow]examples_section[/yellow]   print_help() prints a heading starting with Examples",
         "  [yellow]no_internal_modules[/yellow] (entry point only) modules/ hides _wire/_fix/_impl/_internal plumbing",
+        "  [yellow]version_from_header[/yellow] (entry point only) the # Version header is the one version:",
+        "                     no VERSION or __version__ constant, no X.Y.Z literal outside a docstring,",
+        "                     and --version prints NAME v plus header_version(__file__) from aipass.cli",
         "",
         "  [bold]Every print[/bold] (help surfaces and command output):",
         "  [yellow]markup_kept[/yellow]        no markup=False inside a help function (any function named",
@@ -70,7 +73,7 @@ def get_cli_ux_standards() -> str:
         '  console.print(escape("  drone @git log \\[count] \\[path]"))',
         '  console.print("\\[bold]Services:\\[/bold] \\[dim]libraries every branch imports\\[/dim]")',
         '  console.print(f"Found \\[cyan]{len(items)}\\[/cyan] items")',
-        '  console.print(f"drone v{VERSION}", highlight=False)',
+        '  console.print(f"drone v{header_version(__file__)}", highlight=False)',
         "",
         "  [bold]Not:[/bold] console.print(line, markup=False) over a help block - every tag on it prints",
         "  as text and the page looks like another product. escape() the data, keep the line styled.",

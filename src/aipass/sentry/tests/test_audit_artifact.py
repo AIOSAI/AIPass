@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_audit_artifact.py
 # Description: Completeness + join-key tests for audit/artifact.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-11
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/handlers/audit/artifact.py."""
@@ -255,6 +255,14 @@ def test_metadata_block_is_well_formed(tmp_path):
     assert meta["branches"] == ["prax"]
     assert meta["branch_count"] == 1
     assert set(meta["totals"]) == {"violations", "failed_checks", "type_error_files", "type_errors"}
+
+
+def test_metadata_carries_sentrys_header_version_not_none(tmp_path):
+    """sentry_version is the # Version line of apps/sentry.py; a lost constant once left it None."""
+    doc = _write_and_load(tmp_path, _make_results(tmp_path / "prax"), pack="aipass", specific_branch="prax")
+    entry = Path(audit_artifact.__file__).resolve().parents[2] / "sentry.py"
+    header = next(line for line in entry.read_text(encoding="utf-8").splitlines() if line.startswith("# Version:"))
+    assert doc["metadata"]["sentry_version"] == header.split(":", 1)[1].strip()
 
 
 def test_scope_is_full_fleet_without_a_target_branch(tmp_path):

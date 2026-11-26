@@ -33,6 +33,8 @@ paths are in [the display API](docs/display_api.md).
 - Owns the operation templates, `operation_start` and `operation_complete`.
 - Owns the exit seam: `error()` marks the command failed, and `resolve_exit()`
   turns that into the process exit code every `main()` returns.
+- Owns `header_version`: an entry point's `--version` reads the `# Version:`
+  line of its own file header, the one place an agent's version lives.
 - Binds the fleet json service for this branch's own logs. It is a library: the
   command line only introspects and demos it.
 
@@ -116,7 +118,7 @@ the live importers, grep the tree rather than trusting a number written here.
 
 ---
 
-**Last Updated:** 2026-10-18
+**Last Updated:** 2026-11-25
 
 ---
 

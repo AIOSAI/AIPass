@@ -1,15 +1,18 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for cli's entry point routing, help and introspection
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-09-03
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/cli.py — routing, help, introspection and the exit seam."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(documentation) — that route_command and print_help in apps/cli.py carry docstrings
+
+import re
+from pathlib import Path
 
 import pytest
 
@@ -145,8 +148,14 @@ def test_version_flag_prints_version(monkeypatch, capsys, flag):
     assert _run(monkeypatch, [flag]) == 0
 
     out = capsys.readouterr().out
-    assert "cli v" in out
-    assert branch_entry.VERSION in out
+    header = Path(branch_entry.__file__).read_text(encoding="utf-8")
+    found = re.search(r"^# Version: (\S+)$", header, re.MULTILINE)
+    assert found, "apps/cli.py header carries no # Version line"
+    assert out == f"cli v{found.group(1)}\n"
+
+
+def test_the_entry_point_holds_no_version_constant():
+    assert not hasattr(branch_entry, "VERSION")
 
 
 def test_route_command_returns_true_for_known_command(stub_module):

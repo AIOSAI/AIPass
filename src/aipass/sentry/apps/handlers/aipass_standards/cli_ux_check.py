@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: cli_ux_check.py
 # Description: CLI UX Standards Checker Handler
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-07-17
 # Modified: 2026-11-25
 # =============================================
@@ -43,6 +43,10 @@ _NUMERIC_NAME = re.compile(r"(?i)(count|total|version|num|score|size|percent|pct
 _NUMERIC_SPEC = re.compile(r"[dfe%n]$|,")
 #: A count after a heading's name, "Branches ({}):", is not one of its words.
 _COUNT = re.compile(r"\(\{\}\)")
+#: A version number in a literal: the header's # Version line is the only place one may live.
+_SEMVER = re.compile(r"\bv?\d+\.\d+\.\d+\b")
+#: The one helper that reads it, from aipass.cli.
+VERSION_HELPER = "header_version"
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
@@ -123,6 +127,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         checks.append(_check_rich_console(introspection_func, help_func, path.name))
     if entry:
         checks.append(_check_no_internal_modules(path))
+        checks.append(_check_version_from_header(tree, path))
     checks.extend(_surface_checks(tree))
 
     if not checks:
@@ -216,7 +221,7 @@ def _check_rich_console(
                 if (
                     node.func.attr == "print"
                     and isinstance(node.func.value, ast.Name)
-                    and node.func.value.id == "console"
+                    and node.func.value.id.lower().endswith("console")
                 ):
                     has_console_print = True
             if isinstance(node.func, ast.Name) and node.func.id == "print":
@@ -351,8 +356,8 @@ def _is_print_call(node: ast.Call) -> bool:
     if not (isinstance(func, ast.Attribute) and func.attr == "print"):
         return False
     receiver = func.value
-    return (isinstance(receiver, ast.Name) and receiver.id == "console") or (
-        isinstance(receiver, ast.Attribute) and receiver.attr == "console"
+    return (isinstance(receiver, ast.Name) and receiver.id.lower().endswith("console")) or (
+        isinstance(receiver, ast.Attribute) and receiver.attr.lower().endswith("console")
     )
 
 
@@ -456,7 +461,7 @@ def _is_any_print(node: ast.AST) -> bool:
         return False
     receiver = func.value
     name = receiver.id if isinstance(receiver, ast.Name) else getattr(receiver, "attr", "")
-    return name.endswith("console")
+    return name.lower().endswith("console")
 
 
 def _keyword(call: ast.Call, name: str) -> Optional[ast.expr]:
@@ -653,3 +658,106 @@ def _surface_checks(tree: ast.Module) -> List[Dict]:
             "style the line, or pass highlight=False",
         ),
     ]
+
+
+# ---- the version: one number, the header's, printed as <name> v<semver> -----------------------
+
+
+def _docstring_ids(tree: ast.Module) -> set:
+    """ids of the module, class and function docstrings."""
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                found.add(id(first.value))
+    return found
+
+
+def _version_constants(tree: ast.Module) -> List[str]:
+    """Module-level names ending in VERSION, __version__ included: each is a second version."""
+    found = []
+    for node in tree.body:
+        targets = (
+            node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+        )
+        found += [
+            f"line {node.lineno} {t.id}"
+            for t in targets
+            if isinstance(t, ast.Name) and t.id.strip("_").upper().endswith("VERSION")
+        ]
+    return found
+
+
+def _version_literals(tree: ast.Module) -> List[str]:
+    """String literals, docstrings aside, that hold an X.Y.Z number."""
+    docstrings = _docstring_ids(tree)
+    return [
+        f"line {node.lineno} '{match.group(0)}'"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings
+        for match in [_SEMVER.search(node.value)]
+        if match
+    ]
+
+
+def _version_branch(tree: ast.Module) -> Optional[ast.If]:
+    """The first ``if`` whose test names "--version"."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and any(
+            isinstance(sub, ast.Constant) and sub.value == "--version" for sub in ast.walk(node.test)
+        ):
+            return node
+    return None
+
+
+def _calls_helper(node: ast.expr) -> bool:
+    """A call to header_version, by name or as an attribute."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    return (func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")) == VERSION_HELPER
+
+
+def _prints_the_header(call: ast.Call, name: str) -> bool:
+    """``print(f"<name> v{header_version(__file__)}")``: the name, a v, the helper, nothing else."""
+    arg = call.args[0] if call.args else None
+    if not isinstance(arg, ast.JoinedStr) or len(arg.values) != 2:
+        return False
+    head, value = arg.values
+    return (
+        isinstance(head, ast.Constant)
+        and head.value == f"{name} v"
+        and isinstance(value, ast.FormattedValue)
+        and _calls_helper(value.value)
+    )
+
+
+def _branch_prints(tree: ast.Module, branch: ast.If) -> List[ast.Call]:
+    """The prints in the --version branch, and in a same-file function it calls, one hop."""
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    scopes: List[ast.AST] = list(branch.body)
+    for stmt in branch.body:
+        for sub in ast.walk(stmt):
+            if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id in functions:
+                scopes.append(functions[sub.func.id])
+    return [sub for scope in scopes for sub in ast.walk(scope) if isinstance(sub, ast.Call) and _is_any_print(sub)]
+
+
+def _check_version_from_header(tree: ast.Module, path: Path) -> Dict:
+    """The entry point holds no version of its own and its --version prints the header's as <name> v<semver>."""
+    name = path.stem
+    constants = _version_constants(tree)
+    held = {site.split()[1] for site in constants}
+    problems = [f"{site} holds a second version" for site in constants]
+    problems += [f"{site} is a version literal" for site in _version_literals(tree) if site.split()[1] not in held]
+    branch = _version_branch(tree)
+    if branch is None:
+        problems.append("no --version branch")
+    elif not any(_prints_the_header(call, name) for call in _branch_prints(tree, branch)):
+        problems.append(f"line {branch.lineno} --version does not print {name} v plus {VERSION_HELPER}(__file__)")
+    cure = (
+        f"the # Version header is the one version: drop the constant and print "
+        f"f'{name} v{{{VERSION_HELPER}(__file__)}}' (from aipass.cli import {VERSION_HELPER})"
+    )
+    return _row("version_from_header", problems, cure)

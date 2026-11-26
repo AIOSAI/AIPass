@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli.py
 # Description: Entry point for drone @cli — sentry-compliant module discovery and routing
-# Version: 2.3.5
+# Version: 2.3.6
 # Created: 2026-03-08
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -21,9 +21,8 @@ from rich.table import Table
 from rich.panel import Panel
 from rich import box
 
-from aipass.cli.apps.modules.display import console, header, error, reset_command_state, resolve_exit
+from aipass.cli.apps.modules.display import console, header, error, reset_command_state, resolve_exit, header_version
 
-VERSION = "2.3.4"
 CLI_ROOT = Path(__file__).parent
 MODULES_DIR = CLI_ROOT / "modules"
 
@@ -71,7 +70,7 @@ def print_introspection() -> None:
 
     console.print()
     console.print("[bold cyan]cli - Command Line Interface Branch[/bold cyan]")
-    console.print(f"  Version: {VERSION}")
+    console.print(f"  Version: {header_version(__file__)}")
     console.print()
     console.print("[dim]Universal Display & Output Service Provider[/dim]")
     console.print()
@@ -230,7 +229,7 @@ def print_help() -> None:
 
 def show_version():
     """Print version."""
-    console.print(f"cli v{VERSION}")
+    console.print(f"cli v{header_version(__file__)}", highlight=False)
 
 
 def main() -> int:

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: sentry.py
 # Description: SENTRY - Standards Platform for AIPass
-# Version: 2.0.8
+# Version: 2.0.9
 # Created: 2026-03-05
 # Modified: 2026-11-25
 # =============================================
@@ -17,15 +17,20 @@ from pathlib import Path
 from typing import List, Any
 
 from aipass.prax import logger
-from aipass.cli import console, header
+from aipass.cli import console, header, header_version
 from aipass.cli import error
 from aipass.sentry.apps.modules import CommandRefused
 from aipass.sentry.apps.modules import standards_audit
 
-# The header and this constant both carry the version; --version and the README read this one.
-VERSION = "2.0.5"
 SENTRY_ROOT = Path(__file__).parent
 MODULES_DIR = SENTRY_ROOT / "modules"
+
+
+def sentry_version() -> str:
+    """Sentry's one version, the # Version line of this file's header."""
+    return header_version(__file__)
+
+
 # refusal.EXIT_UNPROVEN, "the lane could not run"; spelled here because an entry point never imports handlers.
 EXIT_LANE_COULD_NOT_RUN = 2
 
@@ -97,7 +102,7 @@ def print_introspection() -> None:
 
     console.print()
     console.print("[bold cyan]sentry - Standards Platform for AIPass[/bold cyan]")
-    console.print(f"  Version: [cyan]{VERSION}[/cyan]")
+    console.print(f"  Version: [cyan]{header_version(__file__)}[/cyan]")
     console.print()
 
     console.print(f"[yellow]Discovered Modules:[/yellow] {len(modules)}")
@@ -327,7 +332,7 @@ def main() -> int:
             return 0
 
         if args[0] in ["--version", "-V"]:
-            console.print(f"sentry v{VERSION}", highlight=False)
+            console.print(f"sentry v{header_version(__file__)}", highlight=False)
             return 0
 
         command = args[0]

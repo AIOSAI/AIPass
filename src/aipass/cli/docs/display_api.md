@@ -44,9 +44,25 @@ from aipass.cli import console
 console.print("[bold cyan]Custom Rich output[/bold cyan]")
 ```
 
+## The version line
+
+An agent has one version: the `# Version: X.Y.Z` line of its entry point's file
+header. `--version` prints it; no `VERSION` constant holds a second copy.
+
+```python
+from aipass.cli import console, header_version
+
+console.print(f"name v{header_version(__file__)}", highlight=False)
+```
+
+`header_version` reads the file as UTF-8 text (no import) and takes the first
+`# Version:` line in the leading run of `#` lines. A missing line, or a value
+that is not three integers, raises `ValueError` naming the file — there is no
+`0.0.0` fallback.
+
 ## The public API
 
-Handed out by the package door, `aipass.cli` (`__init__.py`), lazily on first access:
+Handed out by the package door, `aipass.cli` (`__init__.py`), read from its home on each access:
 
 | Function | Signature | Purpose |
 |----------|-----------|---------|
@@ -61,6 +77,7 @@ Handed out by the package door, `aipass.cli` (`__init__.py`), lazily on first ac
 | `escape()` | `escape(value) -> str` | Rich's own escape, for a value with literal square brackets |
 | `operation_start()` | `operation_start(operation, **details)` | Standard operation begin header |
 | `operation_complete()` | `operation_complete(**summary)` | Completion summary with optional timing |
+| `header_version()` | `header_version(path) -> str` | `X.Y.Z` from the file header's `# Version:` line; `ValueError` if absent or malformed |
 | `mark_command_failed()` | `mark_command_failed()` | Set the process failure flag (`error()` calls it automatically) |
 | `command_failed()` | `command_failed() -> bool` | Whether the failure flag is set since last reset |
 | `reset_command_state()` | `reset_command_state()` | Clear the failure flag (tests, `main()` entry) |

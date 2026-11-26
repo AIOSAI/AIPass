@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: cli Display Module — public API for Rich terminal output formatting
-# Version: 0.5.5
+# Version: 0.6.0
 # Created: 2025-11-12
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -23,6 +23,7 @@ from rich.markup import escape  # published, bound not wrapped: docs/rich_markup
 
 from aipass.cli.apps.handlers.json import json_handler
 from aipass.cli.apps.handlers.cli.help_flags import wants_help
+from aipass.cli.apps.handlers.cli.header_version import header_version as header_version  # published, not wrapped
 
 # No prax logger: circular import (prax depends on cli).
 

@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from aipass.cli.apps.modules import display
     from aipass.cli.apps.modules.display import console, err_console, header, success, error, warning, fatal, section
     from aipass.cli.apps.modules.display import escape, mark_command_failed, command_failed, reset_command_state
-    from aipass.cli.apps.modules.display import resolve_exit
+    from aipass.cli.apps.modules.display import resolve_exit, header_version
     from aipass.cli.apps.modules.templates import operation_start, operation_complete
 
 _DISPLAY = "aipass.cli.apps.modules.display"
@@ -32,6 +32,7 @@ _HOMES = {
             "command_failed",
             "reset_command_state",
             "resolve_exit",
+            "header_version",
         ),
         _DISPLAY,
     ),

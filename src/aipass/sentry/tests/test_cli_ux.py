@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_cli_ux.py
 # Description: Tests for cli_ux_check.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-07-17
 # Modified: 2026-11-25
 # =============================================
@@ -93,8 +93,9 @@ def print_help():
     console.print("[yellow]Examples:[/yellow]")
     console.print("  drone @branch do-stuff")
 
-def main():
-    pass
+def main(args):
+    if args[0] == "--version":
+        console.print(f"branch v{header_version(__file__)}", highlight=False)
 """
 
 
@@ -112,6 +113,7 @@ def test_good_entry_passes_all(tmp_path):
     assert "usage_section" in names
     assert "examples_section" in names
     assert "no_internal_modules" in names
+    assert "version_from_header" in names
 
 
 BAD_ENTRY = """
@@ -422,8 +424,9 @@ def print_help():
     console.print("[yellow]Examples:[/yellow]")
     console.print("  drone @backup snapshot")
 
-def main():
-    pass
+def main(args):
+    if args[0] == "--version":
+        console.print(f"backup v{header_version(__file__)}", highlight=False)
 """
     entry = apps_dir / "backup.py"
     entry.write_text(source, encoding="utf-8")
@@ -571,3 +574,72 @@ def test_drone_systems_shape_fails_unstyled_unexplained_groups_and_highlighter_c
     for heading in ("line 3 'Infrastructure:'", "line 6 'AIPass Services ({}):'", "line 9 'Branches ({}):'"):
         assert heading in failed["heading_styled"] and heading in failed["group_explained"]
     assert "line 4, line 6, line 9" in failed["highlight_deliberate"]
+
+
+VERSION_ENTRY = '''"""tool 1.2.3 is the release this docstring describes."""
+
+from aipass.cli import console, header_version
+
+
+def handle(args):
+    if args[0] in ["--version", "-V"]:
+        {line}
+'''
+GOOD_VERSION = 'console.print(f"tool v{header_version(__file__)}", highlight=False)'
+
+
+def _version_row(tmp_path, source):
+    result = check_module(_file(tmp_path, "apps/tool.py", source))
+    return next(c for c in result["checks"] if c["name"] == "version_from_header")
+
+
+class TestTheVersionComesFromTheHeader:
+    @pytest.mark.parametrize(
+        "source",
+        [
+            VERSION_ENTRY.format(line=GOOD_VERSION),
+            VERSION_ENTRY.format(line="show_version()") + f"\n\ndef show_version():\n    {GOOD_VERSION}\n",
+        ],
+    )
+    def test_printing_name_v_and_the_helper_passes_directly_or_one_call_away(self, tmp_path, source):
+        assert _version_row(tmp_path, source)["passed"] is True
+
+    @pytest.mark.parametrize(
+        "source, finding",
+        [
+            ('VERSION = "1.2.3"\n' + VERSION_ENTRY.format(line=GOOD_VERSION), "line 1 VERSION holds a second version"),
+            ('__version__ = "1.2.3"\n' + VERSION_ENTRY.format(line=GOOD_VERSION), "__version__ holds a second version"),
+            (VERSION_ENTRY.format(line='console.print("tool v1.2.3")'), "'v1.2.3' is a version literal"),
+            (
+                VERSION_ENTRY.format(line='console.print(f"other v{header_version(__file__)}")'),
+                "--version does not print",
+            ),
+            (
+                VERSION_ENTRY.format(line='console.print(f"tool {header_version(__file__)}")'),
+                "--version does not print",
+            ),
+            (
+                VERSION_ENTRY.format(line='console.print(f"tool v{header_version(__file__)} ok")'),
+                "--version does not print",
+            ),
+            (VERSION_ENTRY.format(line='console.print(f"tool v{VER}")'), "--version does not print"),
+            ("def handle(args):\n    return args\n", "no --version branch"),
+        ],
+    )
+    def test_a_second_version_a_literal_a_wrong_form_or_no_branch_fails_by_name(self, tmp_path, source, finding):
+        row = _version_row(tmp_path, source)
+        assert row["passed"] is False and finding in row["message"]
+
+    def test_a_module_is_not_judged_for_the_agent_version(self, tmp_path):
+        result = check_module(_file(tmp_path, "apps/modules/tool.py", '__version__ = "1.0.0"\n' + STYLED_MODULE))
+        assert "version_from_header" not in {c["name"] for c in result["checks"]}
+
+
+def test_a_module_printing_through_an_uppercase_console_counts_as_console_print(tmp_path):
+    """display.py prints with CONSOLE.print: it is the Rich console, not a bare print."""
+    source = STYLED_MODULE.replace("console.print", "CONSOLE.print").replace(
+        '[yellow]Examples:[/yellow]")',
+        '[yellow]Examples:[/yellow]")\n    CONSOLE.print("  tool run 2", highlight=False)',
+    )
+    failed = _failed(_file(tmp_path, "apps/modules/tool.py", source))
+    assert "rich_console" not in failed and "examples_section" not in failed
