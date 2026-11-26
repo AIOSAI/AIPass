@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_cli_ux.py
 # Description: Tests for cli_ux_check.py
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-07-17
 # Modified: 2026-11-25
 # =============================================
@@ -629,6 +629,11 @@ class TestTheVersionComesFromTheHeader:
     def test_a_second_version_a_literal_a_wrong_form_or_no_branch_fails_by_name(self, tmp_path, source, finding):
         row = _version_row(tmp_path, source)
         assert row["passed"] is False and finding in row["message"]
+
+    def test_a_template_entry_named_by_placeholder_passes_with_its_escaped_braces(self, tmp_path):
+        source = VERSION_ENTRY.format(line='console.print(f"{{BRANCH}} v{header_version(__file__)}")')
+        result = check_module(_file(tmp_path, "apps/{{BRANCH}}.py", source))
+        assert next(c for c in result["checks"] if c["name"] == "version_from_header")["passed"] is True
 
     def test_a_module_is_not_judged_for_the_agent_version(self, tmp_path):
         result = check_module(_file(tmp_path, "apps/modules/tool.py", '__version__ = "1.0.0"\n' + STYLED_MODULE))

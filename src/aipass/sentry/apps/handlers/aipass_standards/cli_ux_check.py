@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: cli_ux_check.py
 # Description: CLI UX Standards Checker Handler
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-07-17
 # Modified: 2026-11-25
 # =============================================
@@ -747,6 +747,8 @@ def _branch_prints(tree: ast.Module, branch: ast.If) -> List[ast.Call]:
 def _check_version_from_header(tree: ast.Module, path: Path) -> Dict:
     """The entry point holds no version of its own and its --version prints the header's as <name> v<semver>."""
     name = path.stem
+    # a template's {{BRANCH}} stem prints, inside an f-string, as the escaped "{BRANCH}"
+    printed = name.replace("{{", "{").replace("}}", "}")
     constants = _version_constants(tree)
     held = {site.split()[1] for site in constants}
     problems = [f"{site} holds a second version" for site in constants]
@@ -754,7 +756,7 @@ def _check_version_from_header(tree: ast.Module, path: Path) -> Dict:
     branch = _version_branch(tree)
     if branch is None:
         problems.append("no --version branch")
-    elif not any(_prints_the_header(call, name) for call in _branch_prints(tree, branch)):
+    elif not any(_prints_the_header(call, printed) for call in _branch_prints(tree, branch)):
         problems.append(f"line {branch.lineno} --version does not print {name} v plus {VERSION_HELPER}(__file__)")
     cure = (
         f"the # Version header is the one version: drop the constant and print "
