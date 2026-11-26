@@ -8,7 +8,7 @@
     {
       "standard": "logged_fallback",
       "file": "apps/devpulse.py",
-      "lines": [107],
+      "lines": [109],
       "reason": "route_command's bool is the module's claim on the command, not its verdict. A module that raised is reported by name through error(), which marks the command failed, so resolve_exit answers 2 and a chained next step does not run; the shell can tell. A re-raise would hand drone a traceback for a module defect, and False would exit 1 as 'unknown command', which it is not (pinned in tests/test_devpulse.py test_route_command_catches_module_errors)."
     },
     {
