@@ -1783,6 +1783,14 @@
         "scan_file"
       ],
       "reason": "A file that cannot be read or parsed reports no findings by contract (docstring): ruff and the read-failing checkers convict it, and a portability verdict cannot be formed on it."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/ruff_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_module"
+      ],
+      "reason": "Not a stand-in: a ruff format --check that times out or cannot run is carried in fmt_failure and recorded as a FAILED Ruff format row (passed False, score 0); the checker does not follow the carried variable."
     }
   ],
   "notes": {
