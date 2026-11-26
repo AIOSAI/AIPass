@@ -57,7 +57,7 @@ def print_introspection():
     modules = discover_modules()
     console.print("[bold cyan]devpulse[/bold cyan] — Orchestration Hub")
     console.print("[dim]The user's primary collaborator — design, plan, dispatch, track[/dim]")
-    console.print(f"  Modules discovered: {len(modules)}")
+    console.print(f"  Modules discovered: {len(modules)}", highlight=False)
     for module in modules:
         name = module.__name__.split(".")[-1]
         desc = (module.__doc__ or "").strip().split("\n")[0] if module.__doc__ else "No description"
@@ -87,7 +87,7 @@ def print_help():
     console.print('  drone @devpulse compass query "registry"     Search rated decisions')
     console.print("  drone @devpulse watchdog agent @flow         Watch a dispatched agent")
     console.print("  drone @devpulse feedback inbox               Check cross-project feedback")
-    console.print("  drone @devpulse release-notify v2.8.4        Mail every project manager a release")
+    console.print("  drone @devpulse release-notify v2.8.4        Mail every project manager a release", highlight=False)
 
 
 def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
