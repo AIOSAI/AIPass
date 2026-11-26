@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ai_mail.py
 # Description: Entry point CLI for drone @ai_mail — inter-branch email system
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-03-08
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -20,7 +20,7 @@ from typing import Any, List
 
 from aipass.prax import logger
 
-from aipass.cli import console, error, reset_command_state, resolve_exit
+from aipass.cli import console, error, header_version, reset_command_state, resolve_exit
 
 _UPDATE_SECTION = None  # type: ignore
 
@@ -139,7 +139,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
             if module.handle_command(command, args):
                 return True
         except BrokenPipeError:
-            logger.info(f"[ai_mail] Broken pipe in {module.__name__} (stdout closed early)")
+            logger.warning(f"[ai_mail] Broken pipe in {module.__name__} (stdout closed early)")
             return True
 
     return False
@@ -166,7 +166,7 @@ def main():
             return 0
 
         if args[0] in ["--version", "-V"]:
-            console.print("ai_mail v2.0.0")
+            console.print(f"ai_mail v{header_version(__file__)}", highlight=False)
             return 0
 
         if args[0] in ["--help", "-h", "help"]:

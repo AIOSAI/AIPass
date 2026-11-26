@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: session_pointer.py
 # Description: Durable per-branch "current session" pointer for dispatch
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-08-20
-# Modified: 2026-10-28
+# Modified: 2026-11-26
 # =============================================
 
 """Durable per-branch current-session pointer.
@@ -43,7 +43,7 @@ def _log_operation(operation: str, data: dict) -> None:
     try:
         json_handler.log_operation(operation, data)
     except Exception as e:
-        logger.info("[session_pointer] log_operation(%s) failed: %s", operation, e)
+        logger.warning("[session_pointer] log_operation(%s) failed: %s", operation, e)
 
 
 def mint_session_id() -> str:
@@ -68,8 +68,7 @@ def _claude_home() -> Optional[Path]:
             _HOME_FAILURE_WARNED = True
             logger.warning(
                 "[session_pointer] cannot determine the home directory (%s) — no ~/.claude/projects "
-                "can be located, so transcript lookups will report absence and dispatches fall back "
-                "to -c.",
+                "can be located, so transcript lookups report absence and dispatches resume with -c.",
                 e,
             )
         return None
@@ -224,7 +223,7 @@ def write_pointer(
             try:
                 os.unlink(tmp_name)
             except OSError as e:
-                logger.info("[session_pointer] Could not remove temp file %s: %s", tmp_name, e)
+                logger.warning("[session_pointer] Could not remove temp file %s: %s", tmp_name, e)
 
 
 def record_run(branch_path: Path, run: dict) -> bool:
@@ -260,7 +259,7 @@ def observe_model(branch_path: Path, session_id: str, provider: str) -> Tuple[Op
             return _observe_codex(session_id)
         return _observe_claude(branch_path, session_id)
     except (OSError, sqlite3.Error, ValueError) as e:
-        logger.info("[session_pointer] %s model for %s not observable: %s", provider, session_id, e)
+        logger.warning("[session_pointer] %s model for %s not observable: %s", provider, session_id, e)
         return None, None
 
 
@@ -288,7 +287,7 @@ def _jsonl_rows(path: Optional[Path]) -> Iterator:
             try:
                 row = json.loads(line)
             except json.JSONDecodeError as e:
-                logger.info("[session_pointer] skipping a non-JSON line in %s: %s", path, e)
+                logger.warning("[session_pointer] skipping a non-JSON line in %s: %s", path, e)
                 continue
             if isinstance(row, dict):
                 yield row

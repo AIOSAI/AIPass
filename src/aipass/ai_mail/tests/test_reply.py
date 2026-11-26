@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_reply.py
 # Description: Tests for email reply handler
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-04-25
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/email/reply.py."""
@@ -454,3 +454,29 @@ def test_cross_project_reply_round_trip(tmp_path):
     assert landed["from"] == "@vera"
     assert landed["message"] == "Reply back inbound"
     assert landed["reply_path"] == str(ext_inbox)
+
+
+def test_reply_says_so_when_its_sent_copy_cannot_be_saved(tmp_path):
+    """A reply that lands but leaves no sent/ record tells the sender, not only the log."""
+    _ext_branch, ext_inbox = _make_external_project(tmp_path)
+    branch_a = tmp_path / "aipass_root" / "branch_a"
+    sent_dir = branch_a / ".ai_mail.local" / "sent"
+    sent_dir.mkdir(parents=True)
+    sent_dir.chmod(0o555)
+    original = _make_original_email(sender="@vera")
+    original["reply_path"] = str(ext_inbox)
+
+    try:
+        with (
+            patch(_PATCH_BRANCH_DETECTION, return_value={"email": "@branch_a", "name": "BRANCH_A"}),
+            patch(_PATCH_ALL_BRANCHES, return_value=[]),
+            patch(_PATCH_CLOSE_ARCHIVE, return_value=(True, "closed")),
+            patch(_PATCH_NOTIFY),
+        ):
+            success, msg, _rid = send_reply(branch_a, original, "Reply outbound")
+    finally:
+        sent_dir.chmod(0o755)
+
+    assert success is True, msg
+    assert "sent copy not saved" in msg
+    assert list(sent_dir.glob("*.json")) == []

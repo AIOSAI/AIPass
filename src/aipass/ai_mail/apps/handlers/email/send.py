@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: send.py
 # Description: Email Send Handler
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-03-08
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 
 from aipass.prax import logger
+from aipass.trigger import trigger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.email.create import mark_sent_record_refused
 
@@ -136,12 +137,7 @@ def send_to_broadcast(
     log_operation_fn("broadcast_sent", {"recipients": len(branches), "successful": success_count})
 
     if success_count > 0:
-        try:
-            from aipass.trigger import trigger
-
-            trigger.fire("email_broadcast_sent", recipients=len(branches), successful=success_count, subject=subject)
-        except ImportError as e:
-            logger.warning("[send] trigger import unavailable for broadcast event: %s", e)
+        trigger.fire("email_broadcast_sent", recipients=len(branches), successful=success_count, subject=subject)
 
     try:
         if update_central_fn:
@@ -202,13 +198,7 @@ def send_to_single(
             payload["upsert_action"] = email_data["upsert_action"]
         log_operation_fn("email_sent", payload)
 
-        try:
-            from aipass.trigger import trigger
-
-            trigger.fire("email_sent", to=to_branch, subject=subject, auto_execute=auto_execute)
-        except ImportError as e:
-            logger.warning("[send] trigger import unavailable for send event: %s", e)
-
+        trigger.fire("email_sent", to=to_branch, subject=subject, auto_execute=auto_execute)
         return True, None
     else:
         # The sent record predates delivery: a refused one must never read as delivered.

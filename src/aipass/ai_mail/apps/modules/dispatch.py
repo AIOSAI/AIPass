@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.10.1
+# Version: 3.10.2
 # Created: 2026-02-02
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -26,17 +26,20 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 
 def print_help() -> None:
     """Print help for dispatch commands."""
-    help_text = """
-Dispatch Module - Agent dispatch management
-
-COMMANDS:
-  dispatch @target "Subject" "Body"   - Send dispatch email + wake target
+    console.print()
+    console.print("[bold cyan]Dispatch Module[/bold cyan] - Agent dispatch management")
+    console.print()
+    console.print("[yellow]Usage:[/yellow]")
+    console.print(
+        """  dispatch @target "Subject" "Body"   - Send dispatch email + wake target
   dispatch register                   - Show outstanding dispatches and which are overdue
   dispatch wake @branch               - Wake only (no email sent)
   dispatch stop @agent [--by <who>]   - End the agent's running dispatch; the row reads stopped
   dispatch close <id> "reason"        - Close a register row no monitor will close (sender or admin)
-
-DISPATCH (send + wake):
+"""
+    )
+    console.print("[yellow]Examples:[/yellow]")
+    help_text = """DISPATCH (send + wake):
   drone @ai_mail dispatch @branch "Subject" "Body"                    # Send + wake
   drone @ai_mail dispatch @branch "Subject" "Body" --fresh            # Send + fresh wake
   drone @ai_mail dispatch @branch "Subject" "Body" --model opus       # Send + wake with Opus
@@ -573,6 +576,7 @@ def print_introspection():
     )
     console.print("  [cyan]modules/email_send.py[/cyan] [dim](_send_direct — the send half of combined dispatch)[/dim]")
     console.print()
+    console.print("[dim]Run 'drone @ai_mail dispatch --help' for usage[/dim]")
 
 
 if __name__ == "__main__":

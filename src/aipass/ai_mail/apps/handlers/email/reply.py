@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: reply.py
 # Description: Email Reply Handler
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2025-11-30
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -196,11 +196,13 @@ def _deliver_via_reply_path(
     sent_folder = from_branch_path / ".ai_mail.local" / "sent"
     sent_folder.mkdir(parents=True, exist_ok=True)
     sent_file = sent_folder / f"{reply_id}.json"
+    unsaved = ""
     try:
         with open(sent_file, "w", encoding="utf-8") as f:
             json.dump(reply_email_data, f, indent=2)
     except Exception as e:
         logger.warning("[reply] failed to save sent copy: %s", e)
+        unsaved = f" (warning: sent copy not saved: {e})"
 
     from aipass.ai_mail.apps.handlers.email.inbox_cleanup import mark_as_closed_and_archive
 
@@ -208,10 +210,10 @@ def _deliver_via_reply_path(
     if original_id:
         close_success, close_msg = mark_as_closed_and_archive(from_branch_path, original_id)
         if not close_success:
-            return True, f"Reply sent (warning: original not closed: {close_msg})", reply_id
+            return True, f"Reply sent (warning: original not closed: {close_msg}){unsaved}", reply_id
 
     destination = reply_email_data.get("to", reply_path)
-    return True, f"Reply sent to {destination} via reply_path, original closed", reply_id
+    return True, f"Reply sent to {destination} via reply_path, original closed{unsaved}", reply_id
 
 
 if __name__ == "__main__":
@@ -223,15 +225,17 @@ if __name__ == "__main__":
     console.print("\nPURPOSE:")
     console.print("  Sends reply to email's original sender and auto-closes original")
     console.print()
-    console.print("FUNCTIONS PROVIDED:")
+    console.print("[bold cyan]FUNCTIONS PROVIDED:[/bold cyan]")
+    console.print("[dim]  the calls other modules import[/dim]")
     console.print("  - get_email_by_id(inbox_file, message_id) -> dict or None")
     console.print("  - send_reply(from_path, original_email, message) -> (bool, str, id)")
     console.print()
-    console.print("WORKFLOW:")
-    console.print("  1. Find original email by ID")
-    console.print("  2. Create reply with RE: subject")
-    console.print("  3. Deliver to original sender's inbox")
-    console.print("  4. Save to sender's sent folder")
-    console.print("  5. Auto-close original email")
+    console.print("[bold cyan]WORKFLOW:[/bold cyan]")
+    console.print("[dim]  the steps, in order[/dim]")
+    console.print("  1. Find original email by ID", highlight=False)
+    console.print("  2. Create reply with RE: subject", highlight=False)
+    console.print("  3. Deliver to original sender's inbox", highlight=False)
+    console.print("  4. Save to sender's sent folder", highlight=False)
+    console.print("  5. Auto-close original email", highlight=False)
     console.print()
     console.print("=" * 70 + "\n")

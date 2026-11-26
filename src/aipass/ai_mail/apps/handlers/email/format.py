@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: format.py
 # Description: Email Formatting Handler
-# Version: 1.4.2
+# Version: 1.4.3
 # Created: 2025-11-15
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -28,23 +28,22 @@ REGISTRY_PATH = find_repo_root() / "AIPASS_REGISTRY.json"
 def lookup_branch_alias(branch_name: str) -> Optional[str]:
     """Look up a branch's alias from AIPASS_REGISTRY.json.
 
-    Returns None when there is no alias to show, including an unreadable registry.
+    Returns None when the branch has no alias; raises when the registry cannot be read.
     """
-    try:
-        registry = json.loads(REGISTRY_PATH.read_text())
-        for branch in registry.get("branches", []):
-            if str(branch.get("name", "")).lower() == branch_name.lower():
-                alias = branch.get("alias", "")
-                return alias if alias else None
-        return None
-    except Exception as e:
-        logger.warning("[format] lookup_branch_alias(%s) failed: %s", branch_name, e)
-        return None
+    registry = json.loads(REGISTRY_PATH.read_text())
+    for branch in registry.get("branches", []):
+        if str(branch.get("name", "")).lower() == branch_name.lower():
+            return branch.get("alias") or None
+    return None
 
 
 def format_sender_display(from_name: str, from_addr: str) -> str:
-    """Format sender display with alias if available."""
-    alias = lookup_branch_alias(from_name)
+    """Format sender display with alias if available; an unreadable registry is stated in the row."""
+    try:
+        alias = lookup_branch_alias(from_name)
+    except (OSError, ValueError, AttributeError) as e:
+        logger.warning("[format] alias lookup for %s failed, registry unreadable: %s", from_name, e)
+        return f"{escape(from_name)} ({escape(from_addr)}) (alias unknown: registry unreadable)"
     if alias:
         return f"{escape(alias)} ({escape(from_addr)})"
     return f"{escape(from_name)} ({escape(from_addr)})"
@@ -135,19 +134,22 @@ if __name__ == "__main__":
     console.print("\nPURPOSE:")
     console.print("  Email display formatting and text utilities")
     console.print()
-    console.print("FUNCTIONS PROVIDED:")
+    console.print("[bold cyan]FUNCTIONS PROVIDED:[/bold cyan]")
+    console.print("[dim]  the calls other modules import[/dim]")
     console.print("  - format_email_preview(message, max_length) -> str")
     console.print("  - format_update_count(email_data) -> int")
     console.print("  - format_email_header(email_data) -> str")
     console.print("  - format_email_list_item(index, email_data, show_unread) -> str")
     console.print()
-    console.print("HANDLER CHARACTERISTICS:")
+    console.print("[bold cyan]HANDLER CHARACTERISTICS:[/bold cyan]")
+    console.print("[dim]  the layering rules this handler keeps[/dim]")
     console.print("  [green]+[/green] Independent - no module dependencies")
     console.print("  [green]+[/green] Can import prax (service provider)")
     console.print("  [green]+[/green] Pure business logic")
     console.print("  [dim]-[/dim] CANNOT import parent modules")
     console.print()
-    console.print("USAGE FROM MODULES:")
+    console.print("[bold cyan]USAGE FROM MODULES:[/bold cyan]")
+    console.print("[dim]  how a module imports it[/dim]")
     console.print("  from ai_mail.apps.handlers.email.format import format_email_preview")
     console.print("  from ai_mail.apps.handlers.email.format import format_email_header")
     console.print()

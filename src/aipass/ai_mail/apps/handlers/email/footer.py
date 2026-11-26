@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: footer.py
 # Description: Email Footer Handler
-# Version: 1.2.4
+# Version: 1.2.5
 # Created: 2026-01-29
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -39,27 +39,32 @@ def append_footer(message: str) -> str:
 
 
 if __name__ == "__main__":
-    print("\n" + "=" * 70)
-    print("EMAIL FOOTER HANDLER")
-    print("=" * 70)
-    print("\nPURPOSE:")
-    print("  Generates standard footer for all outgoing emails")
-    print()
-    print("FUNCTIONS PROVIDED:")
-    print("  - get_footer() -> str")
-    print("  - append_footer(message) -> str")
-    print()
-    print("FOOTER CONTENT:")
-    print(STANDARD_FOOTER)
-    print()
-    print("HANDLER CHARACTERISTICS:")
-    print("  ✓ Independent - no module dependencies")
-    print("  ✓ Can import prax (service provider)")
-    print("  ✓ Pure business logic")
-    print("  ✗ CANNOT import parent modules")
-    print()
-    print("USAGE FROM MODULES:")
-    print("  from ai_mail.apps.handlers.email.footer import append_footer")
-    print("  from ai_mail.apps.handlers.email.footer import get_footer")
-    print()
-    print("=" * 70 + "\n")
+    from aipass.cli import console
+
+    console.print("\n" + "=" * 70)
+    console.print("EMAIL FOOTER HANDLER")
+    console.print("=" * 70)
+    console.print("\nPURPOSE:")
+    console.print("  Generates standard footer for all outgoing emails")
+    console.print()
+    console.print("[bold cyan]FUNCTIONS PROVIDED:[/bold cyan]")
+    console.print("[dim]  the calls other modules import[/dim]")
+    console.print("  - get_footer() -> str")
+    console.print("  - append_footer(message) -> str")
+    console.print()
+    console.print("[bold cyan]FOOTER CONTENT:[/bold cyan]")
+    console.print(STANDARD_FOOTER, markup=False, highlight=False)
+    console.print()
+    console.print("[bold cyan]HANDLER CHARACTERISTICS:[/bold cyan]")
+    console.print("[dim]  the layering rules this handler keeps[/dim]")
+    console.print("  [green]+[/green] Independent - no module dependencies")
+    console.print("  [green]+[/green] Can import prax (service provider)")
+    console.print("  [green]+[/green] Pure business logic")
+    console.print("  [dim]-[/dim] CANNOT import parent modules")
+    console.print()
+    console.print("[bold cyan]USAGE FROM MODULES:[/bold cyan]")
+    console.print("[dim]  how a module imports it[/dim]")
+    console.print("  from ai_mail.apps.handlers.email.footer import append_footer")
+    console.print("  from ai_mail.apps.handlers.email.footer import get_footer")
+    console.print()
+    console.print("=" * 70 + "\n")

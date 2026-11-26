@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_format.py
 # Description: Tests for email formatting handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/email/format.py -- lookup, preview, header, list item."""
@@ -82,20 +82,31 @@ def test_lookup_branch_alias_unknown_branch_returns_none(registry_file):
     assert result is None
 
 
-def test_lookup_branch_alias_file_missing_returns_none(tmp_path, monkeypatch):
-    """Returns None when REGISTRY_PATH points to a non-existent file."""
+def test_lookup_branch_alias_file_missing_raises(tmp_path, monkeypatch):
+    """A missing registry is an error, not "no alias": the display that calls it states it."""
     monkeypatch.setattr(mod, "REGISTRY_PATH", tmp_path / "missing.json")
-    result = mod.lookup_branch_alias("TEAM_1")
-    assert result is None
+    with pytest.raises(FileNotFoundError):
+        mod.lookup_branch_alias("TEAM_1")
 
 
-def test_lookup_branch_alias_invalid_json_returns_none(tmp_path, monkeypatch):
-    """Returns None when REGISTRY_PATH contains invalid JSON."""
+def test_lookup_branch_alias_invalid_json_raises(tmp_path, monkeypatch):
+    """A corrupt registry is an error, not "no alias"."""
     bad_file = tmp_path / "bad.json"
     bad_file.write_text("not valid json {{{", encoding="utf-8")
     monkeypatch.setattr(mod, "REGISTRY_PATH", bad_file)
-    result = mod.lookup_branch_alias("TEAM_1")
-    assert result is None
+    with pytest.raises(ValueError):
+        mod.lookup_branch_alias("TEAM_1")
+
+
+def test_format_sender_display_states_an_unreadable_registry(tmp_path, monkeypatch):
+    """The listing still renders the sender, and the reader is told why no alias shows."""
+    bad_file = tmp_path / "bad.json"
+    bad_file.write_text("not valid json {{{", encoding="utf-8")
+    monkeypatch.setattr(mod, "REGISTRY_PATH", bad_file)
+
+    result = mod.format_sender_display("TEAM_1", "@team_1")
+
+    assert result == "TEAM_1 (@team_1) (alias unknown: registry unreadable)"
 
 
 # --- format_sender_display tests -------------------------------------

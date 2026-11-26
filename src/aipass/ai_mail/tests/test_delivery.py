@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_delivery.py
 # Description: Tests for email delivery handler
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-03-29
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py."""
@@ -204,11 +204,14 @@ def test_private_branch_email_not_found(repo_root):
 
 
 def test_private_branch_email_corrupted_json(repo_root):
-    """Corrupted registry file -> not private (graceful failure)."""
+    """A privacy check that cannot read its registry refuses, never reads as "not private" and delivers."""
     registry_path = repo_root / "PRIVATE_BRANCH_REGISTRY.json"
     registry_path.write_text("not json", encoding="utf-8")
 
-    assert _private_refusal(repo_root, "@secret") == ""
+    refusal = _private_refusal(repo_root, "@secret")
+
+    assert refusal.startswith("Private branch registry unreadable, @secret not delivered: ")
+    assert not (repo_root / "seats" / "secret" / ".ai_mail.local" / "inbox.json").exists()
 
 
 # ---- deliver_email_to_branch() tests ------------------------------
@@ -328,6 +331,22 @@ def test_deliver_unknown_branch(repo_root, noop_inbox_lock):
     assert success is False
     assert "Unknown branch email" in error
     assert "@nonexistent" in error
+
+
+def test_unknown_address_says_so_when_the_hosted_registries_cannot_be_read(repo_root, noop_inbox_lock):
+    """The plain refusal stands, and the reader is told the hosted-citizen check could not run."""
+    broken = MagicMock(side_effect=OSError("registry gone"))
+    with (
+        patch.object(delivery_mod, "get_all_branches", return_value=[]),
+        patch.object(registry_read, "get_project_tree_branches", broken),
+    ):
+        success, error = deliver_email_to_branch("@nonexistent", _make_email_data())
+
+    assert success is False
+    assert error == (
+        "Unknown branch email: @nonexistent (available: 0 branches); "
+        "hosted project registries unreadable: registry gone"
+    )
 
 
 def test_deliver_says_so_when_the_external_tier_cannot_answer(repo_root, noop_inbox_lock):

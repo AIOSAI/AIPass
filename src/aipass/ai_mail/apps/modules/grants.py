@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: grants.py
 # Description: Grants Module: the open scoped write grants dispatches carry, listed and widened
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-11-03
-# Modified: 2026-11-04
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -28,26 +28,30 @@ _LIVENESS = {True: "monitor alive", False: "monitor GONE", None: "monitor unknow
 
 def print_help() -> None:
     """Print help for the grants command."""
+    console.print()
+    console.print("[bold cyan]Grants[/bold cyan] - scoped write grants carried by open dispatches")
+    console.print()
+    console.print("[yellow]Usage:[/yellow]")
     console.print(
-        """
-Grants - scoped write grants carried by open dispatches
-
-  drone @ai_mail grants      List each open grant: dispatch, sender -> target, root and paths, monitor
-  drone @ai_mail grants widen <id or unique prefix> <p1,p2,...>
-                             Admin seat only: add paths under the same root to a running dispatch's
+        "  [cyan]drone @ai_mail grants[/cyan]      List each open grant: dispatch, sender -> target, root and paths, monitor"
+    )
+    console.print("  [cyan]drone @ai_mail grants widen[/cyan] <id or unique prefix> <p1,p2,...>")
+    console.print(
+        """                             Admin seat only: add paths under the same root to a running dispatch's
                              grant, validated as at send; the agent's next write sees them. Mail the
                              target yourself: the widen sends nothing.
-
-GRANTING (admin seat only), on the dispatch verb:
-  drone @ai_mail dispatch @hooks "S" "B" --grant-root <project dir> --grant src/loop.ts,src/hooks
+"""
+    )
+    console.print("[yellow]Examples:[/yellow] [dim]granting (admin seat only), on the dispatch verb[/dim]")
+    console.print(
+        """  drone @ai_mail dispatch @hooks "S" "B" --grant-root <project dir> --grant src/loop.ts,src/hooks
   Files grant themselves; a directory grants everything under it, new files included. Refused
   before the send for a non-admin sender, a manager target, an absolute path, .., a path that
   escapes the root, the root itself, .git, a missing path, or an overlap with an open grant.
   The body gains a GRANT block. The grant lives on the dispatch's register row and ends when the
   row closes (monitor exit, reply, stop, close); only the session carrying that dispatch's
   AIPASS_DISPATCH_ID holds it.
-""",
-        markup=False,
+"""
     )
 
 
@@ -70,7 +74,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if not rows:
         console.print("No open grants")
         return True
-    console.print(f"\nOpen grants ({len(rows)})\n")
+    console.print(f"\n[bold cyan]Open grants[/bold cyan] ({len(rows)})\n")
     for row in rows:
         _print_row(row)
     return True
@@ -89,7 +93,7 @@ def _widen(args: List[str]) -> bool:
     except GrantRefused as exc:
         error(str(exc))
         return True
-    console.print("Grant now:")
+    console.print("[bold cyan]Grant now:[/bold cyan]")
     _print_row(row)
     console.print(f"Mail {row.get('target')} the new paths: the widen sends nothing.", soft_wrap=True)
     return True
@@ -112,6 +116,7 @@ def print_introspection() -> None:
     console.print("[dim]Lists and widens the open scoped write grants on the dispatch register.[/dim]")
     console.print("  [cyan]handlers/dispatch/grant.py[/cyan] [dim](open_grants)[/dim]")
     console.print("  [cyan]handlers/dispatch/register.py[/cyan] [dim](widen_grant)[/dim]")
+    console.print("[dim]Run 'drone @ai_mail grants --help' for usage[/dim]")
     console.print()
 
 

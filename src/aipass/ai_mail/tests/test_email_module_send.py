@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_email_module_send.py
 # Description: Tests for email_send.py's send lane and email.py's command routing
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/email_send.py's handle_send and the routing of apps/modules/email.py."""
@@ -14,9 +14,12 @@
 # sentry: no-test-needed(ruff) — that print_help, caller_refusal and resolve_broadcast_targets parse and import
 # sentry: no-test-needed(shared) — handle_inbox() and the other reading handlers: tests/test_email_module.py
 
+import importlib.util
+
 import pytest
 from unittest.mock import MagicMock
 
+from aipass.ai_mail.apps.handlers import central_writer
 from aipass.ai_mail.apps.modules import email_send as email_send_mod
 from aipass.ai_mail.apps.modules.email import (
     handle_command,
@@ -382,8 +385,8 @@ class TestGetBranchInfoFn:
         assert callable(result)
         assert result.__name__ == "get_branch_info_from_registry"
 
-    def test_get_branch_info_fn_import_error(self, monkeypatch, tmp_path):
-        """Returns None on ImportError."""
+    def test_get_branch_info_fn_import_error_fails_the_send(self, monkeypatch, tmp_path):
+        """A broken branch_detection import raises: no silent None lookup."""
         import builtins
 
         original_import = builtins.__import__
@@ -396,8 +399,20 @@ class TestGetBranchInfoFn:
 
         monkeypatch.setattr(builtins, "__import__", mock_import)
 
-        result = self._lookup_handed_over(monkeypatch, tmp_path)
-        assert result is None
+        with pytest.raises(ImportError, match="no module"):
+            self._lookup_handed_over(monkeypatch, tmp_path)
+
+
+@pytest.mark.parametrize("name", ["email", "email_send"])
+def test_module_import_fails_loudly_without_central_writer(name, monkeypatch):
+    """A missing central_writer stops the module importing, never a None stand-in."""
+    monkeypatch.delattr(central_writer, "update_central")
+    path = email_send_mod.__file__.replace("email_send.py", f"{name}.py")
+    spec = importlib.util.spec_from_file_location(f"_probe_{name}", path)
+    probe = importlib.util.module_from_spec(spec)
+
+    with pytest.raises(ImportError, match="central_writer"):
+        spec.loader.exec_module(probe)
 
 
 class TestSendDirectExtended:
@@ -413,10 +428,14 @@ class TestSendDirectExtended:
         monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", error_mock)
         _no_error_dispatch(monkeypatch)
 
+        warned: list[str] = []
+        monkeypatch.setattr(email_send_mod.logger, "warning", lambda msg, *a: warned.append(msg))
+
         result = handle_send(["@target", "Sub", "Msg"])
         assert result is True
         # A closed stdout is not a failed send: nothing is reported as an error
         error_mock.assert_not_called()
+        assert any("broken pipe" in line for line in warned), warned
 
     def test_send_direct_generic_exception(self, monkeypatch):
         """Generic exception calls dispatch_send_error and returns False."""

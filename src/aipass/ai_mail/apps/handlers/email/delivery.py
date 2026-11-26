@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.6.3
+# Version: 3.6.4
 # Created: 2025-12-02
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -75,35 +75,14 @@ def _get_inbox_lock():
     return _INBOX_LOCK
 
 
-def _migrate_inbox_format(inbox_data: Dict, inbox_file: Path) -> Dict:
-    """Auto-migrate old inbox format to v2 schema, persisting when anything changed. Caller holds the lock."""
-    inbox_data, migrated = migrate_inbox_format(inbox_data)
-
-    if migrated:
-        try:
-            with open(inbox_file, "w", encoding="utf-8") as f:
-                json.dump(inbox_data, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            logger.warning("[delivery] _migrate_inbox_format() failed to persist migration for %s: %s", inbox_file, e)
-            return inbox_data
-
-    return inbox_data
-
-
 def _is_private_branch_email(email: str) -> bool:
     """Check if email belongs to a private branch."""
     registry_path = _REPO_ROOT / "PRIVATE_BRANCH_REGISTRY.json"
     if not registry_path.exists():
         return False
-    try:
-        with open(registry_path, "r", encoding="utf-8") as f:
-            registry = json.load(f)
-        for branch in registry.get("branches", []):
-            if branch.get("email", "") == email:
-                return True
-    except (json.JSONDecodeError, IOError) as e:
-        logger.warning("[delivery] _is_private_branch_email(%s) failed: %s", email, e)
-    return False
+    with open(registry_path, "r", encoding="utf-8") as f:
+        registry = json.load(f)
+    return any(branch.get("email", "") == email for branch in registry.get("branches", []))
 
 
 def _resolve_reply_path() -> str:
@@ -297,7 +276,7 @@ def _describe_unresolved_address(to_branch: str, known_count: int) -> str:
 
     Returns a string only: the caller's branch map is never updated, so the wall is described, not opened.
     """
-    fallback = f"Unknown branch email: {to_branch} (available: {known_count} branches)"
+    unknown = f"Unknown branch email: {to_branch} (available: {known_count} branches)"
 
     try:
         from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
@@ -305,11 +284,11 @@ def _describe_unresolved_address(to_branch: str, known_count: int) -> str:
         hosted = get_project_tree_branches(_REPO_ROOT)
     except Exception as exc:
         logger.warning("[delivery] could not read hosted project registries to explain refusal: %s", exc)
-        return fallback
+        return f"{unknown}; hosted project registries unreadable: {exc}"
 
     hosted_path = hosted.get(to_branch)
     if not hosted_path:
-        return fallback
+        return unknown
 
     project = _hosted_project_name(hosted_path)
     logger.info("[delivery] out-of-scope address refused: %s (hosted project: %s)", to_branch, project)
@@ -438,7 +417,12 @@ def deliver_email_to_branch(
         return False, _describe_unresolved_address(to_branch, len(branches))
 
     sender_email = email_data.get("from", "")
-    if _is_private_branch_email(to_branch) and sender_email != to_branch:
+    try:
+        private = _is_private_branch_email(to_branch)
+    except (ValueError, OSError) as e:
+        logger.warning("[delivery] private branch registry unreadable for %s: %s", to_branch, e)
+        return False, f"Private branch registry unreadable, {to_branch} not delivered: {e}"
+    if private and sender_email != to_branch:
         return False, f"Cannot deliver to private branch: {to_branch}"
 
     raw_path = branches[to_branch]
@@ -485,7 +469,7 @@ def deliver_email_to_branch(
             try:
                 with open(inbox_file, "r", encoding="utf-8") as f:
                     inbox_data = json.load(f)
-                inbox_data = _migrate_inbox_format(inbox_data, inbox_file)
+                inbox_data = migrate_inbox_format(inbox_data)[0]  # persisted by this lane's own write below
             except Exception as e:
                 logger.warning("[delivery] failed to read inbox %s: %s", inbox_file, e)
                 return False, f"Failed to read inbox {inbox_file}: {e}"
@@ -611,7 +595,7 @@ def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str
             try:
                 with open(inbox_file, "r", encoding="utf-8") as fh:
                     inbox_data = json.load(fh)
-                inbox_data = _migrate_inbox_format(inbox_data, inbox_file)
+                inbox_data = migrate_inbox_format(inbox_data)[0]  # persisted by this lane's own write below
             except Exception as exc:
                 logger.warning("[delivery] deliver_to_inbox_file read failed %s: %s", inbox_file, exc)
                 return False, f"Failed to read inbox {inbox_file}: {exc}", ""
@@ -747,18 +731,21 @@ if __name__ == "__main__":
     console.print("\nPURPOSE:")
     console.print("  Delivers emails to branch inboxes")
     console.print()
-    console.print("FUNCTIONS PROVIDED:")
+    console.print("[bold cyan]FUNCTIONS PROVIDED:[/bold cyan]")
+    console.print("[dim]  the calls other modules import[/dim]")
     console.print("  - get_all_branches() -> List[Dict]")
     console.print("  - deliver_email_to_branch(to_branch, email_data, on_delivered, upsert_key) -> Tuple\\[bool, str]")
     console.print("  - deliver_to_inbox_file(inbox_file, email_data) -> Tuple\\[bool, str, str]")
     console.print()
-    console.print("HANDLER CHARACTERISTICS:")
+    console.print("[bold cyan]HANDLER CHARACTERISTICS:[/bold cyan]")
+    console.print("[dim]  the layering rules this handler keeps[/dim]")
     console.print("  - Independent - no module dependencies")
     console.print("  - Uses lazy imports for services")
     console.print("  - Pure business logic")
     console.print("  - CANNOT import parent modules")
     console.print()
-    console.print("USAGE FROM MODULES:")
+    console.print("[bold cyan]USAGE FROM MODULES:[/bold cyan]")
+    console.print("[dim]  how a module imports it[/dim]")
     console.print("  from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch")
     console.print("  from aipass.ai_mail.apps.handlers.registry.read import get_all_branches")
     console.print()

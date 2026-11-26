@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stop.py
 # Description: End a running dispatch from outside: the stop verb's handler, and the live-monitor test close uses
-# Version: 1.0.5
+# Version: 1.0.6
 # Created: 2026-11-01
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -67,8 +67,10 @@ def _signal(pid: int, as_group: bool, sig: int) -> None:
             os.killpg(pid, sig)
         else:
             os.kill(pid, sig)
-    except OSError as e:
+    except ProcessLookupError as e:
         logger.info("[stop] signal %s to PID %s not sent, already gone: %s", sig, pid, e)
+    except OSError as e:
+        logger.warning("[stop] signal %s to PID %s not sent: %s", sig, pid, e)
 
 
 def _end_process_group(pid: int, grace: float) -> None:
@@ -77,7 +79,7 @@ def _end_process_group(pid: int, grace: float) -> None:
     try:
         as_group = os.getpgid(pid) == pid
     except OSError as e:
-        logger.info("[stop] PID %s gone before the stop: %s", pid, e)
+        logger.warning("[stop] PID %s gone before the stop: %s", pid, e)
         return
     _signal(pid, as_group, signal.SIGTERM)
     deadline = time.monotonic() + grace

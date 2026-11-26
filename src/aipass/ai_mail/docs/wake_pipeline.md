@@ -19,8 +19,13 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
    - **Auto-retry** — 3 strikes: attempt 1+2 resume, attempt 3 fresh (new session)
    - **Bounce email** — on final failure, sends error report back to sender. A bounce
      drone did not deliver logs one `BOUNCE NOT DELIVERED` warning and ends the
-     completion status with `, bounce NOT delivered to @sender` (report, register, feed)
-   - **Lock cleanup** — removes `.dispatch.lock` when agent exits
+     completion status with `, bounce NOT delivered to @sender` (report, register, feed).
+     A report that cannot be assembled ends it with `, report NOT written (<error type>)`
+   - **Lock cleanup** — removes `.dispatch.lock` when agent exits; a lock it cannot
+     remove, or cannot prove it owns, is left in place with a warning
+   - **Side files fail loud, the agent runs on** — an unreadable stream, stderr or
+     result file, or a lock that will not take the monitor's pid, logs a warning and
+     is named in the outcome; it never stops a running agent
    - **Transcripts** — `dispatch_stdout.out`, `dispatch_stderr.out` and
      `dispatch_stdout.attempt-N.out` (N 1-3) in the target's `logs/`, rotated
      to `.out.1`; never `.log`, which trigger's watcher reads.
@@ -45,7 +50,12 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
 
 ## Safety Limits
 
-- PID-based locking prevents concurrent agents per branch (`.dispatch.lock`)
+- PID-based locking prevents concurrent agents per branch (`.dispatch.lock`). A lock that
+  is not JSON holds the branch and names why (`{"corrupt": "<why>"}`); a pid probe that
+  cannot run raises instead of reading as dead
+- **Scans that cannot run are said** — when `pgrep` or the zombie scan fails, the wake
+  goes on and the status block carries a warn row (`spawning unchecked`), never silence;
+  a notification feed that cannot be written is a warn row too
 - Max turns per wake, max dispatches per branch per day
 - `WAKE_BLOCKLIST` protects `@devpulse` from cross-branch manual wakes
 - **Manager structural block** — managers (`citizen_class: "manager"`, e.g. `@devpulse`) are unwakeable on the dispatch and manual paths. Mail delivers, wake skips. The three exceptions (scheduled, admin, @daemon self-wake) are named below

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_inbox_ops.py
 # Description: Tests for inbox operations handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-24
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/email/inbox_ops.py -- inbox loading and migration."""
@@ -198,5 +198,21 @@ def test_load_inbox_refuses_a_wrong_shaped_store_and_keeps_it(tmp_path, stored):
 
     with pytest.raises(Exception, match=r"(?s)inbox\.json.*wrong-shaped"):
         load_inbox(inbox_path)
+
+    assert inbox_path.read_text(encoding="utf-8") == stored
+
+
+def test_load_inbox_refuses_when_its_migration_cannot_be_saved(tmp_path):
+    """A migration that cannot be written back is refused, never handed out as if it were the inbox on disk."""
+    inbox_path = tmp_path / "inbox.json"
+    stored = json.dumps({"inbox": [{"id": "m1", "status": "new"}]})
+    inbox_path.write_text(stored, encoding="utf-8")
+    inbox_path.chmod(0o444)
+
+    try:
+        with pytest.raises(Exception, match="Failed to load inbox"):
+            load_inbox(inbox_path)
+    finally:
+        inbox_path.chmod(0o644)
 
     assert inbox_path.read_text(encoding="utf-8") == stored

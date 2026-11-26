@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: contacts.py
 # Description: Contacts address book — maps branch names to inbox paths
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-11
-# Modified: 2026-10-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -26,8 +26,7 @@ CONTACTS_FILE = find_repo_root() / "src/aipass/ai_mail/.ai_mail.local/contacts.j
 def _load_contacts() -> Dict:
     """Load contacts.json from disk.
 
-    Only a missing file reads as empty; an unreadable book raises RuntimeError, since
-    read as empty it lets the identity chain synthesize a citizen where a fault stands.
+    Only a missing file reads as empty; an unreadable one raises: empty, it would synthesize a citizen.
     """
     import json
 
@@ -107,7 +106,7 @@ if __name__ == "__main__":
     console.print(f"\nContacts file: {CONTACTS_FILE}")
     contacts = all_contacts()
     if contacts:
-        console.print(f"\n{len(contacts)} registered contact(s):")
+        console.print(f"\n{len(contacts)} registered contact(s):", highlight=False)
         for name, info in sorted(contacts.items()):
             console.print(f"  @{name} -> {info.get('inbox', '?')} ({info.get('project', '')})")
     else:

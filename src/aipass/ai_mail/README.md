@@ -4,7 +4,6 @@
 
 **Purpose:** Inter-agent messaging for AIPass. A file-based mail system that lets citizens send, receive and resolve messages at `@branch` addresses, and a dispatch pipeline that hands work over by waking the recipient. No SMTP, no external service — JSON files and symbolic routing.
 **Module:** `aipass.ai_mail`
-**Version:** 2.0.0
 **Created:** 2025-11-08
 
 ---

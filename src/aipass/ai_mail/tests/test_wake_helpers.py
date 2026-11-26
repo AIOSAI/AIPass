@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake_helpers.py
 # Description: Tests for the wake's small parts - dispatch status, the grant read, pid lock and branch resolution
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-10-08
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's helpers and pid_lock.py: status, locks, pids, resolve_branch."""
@@ -37,11 +37,14 @@ from aipass.ai_mail.apps.handlers.dispatch.wake import (
     DEFAULT_MODEL,
     wake_branch,
 )
+from aipass.ai_mail.apps.handlers.registry import read as registry_read
 from aipass.ai_mail.tests.support_wake import (
+    _FakeProc,
     _claude_args,
     _make_wake_fixtures,
     _patch_wake_deps,
     _record_spawn_routes,
+    _step,
 )
 
 pytestmark = pytest.mark.usefixtures("wake_log_operation_suppressed")
@@ -174,6 +177,33 @@ def test_read_json_corrupt(tmp_path, monkeypatch):
     assert str(raised).startswith("bad.json could not be read")
 
 
+# --- wake_branch when a scan or the feed cannot run --------------
+
+
+def test_scans_that_cannot_run_are_said_and_the_wake_goes_on(tmp_path, monkeypatch):
+    """ps, pgrep and the feed failing each leave a warn row naming the failure; none ends the wake."""
+    _make_wake_fixtures(tmp_path, monkeypatch)
+
+    def _no_tool(*a):
+        raise FileNotFoundError(2, "No such file or directory", "pgrep")
+
+    _patch_wake_deps(monkeypatch, clean_zombies=_no_tool, branch_occupant=_no_tool)
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
+
+    def _feed_down(*a, **kw):
+        raise OSError("feed is read-only")
+
+    monkeypatch.setattr("aipass.ai_mail.apps.handlers.notify.send_notification", _feed_down)
+
+    status, ok = wake_branch("@testbranch")
+
+    assert ok is True
+    assert _step(status, "pre-flight")[:2] == ("warn", "pre-flight")
+    assert "cannot scan for zombie processes" in _step(status, "pre-flight")[2]
+    assert _step(status, "occupancy")[0] == "warn" and "No such file" in _step(status, "occupancy")[2]
+    assert _step(status, "notify") == ("warn", "notify", "notification feed not written: feed is read-only")
+
+
 # --- check_pid_alive tests -------------------------------------------
 
 
@@ -187,6 +217,17 @@ def test_check_pid_alive_permission_error(monkeypatch):
     """PermissionError means process exists but cannot signal -- returns True."""
     monkeypatch.setattr(os, "kill", _raise_permission)
     assert check_pid_alive(1) is True
+
+
+def test_check_pid_alive_raises_when_the_probe_cannot_run(monkeypatch):
+    """An os.kill error that is neither "no such process" nor "not permitted" raises: dead is not known."""
+
+    def _einval(pid, sig):
+        raise OSError(22, "Invalid argument")
+
+    monkeypatch.setattr(os, "kill", _einval)
+    with pytest.raises(OSError, match="Invalid argument"):
+        check_pid_alive(42)
 
 
 def test_check_pid_alive_running_non_zombie(monkeypatch, tmp_path):
@@ -411,6 +452,16 @@ def test_check_lock_fresh_corrupt_json_is_held(tmp_path):
     assert lock_file.exists()
 
 
+def test_check_lock_corrupt_lock_names_why_it_is_held(tmp_path):
+    """The held answer for a corrupt lock carries the reason, not a bare flag."""
+    lock_dir = tmp_path / ".ai_mail.local"
+    lock_dir.mkdir(parents=True)
+    (lock_dir / ".dispatch.lock").write_text("{bad json", encoding="utf-8")
+    assert check_lock(tmp_path)["corrupt"].startswith("not JSON: ")
+    (lock_dir / ".dispatch.lock").write_text("[1, 2]", encoding="utf-8")
+    assert check_lock(tmp_path) == {"corrupt": "not a JSON object (list)"}
+
+
 def test_check_lock_old_corrupt_json_is_reclaimed(tmp_path):
     """A corrupt lock an hour old is a crashed writer's leftover: removed, None."""
     lock_dir = tmp_path / ".ai_mail.local"
@@ -591,13 +642,13 @@ def test_clean_zombies_counts_an_opencode_zombie(monkeypatch):
 
 
 def test_clean_zombies_subprocess_error(monkeypatch):
-    """Returns 0 on subprocess failure."""
+    """A ps that cannot run raises: zero zombies is not known."""
     monkeypatch.setattr(
         "subprocess.run",
         _raise_subprocess_error,
     )
-    count = clean_zombies()
-    assert count == 0
+    with pytest.raises(subprocess.SubprocessError):
+        clean_zombies()
 
 
 # --- Helpers ---------------------------------------------------------
@@ -768,6 +819,20 @@ class TestResolveBranchCallerRegistry:
 
         result = resolve_branch("@nonexistent")
         assert result is None
+
+    def test_an_unreadable_caller_tree_refuses(self, tmp_path, monkeypatch):
+        """A caller tree that cannot be walked refuses: steps 3-4 could serve a namesake."""
+        aipass_registry = tmp_path / "AIPASS_REGISTRY.json"
+        aipass_registry.write_text(json.dumps({"branches": []}), encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "BRANCH_REGISTRY", aipass_registry)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+
+        def _unwalkable(caller_cwd):
+            raise PermissionError(13, "Permission denied", caller_cwd)
+
+        monkeypatch.setattr(registry_read, "get_caller_project_branches", _unwalkable)
+        with pytest.raises(registry_read.RegistryUnreadable, match="Permission denied"):
+            resolve_branch("@strategy")
 
 
 # ─── NEW LINE COVERAGE TESTS ──────────────────────────────────
@@ -954,14 +1019,15 @@ class TestIsBranchOccupied:
     def test_a_claude_whose_argv_looks_like_a_subcommand_still_occupies(self, tmp_path, monkeypatch):
         assert self._scan(tmp_path, monkeypatch, "claude", ["claude", "exec"]) == "claude"
 
-    def test_pgrep_subprocess_failure_returns_false(self, tmp_path, monkeypatch):
-        """subprocess failure returns False."""
+    def test_pgrep_subprocess_failure_raises(self, tmp_path, monkeypatch):
+        """A pgrep that cannot run raises: an empty branch is not known."""
 
         def _fail(*a, **kw):
             raise subprocess.SubprocessError("pgrep failed")
 
         monkeypatch.setattr(subprocess, "run", _fail)
-        assert branch_occupant(tmp_path) is None
+        with pytest.raises(subprocess.SubprocessError, match="pgrep failed"):
+            branch_occupant(tmp_path)
 
     def test_readlink_oserror_continues(self, tmp_path, monkeypatch):
         """OSError on readlink is caught, continues to next PID."""

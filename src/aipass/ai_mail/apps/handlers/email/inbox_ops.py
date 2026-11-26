@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_ops.py
 # Description: Inbox Operations Handler
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2025-11-15
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -129,11 +129,8 @@ def load_inbox(inbox_file: Path) -> Dict:
                 logger.warning("[inbox] sweep_closed in load_inbox failed: %s", e)
 
             if migrated:
-                try:
-                    with open(inbox_file, "w", encoding="utf-8") as f:
-                        json.dump(inbox_data, f, indent=2, ensure_ascii=False)
-                except Exception as e:
-                    logger.warning("[inbox] Migration persist failed for %s: %s", inbox_file, e)
+                with open(inbox_file, "w", encoding="utf-8") as f:
+                    json.dump(inbox_data, f, indent=2, ensure_ascii=False)
 
         return inbox_data
 
@@ -154,16 +151,19 @@ if __name__ == "__main__":
     console.print("\nPURPOSE:")
     console.print("  Handles inbox file I/O operations")
     console.print()
-    console.print("FUNCTIONS PROVIDED:")
+    console.print("[bold cyan]FUNCTIONS PROVIDED:[/bold cyan]")
+    console.print("[dim]  the calls other modules import[/dim]")
     console.print("  - load_inbox(inbox_file) -> Dict")
     console.print()
-    console.print("HANDLER CHARACTERISTICS:")
+    console.print("[bold cyan]HANDLER CHARACTERISTICS:[/bold cyan]")
+    console.print("[dim]  the layering rules this handler keeps[/dim]")
     console.print("  [green]+[/green] Independent - no module dependencies")
     console.print("  [green]+[/green] Can import prax (service provider)")
     console.print("  [green]+[/green] Pure business logic")
     console.print("  [dim]-[/dim] CANNOT import parent modules")
     console.print()
-    console.print("USAGE FROM MODULES:")
+    console.print("[bold cyan]USAGE FROM MODULES:[/bold cyan]")
+    console.print("[dim]  how a module imports it[/dim]")
     console.print("  from aipass.ai_mail.apps.handlers.email.inbox_ops import load_inbox")
     console.print("  inbox_data = load_inbox(Path('/path/to/inbox.json'))")
     console.print()

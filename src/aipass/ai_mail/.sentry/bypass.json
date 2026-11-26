@@ -121,14 +121,14 @@
       "file": "apps/modules/email.py",
       "standard": "logged_fallback",
       "lines": [
-        198,
-        202,
-        247,
-        251,
-        296,
-        330,
-        360,
-        383
+        199,
+        203,
+        248,
+        252,
+        294,
+        328,
+        358,
+        381
       ],
       "reason": "CLI handler layer (ai_mail, fleet green leg 9). A handle_* return is 'command recognised', not 'it worked' (branch prompt, Critical Rules): the router stops on True. Failure is told by cli error(), which calls mark_command_failed() and sets the process exit; a BrokenPipeError is stdout closed early, not a failure. So True on these lines is the contract, and the checker reads it as an indistinguishable fallback."
     },
@@ -136,8 +136,8 @@
       "file": "apps/modules/email_send.py",
       "standard": "logged_fallback",
       "lines": [
-        247,
-        252
+        238,
+        243
       ],
       "reason": "Same CLI handler contract as apps/modules/email.py (ai_mail, fleet green leg 9): 248 is a BrokenPipeError (stdout closed early); 253 has already called error() (mark_command_failed) and mailed the failure through dispatch_send_error, so the caller is told by the failure flag, not by the bool."
     },
@@ -145,10 +145,10 @@
       "file": "apps/modules/dispatch.py",
       "standard": "logged_fallback",
       "lines": [
-        346,
-        395,
-        450,
-        477
+        349,
+        398,
+        453,
+        480
       ],
       "reason": "Same CLI handler contract (ai_mail, fleet green legs 9 and 10): 484 is the send phase failing to resolve the sender, 457 a refused grant, 353 is dispatch stop and 402 dispatch close meeting an unreadable registry; each has already called error() (mark_command_failed). True tells the router the command was recognised."
     },
@@ -156,30 +156,82 @@
       "file": "apps/handlers/email/send.py",
       "standard": "logged_fallback",
       "lines": [
-        242,
-        250,
-        266,
-        274
+        232,
+        240,
+        256,
+        264
       ],
-      "reason": "The value is the true answer (ai_mail, fleet green leg 10): collect_interactive_input documents None as 'cancelled', and these four arms are the user cancelling at a prompt (Ctrl-C, end of input, or a pick that is not a number), the same answer its in-try paths give for an out-of-range pick, an empty subject or a 'n' at the confirm. No system failure is hidden: its one caller, email_send.py:189, prints 'Cancelled' and sends nothing, and each arm logs what was typed or raised."
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined 2026-11-26, FPLAN-1221, after the trigger import moved to the top): collect_interactive_input documents None as 'cancelled', and these four arms are the user cancelling at a prompt (Ctrl-C, end of input, or a pick that is not a number), the same answer its in-try paths give for an out-of-range pick, an empty subject or a 'n' at the confirm. No system failure is hidden: its one caller, email_send.py:155, prints 'Cancelled' and sends nothing, and each arm logs what was typed or raised."
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "logged_fallback",
       "lines": [
-        164,
-        243,
-        676
+        167,
+        246,
+        692
       ],
-      "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined 2026-10-08, 2026-10-16 and 2026-11-15). 164: wake_sender returns an outcome word, and 'failed' is what its normal path also answers when the sender was not woken; a crash in the wake-back is that same outcome, it never reads as 'success', and the report's wake_result carries it. 243: _mail_wake_back returns True only when the mail went; False is its one failure answer, the same as a non-zero exit, and its caller turns it into 'failed_manager_mail'. 676: _parse_result_json documents {} for a stdout log that is missing or holds no JSON, which is what an unreadable log is to the report: build_report then records cost, tokens and turns as null, not as values."
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined 2026-10-08, 2026-10-16, 2026-11-15 and 2026-11-26). 167: wake_sender returns an outcome word, and 'failed' is what its normal path also answers when the sender was not woken; a crash in the wake-back is that same outcome, it never reads as 'success', and the report's wake_result carries it. 246: _mail_wake_back returns True only when the mail went; False is its one failure answer, the same as a non-zero exit, and its caller turns it into 'failed_manager_mail'. 692: _parse_result_json documents {} for a stdout log that is missing or holds no JSON, which is what an unreadable log is to the report: build_report then records cost, tokens and turns as null, not as values."
+    },
+    {
+      "file": "apps/handlers/dispatch/dispatch_monitor.py",
+      "standard": "fallback",
+      "functions": ["_read_agent_stderr"],
+      "reason": "A classifier input, not a record (ai_mail, FPLAN-1221): the dispatch stderr log is read only to tell a rate limit or overload from a plain failure. Unreadable, it reads as no such evidence: the retry takes the short pause and the bounce keeps the plain 'All N attempts failed' reason. The warning names the file, and the bounce's own read of the same file states '(no stderr captured)'. A raise would kill the monitor mid-retry with the lock held and no bounce, report or wake-back."
+    },
+    {
+      "file": "apps/handlers/dispatch/dispatch_monitor.py",
+      "standard": "fallback",
+      "functions": ["_parse_result_json"],
+      "reason": "The documented {} contract of the logged_fallback row above (ai_mail, FPLAN-1221): a stdout log that cannot be read is no result JSON. Every caller states it: _summarize_result_json writes '(no result JSON captured)' into the bounce, reconcile_pointer leaves the pointer, build_report records cost, tokens and turns as null. The warning names the file. A raise would lose the bounce and report of a run that already happened."
+    },
+    {
+      "file": "apps/handlers/dispatch/dispatch_monitor.py",
+      "standard": "fallback",
+      "functions": ["_read_stderr_segment"],
+      "reason": "Read only after an exit 0, to find the background-tasks marker that downgrades it to INCOMPLETE (ai_mail, FPLAN-1221). Unreadable, there is no evidence of the marker and the agent's own exit 0 stands; the warning names the file. A raise would kill the monitor after a successful run, before its report, wake-back and lock release."
+    },
+    {
+      "file": "apps/handlers/dispatch/dispatch_monitor.py",
+      "standard": "fallback",
+      "functions": ["_cleanup_own_lock"],
+      "reason": "Leaving an unreadable lock is the safe answer, its docstring's contract (ai_mail, FPLAN-1221): the monitor deletes only a lock it can prove it owns, or it could free a successor monitor's lock. The warning names the lock; pid_lock.check_lock then answers it as held ('unreadable') or removes it as corrupt past its grace period."
+    },
+    {
+      "file": "apps/handlers/dispatch/dispatch_monitor.py",
+      "standard": "fallback",
+      "functions": ["_check_jsonl_activity"],
+      "reason": "The startup probe (ai_mail, FPLAN-1221): a transcript dir that cannot be listed, or a transcript that cannot be stat'ed, reads as 'no activity yet', never as started. The warning names it on each poll; if it persists, the startup timeout ends the attempt and the 3-strike retry and bounce run. A raise would escape run_with_startup_check with a live agent spawned and the lock held."
+    },
+    {
+      "file": "apps/handlers/dispatch/dispatch_monitor.py",
+      "standard": "fallback",
+      "lines": [857],
+      "reason": "run_with_startup_check (ai_mail, FPLAN-1221): a stdout log that cannot be opened runs the agent with stdout to DEVNULL rather than not at all; its work (reply, memories) is the dispatch's point. The warning names the file. The result JSON then reads as absent, which the bounce and report state; a streaming provider (codex, opencode) shows no stdout byte and fails at the startup timeout through the 3-strike path."
+    },
+    {
+      "file": "apps/handlers/dispatch/dispatch_monitor.py",
+      "standard": "fallback",
+      "lines": [981, 1001, 1204],
+      "reason": "main() keeps the agent running over a side file it cannot use (ai_mail, FPLAN-1221); each warns with the file. 981: the lock cannot take the monitor's PID, so it keeps the wake's pre-spawn PID; known cost, raised to the owner: pid_lock reads that lock stale once the wake's PID exits. 1001: the stderr log cannot be opened; the agent inherits the monitor's stderr, the attempt lines go unwritten, and the bounce states '(no stderr captured)'. 1204: the max-turns label cannot be read; the status comes from the exit code alone. A raise in any of them loses the dispatch's bounce, report, wake-back and lock release."
     },
     {
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "logged_fallback",
       "lines": [
-        394
+        395
       ],
-      "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined in legs 13 and 16): is_manager's FileNotFoundError arm answers False because a branch with no passport has declared no class, which is what wake_branch's manager gate also does for a missing passport (pinned: test_missing_passport_continues). A passport that exists but cannot be read is the other arm, and since leg 11 it fails closed (True) under @devpulse's ruling e; since leg 12 an unreadable registry fails closed too. Line shifted 381 -> 394 by the Linux-only purge (2026-11-14)."
+      "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined in legs 13 and 16): is_manager's FileNotFoundError arm answers False because a branch with no passport has declared no class, which is what wake_branch's manager gate also does for a missing passport (pinned: test_missing_passport_continues). A passport that exists but cannot be read is the other arm, and since leg 11 it fails closed (True) under @devpulse's ruling e; since leg 12 an unreadable registry fails closed too. Line shifted 381 -> 394 by the Linux-only purge (2026-11-14), 394 -> 395 by a wrapped line (FPLAN-1221)."
+    },
+    {
+      "file": "apps/handlers/dispatch/wake.py",
+      "standard": "fallback",
+      "lines": [
+        151,
+        396
+      ],
+      "reason": "Fails closed, a refusal not a pass (FPLAN-1221); the checker reads the function name, not the polarity. 151: fable_allowed answers an empty grant for an unreadable safety config, logged at error, so nobody runs Fable and resolve_wake_model refuses the model; a raise would end every wake over a model grant. 396: is_manager answers True (manager) for a passport that exists but cannot be read, logged at warning, under @devpulse's ruling e: a manager is never woken, so the target is mailed, not spawned, and dispatch says so.",
+      "measured": "2026-11-26 (FPLAN-1221) — added for these two sites; both arms fail toward refusing, never toward spawning."
     },
     {
       "file": "apps/handlers/email/create.py",
@@ -191,11 +243,12 @@
     },
     {
       "file": "apps/handlers/registry/read.py",
-      "standard": "logged_fallback",
-      "lines": [
-        261
+      "standard": "fallback",
+      "functions": [
+        "declared_residency"
       ],
-      "reason": "Traced, the namesake is not reachable through this {} (ai_mail, fleet green leg 12). _residents_from_registry feeds get_resident_branches only, whose caller is @sentry's fresh_clone_check 13/40 (@all reads the fleet through memory's door instead). An unreadable resident registry drops that project's residents from the list; it adds no address and resolves no name, so no mail can reach another project's citizen through it. The failure is logged at error and names the registry. A raise would stop the whole broadcast to every other project and reach @sentry's check. Line shifted 270 -> 261 by the Linux-only purge (2026-11-14)."
+      "reason": "Fails closed, a refusal not a default (FPLAN-1221): declared_residency documents None as 'declares nothing', and its one caller, _classify_resident, REFUSES that candidate and logs the refusal at error naming the branch, path, registry and 'missing, unreadable, or no field' (pinned: test_cross_project_bridge.py test_unreadable_passport_is_refused_not_crashed, test_every_refusal_is_named_at_error_level). One torn passport refuses one resident; a raise would drop every other project's residents with it. @memory's registry_scope.declared_residency keeps the same contract.",
+      "measured": "2026-11-26 (FPLAN-1221) — added for this site; the stale logged_fallback row at 261 is gone with its {} (_residents_from_registry now raises RegistryUnreadable)."
     },
     {
       "file": "apps/handlers/dispatch/register.py",
@@ -218,8 +271,8 @@
       "file": "apps/handlers/notify.py",
       "standard": "logged_fallback",
       "lines": [
-        198,
-        213
+        197,
+        212
       ],
       "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined in leg 16): _trim_jsonl returns whether the log was trimmed, and a read or replace that failed trimmed nothing (320 also removes its temp file). Its one caller, notify.py:199, ignores the answer, under the lock, after the append has landed; the failure is logged at error. A raise would fail a notification that was already written."
     },
@@ -227,7 +280,7 @@
       "file": "apps/modules/email.py",
       "standard": "logged_fallback",
       "lines": [
-        87
+        82
       ],
       "reason": "The value is the answer (ai_mail, fleet green leg 10): the caller-identity gate returns '' when the caller resolves and the refusal text when it does not, as its docstring says; the except arm IS the refusal, carrying get_current_user()'s own RuntimeError text, and the entry point refuses on any non-empty answer."
     },
@@ -257,10 +310,21 @@
       "file": "apps/handlers/dispatch/pid_lock.py",
       "standard": "logged_fallback",
       "lines": [
-        50,
-        98
+        39,
+        91
       ],
-      "reason": "The value is the true answer (ai_mail, fleet green legs 12 and 13; moved from wake.py in leg 13, public names since leg 15). 50: check_lock answers None when the lock file does not exist, which is a free lock, the same None it answers after removing a dead holder's lock; an unreadable lock answers held since leg 13. 98: _get_pid_cwd answers None for 'cwd not known'; is_branch_occupied skips that pid. pgrep -x claude matches every user's processes; the one kind skipped is a claude whose cwd this user may not read, i.e. another user's session, which is the named gap of this answer."
+      "reason": "The value is the true answer (ai_mail, fleet green legs 12 and 13; moved from wake.py in leg 13, public names since leg 15; re-lined 50 -> 39 and 98 -> 91 in FPLAN-1221). 39: check_lock answers None when the lock file does not exist, which is a free lock, the same None it answers after removing a dead holder's lock; an unreadable lock answers held since leg 13. 91: _get_pid_cwd answers None for 'cwd not known'; is_branch_occupied skips that pid. pgrep -x claude matches every user's processes; the one kind skipped is a claude whose cwd this user may not read, i.e. another user's session, which is the named gap of this answer."
+    },
+    {
+      "file": "apps/handlers/dispatch/pid_lock.py",
+      "standard": "fallback",
+      "lines": [
+        38,
+        102,
+        200
+      ],
+      "reason": "The answer, not a stand-in (FPLAN-1221); the checker reads the function name, not the polarity. 38: check_lock's FileNotFoundError is no lock file, the free state, the same None as after a dead holder's lock is reclaimed; an unreadable lock answers held with the reason. 102: _read_session_type counts a process whose environ cannot be read as interactive, logged at warning: the occupancy scan then refuses the wake, the side the codex and opencode argv readers also take (refusing beats spawning beside a live session). 200: os.kill(pid, 0) raising PermissionError proves the pid exists under another user, so alive is the true answer; every other kill error now raises.",
+      "measured": "2026-11-26 (FPLAN-1221) — added for these three sites."
     },
     {
       "file": "tests/test_notify.py",
@@ -282,11 +346,21 @@
       "file": "apps/handlers/dispatch/session_pointer.py",
       "standard": "logged_fallback",
       "lines": [
-        150,
-        153,
-        159
+        149,
+        152,
+        158
       ],
-      "reason": "read_pointer (ai_mail, fleet green leg 9): the docstring states the contract - None, never a raise, when the pointer is missing, unreadable or malformed, because a pointer that cannot be trusted IS no pointer: every caller (wake.py fresh/resume decision, dispatch_monitor attempt 3) falls back to -c the same way. 208 is the plain truth (no file, no pointer); 211/217 are the documented equivalence. A raise here would cost the wake itself, which the module exists to avoid."
+      "reason": "read_pointer (ai_mail, fleet green leg 9; re-lined 150/153/159 -> 149/152/158 in FPLAN-1221): the docstring states the contract - None, never a raise, when the pointer is missing, unreadable or malformed, because a pointer that cannot be trusted IS no pointer: every caller (wake.py fresh/resume decision, dispatch_monitor attempt 3) falls back to -c the same way. 208 is the plain truth (no file, no pointer); 211/217 are the documented equivalence. A raise here would cost the wake itself, which the module exists to avoid."
+    },
+    {
+      "file": "apps/handlers/dispatch/session_pointer.py",
+      "standard": "fallback",
+      "lines": [
+        150,
+        156
+      ],
+      "reason": "A stated stand-in with a cross-branch contract (FPLAN-1221): read_pointer answers None for a pointer that exists but cannot be read (150) or is not JSON (156), logged at warning, and the module docstring promises it never raises: a bad pointer degrades the dispatch to -c. Every ai_mail caller says so (resolve_resume_target: 'no usable pointer at <path> - falling back to -c'); @devpulse's watchdog (agent.py, feed.py, dispatches.py) and @trigger's mute_expiry read the same None as 'no pointer'. A raise would end the wake over a resume hint and break those callers.",
+      "measured": "2026-11-26 (FPLAN-1221) — added for these two sites."
     },
     {
       "file": "apps/modules/grants.py",
@@ -297,10 +371,19 @@
       "file": "apps/modules/grants.py",
       "standard": "logged_fallback",
       "lines": [
-        69,
-        91
+        73,
+        95
       ],
       "reason": "Same CLI handler contract as dispatch.py: an unreadable register or a refused widen has already called error() (mark_command_failed); True tells the router the command was recognised."
+    },
+    {
+      "file": "apps/handlers/email/create.py",
+      "standard": "fallback",
+      "functions": [
+        "load_email_file"
+      ],
+      "reason": "Stated stand-in: None from an unreadable sent file is told to the reader by both callers. apps/modules/email.py's sent listing prints a '[UNREADABLE FILE] <name>' row with a warning log so nothing sent is under-reported, and send.py's send_to_single refuses with 'Email file could not be loaded'. Raising instead would abort the whole sent listing at the first bad file (email.py catches only at the listing level), breaking the placeholder-row contract.",
+      "measured": "2026-11-26 (FPLAN-1221) — added for this site; email.py:348-354 and send.py send_to_single/send_to_broadcast read the None."
     }
   ],
   "notes": {

@@ -168,7 +168,9 @@ new → opened → closed
 - **opened** — Viewed by recipient, awaiting action
 - **closed** — Replied or dismissed, archived automatically to `deleted/`. `view`, `reply`
   and `close` on a closed id answer `Message <id> is already closed` while its `deleted/`
-  file exists; once purged it is `Message not found`.
+  file exists; once purged it is `Message not found`. A legacy `deleted.json` that cannot
+  be migrated into `deleted/` refuses the close with `Cannot migrate <path>: <error> - repair
+  or move it aside, then retry`; the message stays open.
 
 Each branch's mailbox lives at `<branch_path>/.ai_mail.local/inbox.json`. Sent copies go to `.ai_mail.local/sent/`. File locking (`fcntl`) protects concurrent inbox writes.
 

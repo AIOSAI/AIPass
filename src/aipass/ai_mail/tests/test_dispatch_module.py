@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_module.py
 # Description: Tests for dispatch.py orchestrator functions
-# Version: 1.3.3
+# Version: 1.3.4
 # Created: 2026-04-26
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/dispatch.py."""
@@ -136,7 +136,7 @@ class TestHandleCommand:
         result = handle_command("dispatch", ["--help"])
         assert result is True
         combined = " ".join(printed)
-        assert "COMMANDS" in combined
+        assert "Usage:" in combined
 
     def test_dispatch_h_flag(self, monkeypatch):
         """'dispatch -h' prints help and returns True."""
@@ -145,7 +145,7 @@ class TestHandleCommand:
 
         result = handle_command("dispatch", ["-h"])
         assert result is True
-        assert "COMMANDS" in " ".join(printed)
+        assert "Usage:" in " ".join(printed)
 
     def test_dispatch_help_word(self, monkeypatch):
         """'dispatch help' prints help and returns True."""
@@ -154,7 +154,7 @@ class TestHandleCommand:
 
         result = handle_command("dispatch", ["help"])
         assert result is True
-        assert "COMMANDS" in " ".join(printed)
+        assert "Usage:" in " ".join(printed)
 
     def test_dispatch_wake_subcommand(self, monkeypatch):
         """'dispatch wake @branch' delegates to _orchestrate_wake."""

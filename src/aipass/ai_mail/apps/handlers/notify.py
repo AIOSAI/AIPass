@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: notify.py
 # Description: Notification Feed Writer
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-03-08
-# Modified: 2026-11-03
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -111,10 +111,9 @@ def append_jsonl(
     keep_lines: int,
     precheck: Optional[Callable[[], None]] = None,
 ) -> bool:
-    """Append *record* as one locked JSON line to a capped append-only log.
+    """Append *record* as one locked JSON line to a capped log (feed and register share the lock-then-trim order).
 
-    One shared write discipline for the feed and the dispatch register, so the lock-then-trim ordering cannot drift.
-    precheck runs while the lock is held, before the write; whatever it raises propagates and nothing is written.
+    precheck runs under the lock, before the write; whatever it raises propagates and nothing is written.
     """
     line = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
 
@@ -141,7 +140,6 @@ def jsonl_records(path: Path, strict: bool = False):
     A malformed line is skipped and named; a missing file yields nothing. ``strict`` raises OSError when an existing
     file cannot be read: for the dispatch register, "nothing outstanding" and "cannot tell" must differ.
     """
-    # Checked, not caught: a missing file is a defined empty state, distinct from a read failure below.
     if not path.exists():
         return
 
@@ -163,6 +161,7 @@ def jsonl_records(path: Path, strict: bool = False):
             yield json.loads(line.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             logger.warning("[notify] skipping malformed line %d in %s", number, path)
+            continue
 
 
 @contextmanager

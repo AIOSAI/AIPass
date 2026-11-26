@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.17.0
+# Version: 2.17.1
 # Created: 2026-03-02
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -82,6 +82,9 @@ PROVIDER_FLAG_PREFIX = "--provider="
 OPENCODE_CONFIG_FLAG_PREFIX = "--opencode-config="
 OPENCODE_CONFIG_ENV = "OPENCODE_CONFIG_CONTENT"
 CODEX = session_pointer.CODEX
+# run_with_startup_check's own failures: the agent never spawned, or outran HARD_TIMEOUT and was killed.
+SPAWN_FAILED = -2
+HARD_TIMED_OUT = -1
 # Exit 0 whose stream shows an `error` event or no `turn.completed`: a failed Codex turn.
 CODEX_STREAM_FAILED = -5
 OPENCODE = session_pointer.OPENCODE
@@ -267,9 +270,9 @@ def _send_bounce(branch_email: str, reason: str, sender: str, lock_file: str, st
     try:
         return _send_from_ai_mail(sender, subject, body, Path(lock_file).parent.parent).returncode == 0
     except (subprocess.SubprocessError, OSError) as e:
-        # The caller warns; the transport error rides in the fallback file beside the lock.
+        # The caller warns; the transport error rides in the record file beside the lock.
+        bounce_file = Path(lock_file).parent / "last_bounce.json"
         try:
-            bounce_file = Path(lock_file).parent / "last_bounce.json"
             with open(bounce_file, "w", encoding="utf-8") as f:
                 json.dump(
                     {
@@ -283,8 +286,9 @@ def _send_bounce(branch_email: str, reason: str, sender: str, lock_file: str, st
                     f,
                     indent=2,
                 )
-        except OSError:
-            logger.info("[monitor] Failed to write bounce file fallback")
+        except OSError as write_error:
+            logger.warning("[monitor] Failed to write bounce record %s: %s", bounce_file, write_error)
+            return False
         return False
 
 
@@ -487,15 +491,19 @@ def parse_codex_stream(stdout_log: str) -> dict:
     parsed: dict = {"session_id": None, "result": "", "usage": None, "error": "", "succeeded": False}
     try:
         lines = Path(stdout_log).read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        logger.info("[monitor] No codex stream to parse at %s", stdout_log)
+        return parsed
     except OSError as e:
-        logger.info("[monitor] No codex stream to parse at %s: %s", stdout_log, e)
+        logger.warning("[monitor] codex stream %s unreadable: %s", stdout_log, e)
+        parsed["error"] = f"codex stream unreadable: {e}"
         return parsed
     completed = False
     for line in lines:
         try:
             event = json.loads(line)
         except json.JSONDecodeError as e:
-            logger.info("[monitor] codex stream line is not JSON, skipped: %s", e)
+            logger.warning("[monitor] codex stream line is not JSON, skipped: %s", e)
             continue
         if not isinstance(event, dict):
             continue
@@ -545,15 +553,19 @@ def parse_opencode_stream(stdout_log: str) -> dict:
     }
     try:
         lines = Path(stdout_log).read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        logger.info("[monitor] No opencode stream to parse at %s", stdout_log)
+        return parsed
     except OSError as e:
-        logger.info("[monitor] No opencode stream to parse at %s: %s", stdout_log, e)
+        logger.warning("[monitor] opencode stream %s unreadable: %s", stdout_log, e)
+        parsed["error"] = f"opencode stream unreadable: {e}"
         return parsed
     has_text = False
     for line in lines:
         try:
             event = json.loads(line)
         except json.JSONDecodeError as e:
-            logger.info("[monitor] opencode stream line is not JSON, skipped: %s", e)
+            logger.warning("[monitor] opencode stream line is not JSON, skipped: %s", e)
             continue
         if not isinstance(event, dict):
             continue
@@ -627,8 +639,12 @@ def requested_run(cmd: list, provider: str, opencode_config: str = "") -> dict:
     try:
         inline = json.loads(opencode_config).get("model") if opencode_config else None
     except (ValueError, AttributeError) as e:
-        logger.info("[monitor] opencode config carries no readable model key: %s", e)
-        inline = None
+        logger.warning("[monitor] opencode config carries no readable model key: %s", e)
+        return {
+            "host_cli": provider,
+            "model_requested": session_pointer.CLI_DEFAULT,
+            "selection_source": "unreadable_config",
+        }
     if inline:
         return {"host_cli": provider, "model_requested": inline, "selection_source": "inline_config"}
     return {"host_cli": provider, "model_requested": session_pointer.CLI_DEFAULT, "selection_source": "cli_default"}
@@ -672,19 +688,21 @@ def _parse_result_json(stdout_log: str) -> dict:
     try:
         content = Path(stdout_log).read_text(encoding="utf-8").strip()
     except OSError as e:
-        logger.info("[monitor] No stdout log to parse at %s: %s", stdout_log, e)
+        logger.warning("[monitor] No stdout log to parse at %s: %s", stdout_log, e)
         return {}
     if not content:
         return {}
     lines = [ln for ln in content.splitlines() if ln.strip()]
+    why = "no JSON object"
     for candidate in (content, lines[-1] if lines else ""):
         try:
             parsed = json.loads(candidate)
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            logger.info("[monitor] Result JSON candidate parse failed — trying next form")
+        except json.JSONDecodeError as e:
+            why = str(e)
             continue
+        if isinstance(parsed, dict):
+            return parsed
+    logger.warning("[monitor] No result JSON in %s: %s", stdout_log, why)
     return {}
 
 
@@ -752,8 +770,8 @@ def _cleanup_own_lock(lock_file: str) -> None:
         return
     try:
         lock_path.unlink()
-    except OSError:
-        logger.info("[monitor] Failed to clean up lock file %s", lock_file)
+    except OSError as e:
+        logger.warning("[monitor] Failed to clean up lock file %s: %s", lock_file, e)
 
 
 def _snapshot_jsonl_sizes(projects_dir: Path) -> dict:
@@ -794,7 +812,7 @@ def _check_jsonl_activity(projects_dir: Path, initial_sizes: dict) -> bool:
 
 
 def _kill_process(process: subprocess.Popen, branch_email: str):
-    """Kill a subprocess gracefully, then forcefully."""
+    """Kill a subprocess: terminate, then SIGKILL if it outlives 10s."""
     try:
         process.terminate()
         process.wait(timeout=10)
@@ -855,7 +873,7 @@ def run_with_startup_check(
         logger.warning("[monitor] Failed to spawn %s: %s", branch_email, e)
         if stdout_fh is not None:
             stdout_fh.close()
-        return -2, False
+        return SPAWN_FAILED, False
 
     # Claude's startup is read from the JSONL transcripts: --output-format json buffers stdout.
     projects_dir = None if provider in STREAMING_PROVIDERS else session_pointer.transcript_dir(cwd)
@@ -892,7 +910,7 @@ def run_with_startup_check(
         except subprocess.TimeoutExpired:
             logger.warning("[monitor] %s timed out after %ds hard limit", branch_email, HARD_TIMEOUT)
             _kill_process(process, branch_email)
-            return -1, False
+            return HARD_TIMED_OUT, False
 
         return process.returncode, False
     finally:
@@ -960,8 +978,8 @@ def main():
             ld = json.loads(lock_path_obj.read_text(encoding="utf-8"))
             ld["pid"] = os.getpid()
             lock_path_obj.write_text(json.dumps(ld, indent=2), encoding="utf-8")
-    except (json.JSONDecodeError, OSError):
-        logger.info("[monitor] Could not self-register PID in lock file %s", lock_file)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("[monitor] Could not self-register PID in lock file %s: %s", lock_file, e)
 
     # The systemd-scope lane never learns this pid at the wake; without it a dead monitor's row reads alive.
     own_dispatch_id = report_mod.current_dispatch_id()
@@ -1120,8 +1138,8 @@ def main():
                 note = " (startup timeout)" if startup_failed else ""
                 stderr_fh.write(f"--- Attempt {attempt}/3 exited: code={exit_code}{note} ---\n")
                 stderr_fh.flush()
-            except OSError:
-                logger.info("[monitor] Failed to write attempt exit line")
+            except OSError as e:
+                logger.warning("[monitor] Failed to write attempt exit line: %s", e)
 
         if exit_code == 0:
             if attempt_stderr_offset is not None and BG_TASKS_MARKER in _read_stderr_segment(
@@ -1194,8 +1212,8 @@ def main():
             retry_note = f" (took {len(attempts)} attempts)" if len(attempts) > 1 else ""
             stderr_fh.write(f"\n--- Agent exited: code={exit_code}, duration={duration}s{suffix}{retry_note} ---\n")
             stderr_fh.flush()
-        except OSError:
-            logger.info("[monitor] Failed to write agent exit log")
+        except OSError as e:
+            logger.warning("[monitor] Failed to write agent exit log: %s", e)
         finally:
             stderr_fh.close()
 
@@ -1295,6 +1313,7 @@ def main():
             )
     except Exception as e:
         logger.warning("[monitor] report assembly failed for %s: %s", branch_email, e)
+        status = f"{status}, report NOT written ({type(e).__name__})"
 
     if dispatch_id:
         register.close_dispatch(dispatch_id, status, report_path)

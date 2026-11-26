@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_send_identity.py
 # Description: Tests for sender identity detection chain
-# Version: 1.2.4
+# Version: 1.2.5
 # Created: 2026-03-10
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/users/branch_detection.py and the sender identity chain in apps/handlers/email/send.py."""
@@ -25,6 +25,7 @@ from aipass.ai_mail.apps.handlers.users.branch_detection import (
     get_branch_info_from_registry,
 )
 from aipass.ai_mail.apps.handlers.email.send import resolve_sender_info
+from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
 from aipass.ai_mail.apps.handlers.email.send_args import parse_send_args
 from aipass.ai_mail.apps.handlers.users.user import get_current_user
 
@@ -364,13 +365,26 @@ class TestLookupBranchByName:
             result = _registry_answer("anything")
             assert result is None
 
-    def test_returns_none_when_registry_corrupted(self, tmp_path):
-        """Should return None (not crash) when registry JSON is malformed."""
+    def test_a_corrupted_registry_raises_naming_itself(self, tmp_path):
+        """A malformed registry is a fault, never "no such branch": read as empty, synthesis would seat the caller."""
         corrupt_path = tmp_path / "AIPASS_REGISTRY.json"
         corrupt_path.write_text("{this is not valid json!!!", encoding="utf-8")
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", corrupt_path):
-            result = _registry_answer("anything")
-            assert result is None
+            with pytest.raises(RuntimeError, match=r"AIPASS_REGISTRY\.json could not be read"):
+                _registry_answer("anything")
+
+    def test_a_corrupted_caller_registry_raises_naming_itself(self, clean_env, tmp_path, temp_registry, monkeypatch):
+        """An unknown name under an unreadable project registry must not fall through to synthesis."""
+        registry_path, _ = temp_registry
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path)
+        seat = tmp_path / "lab" / "vera"
+        (seat / ".trinity").mkdir(parents=True)
+        (seat / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "lab" / "LAB_REGISTRY.json").write_text("{not json", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "vera")
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(seat))
+        with pytest.raises(RuntimeError, match=r"LAB_REGISTRY\.json could not be read"):
+            detect_branch_from_pwd()
 
     def test_list_format_registry_works(self, list_format_registry):
         """Should work with production list-format registry (not just dict)."""
@@ -402,6 +416,20 @@ class TestGetBranchInfoFromRegistry:
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
             result = get_branch_info_from_registry(tmp_path / "random" / "path")
             assert result is None
+
+    @pytest.mark.parametrize("broken", ["AIPASS_REGISTRY.json", "LAB_REGISTRY.json"])
+    def test_an_unreadable_registry_raises_naming_itself(self, clean_env, temp_registry, tmp_path, broken):
+        """Unreadable is not "unregistered": reply and dispatch would otherwise act on a guessed address."""
+        registry_path, _ = temp_registry
+        lab = tmp_path / "lab"
+        lab.mkdir()
+        (lab / "LAB_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+        target = registry_path if broken == "AIPASS_REGISTRY.json" else lab / broken
+        target.write_text("{not json", encoding="utf-8")
+        os.environ["AIPASS_CALLER_CWD"] = str(lab)
+        with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
+            with pytest.raises(RegistryUnreadable, match=rf"^{broken} could not be read \("):
+                get_branch_info_from_registry(tmp_path / "random" / "path")
 
 
 class TestSendArgsFromFlag:

@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for CLI routing and help display
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-27
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/ai_mail.py's CLI routing: print_help, print_introspection, route_command, main."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(constant) — the "-V" version alias and the exact "AI_MAIL v1.0.0" banner text
+# sentry: no-test-needed(shared) — what email.py's handle_command() does once routed: tests/test_email_module.py
 
 import json
 import os
@@ -29,7 +29,8 @@ from aipass.ai_mail.apps.ai_mail import (
     route_command,
     main,
 )
-from aipass.cli import error as cli_error
+from aipass.ai_mail.apps.modules import dispatch, email, email_send, grants
+from aipass.cli import error as cli_error, header_version
 
 
 @pytest.fixture(autouse=True)
@@ -224,11 +225,38 @@ def test_main_a_module_that_cannot_import_is_named_not_no_modules_found(monkeypa
     shown.assert_called_once_with("ModuleNotFoundError: No module named 'aipass.ai_mail.apps.modules.ghost'")
 
 
-def test_main_version_flag(monkeypatch):
-    """--version flag shows version string."""
-    monkeypatch.setattr(sys, "argv", ["ai_mail", "--version"])
+@pytest.mark.parametrize("flag", ["--version", "-V"])
+def test_main_version_flag_prints_the_header_version(flag, monkeypatch, capsys: pytest.CaptureFixture[str]):
+    """--version and its -V alias print the file's # Version header, the one version, not a literal."""
+    monkeypatch.setattr(sys, "argv", ["ai_mail", flag])
     result = main()
     assert result == 0
+    assert capsys.readouterr().out == f"ai_mail v{header_version(ai_mail_mod.__file__)}\n"
+
+
+def test_route_command_broken_pipe_is_logged_at_warning(monkeypatch):
+    """A reader closing stdout early still answers True, and the cut-off output is logged at warning."""
+    warned: list[str] = []
+    monkeypatch.setattr(ai_mail_mod.logger, "warning", lambda msg, *a: warned.append(msg % a if a else msg))
+    piped = MagicMock()
+    piped.__name__ = "piped_module"
+    piped.handle_command.side_effect = BrokenPipeError("stdout closed")
+
+    assert route_command("inbox", [], [piped]) is True
+    assert any("Broken pipe in piped_module" in line for line in warned), warned
+
+
+@pytest.mark.parametrize("module", [dispatch, email, email_send, grants], ids=lambda m: m.__name__.rsplit(".")[-1])
+def test_every_module_help_has_usage_examples_and_a_help_pointer(module, capsys: pytest.CaptureFixture[str]):
+    """Two-tier help: print_help shows Usage and Examples headings; the bare introspection points at --help."""
+    module.print_help()
+    help_lines = [line.strip() for line in capsys.readouterr().out.splitlines()]
+    module.print_introspection()
+    intro = capsys.readouterr().out
+
+    assert any(line.startswith("Usage") for line in help_lines), help_lines
+    assert any(line.startswith("Examples") for line in help_lines), help_lines
+    assert "--help" in intro, intro
 
 
 # Handlers return True for "recognised", not "worked": main() must turn error()'s

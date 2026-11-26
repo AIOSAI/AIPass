@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.12.4
+# Version: 3.12.5
 # Created: 2026-03-02
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -340,7 +340,8 @@ def spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, lo
         logger.warning("[wake] systemd-run failed (rc=%d): %s", result.returncode, result.stderr.strip())
         status.warn(
             "scope",
-            f"systemd-run failed (rc={result.returncode}: {result.stderr.strip()}); the monitor starts as a plain child",
+            f"systemd-run failed (rc={result.returncode}: {result.stderr.strip()}); "
+            "the monitor starts as a plain child",
         )
         return False
 
@@ -444,10 +445,8 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
                 branch_path = Path(branch_path_str)
                 if branch_path.exists():
                     return branch_path, email
-        except RegistryUnreadable:
-            raise
-        except Exception as e:
-            logger.warning("[wake] resolve_branch caller registry fallback failed: %s", e)
+        except OSError as e:
+            raise RegistryUnreadable(f"caller project tree under {caller_cwd} could not be read ({e})") from e
 
     # Verified-admin only; the caller already proved the grant.
     if admin:
@@ -779,11 +778,16 @@ def wake_branch(
         else:
             status.ok("model", resolved_model)
 
-    zombie_count = clean_zombies()
-    if zombie_count > 0:
-        status.warn("zombies", f"{zombie_count} zombie Claude process(es) detected")
+    try:
+        zombie_count = clean_zombies()
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.warning("[wake] zombie scan for %s could not run: %s", email, e)
+        status.warn("pre-flight", f"cannot scan for zombie processes ({e})")
     else:
-        status.ok("pre-flight", "No zombie processes")
+        if zombie_count > 0:
+            status.warn("zombies", f"{zombie_count} zombie Claude process(es) detected")
+        else:
+            status.ok("pre-flight", "No zombie processes")
 
     existing = check_lock(branch_path)
     if existing is not None:
@@ -802,14 +806,20 @@ def wake_branch(
 
     status.ok("lock", "No active lock — agent is sleeping")
 
-    occupant = branch_occupant(branch_path)
+    try:
+        occupant = branch_occupant(branch_path)
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.warning("[wake] occupancy scan for %s could not run: %s", email, e)
+        status.warn("occupancy", f"cannot scan for an interactive session ({e}); spawning unchecked")
+        occupant = None
     if occupant:
         status.warn("occupancy", f"Interactive {occupant} session in {branch_path}")
         status.fail("blocked", "Cannot spawn — interactive session running")
         logger.warning("[wake] BLOCKED %s — interactive %s session", email, occupant)
         return status, False
 
-    status.ok("occupancy", "No interactive session")
+    if status.find_step("occupancy") is None:
+        status.ok("occupancy", "No interactive session")
 
     # The binary, then the dashboard: after every gate that can refuse, before any lock or spawn.
     try:
@@ -1084,7 +1094,9 @@ def wake_branch(
         from aipass.ai_mail.apps.handlers.notify import send_notification
 
         send_notification(f"@{email.lstrip('@')} waking", notif_body, source=email.lstrip("@"), kind="wake")
-    except Exception:
-        logger.info("[wake] Notification feed unavailable")
+    except Exception as e:
+        # The agent is already running: a lost feed line is said, never a failed wake.
+        logger.warning("[wake] Notification feed not written for %s: %s", email, e)
+        status.warn("notify", f"notification feed not written: {e}")
 
     return status, True

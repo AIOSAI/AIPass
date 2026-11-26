@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_artifacts.py
 # Description: Tests for what each dispatch attempt leaves behind - stdout, exit codes, result JSON, the lock
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's attempt artifacts: stdout, stderr, result JSON, lock."""
@@ -16,6 +16,7 @@ import os
 import time
 import pytest
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
@@ -285,6 +286,8 @@ def test_a_dispatch_that_printed_nothing_bounces_with_no_result_json(monkeypatch
     reason = _bounce_reason(monkeypatch, main_argv[0], tmp_path, lambda stdout_log: 1)
 
     assert "Last attempt result JSON: (no result JSON captured)\n\nrun: claude" in reason
+    warnings = [c.args[0] % c.args[1:] for c in cast(MagicMock, mod.logger).warning.call_args_list]
+    assert any(w.startswith("[monitor] No stdout log to parse") for w in warnings)
 
 
 def test_a_lock_turned_unreadable_mid_run_is_left_in_place(monkeypatch, main_argv, tmp_path):
@@ -301,3 +304,40 @@ def test_a_lock_turned_unreadable_mid_run_is_left_in_place(monkeypatch, main_arg
     assert code == 0
     assert lock_file.read_text(encoding="utf-8") == "not json"
     bounce.assert_not_called()
+
+
+def test_a_lock_that_cannot_take_the_monitor_pid_is_warned_and_the_agent_still_runs(monkeypatch, main_argv, tmp_path):
+    argv, lock_file, _ = main_argv
+    lock_file.write_text("not json", encoding="utf-8")
+    ran = MagicMock(return_value=0)
+    bounce = MagicMock()
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
+
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [ran])
+
+    assert code == 0
+    ran.assert_called_once()
+    bounce.assert_not_called()
+    warnings = [c.args[0] % c.args[1:] for c in cast(MagicMock, mod.logger).warning.call_args_list]
+    assert any(w.startswith(f"[monitor] Could not self-register PID in lock file {lock_file}") for w in warnings)
+
+
+def test_a_lock_that_cannot_be_removed_is_warned_and_left(monkeypatch, main_argv, tmp_path):
+    argv, lock_file, _ = main_argv
+    bounce = MagicMock()
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
+
+    def seals_the_lock_dir(stdout_log):
+        lock_file.parent.chmod(0o500)
+        return 0
+
+    try:
+        code, _ = _run_main(monkeypatch, argv, tmp_path, [seals_the_lock_dir])
+    finally:
+        lock_file.parent.chmod(0o700)
+
+    assert code == 0
+    bounce.assert_not_called()
+    assert lock_file.exists()
+    warnings = [c.args[0] % c.args[1:] for c in cast(MagicMock, mod.logger).warning.call_args_list]
+    assert any(w.startswith(f"[monitor] Failed to clean up lock file {lock_file}") for w in warnings)
