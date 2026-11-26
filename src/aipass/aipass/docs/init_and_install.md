@@ -25,7 +25,7 @@ with its fix step.
 | `install --source PATH\|URL` | Clone AIPass from this path or URL instead of the public repo (a local path clones its committed HEAD; for the install sandbox) |
 | `install --non-interactive` | Headless: no questions, stdin closed for `setup.sh`, no pairing QR, the default home `~/AIPass` |
 | `install --yes` | Consent to the machine changes up front: `AIPASS_YES=1` exported to `setup.sh` |
-| `install --provider NAME` | Answer the last question headless: `claude`, `codex` or `opencode`; any other name exits 2 |
+| `install --provider NAME` | Answer the last question headless: `claude`, `codex` or `opencode`; any other name exits 2, and so does `--finish` with it (`--finish` asks no question; run `aipass provider NAME` after) |
 | `install --finish` | The Health check and the report alone, no clone and no `setup.sh`; `setup.sh`'s tail calls it |
 | `install --no-symlink` / `--force-symlink` | Control the global CLI symlinks |
 | `install --force-global-home` | Allow installing into `/tmp`: unsafe, never the default |

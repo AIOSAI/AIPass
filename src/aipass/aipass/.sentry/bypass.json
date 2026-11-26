@@ -145,10 +145,10 @@
       "standard": "through_the_command",
       "lines": [
         32,
-        1516,
-        1548,
-        1575,
-        1585
+        1525,
+        1557,
+        1584,
+        1594
       ],
       "reason": "Ruling (c), fleet green leg 7: run_install, the one public door, clones the repo (_clone_repo), runs setup.sh (_run_setup), fixes ownership (_check_and_fix_owner), fetches baud (_install_phone_face), then runs the health check and the final screen (_finish, which writes the install report and reads _registry_user_name and _setup_attention); _resolve_home and _looks_like_aipass_tree prompt and probe before the clone. Every helper is pinned with the far side stubbed (lines re-pinned 2026-10-15, DPLAN-0409 C3). _resolve_source (--source) is a pure check before the clone, also pinned through run_install. Re-pinned 2026-11-14 (FPLAN-0924; 1269 is a second _clone_repo pin). Re-pinned 2026-11-24 (home-validation pins moved them down). _clone_repo is also pinned against a real local checkout (origin repoint): run_install would run setup.sh."
     },
@@ -203,7 +203,7 @@
       "file": "apps/modules/install.py",
       "standard": "fallback",
       "lines": [
-        132
+        150
       ],
       "reason": "_fire_lock_removed: import guard for the @trigger event bus; the lock is already removed, only the file_deleted event is lost. Warning line '[install] trigger unavailable for file_deleted event' in the aipass log; nothing a person acts on rides on the event"
     },
@@ -211,7 +211,7 @@
       "file": "apps/modules/install.py",
       "standard": "fallback",
       "lines": [
-        153
+        171
       ],
       "reason": "_lock_holder_pid: an unreadable lock gives no pid, and acquire_install_lock treats an unknown holder as alive and never steals it: the install stops with the error line 'REFUSED: another install of <home> is already running (lock: <path>). Wait for it to finish, or delete the lock if you know it is dead.' The safe direction, shown on stderr"
     },
@@ -219,7 +219,7 @@
       "file": "apps/modules/install.py",
       "standard": "fallback",
       "lines": [
-        166
+        184
       ],
       "reason": "_clear_stale_lock: FileNotFoundError at unlink means another process removed the stale lock first, so the lock IS free (True is the fact, not a stand-in); the retry claims it with O_EXCL, which refuses loudly if someone else got there. The 'Clearing a stale install lock' warning line has already printed"
     },
@@ -227,7 +227,7 @@
       "file": "apps/modules/install.py",
       "standard": "fallback",
       "lines": [
-        220
+        238
       ],
       "reason": "_pid_alive: PermissionError from kill(pid, 0) (EPERM) proves the process exists under another user, so True is the answer, not a default; the lock is then left alone and the REFUSED error line names it"
     },
@@ -235,7 +235,7 @@
       "file": "apps/modules/install.py",
       "standard": "fallback",
       "lines": [
-        231
+        249
       ],
       "reason": "release_install_lock: FileNotFoundError means the lock is already gone, which is what release wants; the install's result is unaffected (the docstring: a failed release must not mask the install). Info line '[install] lock already gone at release'"
     },
@@ -243,25 +243,9 @@
       "file": "apps/modules/install.py",
       "standard": "fallback",
       "lines": [
-        254
+        272
       ],
       "reason": "_announce_cloned_branch: a best-effort courtesy line naming the branch the clone landed on; it must never fail an install. When git cannot be read the line is simply absent, and the doctor/finish screen that follows reports the tree's health"
-    },
-    {
-      "file": "apps/aipass.py",
-      "standard": "fallback",
-      "lines": [
-        25
-      ],
-      "reason": "Version-conditional import: tomllib is stdlib on 3.11+, and on 3.10 the same parser is the tomli package, a declared dependency (pyproject: tomli>=2; python_version < '3.11'). Not a stand-in, the same library under its 3.10 name"
-    },
-    {
-      "file": "apps/aipass.py",
-      "standard": "fallback",
-      "lines": [
-        30
-      ],
-      "reason": "Fires only on a Python 3.10 install missing its declared tomli dependency (a broken install); the one effect is that aipass --version prints the installed package metadata version instead of the live tree's pyproject version, a real version either way. Info line '[AIPASS] tomllib/tomli unavailable, pyproject version read disabled' in the aipass log"
     },
     {
       "file": "apps/modules/baud.py",
@@ -520,6 +504,58 @@
         205
       ],
       "reason": "ask_provider: Ctrl-C or Ctrl-D at the install's last question means skip, the same answer as 'q', so None is the answer, not a failure (docstring names all three); run_ending then prints the 'aipass provider' line. Logged at info. Audit finding 7, 2026-11-25. 205: run_ending's wiring failure returns 1, the documented failure code (installer or wiring failed, AIPass installed), logged at error with the retry line printed; 0 is only success."
+    },
+    {
+      "file": "apps/integrations",
+      "standard": "architecture",
+      "reason": "Missing on purpose: the branch has no integrations; the owner archived the empty citizen-template placeholders (archive beside it), so the directory is absent by decision, not by drift. 2026-11-26."
+    },
+    {
+      "file": "apps/plugins",
+      "standard": "architecture",
+      "reason": "Missing on purpose: the branch has no plugins; the owner archived the empty citizen-template placeholders (archive beside it), so the directory is absent by decision, not by drift. 2026-11-26."
+    },
+    {
+      "file": "templates",
+      "standard": "architecture",
+      "reason": "Missing on purpose: the branch has no templates of its own (scaffold templates live in shared/ and spawn); the owner archived the empty citizen-template placeholders (archive beside it), so the directory is absent by decision, not by drift. 2026-11-26."
+    },
+    {
+      "file": "tools",
+      "standard": "architecture",
+      "reason": "Missing on purpose: the branch has no tools directory; the owner archived the empty citizen-template placeholders (archive beside it), so the directory is absent by decision, not by drift. 2026-11-26."
+    },
+    {
+      "file": "apps/modules/doctor.py",
+      "standard": "fallback",
+      "lines": [
+        161
+      ],
+      "reason": "_claude_pin_row: an unreadable manifest gives no pin row; the services group's hooks row reports the manifest itself, so a second error here would double-count one fault. Logged at info. 2026-11-26."
+    },
+    {
+      "file": "apps/modules/doctor.py",
+      "standard": "fallback",
+      "lines": [
+        1249
+      ],
+      "reason": "_set_aside_unchosen: an unreadable manifest yields no Claude settings scalars to set aside; the hooks row reports the manifest. Logged at info. Audit finding 2, 2026-11-25."
+    },
+    {
+      "file": "apps/handlers/provider_choice.py",
+      "standard": "fallback",
+      "lines": [
+        90
+      ],
+      "reason": "ask_provider: Ctrl-C or Ctrl-D at the install's last question means skip, the same answer as q (docstring names all three); not a failure. Logged at info. Audit finding 7, 2026-11-25."
+    },
+    {
+      "file": "apps/handlers/provider_choice.py",
+      "standard": "fallback",
+      "lines": [
+        234
+      ],
+      "reason": "chosen_provider: no install report, or one without a provider, is the answer 'nothing chosen yet' (docstring); doctor then checks every provider row as before. Logged at info. 2026-11-26."
     }
   ]
 }

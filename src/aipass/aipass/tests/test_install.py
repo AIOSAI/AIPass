@@ -3,7 +3,7 @@
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
 # Version: 1.8.0
 # Created: 2026-07-05
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -936,6 +936,15 @@ class TestHandleCommand:
         assert finish.call_args.kwargs == {
             "non_interactive": False, "path": None, "here": True, "dry_run": False, "yes": False
         }  # fmt: skip
+
+    def test_finish_with_a_provider_is_refused_not_dropped(self, capsys) -> None:
+        """--finish asks no provider question, so --provider there would vanish. Mutant: no refusal -> exit 0 -> red."""
+        with patch(f"{_MOD}.run_finish", return_value=0) as finish, patch(f"{_MOD}.run_install"):
+            with pytest.raises(SystemExit) as exc:
+                handle_command("install", ["--finish", "--provider", "codex"])
+        assert exc.value.code == 2
+        finish.assert_not_called()
+        assert "aipass provider codex" in " ".join(capsys.readouterr().err.split())
 
 
 class TestInstallPhoneFaceStep:

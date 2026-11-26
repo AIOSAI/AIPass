@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aipass.py
 # Description: aipass branch entry point — thin command router
-# Version: 0.6.1
+# Version: 2.8.41
 # Created: 2026-04-16
-# Modified: 2026-11-24
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -13,73 +13,11 @@ aipass Branch - Main Orchestrator
 import re
 import sys
 import importlib
-import importlib.metadata
 from pathlib import Path
 from typing import List, Any
 
-from aipass.cli import console, error, resolve_exit, warning
+from aipass.cli import console, error, header_version, resolve_exit, warning
 from aipass.prax import logger
-
-try:
-    import tomllib  # type: ignore[import-not-found]  # Python 3.11+, absent on 3.10
-except ModuleNotFoundError:  # pragma: no cover — Python 3.10
-    try:
-        import tomli as tomllib  # type: ignore[no-redef]
-
-        logger.info("[aipass] tomllib unavailable (Python 3.10), using tomli")
-    except ModuleNotFoundError:
-        tomllib = None  # type: ignore[assignment]
-        logger.info("[aipass] tomllib/tomli unavailable, pyproject version read disabled")
-
-
-def _pyproject_version(start: Path) -> str | None:
-    """Version from the repo's own pyproject.toml, walking up from `start`.
-
-    Editable installs freeze metadata at install time; the repo tree is the live version.
-    """
-    if tomllib is None:
-        logger.info("[aipass] tomllib/tomli unavailable, skipping pyproject version read")
-        return None
-
-    for parent in start.resolve().parents:
-        pyproject = parent / "pyproject.toml"
-        if not pyproject.exists():
-            continue
-        try:
-            data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-        except (OSError, tomllib.TOMLDecodeError) as e:
-            logger.warning(f"[aipass] Could not parse {pyproject}: {e}")
-            continue
-        project = data.get("project", {})
-        # Name guard: nested projects carry their own pyproject — keep walking
-        if project.get("name") == "aipass" and project.get("version"):
-            return str(project["version"])
-    return None
-
-
-def _installed_version() -> str:
-    """``importlib.metadata.version("aipass")``, unchanged.
-
-    A seam: the test stands in an install with no metadata here, not process-wide.
-    """
-    return importlib.metadata.version("aipass")
-
-
-def _resolve_version() -> str:
-    """Live version — repo pyproject.toml first, installed metadata as fallback."""
-    version = _pyproject_version(Path(__file__))
-    if version:
-        return version
-    try:
-        return _installed_version()
-    except importlib.metadata.PackageNotFoundError:
-        logger.info("[aipass] No repo pyproject.toml and no package metadata, version unknown")
-        if tomllib is None:
-            warning("version unknown: no TOML reader (tomllib is Python 3.11+); on Python 3.10 install tomli")
-        else:
-            warning("version unknown: no aipass pyproject.toml above this file and no installed package metadata")
-        return "unknown"
-
 
 MODULES_DIR = Path(__file__).parent / "modules"
 
@@ -206,7 +144,7 @@ def main():
     args = sys.argv[1:]
 
     if len(args) > 0 and args[0] in ["--version", "-V"]:
-        console.print(f"aipass {_resolve_version()}")
+        console.print(f"aipass v{header_version(__file__)}", highlight=False)
         return 0
 
     if not args:

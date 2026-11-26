@@ -77,7 +77,8 @@ The list of modules, verbs and flags is generated from the code that runs them, 
 Run me. Bare `aipass` prints the live command inventory — generated from the
 modules actually loaded, so it cannot go stale — and `aipass --help` is the
 full reference, with each command's own `--help` beneath it. `aipass --version`
-resolves the version live rather than repeating a number written down here.
+prints the `# Version:` header of `apps/aipass.py`, the release number, rather than a
+number written down here.
 
 `drone @aipass` does not resolve, by design. Drone routes between agents; this
 branch is the user's own CLI and serves humans, so it ships as a

@@ -3,7 +3,7 @@
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + doctor + report)
 # Version: 1.9.0
 # Created: 2026-07-05
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -924,6 +924,9 @@ def handle_command(command: str, args: list[str]) -> bool:
     provider = _flag_value(args, "--provider")
     if provider is not None and provider not in provider_choice.PROVIDERS:
         error(f"--provider takes one of: {', '.join(provider_choice.ORDER)}")
+        sys.exit(2)
+    if finish and provider:
+        error(f"--finish asks no provider question: after it, run aipass provider {provider}")
         sys.exit(2)
 
     if finish:
