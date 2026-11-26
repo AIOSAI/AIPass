@@ -102,12 +102,58 @@
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): None is never a registry here. The other None (line 67) is the not-found refusal, logged by logger.warning; it is a failure. The docstring names None as missing/unreadable, and every caller (update_ops 256, mint_ops 199, sync_registry_ops 320, mint_verify 47, regenerate_registry_ops 62) reads None as no registry."
     },
     {
-      "file": "apps/modules/grant_admin.py",
-      "standard": "logged_fallback",
-      "lines": [
-        119
-      ],
-      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): the function answers an exit code, 0 success and 1 failure. The other return 1 (line 128) follows error(reason) on a refused ceremony with a console.print() between; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
+      "file": "apps/handlers/update_ops.py",
+      "standard": "fallback",
+      "lines": [240],
+      "reason": "Not a stand-in: a template file that is not UTF-8 text is the binary lane. copy_undecodable copies it byte for byte and raises if it carries a {{ placeholder, so nothing ships unrendered; the warning names the file."
+    },
+    {
+      "file": "apps/handlers/file_ops.py",
+      "standard": "fallback",
+      "lines": [74],
+      "reason": "Not a stand-in: the same binary lane as update_ops at birth. copy_undecodable copies the file byte for byte and raises on a {{ placeholder; the file is listed as '(binary)' in the copy receipt."
+    },
+    {
+      "file": "apps/handlers/file_ops.py",
+      "standard": "fallback",
+      "lines": [157],
+      "reason": "has_placeholder stays False only for a file that is not UTF-8 text; such a file cannot hold a rendered placeholder, and copy_undecodable refuses one at copy time. An unreadable file is already marked hash 'unreadable' and logged at error two lines up."
+    },
+    {
+      "file": "apps/handlers/placeholders.py",
+      "standard": "fallback",
+      "lines": [72],
+      "reason": "A target outside its registry's root has no registry-relative path to carry; the bare branch name is the passport path the contract writes then (same answer as the no-registry case above it). Logged at warning naming the target and registry."
+    },
+    {
+      "file": "apps/handlers/meta_ops.py",
+      "standard": "fallback",
+      "lines": [41],
+      "reason": "'' is the docstring's failure value, never a hash (success is twelve hex characters), so an unreadable file can never compare equal to a real hash; logged at warning. See the logged_fallback row for line 43."
+    },
+    {
+      "file": "apps/handlers/meta_ops.py",
+      "standard": "fallback",
+      "lines": [61],
+      "reason": "None is the docstring's missing-or-unreadable answer and is logged at error. regenerate_registry refuses on it when the file exists; mint, update, sync and mint_verify skip branch meta on None. Whether those four should refuse a corrupt manifest instead is an open question for the owner, not cured here."
+    },
+    {
+      "file": "apps/handlers/sync_registry_ops.py",
+      "standard": "fallback",
+      "lines": [87, 97],
+      "reason": "Description lookup for an auto-registered row: passport purpose/role, then README first line, then 'Auto-registered branch'. The description is display text, not identity; each unreadable source is logged at warning naming the branch."
+    },
+    {
+      "file": "apps/handlers/registry.py",
+      "standard": "fallback",
+      "lines": [270],
+      "reason": "The check does run: relative_to raising ValueError IS the answer 'outside the project root', so False here is the refusal, logged at warning. No path reads as contained when it is not."
+    },
+    {
+      "file": "apps/handlers/registry.py",
+      "standard": "fallback",
+      "lines": [354, 379],
+      "reason": "fix_passport_registry_id answers True updated, False nothing to change, None a read or write failed; the docstring names None as never a success value, and both sites log at warning naming the file."
     },
     {
       "file": "apps/modules/repair.py",

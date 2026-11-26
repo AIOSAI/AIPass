@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: file_ops.py
 # Description: Template copy and file operations
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-05
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Template copy and file rename operations."""
@@ -30,7 +30,7 @@ def ensure_directory(path):
 
 
 def copy_undecodable(source, dest):
-    """Copy a file that is not UTF-8 text byte for byte; one carrying a {{ placeholder would ship unrendered, so it raises."""
+    """Copy a non-UTF-8 file byte for byte; one carrying a {{ placeholder would ship unrendered, so it raises."""
     source = Path(source)
     if b"{{" in source.read_bytes():
         raise ValueError(
@@ -79,7 +79,7 @@ def copy_template(template_dir, target_dir, replacements):
     try:
         json_handler.log_operation("template_copied", data={"target": str(target_dir)})
     except Exception as exc:
-        logger.info("json_handler.log_operation failed (non-fatal): %s", exc)
+        logger.warning("json_handler.log_operation failed (non-fatal): %s", exc)
 
     return copied, skipped
 

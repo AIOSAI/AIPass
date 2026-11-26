@@ -165,8 +165,9 @@ guards the relocation lane.
 `--relocate` resolves the new path before checking it sits inside the project, so
 `<root>/../outside` refuses. If the registry write fails after the move, the tree is moved
 back and the command exits 1. `--clean-pollution` never flags a nested directory holding
-`__init__.py`: that is a flat-layout package, not a duplicate. A grant ceremony whose
-registry write fails exits 1 and grants nothing.
+`__init__.py`: that is a flat-layout package, not a duplicate. A grant ceremony that is
+refused, a failed registry write included, exits 1; one whose writer raises an unexpected error
+exits 2. Neither grants anything.
 
 ---
 

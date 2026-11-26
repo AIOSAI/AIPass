@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: grant_admin.py
 # Description: Seat-flag ceremonies — thin CLI layer for the registry admin, ci_cure and owner flags
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-12
 # Modified: 2026-11-26
 # =============================================
@@ -106,7 +106,7 @@ def _print_ci_cure_usage() -> None:
 def _run_ceremony(args: list[str], verb: str, flag: str, seat: str, ensure) -> int:
     """Parse --registry, refuse a branch argument, run the writer.
 
-    Returns exit code (0=granted or already granted, 1=refused/failure).
+    Returns exit code (0=granted or already granted, 1=refused, 2=the writer crashed).
     """
     registry_path = None
     positional = []
@@ -134,7 +134,7 @@ def _run_ceremony(args: list[str], verb: str, flag: str, seat: str, ensure) -> i
     except Exception as exc:
         logger.error(f"[{verb}] Unexpected error: {exc}")
         error(str(exc))
-        return 1
+        return 2
 
     # Refusals are logged too, so a rejected attempt on the seat leaves a trace.
     json_handler.log_operation(f"{flag}_ceremony", data={"branch": seat, "status": status})

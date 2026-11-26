@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_registry_ops.py
 # Description: Registry sync handler — implementation logic for registry repair
-# Version: 1.4.2
+# Version: 1.4.3
 # Created: 2026-03-07
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Registry synchronization handler for branch lifecycle management.
@@ -191,7 +191,7 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
                     branch_dir.relative_to(resolved_root)
                 except ValueError:
                     stale.append(name)
-                    logger.info("[sync-registry] Entry '%s' path escapes project root: %s", name, rel_path)
+                    logger.warning("[sync-registry] Entry '%s' path escapes project root: %s", name, rel_path)
                     continue
 
                 passport = branch_dir / ".trinity" / "passport.json"
