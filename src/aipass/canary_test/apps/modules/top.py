@@ -52,8 +52,8 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]The file:[/yellow]")
-    console.print("  Plain UTF-8 text. Every non-blank line is a name, whitespace, and an integer")
-    console.print("  count ('alice 12'). Leading and trailing whitespace is ignored, blank lines are")
+    console.print("  Plain UTF-8 text. Every non-blank line is a name, whitespace, and an integer", highlight=False)
+    console.print("  count ('alice 12'). Leading and trailing whitespace is ignored, blank lines are", highlight=False)
     console.print("  skipped, and a name on more than one line has its counts added together before")
     console.print("  anything is ranked.")
     console.print()
@@ -66,8 +66,8 @@ def print_help() -> None:
 
     console.print("[yellow]Refusals (exit 2):[/yellow]")
     console.print("  The reason goes to stderr and nothing at all reaches stdout. No N; an N that is")
-    console.print("  not a plain positive integer ('0', '-1', '1.5', a non-ASCII digit); no FILE; a")
-    console.print("  FILE that does not exist or cannot be read; a file that is not valid UTF-8; a")
+    console.print("  not a plain positive integer ('0', '-1', '1.5', a non-ASCII digit); no FILE; a", highlight=False)
+    console.print("  FILE that does not exist or cannot be read; a file that is not valid UTF-8; a", highlight=False)
     console.print("  line that is not exactly a name and an integer count; a negative count; more")
     console.print("  arguments than N and FILE.")
     console.print()

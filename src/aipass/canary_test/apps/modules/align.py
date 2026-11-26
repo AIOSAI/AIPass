@@ -52,7 +52,7 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]The file:[/yellow]")
-    console.print("  Plain UTF-8 text. Every non-blank line is two or more fields separated by one")
+    console.print("  Plain UTF-8 text. Every non-blank line is two or more fields separated by one", highlight=False)
     console.print("  or more spaces; a tab separates a column too. Leading and trailing whitespace")
     console.print("  is ignored, blank lines are skipped, and the first non-blank line sets how many")
     console.print("  columns the file has.")
@@ -67,7 +67,7 @@ def print_help() -> None:
 
     console.print("[yellow]Refusals (exit 2):[/yellow]")
     console.print("  The reason goes to stderr and nothing at all reaches stdout. No FILE; a FILE")
-    console.print("  that does not exist or cannot be read; a file that is not valid UTF-8; a row")
+    console.print("  that does not exist or cannot be read; a file that is not valid UTF-8; a row", highlight=False)
     console.print("  with fewer than two fields; a row whose field count differs from the first")
     console.print("  row's; a file with no non-blank lines at all; more arguments than one FILE.")
     console.print()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: canary_test.py
 # Description: Entry point CLI for drone @canary_test — permanent test citizen
-# Version: 2.7.1
+# Version: 2.7.2
 # Created: 2026-08-20
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """canary_test Branch - Main Orchestrator
@@ -21,10 +21,8 @@ from typing import Any, List
 # so a later setdefault would name the wrong branch in every log line.
 os.environ.setdefault("AIPASS_BRANCH_NAME", "canary_test")
 
-from aipass.cli import console, error, reset_command_state, resolve_exit
+from aipass.cli import console, error, header_version, reset_command_state, resolve_exit
 from aipass.prax import logger
-
-__version__ = "2.7.1"
 
 MODULES_DIR = Path(__file__).parent / "modules"
 
@@ -33,6 +31,7 @@ def discover_modules() -> List[Any]:
     """Auto-discover modules in modules/ directory.
 
     Package path only: a local-layout retry re-fails the same module and logs it by the wrong name.
+    A module that fails to import raises: a skipped module would answer as an unknown command.
     """
     modules: List[Any] = []
 
@@ -45,12 +44,9 @@ def discover_modules() -> List[Any]:
 
         module_name = f"aipass.canary_test.apps.modules.{file_path.stem}"
 
-        try:
-            module = importlib.import_module(module_name)
-            if hasattr(module, "handle_command"):
-                modules.append(module)
-        except Exception as e:
-            logger.error("[canary_test] Failed to load module %s: %s", module_name, e)
+        module = importlib.import_module(module_name)
+        if hasattr(module, "handle_command"):
+            modules.append(module)
 
     return modules
 
@@ -125,10 +121,10 @@ def print_help() -> None:
 
     console.print("[yellow]Examples:[/yellow]")
     console.print("  $ drone @canary_test")
-    console.print("  $ drone @canary_test span '2d 4h'")
-    console.print("  $ drone @canary_test span --json 1h30m")
-    console.print("  $ drone @canary_test top 3 scores.txt")
-    console.print("  $ drone @canary_test top --json 3 scores.txt")
+    console.print("  $ drone @canary_test span '2d 4h'", highlight=False)
+    console.print("  $ drone @canary_test span --json 1h30m", highlight=False)
+    console.print("  $ drone @canary_test top 3 scores.txt", highlight=False)
+    console.print("  $ drone @canary_test top --json 3 scores.txt", highlight=False)
     console.print("  $ drone @canary_test align table.txt")
     console.print("  $ drone @canary_test align --json table.txt")
     console.print("  $ drone @canary_test kv store.txt set colour red")
@@ -179,7 +175,7 @@ def main() -> int:
         return 0
 
     if args[0] in ("--version", "-V"):
-        console.print(f"canary_test v{__version__}")
+        console.print(f"canary_test v{header_version(__file__)}", highlight=False)
         return 0
 
     command = args[0]

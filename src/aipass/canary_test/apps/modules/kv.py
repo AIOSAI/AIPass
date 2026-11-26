@@ -62,7 +62,7 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]The store:[/yellow]")
-    console.print("  A UTF-8 text file, one pair per line: the key, a single tab, then the value.")
+    console.print("  A UTF-8 text file, one pair per line: the key, a single tab, then the value.", highlight=False)
     console.print("  'set' creates it if it is not there; every other verb needs it to exist. Keys")
     console.print("  are unique, and setting one that is already there replaces the value where it")
     console.print("  already sits. 'list' sorts by key in code point order, so 'Z' comes before 'a'.")
@@ -77,7 +77,7 @@ def print_help() -> None:
 
     console.print("[yellow]Refusals (exit 2):[/yellow]")
     console.print("  The reason goes to stderr and nothing at all reaches stdout. No FILE; a store")
-    console.print("  that is not there, cannot be read, or is not valid UTF-8; no verb, or one that")
+    console.print("  that is not there, cannot be read, or is not valid UTF-8; no verb, or one that", highlight=False)
     console.print("  is not set, get, delete or list; a KEY that is empty or holds a tab, a newline")
     console.print("  or a carriage return; set with no VALUE; a VALUE holding one of those three; a")
     console.print("  key get or delete cannot find; a store line that is not a key, a tab and a")

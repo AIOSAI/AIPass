@@ -52,16 +52,16 @@ def print_help() -> None:
 
     console.print("[yellow]The text:[/yellow]")
     console.print(f"  Units are [cyan]{parser.UNIT_LIST}[/cyan], lowercase. Order is free and whitespace is")
-    console.print("  optional, so '1h30m', '1h 30m' and '30m 1h' are one and the same duration.")
+    console.print("  optional, so '1h30m', '1h 30m' and '30m 1h' are one and the same duration.", highlight=False)
     console.print(f"  Leading zeros are fine. The total may not exceed {parser.MAX_DAYS} days.")
     console.print()
 
     console.print("[yellow]Refusals (exit 2):[/yellow]")
     console.print("  The reason goes to stderr and nothing at all reaches stdout. Empty or")
-    console.print("  whitespace-only text; a unit given twice; an unknown unit ('2H' is unknown -")
+    console.print("  whitespace-only text; a unit given twice; an unknown unit ('2H' is unknown -", highlight=False)
     console.print("  the parser never case-folds); a number that is not a plain non-negative")
-    console.print("  integer ('1.5h', '-3h', a non-ASCII digit); a bare number with no unit")
-    console.print(f"  ('90'); a total over {parser.MAX_DAYS} days.")
+    console.print("  integer ('1.5h', '-3h', a non-ASCII digit); a bare number with no unit", highlight=False)
+    console.print(f"  ('90'); a total over {parser.MAX_DAYS} days.", highlight=False)
     console.print()
 
     console.print("[yellow]Examples:[/yellow]")

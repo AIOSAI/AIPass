@@ -50,10 +50,10 @@ The entry point checks the first position only. Every module goes further:
 
 ## Versions
 
-`--version` renders `__version__` in `apps/canary_test.py`. That constant is the one
-value to change; the file header comment beside it carries the same number and
-is never read by code, so the two are bumped together. The branch's test suite
-pins the rendered output against the constant, not against a literal.
+`--version` prints `canary_test v` plus the `# Version:` line of the header in
+`apps/canary_test.py`, read by `header_version(__file__)` from `aipass.cli`. The
+header is the one place the number lives; there is no `__version__` constant. The
+branch's test suite pins the output against `header_version`, not against a literal.
 
 ## Known defect, not cured here
 

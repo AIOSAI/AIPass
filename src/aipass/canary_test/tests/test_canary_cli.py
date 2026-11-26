@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: test_canary_cli.py
 # Description: Tests for canary_test's entry point routing, help and introspection
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-22
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/canary_test.py, the entry point: routing, help and introspection."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(logged_fallback) — that a module which fails to import is logged and skipped
+# sentry: no-test-needed(stdlib) — that a module which fails to import raises out of discover_modules
 
 import os
 import subprocess
@@ -18,6 +18,7 @@ import sys
 import pytest
 
 from aipass.canary_test.apps import canary_test as canary_entry
+from aipass.cli import header_version
 
 # Exit codes are asserted on purpose: a refusal that exits 0 is one the shell reads as success.
 
@@ -107,7 +108,7 @@ def test_version_flag_prints_version(monkeypatch, capsys, flag):
     assert _run(monkeypatch, [flag]) == 0
 
     out = capsys.readouterr().out
-    assert f"canary_test v{canary_entry.__version__}" in out
+    assert f"canary_test v{header_version(canary_entry.__file__)}" in out
 
 
 def test_route_command_returns_true_for_known_command(stub_module):
