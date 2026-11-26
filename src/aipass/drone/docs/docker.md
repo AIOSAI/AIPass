@@ -23,11 +23,21 @@ you kept it. The flags and examples are `drone docker --help`.
 | `rm <name>...`, `rm --all` | Stops, then removes its boxes; records each removal |
 | `rm --login` | Removes the `aipass-login-*` volumes, which clears every sign-in (see Login volumes) |
 
-`local`, `dev` and `main` take the project root above the current directory, and that root must be
-an AIPass checkout: its `pyproject.toml` names `aipass` in its `[project]` table. A hosted project
-(`projects/<p>`) is its own git repo and root, so from inside one they refuse in one line before
-any build or box: `cwd is inside <root>, a project, not an AIPass checkout; run from inside the
-AIPass repo`. `bare` needs no checkout.
+`local`, `dev` and `main` work from any directory. They take the AIPass checkout drone already
+knows. An AIPass checkout is a directory whose `pyproject.toml` names `aipass` in its `[project]`
+table. If the project root above the current directory is one, it wins, so a second clone can be
+tested. From anywhere else, including a hosted project (`projects/<p>`, its own repo and root), a
+branch or `~`, they take the AIPass home (`resolve_aipass_home()`, the same home that picks the
+branch interpreter). The first line of output names it before any build:
+
+```
+local: AIPass checkout /path/to/AIPass (its committed HEAD)
+dev: AIPass checkout /path/to/AIPass (origin's dev, origin read from it)
+```
+
+When no checkout is found and no home resolves, or the home is not a checkout, they say so in one
+line with what to do (`set AIPASS_HOME=/path/to/AIPass or run from inside the checkout`), exit 1,
+and start no build or box. `bare` needs no checkout.
 
 `local` is the only verb that uses this checkout: it clones `file:///src` to `~/AIPass-src`, so
 the box sees the committed HEAD, not uncommitted edits. `dev` and `main` clone with `--branch dev`

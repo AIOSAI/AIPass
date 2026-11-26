@@ -4,7 +4,6 @@
 
 **Purpose:** The command router for AIPass. Resolves an `@name` to a real path at runtime, routes the command there, and owns every git operation behind a tier-based access gate — the one interface through which the whole fleet reaches git.
 **Module:** `aipass.drone`
-**Version:** 1.1.0
 **Created:** 2026-03-05
 
 ---

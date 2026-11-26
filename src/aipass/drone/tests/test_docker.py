@@ -696,26 +696,64 @@ class TestBuildVerb:
         assert not fake.calls
 
 
+def a_checkout(path: Path) -> Path:
+    """A directory that reads as an AIPass checkout and an AIPass home: pyproject naming aipass, a registry."""
+    path.mkdir(parents=True)
+    (path / "pyproject.toml").write_text('[project]\nname = "aipass"\n', encoding="utf-8")
+    (path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+    return path
+
+
 class TestAipassCheckout:
-    @pytest.mark.parametrize("verb", ["local", "dev", "main"])
-    def test_a_project_root_that_is_not_aipass_is_refused_before_any_box(
-        self, verb: str, fake: FakeDocker, capsys: pytest.CaptureFixture
+    def test_the_checkout_the_cwd_stands_in_wins_and_is_named_first(
+        self, fake: FakeDocker, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """A hosted project's root, with its own pyproject, is refused in one line; mutant: the check removed."""
-        project = Path.cwd()
-        (project / "pyproject.toml").write_text('[project]\nname = "baud"\n', encoding="utf-8")
-        assert docker.run(verb, ["--", "true"]) == 1
+        """A second clone is testable: its own checkout beats the home. Mutant: the home asked first."""
+        monkeypatch.setenv("AIPASS_HOME", str(a_checkout(tmp_path / "home_checkout")))
+        assert docker.run("local", ["--", "true"]) == 0
+        assert capsys.readouterr().out.splitlines()[0] == f"local: AIPass checkout {Path.cwd()} (its committed HEAD)"
+        assert f"{Path.cwd()}:/src:ro" in fake.runs()[0]
+
+    @pytest.mark.parametrize("verb", ["local", "dev", "main"])
+    def test_from_a_project_repo_the_home_is_cloned(
+        self,
+        verb: str,
+        fake: FakeDocker,
+        capsys: pytest.CaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Standing in a hosted project (its own pyproject) takes the AIPass home; mutant: the cwd root taken as is."""
+        (Path.cwd() / "pyproject.toml").write_text('[project]\nname = "baud"\n', encoding="utf-8")
+        home = a_checkout(tmp_path / "home_checkout")
+        monkeypatch.setenv("AIPASS_HOME", str(home))
+        assert docker.run(verb, ["--", "true"]) == 0
+        first = capsys.readouterr().out.splitlines()[0]
+        assert first.startswith(f"{verb}: AIPass checkout {home} (")
+        assert fake.runs()
+
+    def test_no_checkout_and_no_home_is_one_line_and_no_box(
+        self, fake: FakeDocker, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+        (Path.cwd() / "pyproject.toml").write_text(
+            '[project]\nname = "baud"\n\n[tool.x]\nname = "aipass"\n', encoding="utf-8"
+        )
+        assert docker.run("local", ["--", "true"]) == 1
         err = capsys.readouterr().err
-        assert f"cwd is inside {project}, a project, not an AIPass checkout; run from inside the AIPass repo" in err
+        assert "drone docker local: no AIPass checkout found" in err and "set AIPASS_HOME=/path/to/AIPass" in err
         assert not fake.runs()
         assert not [c for c in fake.calls if c[:2] == ["docker", "build"]]
-
-    def test_aipass_named_outside_the_project_table_is_refused_and_bare_needs_none(self, fake: FakeDocker) -> None:
-        """Mutant: the [project] anchor dropped from the pattern — a tool table's name passes."""
-        pyproject = Path.cwd() / "pyproject.toml"
-        pyproject.write_text('[project]\nname = "baud"\n\n[tool.x]\nname = "aipass"\n', encoding="utf-8")
-        assert docker.run("local", ["--", "true"]) == 1
         assert docker.run("bare", ["--", "true"]) == 0
+
+    def test_a_name_outside_the_project_table_is_not_a_checkout(self, tmp_path: Path) -> None:
+        """Mutant: the [project] anchor dropped from the pattern — a tool table's name passes."""
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "baud"\n\n[tool.x]\nname = "aipass"\n', encoding="utf-8"
+        )
+        assert not docker_handler.is_aipass_checkout(tmp_path)
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "aipass"\nversion = "2"\n', encoding="utf-8")
+        assert docker_handler.is_aipass_checkout(tmp_path)
 
 
 class TestListBaseImages:

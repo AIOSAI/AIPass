@@ -264,19 +264,15 @@ def attach(argv: list[str]) -> int:
     return subprocess.run(argv).returncode
 
 
-def check_aipass_checkout(root: Path) -> None:
-    """Refuse a project root that is not an AIPass checkout: its pyproject.toml must name the aipass package.
-
-    A hosted project (projects/<p>) is its own git repo and project root; cloning it gives a box with no aipass.
-    """
+def is_aipass_checkout(root: Path) -> bool:
+    """Whether *root* is an AIPass checkout: its pyproject.toml names the aipass package in [project]."""
     try:
         text = (root / "pyproject.toml").read_text(encoding="utf-8")
     except OSError as exc:
         logger.info("docker: %s has no readable pyproject.toml: %s", root, exc)
-        text = ""
+        return False
     # tomllib is 3.11+ and the floor is 3.10: read the one key, name = "aipass", inside the [project] table.
-    if not re.search(r"""^\[project\][^\[]*?^name\s*=\s*["']aipass["']\s*$""", text, re.MULTILINE):
-        raise BoxRefusal(f"cwd is inside {root}, a project, not an AIPass checkout; run from inside the AIPass repo")
+    return bool(re.search(r"""^\[project\][^\[]*?^name\s*=\s*["']aipass["']\s*$""", text, re.MULTILINE))
 
 
 def clone_url(verb: str, repo_root: Path) -> str:

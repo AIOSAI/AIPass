@@ -16,6 +16,7 @@ from __future__ import annotations
 import shlex
 import sys
 import time
+from pathlib import Path
 
 from aipass.prax import logger
 from aipass.cli import console, err_console, error, escape
@@ -23,6 +24,7 @@ from aipass.drone.apps.handlers import docker_handler as box
 from aipass.drone.apps.handlers.help_flags import wants_help
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.rm_handler import format_age
+from aipass.drone.apps.handlers.registry_handler import resolve_aipass_home
 from aipass.drone.apps.handlers.router_handler import find_project_root
 
 DRONE_MODULE = {
@@ -121,12 +123,11 @@ def create(verb: str, args: list[str]) -> int:
     mounts = [box.check_mount(p) for p in opts["mount"]]
     if _ready():
         return EXIT_NO_DOCKER
-    repo_root = find_project_root() if verb != "bare" else None
-    if verb != "bare" and repo_root is None:
-        raise box.BoxRefusal(f"drone docker {verb} needs the AIPass project root, and none was found from here")
-    if repo_root is not None:
-        box.check_aipass_checkout(repo_root)
+    repo_root = _checkout(verb) if verb != "bare" else None
     url = box.clone_url(verb, repo_root) if repo_root is not None else None
+    if repo_root is not None:
+        what = "its committed HEAD" if verb == "local" else f"origin's {verb}, origin read from it"
+        console.print(f"{verb}: AIPass checkout {repo_root} ({what})", markup=False, highlight=False, soft_wrap=True)
     state = "rebuild" if opts["rebuild"] else box.base_state(image_ref)
     built = _build(image_ref, state) if state != "current" else 0
     if built:
@@ -135,6 +136,24 @@ def create(verb: str, args: list[str]) -> int:
     box.check_free(name)
     console.print(f"{name}  ({verb}, {image_ref}{', kept' if opts['keep'] else ''})", markup=False, highlight=False)
     return box.launch(verb, name, image_ref, opts, mounts, repo_root, url, tty=sys.stdin.isatty())
+
+
+def _checkout(verb: str) -> Path:
+    """The AIPass checkout a box clones: the one the cwd stands in, else the AIPass home; refused when neither is one."""
+    root = find_project_root()
+    if root is not None and box.is_aipass_checkout(root):
+        return root
+    home = resolve_aipass_home().path
+    if home is not None and box.is_aipass_checkout(home):
+        return home
+    if home is not None:
+        raise box.BoxRefusal(
+            f"drone docker {verb}: the AIPass home {home} is not a checkout (no pyproject naming aipass)"
+        )
+    raise box.BoxRefusal(
+        f"drone docker {verb}: no AIPass checkout found, the cwd is not in one and no AIPass home resolves; "
+        "set AIPASS_HOME=/path/to/AIPass or run from inside the checkout"
+    )
 
 
 def build(args: list[str]) -> int:
