@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trigger_entry.py
 # Description: Tests for trigger.py CLI entry point — line coverage
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for the apps/trigger.py CLI entry point (discover, route, main)."""
@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from aipass.cli import display, error, mark_command_failed
+from aipass.cli import display, error, header_version, mark_command_failed
 from aipass.trigger.apps import config, log_watcher_service
 from aipass.trigger.apps import trigger as trigger_entry
 
@@ -265,7 +265,7 @@ class TestMain:
 
         result = trigger.main(["--version"])
         assert result == 0
-        assert f"trigger v{trigger.__version__}" in capsys.readouterr().out
+        assert f"trigger v{header_version(trigger.__file__)}" in capsys.readouterr().out
 
     def test_version_short_flag(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         """The -V short flag prints version string and returns 0."""
@@ -274,7 +274,7 @@ class TestMain:
 
         result = trigger.main(["-V"])
         assert result == 0
-        assert f"trigger v{trigger.__version__}" in capsys.readouterr().out
+        assert f"trigger v{header_version(trigger.__file__)}" in capsys.readouterr().out
 
     def test_help_flag(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         """The --help flag calls print_help and returns 0."""
@@ -387,18 +387,14 @@ class TestMain:
 
 
 class TestVersionString:
-    """`--version` and the README header must never drift apart again."""
+    """`--version` reports the file's own `# Version:` header, the one version."""
 
-    def test_cli_version_matches_readme_header(self) -> None:
-        """The version printed by the CLI is the version the README publishes."""
-        __version__ = trigger_entry.__version__
-
-        readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
-        match = re.search(r"^\*\*Version:\*\*\s*(\S+)", readme, re.MULTILINE)
-        assert match, "README must publish a **Version:** header"
-        assert __version__ == match.group(1), (
-            f"CLI reports {__version__}, README publishes {match.group(1)} — bump both"
-        )
+    def test_cli_version_matches_file_header(self, capsys: pytest.CaptureFixture[str]) -> None:
+        source = Path(trigger_entry.__file__).read_text(encoding="utf-8")
+        match = re.search(r"^# Version:\s*(\S+)", source, re.MULTILINE)
+        assert match, "trigger.py must carry a # Version: header"
+        assert trigger_entry.main(["--version"]) == 0
+        assert f"trigger v{match.group(1)}" in capsys.readouterr().out
 
 
 class TestUnknownCommandMessage:

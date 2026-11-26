@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_events.py
 # Description: Log events module for centralized log watcher public API
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-01-31
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -40,6 +40,7 @@ def print_introspection():
     console.print("    [cyan]•[/cyan] log_watcher.py [dim](is_log_watcher_active — check if watcher is running)[/dim]")
     console.print("    [cyan]•[/cyan] log_watcher.py [dim](SYSTEM_LOGS_DIR — monitored log directory path)[/dim]")
     console.print()
+    console.print("[dim]Run drone @trigger log_events --help for usage.[/dim]")
 
 
 def start() -> bool:
@@ -93,6 +94,11 @@ def print_help() -> None:
     console.print("  [dim]None from this module.[/dim] The branch watcher reads system_logs and")
     console.print("  fires [bold]error_detected[/bold] and [bold]warning_logged[/bold]:")
     console.print("  [dim]drone @trigger branch_log_events --help[/dim]")
+    console.print()
+    console.print("[bold]EXAMPLES[/bold]")
+    console.print()
+    console.print("  drone @trigger log_events status")
+    console.print("  drone @trigger log_events stop")
     console.print()
 
 

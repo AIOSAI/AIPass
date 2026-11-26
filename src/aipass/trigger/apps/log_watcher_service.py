@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher_service.py
 # Description: Persistent log watcher process for Medic error detection
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-03-29
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -136,6 +136,8 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] in ("--version", "-V"):
-        print("log_watcher_service 1.0.0")
+        from aipass.cli import header_version
+
+        print(f"log_watcher_service v{header_version(__file__)}")
         sys.exit(0)
     main(sys.argv[1:])

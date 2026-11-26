@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Branch log watcher event producer for error detection
-# Version: 2.17.0
+# Version: 2.18.0
 # Created: 2026-02-02
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -730,7 +730,9 @@ if __name__ == "__main__":
     set_event_callback(test_fire_event)
 
     print("Branch Log Watcher Test")
-    print(f"Monitoring: {len(fleet_logs_dirs())} fleet logs/ dirs")
+    from aipass.cli import console
+
+    console.print(f"Monitoring: {len(fleet_logs_dirs())} fleet logs/ dirs", highlight=False)
     print(f"Monitoring: {SYSTEM_LOGS_DIR}/*.log")
     print("Press Ctrl+C to stop")
     print()

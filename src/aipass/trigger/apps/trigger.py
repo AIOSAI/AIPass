@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trigger.py
 # Description: Entry point CLI for drone @trigger — event bus and error registry
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -18,10 +18,7 @@ from typing import List, Any
 
 from aipass.prax import logger
 
-from aipass.cli import console, header, error, reset_command_state, resolve_exit
-
-# Pinned to the README header version by test_trigger_entry.py.
-__version__ = "3.0.0"
+from aipass.cli import console, header, error, reset_command_state, resolve_exit, header_version
 
 
 MODULES_DIR = Path(__file__).parent / "modules"
@@ -158,7 +155,7 @@ def main(argv: list[str] | None = None):
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print(f"trigger v{__version__}")
+        console.print(f"trigger v{header_version(__file__)}", highlight=False)
         return 0
 
     if args[0] in ["--help", "-h", "help"]:

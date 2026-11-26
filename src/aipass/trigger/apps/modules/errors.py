@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: errors.py
 # Description: Error registry management module for Medic v2 commands
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-02-13
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -70,6 +70,7 @@ def print_introspection():
         "    [cyan]•[/cyan] error_reporter.py [dim](send_source_fix_email — notify branch to fix error)[/dim]"
     )
     console.print()
+    console.print("[dim]Run drone @trigger errors --help for usage.[/dim]")
 
 
 _STATUS_COLORS = {"new": "yellow", "investigating": "cyan", "suppressed": "dim", "resolved": "green"}
@@ -124,7 +125,7 @@ def print_help() -> None:
 
     console.print(Panel("Error Registry - Medic v2 Error Management", style="bold"))
     console.print()
-    console.print("View and manage tracked errors in the Medic v2 error registry.")
+    console.print("View and manage tracked errors in the Medic v2 error registry.", highlight=False)
     console.print()
     console.rule("USAGE")
     console.print()
@@ -146,14 +147,14 @@ def print_help() -> None:
     console.print("  [bold]circuit-breaker[/bold]      Show or reset circuit breaker [dim](reset)[/dim]")
     console.print("  [bold]help[/bold]               Show this help")
     console.print()
-    console.rule("EXAMPLES")
+    console.print("[bold cyan]EXAMPLES:[/bold cyan]")
     console.print()
     console.print("  drone @trigger errors list --status=new --component=flow")
-    console.print("  drone @trigger errors detail a1b2c3d4")
-    console.print("  drone @trigger errors suppress a1b2c3d4 known startup issue")
-    console.print("  drone @trigger errors unsuppress a1b2c3d4")
-    console.print("  drone @trigger errors resolve a1b2c3d4")
-    console.print("  drone @trigger errors clear-resolved --days=14")
+    console.print("  drone @trigger errors detail a1b2c3d4", highlight=False)
+    console.print("  drone @trigger errors suppress a1b2c3d4 known startup issue", highlight=False)
+    console.print("  drone @trigger errors unsuppress a1b2c3d4", highlight=False)
+    console.print("  drone @trigger errors resolve a1b2c3d4", highlight=False)
+    console.print("  drone @trigger errors clear-resolved --days=14", highlight=False)
     console.print("  drone @trigger errors circuit-breaker reset")
     console.print()
 
@@ -483,7 +484,7 @@ def _cmd_stats(console, args: list) -> bool:
             console.print(f"  [bold]{label}:[/bold]")
             for key, count in sorted(data.items()):
                 c = color_fn(key)
-                console.print(f"    [{c}]{key:<15}[/{c}] {count}")
+                console.print(f"    [{c}]{key:<15}[/{c}] {count}", highlight=False)
             console.print()
 
     cb_st = cb.get("state", "unknown")

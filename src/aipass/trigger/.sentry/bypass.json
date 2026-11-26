@@ -86,7 +86,7 @@
       "file": "apps/modules/errors.py",
       "standard": "logged_fallback",
       "lines": [
-        289
+        290
       ],
       "pattern": "_cmd_detail returns True after an unreadable registry",
       "reason": "True there means routed, not succeeded (fleet green leg 5, kept leg 10). The failure goes out through cli error() and its failure flag, which trigger.main reads.",

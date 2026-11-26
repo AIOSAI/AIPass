@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_log_events.py
 # Description: Branch log events module for log watcher public API
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-02-02
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -47,6 +47,7 @@ def print_introspection():
     console.print("    [cyan]•[/cyan] log_watcher.py [dim](get_watcher_status — get full status dict)[/dim]")
     console.print("    [cyan]•[/cyan] log_watcher.py [dim](clear_seen_hashes — reset error deduplication)[/dim]")
     console.print()
+    console.print("[dim]Run drone @trigger branch_log_events --help for usage.[/dim]")
 
 
 def start() -> bool:
@@ -115,6 +116,12 @@ def print_help() -> None:
     console.print("  [bold]error_detected[/bold]  When ERROR/CRITICAL level log detected")
     console.print("                   Handled by Medic dispatch pipeline")
     console.print()
+    console.print("[bold]EXAMPLES[/bold]")
+    console.print()
+    console.print("  drone @trigger branch_log_events status")
+    console.print("  drone @trigger branch_log_events start")
+    console.print("  drone @trigger branch_log_events reset")
+    console.print()
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -150,7 +157,10 @@ def handle_command(command: str, args: list) -> bool:
     if command == "start":
         if start():
             success("Branch log watcher started")
-            console.print("   Monitoring: every declared citizen's logs/*.log (memory's door, re-read every 300s)")
+            console.print(
+                "   Monitoring: every declared citizen's logs/*.log (memory's door, re-read every 300s)",
+                highlight=False,
+            )
             console.print("   Events: error_detected → AI_Mail error_handler")
         else:
             error("Failed to start branch log watcher")
@@ -167,7 +177,7 @@ def handle_command(command: str, args: list) -> bool:
         console.print(f"  Seen error hashes: {info['seen_hashes_count']}")
         console.print(f"  Pending flush: {info['pending_flush']}")
         console.print(f"  AIPASS root: {info['aipass_root']}")
-        console.print(f"  Fleet logs dirs: {len(info['watched_logs'])}")
+        console.print(f"  Fleet logs dirs: {len(info['watched_logs'])}", highlight=False)
         for branch, logs_dir in info["watched_logs"]:
             console.print(f"    {branch}  {escape(logs_dir)}")
     elif command == "reset":

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_errors.py
 # Description: Unit tests for the errors module (error registry management CLI)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/errors.py: the errors command routing and its report_error re-export."""
@@ -316,7 +316,7 @@ class TestHandleCommandHelp:
 
         assert _has_line(out, "─", "USAGE"), "Expected USAGE rule section"
         assert _has_line(out, "─", "COMMANDS"), "Expected COMMANDS rule section"
-        assert _has_line(out, "─", "EXAMPLES"), "Expected EXAMPLES rule section"
+        assert "EXAMPLES:" in out, "Expected EXAMPLES heading"
 
         assert _has_line(out, "list", "List tracked errors"), "Expected 'list' command in help"
         assert _has_line(out, "resolve", "Mark error as resolved"), "Expected 'resolve' command in help"

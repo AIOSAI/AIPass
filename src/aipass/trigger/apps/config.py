@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Trigger package paths and atomic JSON writes
-# Version: 1.11.0
+# Version: 1.12.0
 # Created: 2026-03-09
-# Modified: 2026-11-18
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -115,3 +115,39 @@ def print_introspection():
     console.print("[bold cyan]config Module[/bold cyan]")
     console.print("[dim]Path constants — TRIGGER_ROOT and AIPASS_PKG_ROOT used by all trigger modules[/dim]")
     console.print()
+    console.print("[dim]Run config.py --help for usage.[/dim]")
+
+
+def print_help():
+    """Display usage for the config module."""
+    from aipass.cli import console
+
+    console.print()
+    console.print("[bold cyan]config — trigger paths and atomic JSON writes[/bold cyan]")
+    console.print()
+    console.print("[dim]No drone command; trigger modules import it.[/dim]")
+    console.print()
+    console.print("[bold]Usage (Python):[/bold]")
+    console.print("  from aipass.trigger.apps.config import TRIGGER_ROOT, atomic_write_json")
+    console.print()
+    console.print("[bold]Examples:[/bold]")
+    console.print("  atomic_write_json(TRIGGER_JSON_DIR / 'state.json', data)")
+    console.print("  with json_file_lock(path): ...")
+    console.print("  migrate_json_file(legacy_path, new_path)")
+    console.print()
+
+
+if __name__ == "__main__":
+    import sys
+
+    from aipass.cli import console, header_version
+
+    args = sys.argv[1:]
+    if len(args) == 0:
+        print_introspection()
+    elif "--help" in args or "-h" in args:
+        print_help()
+    elif args[0] in ("--version", "-V"):
+        console.print(f"config v{header_version(__file__)}", highlight=False)
+    else:
+        print_introspection()

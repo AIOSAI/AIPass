@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ci.py
 # Description: CI red lane - poll dev's runs, wake the owner, gate the cure through @sentry, push it through drone
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-22
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -43,6 +43,7 @@ def print_introspection():
     console.print("  [cyan]handlers/events/[/cyan]")
     console.print("    [cyan]•[/cyan] ci_red.py [dim](handle_ci_red — medic's gates, then the owner's wake)[/dim]")
     console.print()
+    console.print("[dim]Run drone @trigger ci --help for usage.[/dim]")
 
 
 def print_help() -> None:
@@ -64,6 +65,14 @@ def print_help() -> None:
     console.print()
     console.print("  [dim]The poll runs from .daemon/schedule.json. A hand fire walks the lane too:[/dim]")
     console.print("  [dim]drone @trigger fire ci_red run_id=<a red run id from drone @git run list>[/dim]")
+    console.print()
+    console.print("[yellow]Usage:[/yellow]")
+    console.print("  [cyan]drone @trigger ci[/cyan] <command> \\[args]")
+    console.print("  [cyan]drone @trigger ci[/cyan] --help")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [cyan]drone @trigger ci poll[/cyan]")
+    console.print("  [cyan]drone @trigger ci status[/cyan]")
     console.print()
 
 
