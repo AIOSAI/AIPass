@@ -24,7 +24,7 @@ from aipass.spawn import find_registry, get_owner
 
 
 class RegisterUnavailable(RuntimeError):
-    """This seat's identity or the register could not be resolved."""
+    """This seat's identity or the dispatch register could not be resolved."""
 
 
 def seat_email(repo_root: Path | None = None) -> str:
