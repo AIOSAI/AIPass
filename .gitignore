@@ -79,6 +79,7 @@ src/aipass/trigger/trigger_data.json
 src/aipass/trigger/trigger_data.lock
 src/aipass/drone/drone_command_registry.json
 src/aipass/flow/CLOSED_PLANS.local.json
+src/aipass/flow/.post_close_runner.lock*
 src/aipass/sentry/apps/standards/aipass/pack.json
 
 # Registry lock (spawn's writer lock; one machine's state, recreated on use)
