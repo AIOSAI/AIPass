@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: templates.py
 # Description: cli Templates Module — reusable operation output patterns
-# Version: 0.3.5
+# Version: 0.3.6
 # Created: 2025-11-12
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -49,10 +49,10 @@ def print_help():
     CONSOLE.print()
     CONSOLE.print("  [yellow]operation_complete(**summary)[/yellow]")
     CONSOLE.print("    Standard completion summary with Rich styling")
-    CONSOLE.print("    Example: operation_complete(created=5, skipped=2, time='3.2s')")
+    CONSOLE.print("    Example: operation_complete(created=5, skipped=2, time='3.2s')", highlight=False)
     CONSOLE.print()
 
-    CONSOLE.print("[bold cyan]Usage Examples:[/bold cyan]")
+    CONSOLE.print("[bold cyan]USAGE:[/bold cyan]")
     CONSOLE.print()
     CONSOLE.print("  [green]# Show module info[/green]")
     CONSOLE.print("  drone @cli templates")
@@ -64,9 +64,9 @@ def print_help():
     CONSOLE.print("  drone @cli templates --help")
     CONSOLE.print()
 
-    CONSOLE.print("[bold cyan]Integration Example:[/bold cyan]")
+    CONSOLE.print("[bold cyan]EXAMPLES:[/bold cyan]")
     CONSOLE.print()
-    CONSOLE.print("  [dim]from aipass.cli.apps.modules.templates import operation_start, operation_complete[/dim]")
+    CONSOLE.print("  [dim]from aipass.cli import operation_start, operation_complete[/dim]")
     CONSOLE.print()
     CONSOLE.print("  [dim]# Start operation[/dim]")
     CONSOLE.print("  [dim]operation_start('Creating files', target='/path/to/my_branch')[/dim]")
@@ -149,6 +149,7 @@ def operation_complete(**summary) -> None:
     CONSOLE.print()
     CONSOLE.print("─" * 50)
     CONSOLE.print("[bold]Summary:[/bold]")
+    CONSOLE.print("  [dim]What the operation did[/dim]")
 
     for key, value in summary.items():
         if key != "time":

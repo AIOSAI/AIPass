@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: cli Display Module — public API for Rich terminal output formatting
-# Version: 0.6.0
+# Version: 0.6.1
 # Created: 2025-11-12
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -160,7 +160,7 @@ def print_help():
     CONSOLE.print("─" * 70)
     CONSOLE.print()
 
-    CONSOLE.print("[bold cyan]CODE EXAMPLES:[/bold cyan]")
+    CONSOLE.print("[bold cyan]EXAMPLES:[/bold cyan]")
     CONSOLE.print()
 
     code_examples = """[bold]Import and use in your Python code:[/bold]
@@ -260,9 +260,9 @@ def run_demo():
     CONSOLE.print()
 
     section("Summary")
-    CONSOLE.print("  ✅ 3 operations succeeded")
-    CONSOLE.print("  ⚠️  1 warning")
-    CONSOLE.print("  ❌ 1 error")
+    CONSOLE.print("  ✅ 3 operations succeeded", highlight=False)
+    CONSOLE.print("  ⚠️  1 warning", highlight=False)
+    CONSOLE.print("  ❌ 1 error", highlight=False)
     CONSOLE.print()
 
     CONSOLE.print("[bold green]✨ Rich library integration complete![/bold green]")

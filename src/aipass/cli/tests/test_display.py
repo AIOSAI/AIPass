@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_display.py
 # Description: The display module — messages, header, routing, demo, exit seam, escape, live colour
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-03-24
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/display.py — the render surface every branch imports."""
@@ -396,14 +396,14 @@ class TestPrintHelpOutput:
         assert "USAGE:" in output
         assert "drone @cli display" in output
 
-    def test_print_help_contains_code_examples(self):
+    def test_print_help_has_an_examples_heading(self):
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
         ):
             display.print_help()
         output = get_output()
-        assert "CODE EXAMPLES:" in output
+        assert "EXAMPLES:" in output.splitlines()
         assert "from aipass.cli" in output
 
     def test_print_help_contains_integration_section(self):

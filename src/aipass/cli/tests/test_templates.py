@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_templates.py
 # Description: The templates module — operation_start, operation_complete, routing, demo
-# Version: 1.1.4
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/templates.py — the operation output templates."""
@@ -163,8 +163,8 @@ class TestOperationComplete:
         console, get_output = plain_console
         with patch.object(templates, "CONSOLE", console):
             templates.operation_complete(created=3)
-        output = get_output()
-        assert "Summary:" in output
+        lines = get_output().splitlines()
+        assert lines[lines.index("Summary:") + 1] == "  What the operation did"
 
     def test_summary_kwargs_in_output(self, plain_console):
         console, get_output = plain_console
@@ -273,10 +273,11 @@ class TestPrintHelpOutput:
         ):
             templates.print_help()
         output = get_output()
+        assert {"USAGE:", "EXAMPLES:"} <= set(output.splitlines())
         assert "drone @cli templates" in output
         assert "drone @cli templates demo" in output
 
-    def test_help_contains_integration_example(self, plain_console):
+    def test_help_contains_integration_example_through_the_door(self, plain_console):
         console, get_output = plain_console
         with (
             patch.object(templates, "CONSOLE", console),
@@ -284,7 +285,8 @@ class TestPrintHelpOutput:
         ):
             templates.print_help()
         output = get_output()
-        assert "from aipass.cli" in output
+        assert "from aipass.cli import operation_start, operation_complete" in output
+        assert "aipass.cli.apps" not in output
 
     def test_help_contains_reference(self, plain_console):
         console, get_output = plain_console
