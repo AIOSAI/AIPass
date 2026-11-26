@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: oversize_test_file_check.py
 # Description: Oversize Test File Standards Checker Handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-09-20
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -65,15 +65,6 @@ def measure(source: str) -> Tuple[int, int, int]:
     return total - payload, total, payload
 
 
-def _measure_path(path: Path) -> Tuple[int, int, int]:
-    """measure() for a file on disk, or zeroes if it cannot be read."""
-    try:
-        return measure(path.read_text(encoding="utf-8", errors="ignore"))
-    except OSError as exc:
-        logger.info("[oversize_test_file] Cannot read %s: %s", path, exc)
-        return 0, 0, 0
-
-
 def _result(passed: bool, message: str, score: int) -> Dict:
     """The single-check result shape every checker in this pack returns."""
     return {
@@ -93,7 +84,10 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not path.exists():
         return _result(False, f"File not found: {module_path}", 0)
 
-    code, total, payload = _measure_path(path)
+    try:
+        code, total, payload = measure(path.read_text(encoding="utf-8", errors="ignore"))
+    except OSError as exc:
+        return _result(False, f"Error reading file: {module_path} ({exc})", 0)
 
     if code <= CODE_LINE_CAP:
         return _result(True, f"{code} code lines, cap {CODE_LINE_CAP}", 100)

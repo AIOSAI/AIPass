@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_check.py
 # Description: Template/Boilerplate Detection Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-07-01
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -78,9 +78,9 @@ def _check_file(file_path: Path, bypass_rules: list | None) -> Dict:
 
     try:
         content = file_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        logger.info("Cannot read %s for template check", file_path)
-        return {"name": rel, "passed": True, "message": f"{rel} unreadable (skipped)"}
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning("Cannot read %s for template check: %s", file_path, exc)
+        return {"name": rel, "passed": False, "message": f"{rel} unreadable: {exc}"}
 
     is_markdown = file_path.suffix == ".md"
     is_prompt = file_path.name == "aipass_local_prompt.md"

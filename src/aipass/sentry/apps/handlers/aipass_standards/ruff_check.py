@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ruff_check.py
 # Description: Ruff Linter & Formatter Standards Checker Handler
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-04-16
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -180,6 +180,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         passed = False
 
     needs_format = False
+    fmt_failure = ""
     try:
         fmt_proc = subprocess.run(
             [ruff, "format", "--check", str(fp)],
@@ -191,10 +192,15 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             needs_format = True
     except subprocess.TimeoutExpired:
         logger.warning("ruff format --check timed out on %s", module_path)
+        fmt_failure = f"ruff format --check timed out on {fp.name}"
     except Exception as exc:
         logger.warning("ruff format --check failed on %s: %s", module_path, exc)
+        fmt_failure = f"ruff format --check could not run on {fp.name}: {exc}"
 
-    if needs_format:
+    if fmt_failure:
+        checks.append({"name": "Ruff format", "passed": False, "message": fmt_failure})
+        passed = False
+    elif needs_format:
         checks.append({"name": "Ruff format", "passed": False, "message": f"{fp.name} needs ruff format"})
         passed = False
     else:
@@ -313,6 +319,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
         checks.append({"name": "Ruff lint", "passed": False, "message": message})
 
     fmt_files: list[str] = []
+    fmt_failure = ""
     try:
         fmt_proc = subprocess.run(
             [ruff, "format", "--check", *(str(t) for t in scan_targets)],
@@ -329,11 +336,16 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
             ]
     except subprocess.TimeoutExpired:
         logger.warning("ruff format --check timed out on branch %s", branch_path)
+        fmt_failure = "ruff format --check timed out on the branch"
     except Exception as exc:
         logger.warning("ruff format --check failed on branch %s: %s", branch_path, exc)
+        fmt_failure = f"ruff format --check could not run: {exc}"
 
     fmt_count = len(fmt_files)
-    if fmt_count == 0:
+    if fmt_failure:
+        checks.append({"name": "Ruff format", "passed": False, "message": fmt_failure})
+        score = max(25, score - 2)
+    elif fmt_count == 0:
         checks.append({"name": "Ruff format", "passed": True, "message": "All files formatted"})
     else:
         names = ", ".join(Path(f).name for f in fmt_files[:5])

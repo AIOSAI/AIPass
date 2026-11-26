@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_assert_check.py
 # Description: Router Assert Standards Checker Handler
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-09-20
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -143,15 +143,6 @@ def find_violations(source: str) -> Optional[List[Tuple[int, str]]]:
     return violations
 
 
-def _scan_path(path: Path) -> Optional[List[Tuple[int, str]]]:
-    """Violations in one file, or None if it cannot be read or parsed."""
-    try:
-        return find_violations(path.read_text(encoding="utf-8", errors="ignore"))
-    except OSError as exc:
-        logger.info("[router_assert] Cannot read %s: %s", path, exc)
-        return None
-
-
 def _result(passed: bool, message: str, score: int) -> Dict:
     """The single-check result shape every checker in this pack returns."""
     return {
@@ -171,7 +162,11 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not path.exists():
         return _result(False, f"File not found: {module_path}", 0)
 
-    scanned = _scan_path(path)
+    try:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError as exc:
+        return _result(False, f"Error reading file: {module_path} ({exc})", 0)
+    scanned = find_violations(source)
     if scanned is None:
         return _result(True, NOT_JUDGED, 100)
     hits = [(ln, name) for ln, name in scanned if not is_bypassed(module_path, STANDARD_KEY, ln, bypass_rules)]
