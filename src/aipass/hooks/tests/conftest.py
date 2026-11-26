@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.12.0
+# Version: 2.12.1
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -31,7 +31,7 @@ import pytest
 
 from aipass.ai_mail import GRANT_KEY
 from aipass.cli import display
-from aipass.hooks.apps import sound
+from aipass.hooks.apps.handlers.notification import sound
 from aipass.hooks.apps.handlers.config import diagnostics, loader, trust_registry
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.handlers.lifecycle import session_boot

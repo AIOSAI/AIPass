@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 2.9.1
+# Version: 2.9.2
 # Description: Hook engine — unified dispatcher; gates fail closed, injectors skip on error
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL.
@@ -402,7 +402,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
                 }
             )
             try:
-                from aipass.hooks.apps.sound import speak
+                from aipass.hooks.apps.handlers.notification.sound import speak
 
                 speak(f"{hook_name.replace('_', ' ')} timed out")
             except Exception as exc:
@@ -438,7 +438,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 
         if result.get("sound"):
             try:
-                from aipass.hooks.apps.sound import speak
+                from aipass.hooks.apps.handlers.notification.sound import speak
 
                 speak(result["sound"])
             except Exception as exc:
@@ -568,6 +568,23 @@ def print_introspection():
         handler_files = [f.name for f in sorted(category_dir.glob("*.py")) if not f.name.startswith("_")]
         if handler_files:
             CONSOLE.print(f"    handlers/{category_dir.name}/ — {', '.join(handler_files)}")
+    CONSOLE.print("[dim]Routes every hook event of every session to its handlers, gates first.[/dim]")
+    CONSOLE.print("[dim]Run drone @hooks engine --help for usage.[/dim]")
+
+
+def print_help():
+    """Print engine usage and examples."""
+    CONSOLE.print("[bold cyan]engine[/bold cyan] — Hook dispatch engine")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print(
+        "  drone @hooks [green]engine[/green]    The handler map: every handler the engine dispatches, by category"
+    )
+    CONSOLE.print("  drone @hooks [green]log[/green]       Tail recent hook activity")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  drone @hooks engine")
+    CONSOLE.print("  drone @hooks log")
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -578,10 +595,7 @@ def handle_command(command: str, args: list) -> bool:
             return True
 
     if command in ("--help", "-h", "help") or (command == "engine" and wants_help(args)):
-        CONSOLE.print("[bold cyan]engine[/bold cyan] — Hook dispatch engine")
-        CONSOLE.print()
-        CONSOLE.print("  drone @hooks engine    The handler map: every handler the engine dispatches, by category")
-        CONSOLE.print("  drone @hooks log       Tail recent hook activity")
+        print_help()
         return True
 
     if command == "log":

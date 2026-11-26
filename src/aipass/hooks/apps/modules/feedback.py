@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: feedback.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Feedback pulse toggle — on/off control for periodic feedback ask
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-18
-# Modified: 2026-10-25
+# Modified: 2026-11-26
 # =============================================
 
 """Feedback pulse toggle — on/off control for the periodic feedback ask via drone @hooks feedback."""
@@ -67,6 +67,22 @@ def print_introspection() -> None:
         if not _configured_on():
             status = "DISABLED in hooks.json"
     CONSOLE.print(f"[bold cyan]feedback[/bold cyan] — Feedback pulse ({status})")
+    CONSOLE.print("[dim]Turns the periodic feedback pulse on or off for this project.[/dim]")
+    CONSOLE.print("[dim]Run drone @hooks feedback --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print usage for ``drone @hooks feedback``."""
+    CONSOLE.print("[bold cyan]feedback[/bold cyan] — Toggle the periodic feedback pulse")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  drone @hooks [cyan]feedback[/cyan]        Show current status")
+    CONSOLE.print("  drone @hooks [cyan]feedback on[/cyan]     Enable feedback pulse (default)")
+    CONSOLE.print("  drone @hooks [cyan]feedback off[/cyan]    Disable feedback pulse")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  drone @hooks feedback off")
+    CONSOLE.print("  drone @hooks feedback on")
 
 
 def _require_sentinel() -> Path:
@@ -91,11 +107,7 @@ def handle_command(command: str, args: list) -> bool:
         sub = args[0]
 
         if wants_help(args):
-            CONSOLE.print("[bold cyan]feedback[/bold cyan] — Toggle the periodic feedback pulse")
-            CONSOLE.print()
-            CONSOLE.print("  drone @hooks feedback        Show current status")
-            CONSOLE.print("  drone @hooks feedback on     Enable feedback pulse (default)")
-            CONSOLE.print("  drone @hooks feedback off    Disable feedback pulse")
+            print_help()
             return True
 
         if sub == "off":

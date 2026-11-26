@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: alert_dismiss.py
-# Version: 1.1.3
+# Version: 1.1.4
 # Description: Dismiss alerts from .aipass/alerts.json via drone @hooks dismiss
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-14
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Dismiss alerts from .aipass/alerts.json by ID."""
@@ -88,6 +88,21 @@ def _dismiss_alert(alert_id: str) -> bool:
 def print_introspection():
     """Print module structure for drone routing."""
     CONSOLE.print("[bold cyan]alert_dismiss[/bold cyan] — Remove alerts from .aipass/alerts.json")
+    CONSOLE.print("[dim]Takes one alert off the shared alerts list by its ID.[/dim]")
+    CONSOLE.print("[dim]Run drone @hooks dismiss --help for usage.[/dim]")
+
+
+def print_help():
+    """Print the dismiss verb's usage and examples."""
+    CONSOLE.print("[bold cyan]dismiss[/bold cyan] — Remove an alert")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks dismiss[/cyan] <alert-id>")
+    CONSOLE.print()
+    CONSOLE.print("Removes the alert with the given ID from .aipass/alerts.json.")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks dismiss[/cyan] test-001", highlight=False)
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -104,11 +119,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if wants_help(args):
-        CONSOLE.print("[bold cyan]dismiss[/bold cyan] — Remove an alert")
-        CONSOLE.print()
-        CONSOLE.print("  drone @hooks dismiss <alert-id>")
-        CONSOLE.print()
-        CONSOLE.print("Removes the alert with the given ID from .aipass/alerts.json.")
+        print_help()
         return True
 
     # A miss exits non-zero so a script can tell a dismissal from a miss; sys.exit, not a return,

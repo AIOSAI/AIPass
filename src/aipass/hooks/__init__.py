@@ -17,11 +17,11 @@ if TYPE_CHECKING:  # each name typed from its home
     )
     from aipass.hooks.apps.modules.grounding_content import BRANCH_CHAR_BUDGET
     from aipass.hooks.apps.modules.sandbox import build_policy, build_srt_config, resolve_bwrap_command
-    from aipass.hooks.apps.sound import SOUND_FLAG, is_muted
+    from aipass.hooks.apps.handlers.notification.sound import SOUND_FLAG, is_muted
 
 _TRUST = "aipass.hooks.apps.handlers.config.trust_registry"
 _SANDBOX = "aipass.hooks.apps.modules.sandbox"
-_SOUND = "aipass.hooks.apps.sound"
+_SOUND = "aipass.hooks.apps.handlers.notification.sound"
 
 _HOMES = {
     "build_policy": _SANDBOX,

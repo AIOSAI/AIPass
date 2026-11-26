@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: comments.py
-# Version: 1.0.4
+# Version: 1.0.5
 # Description: The comments verb — the comment budget's ledger, trend and on-demand scan
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-16
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """The comment budget: last edits, a file's trend, over-budget files, or a scan now."""
@@ -33,17 +33,30 @@ HELP_COMMANDS = [
 def print_introspection() -> None:
     """Print module structure for drone routing."""
     err_console.print("[bold cyan]comments[/bold cyan] — the comment budget's ledger and on-demand scan")
+    err_console.print("[dim]Keeps each judged file's full-line comments under a share of its lines.[/dim]")
+    err_console.print("[dim]Run drone @hooks comments --help for usage.[/dim]")
 
 
-def _print_help() -> None:
-    """The verb's help: the budget and the metric in four lines."""
+def print_help() -> None:
+    """The verb's help: its forms, the budget and the metric."""
+    CONSOLE.print("[bold cyan]comments[/bold cyan] — the comment budget's ledger and on-demand scan")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks comments[/cyan]                  The last 20 judged edits")
+    CONSOLE.print("  [cyan]drone @hooks comments[/cyan] <path>           Scan a file or a tree now")
+    CONSOLE.print("  [cyan]drone @hooks comments --file[/cyan] <path>    One file's trend")
+    CONSOLE.print("  [cyan]drone @hooks comments --over[/cyan]           Files whose latest edit is over budget")
+    CONSOLE.print()
     CONSOLE.print(
-        f"Budget: full-line comments at most {comment_scan.BUDGET_PERCENT}% of a file's non-blank lines; "
+        f"[bold]Budget:[/bold] full-line comments at most {comment_scan.BUDGET_PERCENT}% of a file's non-blank lines; "
         f"files under {comment_scan.MIN_BODY_LINES} are not judged."
     )
-    CONSOLE.print("Comments: # / // lines, /* */ block lines, Python docstring lines past the first.")
-    CONSOLE.print("Free: the AIPass header, one-line docstrings, directives (noqa, eslint-, @ts-...).")
-    CONSOLE.print("Usage: comments (last 20 edits) | comments <path> | --file <path> (trend) | --over")
+    CONSOLE.print("[bold]Comments:[/bold] # / // lines, /* */ block lines, Python docstring lines past the first.")
+    CONSOLE.print("[bold]Free:[/bold] the AIPass header, one-line docstrings, directives (noqa, eslint-, @ts-...).")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks comments[/cyan] apps/")
+    CONSOLE.print("  [cyan]drone @hooks comments --over[/cyan]")
 
 
 def _caller_path(target: str) -> Path:
@@ -135,7 +148,9 @@ def _scan_tree(root: Path) -> None:
     comments = sum(scan.comments for _, scan in scans)
     over = sum(1 for _, scan in scans if scan.over() > 0)
     share = round(comments / body * 100) if body else 0
-    CONSOLE.print(f"files {len(scans)}, over budget {over}, share {share}% ({comments} of {body} lines)")
+    CONSOLE.print(
+        f"files {len(scans)}, over budget {over}, share {share}% ({comments} of {body} lines)", highlight=False
+    )
 
 
 def _scan_now(target: str) -> bool:
@@ -178,7 +193,7 @@ def handle_command(command: str, args: list) -> bool:
         _show_recent()
         return True
     if wants_help(args):
-        _print_help()
+        print_help()
         return True
     if not _route(args):
         sys.exit(1)

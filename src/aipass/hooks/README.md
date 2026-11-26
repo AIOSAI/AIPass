@@ -100,11 +100,13 @@ command to the one that claims it. `apps/modules/` holds one business-logic modu
 (what a seat was told, and whether it arrived), `grounding_content` (the injected blocks and budgets),
 `write_ownership` and `write_grant` (whose file a write lands in, and the grant that may cover it),
 `bash_writes`, `shell_reader`, `shell_programs` and `testwrite_targets` (what a shell command writes and
-runs), `promote` (source to live code), `protected_paths` (the files that switch the gates), and more:
-bare `drone @hooks` lists them all live. `apps/handlers/` holds the implementation, one directory per
-concern: `bridges/` per platform, `prompt/` for injection, `security/` for the gates, `lifecycle/` for
-session and compaction events, `notification/` for sound and mail, `parity/`, plus `config/`, `cli/` and
-the `json/` service every branch shares.
+runs), `promote` (source to live code), `protected_paths` (the files that switch the gates), plus
+`alert_dismiss`, `cc_sessions`, `cc_transcripts`, `comment_scan`, `context_window`, `diagnostics_state`,
+`engine_closure`, `feedback`, `hook_test`, `hooksound`, `hookstatus`, `provider_launch`,
+`testgate_policy` and `wire_verify`; bare `drone @hooks` describes each. `apps/handlers/` holds the
+implementation, one directory per concern: `bridges/` per platform, `prompt/` for injection, `security/`
+for the gates, `lifecycle/` for session and compaction events, `notification/` for sound and mail,
+`parity/`, plus `config/`, `cli/` and the `json/` service every branch shares.
 
 Handlers are imported dynamically by dotted path at dispatch time, never statically, which is why no
 handler is referenced anywhere in this tree and why static analysis cannot see them as used.

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_context_window.py
-# Version: 1.8.0
+# Version: 1.8.1
 # Description: Tests for shared context_window module (live status-line window since 1.8.0)
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/context_window.py."""
@@ -403,3 +403,11 @@ class TestSeedTranscript:
         transcript = str(_seed_transcript(tmp_path / "transcript.jsonl"))
         assert read_latest_usage(transcript, provider="seed") is None
         assert parsed == [], "Seed's lines are not Claude's: nothing may parse them as such"
+
+
+class TestHelp:
+    def test_help_prints_the_usage_and_examples_headings(self, capsys):
+        assert context_window.handle_command("context_window", ["--help"]) is True
+        err = capsys.readouterr().err
+        assert "Usage:" in err
+        assert "Examples:" in err

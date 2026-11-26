@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: injection_ledger.py
-# Version: 1.1.3
+# Version: 1.1.4
 # Description: Per-turn record of what the engine injected into a session, keyed on cadence's turn token (warn-only)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-16
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """What a seat was told, and when — one JSONL record per injecting dispatch.
@@ -87,6 +87,24 @@ def print_introspection() -> None:
     """Print module structure for drone routing."""
     console.print("[bold cyan]injection_ledger[/bold cyan] — What each session was told, keyed on the turn token")
     console.print("  Connected Handlers: handlers/config/ - ledger_store.py")
+    console.print("[dim]Shows what each session was told by the hooks, one line per turn.[/dim]")
+    console.print("[dim]Run drone @hooks ledger --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print usage for ``drone @hooks ledger``."""
+    console.print("[bold cyan]ledger[/bold cyan] — what a session was told, one line per turn")
+    console.print()
+    console.print("[bold]Usage:[/bold]")
+    console.print("  drone @hooks [cyan]ledger[/cyan]                    this session (else the most recently written)")
+    console.print("  drone @hooks [cyan]ledger --session <id>[/cyan]     a named session")
+    console.print(
+        "  drone @hooks [cyan]ledger --last N[/cyan]           only the last N rows (default 20)", highlight=False
+    )
+    console.print()
+    console.print("[bold]Examples:[/bold]")
+    console.print("  drone @hooks ledger")
+    console.print("  drone @hooks ledger --last 5", highlight=False)
 
 
 def _positive(value: str) -> int:
@@ -104,10 +122,7 @@ def handle_command(command: str, args: list) -> bool:
     if not args:
         print_introspection()
     if wants_help(args):
-        console.print("[bold cyan]ledger[/bold cyan] — what a session was told, one line per turn")
-        console.print("  drone @hooks ledger                    this session (else the most recently written)")
-        console.print("  drone @hooks ledger --session <id>     a named session")
-        console.print("  drone @hooks ledger --last N           only the last N rows (default 20)")
+        print_help()
         return True
 
     parser = argparse.ArgumentParser(prog="drone @hooks ledger", add_help=False)

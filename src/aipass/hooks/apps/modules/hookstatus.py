@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hookstatus.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Hook status — read-only view of per-project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-28
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Hook status — read-only view of per-project hook configuration via drone @hooks status."""
@@ -50,6 +50,23 @@ def print_config_break() -> None:
 def print_introspection():
     """Print module structure for drone routing."""
     CONSOLE.print("[bold cyan]hookstatus[/bold cyan] — Read-only hook config viewer")
+    CONSOLE.print("[dim]Shows which hooks this project's hook config enables.[/dim]")
+    CONSOLE.print("[dim]Run drone @hooks status --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print usage for ``drone @hooks status``."""
+    CONSOLE.print("[bold cyan]hookstatus[/bold cyan] — Read-only hook config viewer")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  drone @hooks [cyan]status[/cyan]           Show current project hook config")
+    CONSOLE.print("  drone @hooks [cyan]status --help[/cyan]    Show this help")
+    CONSOLE.print()
+    CONSOLE.print("Reads .aipass/hooks.json from the current directory tree.")
+    CONSOLE.print("Display only — never modifies config. Exits 1 when there is no config to show.", highlight=False)
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  drone @hooks status")
 
 
 def _render_status(config: dict) -> None:
@@ -119,13 +136,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if wants_help(args):
-        CONSOLE.print("[bold cyan]hookstatus[/bold cyan] — Read-only hook config viewer")
-        CONSOLE.print()
-        CONSOLE.print("  drone @hooks status           Show current project hook config")
-        CONSOLE.print("  drone @hooks status --help    Show this help")
-        CONSOLE.print()
-        CONSOLE.print("Reads .aipass/hooks.json from the current directory tree.")
-        CONSOLE.print("Display only — never modifies config. Exits 1 when there is no config to show.")
+        print_help()
         return True
 
     return False

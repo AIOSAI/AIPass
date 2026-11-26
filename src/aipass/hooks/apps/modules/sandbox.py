@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: sandbox.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Sandbox building blocks — policy, srt config and the bwrap command (kernel FS boundary)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-09
-# Modified: 2026-11-18
+# Modified: 2026-11-26
 # =============================================
 
 """Sandbox building blocks for the srt kernel filesystem boundary; callers spawn the wrapped command.
@@ -213,8 +213,21 @@ def resolve_bwrap_command(command: str, srt_config: dict) -> str:
 def print_introspection() -> None:
     """Print module structure for drone routing."""
     CONSOLE.print("[bold cyan]sandbox[/bold cyan] — Kernel filesystem boundary via srt")
-    CONSOLE.print("  Phase 1: wrapper module only (not yet wired into dispatch)")
+    CONSOLE.print("[dim]Wraps a hook command in a kernel filesystem boundary built from the branch's policy.[/dim]")
+    CONSOLE.print("  Phase 1: wrapper module only (not yet wired into dispatch)", highlight=False)
     CONSOLE.print("  Callers compose build_policy, build_srt_config and resolve_bwrap_command.")
+    CONSOLE.print("[dim]Run drone @hooks sandbox --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print the sandbox command line and an example."""
+    CONSOLE.print("[bold cyan]sandbox[/bold cyan] — Kernel filesystem boundary via srt")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  drone @hooks [cyan]sandbox[/cyan]    Show sandbox module status")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  drone @hooks sandbox")
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -225,9 +238,7 @@ def handle_command(command: str, args: list) -> bool:
             return True
 
         if wants_help(args):
-            CONSOLE.print("[bold cyan]sandbox[/bold cyan] — Kernel filesystem boundary via srt")
-            CONSOLE.print()
-            CONSOLE.print("  drone @hooks sandbox    Show sandbox module status")
+            print_help()
             return True
 
     return False

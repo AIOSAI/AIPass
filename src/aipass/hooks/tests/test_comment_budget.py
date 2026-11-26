@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_comment_budget.py
-# Version: 1.3.1
+# Version: 1.3.2
 # Description: Tests for the comment budget: counter, PostToolUse handler, comments verb
 # Branch: hooks
 # Created: 2026-10-16
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/lifecycle/comment_budget.py, apps/modules/comment_scan.py and apps/modules/comments.py."""
@@ -360,6 +360,12 @@ class TestCommentsVerb:
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
         assert comments.handle_command("comments", ["mine.py"])
         assert "1 of 10 lines are comments (10%), 0 over" in capsys.readouterr()[0]
+
+    def test_help_prints_the_usage_and_examples_headings(self, capsys):
+        assert comments.handle_command("comments", ["--help"])
+        out = capsys.readouterr()[0]
+        assert "Usage:" in out
+        assert "Examples:" in out
 
     def test_an_unknown_form_exits_one_on_stderr(self, capsys):
         with pytest.raises(SystemExit) as stop:

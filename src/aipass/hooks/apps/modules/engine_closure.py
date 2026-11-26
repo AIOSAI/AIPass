@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine_closure.py
-# Version: 1.3.1
+# Version: 1.3.2
 # Description: The hook engine's import closure, and the edit check that keeps a NameError out of it
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-04
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Which files the hook engine imports, and a refusal for an edit that would crash one of them.
@@ -217,6 +217,20 @@ def print_introspection() -> None:
     CONSOLE.print(f"  roots: {', '.join(ROOT_MODULES)} + every handler in .aipass/hooks.json")
     CONSOLE.print(f"  an edit to a closure file is checked for {CRASH_RULES} before it lands")
     CONSOLE.print("  [dim]drone @hooks closure list[/dim] — list the closure, computed from this install")
+    CONSOLE.print("[dim]Run drone @hooks closure --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print usage for ``drone @hooks closure``."""
+    CONSOLE.print("[bold cyan]closure[/bold cyan] — List the hook engine's import closure")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  drone @hooks [cyan]closure list[/cyan]")
+    CONSOLE.print()
+    CONSOLE.print("Prints every file the engine imports, computed now from this install, and the count.")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  drone @hooks closure list")
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -227,11 +241,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
     if wants_help(args):
-        CONSOLE.print("[bold cyan]closure[/bold cyan] — List the hook engine's import closure")
-        CONSOLE.print()
-        CONSOLE.print("  drone @hooks closure list")
-        CONSOLE.print()
-        CONSOLE.print("Prints every file the engine imports, computed now from this install, and the count.")
+        print_help()
         return True
     if args != ["list"]:
         return False

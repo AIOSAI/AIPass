@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: testgate_policy.py
-# Version: 1.1.1
+# Version: 1.1.2
 # Description: Reads .aipass/test_write_policy.json — the switch behind the test-write gate
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Reads the test-write policy: may agents create new test files here?
@@ -192,6 +192,23 @@ def print_introspection() -> None:
     CONSOLE.print("[yellow]NOT CAUGHT — the residual, stated rather than discovered:[/yellow]")
     for gap in NOT_CAUGHT:
         CONSOLE.print(f"  - {gap}")
+    CONSOLE.print()
+    CONSOLE.print("[dim]Run drone @hooks testwrite --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print the testwrite command line, the policy file and why it is read-only."""
+    CONSOLE.print("[bold cyan]testwrite[/bold cyan] — show the test-write policy in force")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  drone @hooks [cyan]testwrite[/cyan]       Show the policy and the gate's residual")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  drone @hooks testwrite")
+    CONSOLE.print()
+    CONSOLE.print(f"[dim]Policy file: <project>/{POLICY_DIR}/{POLICY_FILENAME}[/dim]")
+    CONSOLE.print("[dim]Read-only on purpose: flipping an owner-level ruling is a human edit,[/dim]")
+    CONSOLE.print("[dim]not something an agent can do to the gate that constrains it.[/dim]")
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -202,12 +219,6 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
     if wants_help(args):
-        CONSOLE.print("[bold cyan]testwrite[/bold cyan] — show the test-write policy in force")
-        CONSOLE.print()
-        CONSOLE.print("  drone @hooks testwrite       Show the policy and the gate's residual")
-        CONSOLE.print()
-        CONSOLE.print(f"[dim]Policy file: <project>/{POLICY_DIR}/{POLICY_FILENAME}[/dim]")
-        CONSOLE.print("[dim]Read-only on purpose: flipping an owner-level ruling is a human edit,[/dim]")
-        CONSOLE.print("[dim]not something an agent can do to the gate that constrains it.[/dim]")
+        print_help()
         return True
     return False

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_compact.py
-# Version: 2.0.0
+# Version: 2.0.1
 # Description: Tests for the compaction handlers: summary instructions (PreCompact), resume list (SessionStart)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/lifecycle/compact.py."""
@@ -19,7 +19,7 @@ from unittest.mock import patch
 import pytest
 
 from aipass.hooks.apps.handlers.lifecycle import compact
-from aipass.hooks.apps.handlers.lifecycle.compact import handle
+from aipass.hooks.apps.handlers.lifecycle.compact import handle, handle_resume
 from aipass.hooks.apps.modules import cadence, context_window
 
 
@@ -142,7 +142,7 @@ class TestCompactResume:
 
     def test_source_compact_injects_the_work_still_out_as_context(self, tmp_path):
         seat, transcript = _branch(tmp_path)
-        result = _run(compact.handle_resume, seat, transcript, _plan(seat), source="compact")
+        result = _run(handle_resume, seat, transcript, _plan(seat), source="compact")
         out = json.loads(result["stdout"])["hookSpecificOutput"]
         assert out["hookEventName"] == "SessionStart"
         context = out["additionalContext"]
@@ -154,7 +154,7 @@ class TestCompactResume:
     @pytest.mark.parametrize("source", ["startup", "resume", "clear", ""])
     def test_any_other_source_injects_nothing(self, tmp_path, source):
         seat, transcript = _branch(tmp_path)
-        assert _run(compact.handle_resume, seat, transcript, source=source) == {"stdout": "", "exit_code": 0}
+        assert _run(handle_resume, seat, transcript, source=source) == {"stdout": "", "exit_code": 0}
 
 
 class TestARaiseIsTheEnginesFault:

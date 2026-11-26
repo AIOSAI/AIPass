@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cadence_regroup.py
 # Description: Cadence's regroup and counter machinery: reset, the regroup token and part queue, config, fail-loud
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/cadence.py: the regroup and counter machinery."""
@@ -424,6 +424,12 @@ class TestModuleInterface:
 
     def test_handle_command_unknown_returns_false(self):
         assert handle_command("other", []) is False
+
+    def test_help_prints_the_usage_and_examples_headings(self, capsys):
+        assert handle_command("cadence", ["--help"]) is True
+        err = capsys.readouterr().err
+        assert "Usage:" in err
+        assert "Examples:" in err
 
     def test_print_introspection_runs(self, tmp_path, capsys):
         """Introspection names the module and reports the cadence it read.

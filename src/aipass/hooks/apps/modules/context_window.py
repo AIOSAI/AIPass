@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.14.1
+# Version: 1.14.2
 # Description: Context fill per CLI (Claude transcript, Codex rollout, OpenCode store) and the compact window
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-20
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Live context fill from a session transcript, and the window each CLI runs, read from a live source only.
@@ -487,22 +487,35 @@ def _provider_or_claude(transcript_path: str) -> str:
 def print_introspection() -> None:
     """Print context_window config and the resolved window for CWD."""
     CONSOLE.print("[bold cyan]context_window[/bold cyan] Module")
+    CONSOLE.print("[dim]Resolves the context window a session compacts against, and how full it is.[/dim]")
     CONSOLE.print("  Claude window: the status line's context_window_size per session (none written: unknown)")
-    CONSOLE.print(f"  Auto-compact buffer: {AUTOCOMPACT_BUFFER:,}")
-    CONSOLE.print(f"  Transcript tail read: {_TAIL_BYTES:,} bytes")
+    CONSOLE.print(f"  Auto-compact buffer: {AUTOCOMPACT_BUFFER:,}", highlight=False)
+    CONSOLE.print(f"  Transcript tail read: {_TAIL_BYTES:,} bytes", highlight=False)
     explicit = explicit_window(str(Path.cwd()))
     CONSOLE.print(f"  Explicit window (CWD): {f'{explicit:,}' if explicit is not None else 'none'}")
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     window = resolve_compact_window(str(Path.cwd()), session_id)
     CONSOLE.print(f"  Resolved window (this session): {f'{window:,}' if window is not None else 'unknown'}")
+    CONSOLE.print("[dim]Run drone @hooks context_window --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print the context_window verb's usage and examples."""
+    CONSOLE.print("[bold cyan]context_window[/bold cyan] — Transcript usage + compact-window resolver")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print(
+        "  [cyan]drone @hooks context_window[/cyan]    Show known windows, buffer, tail size, resolved window for CWD"
+    )
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks context_window[/cyan]")
 
 
 def handle_command(command: str, args: list) -> bool:
     """Route context_window commands from drone @hooks."""
     if command in ("--help", "-h", "help") or (command == "context_window" and wants_help(args)):
-        CONSOLE.print("[bold cyan]context_window[/bold cyan] — Transcript usage + compact-window resolver")
-        CONSOLE.print()
-        CONSOLE.print("  drone @hooks context_window    Show known windows, buffer, tail size, resolved window for CWD")
+        print_help()
         return True
 
     if command == "context_window":

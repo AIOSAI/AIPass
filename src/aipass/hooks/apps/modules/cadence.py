@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.15.1
+# Version: 2.15.2
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -1018,6 +1018,7 @@ def print_introspection() -> None:
     """Print cadence config and current state."""
     config = _load_config()
     CONSOLE.print("[bold cyan]cadence[/bold cyan] Module")
+    CONSOLE.print("[dim]Decides on which prompt turns each context loader fires.[/dim]")
     CONSOLE.print(f"  Enabled: {config.get('enabled', True)}")
     global_period = config.get("period", 5)
     CONSOLE.print(f"  Period: {global_period} turns (global default)")
@@ -1043,14 +1044,24 @@ def print_introspection() -> None:
     else:
         CONSOLE.print("  Current turn: (no state file)")
     CONSOLE.print(f"  Config file: {_CONFIG_PATH}")
+    CONSOLE.print("[dim]Run drone @hooks cadence --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print the cadence verb's usage and examples."""
+    CONSOLE.print("[bold cyan]cadence[/bold cyan] — Prompt injection cadence control")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks cadence[/cyan]    Show cadence config and current turn state")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks cadence[/cyan]")
 
 
 def handle_command(command: str, args: list) -> bool:
     """Route cadence commands from drone @hooks."""
     if command in ("--help", "-h", "help") or (command == "cadence" and wants_help(args)):
-        CONSOLE.print("[bold cyan]cadence[/bold cyan] — Prompt injection cadence control")
-        CONSOLE.print()
-        CONSOLE.print("  drone @hooks cadence    Show cadence config and current turn state")
+        print_help()
         return True
 
     if command == "cadence":

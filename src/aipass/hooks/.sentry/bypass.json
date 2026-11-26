@@ -62,7 +62,7 @@
       "reason": "dispatch() is the engine's core purpose: it IS the module's primary function, not a handler that belongs elsewhere. Its stdlib json is the stdin payload and handler stdouts, never branch data. Moving dispatch to handlers/ would leave an empty module."
     },
     {
-      "file": "apps/sound.py",
+      "file": "apps/handlers/notification/sound.py",
       "standard": "trigger",
       "reason": "SOUND_FLAG.unlink(missing_ok=True) in mute() removes the sound-on flag file: not a tracked resource or production data. Deliberate user action via 'drone @hooks hooksound off' or an imported mute() call."
     },
@@ -983,11 +983,11 @@
       "reason": "An absent session pointer is a defined state (0.0 = never written); the run compares the stamp before and after, so a pointer that appears reads as moved. Only FileNotFoundError is caught: any other stat failure raises out of the run. Kept because the checker's absence pass needs a read call and stat is none."
     },
     {
-      "file": "apps/sound.py",
+      "file": "apps/handlers/notification/sound.py",
       "standard": "fallback",
       "lines": [
-        90,
-        92
+        86,
+        88
       ],
       "reason": "Sound is cosmetic: a voice or chime that cannot play (piper timed out, no player) costs only that sound, and the hook's real output is already delivered. The event's engine.jsonl row still records the hook; a raise would only fail the hook for a missing beep."
     },

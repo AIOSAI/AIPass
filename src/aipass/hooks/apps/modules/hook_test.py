@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hook_test.py
-# Version: 1.6.2
+# Version: 1.6.3
 # Description: Portable hook test runner — every hook with mock data; provider parity and smoke with real sessions
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-10
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Portable hook test runner.
@@ -273,7 +273,7 @@ def print_results(results: dict, verbose: bool = False) -> None:
             elif status in counts:
                 counts[status] += 1
 
-            CONSOLE.print(f"  {icon} {name:30} {status:20} {ms:>6.0f}ms")
+            CONSOLE.print(f"  {icon} {name:30} {status:20} {ms:>6.0f}ms", highlight=False)
             if verbose and h.get("output_preview"):
                 CONSOLE.print(f"      [dim]{h['output_preview']}[/dim]")
             if h.get("error"):
@@ -360,7 +360,10 @@ def _parity_command(args: list) -> bool:
             "  --provider defaults to claude,codex; opencode loads its plugin from OPENCODE_CONFIG_DIR when set"
         )
         CONSOLE.print("  --json   also write artifacts/reports/parity_<date>.json")
-        CONSOLE.print("Lane J is A,B,C with --branch at an external project's citizen. Exit 1 on DIFFERENT or no data.")
+        CONSOLE.print(
+            "Lane J is A,B,C with --branch at an external project's citizen. Exit 1 on DIFFERENT or no data.",
+            highlight=False,
+        )
         return True
     parser = argparse.ArgumentParser(prog="drone @hooks parity", add_help=False)
     parser.add_argument("--branch", default="@canary_test")
@@ -401,7 +404,7 @@ def _smoke_command(args: list) -> bool:
         CONSOLE.print("  --branch defaults to the current directory; --model provider=model, comma-separated")
         CONSOLE.print("  pass: the temporal hook's ack is in the provider's own record of that session")
         CONSOLE.print("  skip: not installed, not logged in, rate or free limit, plugin not installed, no readback")
-        CONSOLE.print("  --json   one JSON array on stdout. Exit 1 on any fail.")
+        CONSOLE.print("  --json   one JSON array on stdout. Exit 1 on any fail.", highlight=False)
         return True
     parser = argparse.ArgumentParser(prog="drone @hooks smoke", add_help=False)
     parser.add_argument("--branch", default=".")
@@ -427,8 +430,23 @@ def _smoke_command(args: list) -> bool:
 
 def print_introspection() -> None:
     """Print module introspection for drone discovery."""
-    CONSOLE.print("[cyan]hook_test[/cyan] — Portable hook test runner")
-    CONSOLE.print("  Fire every hook with mock data and report what fired.")
+    CONSOLE.print("[bold cyan]hook_test[/bold cyan] — Portable hook test runner")
+    CONSOLE.print("[dim]Fire every hook with mock data and report what fired.[/dim]")
+    CONSOLE.print("[dim]Run drone @hooks test --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print the test, parity and smoke command lines and examples."""
+    CONSOLE.print("[bold cyan]hook_test[/bold cyan] — Portable hook test runner")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  drone @hooks [cyan]test run[/cyan] [--verbose|-v]   fire every hook with mock data")
+    CONSOLE.print("  drone @hooks [cyan]parity[/cyan] --help             the same prompts on each provider, compared")
+    CONSOLE.print("  drone @hooks [cyan]smoke[/cyan] --help              one live turn per provider, hook read back")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  drone @hooks test run")
+    CONSOLE.print("  drone @hooks test run --verbose")
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -445,7 +463,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if wants_help(args):
-        print_introspection()
+        print_help()
         return True
 
     if any(arg not in ("run", "--verbose", "-v") for arg in args):

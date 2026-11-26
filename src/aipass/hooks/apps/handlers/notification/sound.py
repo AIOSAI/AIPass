@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: sound.py
-# Version: 2.1.1
+# Version: 2.2.1
 # Description: Shared sound utilities — Piper TTS speech with mute support
 # Branch: hooks
-# Layer: apps
+# Layer: apps/handlers/notification
 # Created: 2026-05-22
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Shared sound functions for hook handlers. Silent unless hook sounds are switched on."""
@@ -14,21 +14,15 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
-from aipass.cli import err_console
 
-CONSOLE = err_console
 # Sound is the exception: off unless this flag exists. Per-user, outside the temp dir so a reboot keeps it.
 SOUND_FLAG = Path.home() / ".aipass" / "aipass-hooks-sound-on"
 PIPER_BIN = Path.home() / ".local" / "share" / "piper" / "piper"
 PIPER_VOICE = Path.home() / ".local" / "share" / "piper-voices" / "en_US-amy-medium.onnx"
 
 _PLAY_CMD: list[str] = ["aplay", "-q"]
-
-
-def print_introspection():
-    """Print module structure for drone routing."""
-    CONSOLE.print("[bold cyan]sound[/bold cyan] — Shared sound utilities (speak, mute)")
 
 
 def is_muted() -> bool:
@@ -43,6 +37,7 @@ def mute() -> bool:
     """
     SOUND_FLAG.unlink(missing_ok=True)
     logger.info("[hooks] sound: muted")
+    json_handler.log_operation("mute", {"muted": True})
     return True
 
 
@@ -51,6 +46,7 @@ def unmute() -> bool:
     SOUND_FLAG.parent.mkdir(parents=True, exist_ok=True)
     SOUND_FLAG.touch()
     logger.info("[hooks] sound: unmuted")
+    json_handler.log_operation("unmute", {"muted": False})
     return False
 
 

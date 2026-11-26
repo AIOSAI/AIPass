@@ -1,19 +1,18 @@
 # =================== AIPass ====================
 # Name: test_sound.py
-# Version: 2.1.1
+# Version: 2.1.2
 # Description: Tests for shared sound module
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
-"""Tests for apps/sound.py."""
+"""Tests for apps/handlers/notification/sound.py."""
 
 # Shared speak; silent unless hook sounds are switched on.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(constant) — PIPER_BIN and PIPER_VOICE's install locations under the home directory
-# sentry: no-test-needed(documentation) — print_introspection() output, a help screen
 
 import os
 import subprocess as real_sub
@@ -21,8 +20,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from aipass.hooks.apps import sound
-from aipass.hooks.apps.sound import is_muted, mute, speak, unmute
+from aipass.hooks.apps.handlers.notification import sound
+from aipass.hooks.apps.handlers.notification.sound import is_muted, mute, speak, unmute
 
 
 class TestIsMuted:
@@ -42,7 +41,7 @@ class TestSoundFlagHome:
 
     def test_the_flag_path_ignores_tmpdir(self, tmp_path):
         """Asked of a fresh child, so the conftest isolation does not answer for the module."""
-        probe = "from aipass.hooks.apps import sound; print(sound.SOUND_FLAG)"
+        probe = "from aipass.hooks.apps.handlers.notification import sound; print(sound.SOUND_FLAG)"
         paths = set()
         for tmpdir in (tmp_path / "a", tmp_path / "b"):
             tmpdir.mkdir()
@@ -64,10 +63,10 @@ class TestSpeak:
 
     def test_speak_calls_piper_when_not_muted(self, tmp_path):
         with (
-            patch("aipass.hooks.apps.sound.is_muted", return_value=False),
-            patch("aipass.hooks.apps.sound.PIPER_BIN") as mock_bin,
-            patch("aipass.hooks.apps.sound.PIPER_VOICE") as mock_voice,
-            patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
+            patch("aipass.hooks.apps.handlers.notification.sound.is_muted", return_value=False),
+            patch("aipass.hooks.apps.handlers.notification.sound.PIPER_BIN") as mock_bin,
+            patch("aipass.hooks.apps.handlers.notification.sound.PIPER_VOICE") as mock_voice,
+            patch("aipass.hooks.apps.handlers.notification.sound.subprocess") as mock_sub,
         ):
             mock_bin.exists.return_value = True
             mock_voice.exists.return_value = True
@@ -95,8 +94,8 @@ class TestSpeak:
 
     def test_speak_skips_when_muted(self):
         with (
-            patch("aipass.hooks.apps.sound.is_muted", return_value=True),
-            patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
+            patch("aipass.hooks.apps.handlers.notification.sound.is_muted", return_value=True),
+            patch("aipass.hooks.apps.handlers.notification.sound.subprocess") as mock_sub,
         ):
             speak("test")
 
@@ -104,9 +103,9 @@ class TestSpeak:
 
     def test_speak_skips_when_piper_missing(self):
         with (
-            patch("aipass.hooks.apps.sound.is_muted", return_value=False),
-            patch("aipass.hooks.apps.sound.PIPER_BIN") as mock_bin,
-            patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
+            patch("aipass.hooks.apps.handlers.notification.sound.is_muted", return_value=False),
+            patch("aipass.hooks.apps.handlers.notification.sound.PIPER_BIN") as mock_bin,
+            patch("aipass.hooks.apps.handlers.notification.sound.subprocess") as mock_sub,
         ):
             mock_bin.exists.return_value = False
             speak("test")
@@ -122,11 +121,11 @@ class TestSpeak:
         what proves the except leg is the one that ran.
         """
         with (
-            patch("aipass.hooks.apps.sound.is_muted", return_value=False),
-            patch("aipass.hooks.apps.sound.PIPER_BIN") as mock_bin,
-            patch("aipass.hooks.apps.sound.PIPER_VOICE") as mock_voice,
-            patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
-            patch("aipass.hooks.apps.sound.logger") as mock_logger,
+            patch("aipass.hooks.apps.handlers.notification.sound.is_muted", return_value=False),
+            patch("aipass.hooks.apps.handlers.notification.sound.PIPER_BIN") as mock_bin,
+            patch("aipass.hooks.apps.handlers.notification.sound.PIPER_VOICE") as mock_voice,
+            patch("aipass.hooks.apps.handlers.notification.sound.subprocess") as mock_sub,
+            patch("aipass.hooks.apps.handlers.notification.sound.logger") as mock_logger,
         ):
             mock_bin.exists.return_value = True
             mock_voice.exists.return_value = True
@@ -141,10 +140,10 @@ class TestSpeak:
 
     def test_a_failed_synthesis_leaves_no_wav(self, tmp_path):
         with (
-            patch("aipass.hooks.apps.sound.is_muted", return_value=False),
-            patch("aipass.hooks.apps.sound.PIPER_BIN") as mock_bin,
-            patch("aipass.hooks.apps.sound.PIPER_VOICE") as mock_voice,
-            patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
+            patch("aipass.hooks.apps.handlers.notification.sound.is_muted", return_value=False),
+            patch("aipass.hooks.apps.handlers.notification.sound.PIPER_BIN") as mock_bin,
+            patch("aipass.hooks.apps.handlers.notification.sound.PIPER_VOICE") as mock_voice,
+            patch("aipass.hooks.apps.handlers.notification.sound.subprocess") as mock_sub,
         ):
             mock_bin.exists.return_value = True
             mock_voice.exists.return_value = True
@@ -158,11 +157,11 @@ class TestSpeak:
     def test_speak_graceful_on_os_error(self, tmp_path):
         """A missing piper binary is caught and the reason carried into the log."""
         with (
-            patch("aipass.hooks.apps.sound.is_muted", return_value=False),
-            patch("aipass.hooks.apps.sound.PIPER_BIN") as mock_bin,
-            patch("aipass.hooks.apps.sound.PIPER_VOICE") as mock_voice,
-            patch("aipass.hooks.apps.sound.subprocess.run", side_effect=OSError("broken")),
-            patch("aipass.hooks.apps.sound.logger") as mock_logger,
+            patch("aipass.hooks.apps.handlers.notification.sound.is_muted", return_value=False),
+            patch("aipass.hooks.apps.handlers.notification.sound.PIPER_BIN") as mock_bin,
+            patch("aipass.hooks.apps.handlers.notification.sound.PIPER_VOICE") as mock_voice,
+            patch("aipass.hooks.apps.handlers.notification.sound.subprocess.run", side_effect=OSError("broken")),
+            patch("aipass.hooks.apps.handlers.notification.sound.logger") as mock_logger,
         ):
             mock_bin.exists.return_value = True
             mock_voice.exists.return_value = True

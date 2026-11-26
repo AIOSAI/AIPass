@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: diagnostics_state.py
-# Version: 2.5.1
+# Version: 2.5.2
 # Description: Post-edit diagnostics state per seat — location, meaning, and live re-validation
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-13
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Owns what the diagnostics state means: one file per seat since leg 4 (see load_seat).
@@ -315,18 +315,20 @@ def revalidate(file_path: str) -> list[dict] | None:
 def print_introspection() -> None:
     """Show what the gate remembers for every seat, and whether it is still true."""
     CONSOLE.print("[bold cyan]diagnostics_state[/bold cyan] Module")
+    CONSOLE.print("[dim]What the edit gate remembers of each seat's type errors, re-checked live.[/dim]")
     CONSOLE.print(f"  State directory: {STATE_DIR}")
 
     states = [_read_seat_file(path) for path in sorted(STATE_DIR.glob("*.json"))]
     recorded = [state for state in states if state and state.get("errors")]
     if not recorded:
         CONSOLE.print("  Recorded: [green]nothing — no edit is being gated[/green]")
+        CONSOLE.print("[dim]Run drone @hooks diagnostics_state --help for usage.[/dim]")
         return
 
     for state in recorded:
         errors = state["errors"]
         errored_file = state.get("file", "")
-        CONSOLE.print(f"  One seat recorded {len(errors)} error(s) in {Path(errored_file).name}")
+        CONSOLE.print(f"  One seat recorded {len(errors)} error(s) in {Path(errored_file).name}", highlight=False)
         CONSOLE.print(f"    Resolvable only elsewhere: {all_cross_file(errors)}")
 
         fresh = revalidate(errored_file)
@@ -336,14 +338,24 @@ def print_introspection() -> None:
             CONSOLE.print("    Live check: [green]file is clean now — this state is stale[/green]")
         else:
             CONSOLE.print(f"    Live check: [red]{len(fresh)} error(s) still present[/red]")
+    CONSOLE.print("[dim]Run drone @hooks diagnostics_state --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print the diagnostics_state verb's usage and examples."""
+    CONSOLE.print("[bold cyan]diagnostics_state[/bold cyan] — what the edit gate remembers")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks diagnostics_state[/cyan]    Show recorded errors and re-check them live")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks diagnostics_state[/cyan]")
 
 
 def handle_command(command: str, args: list) -> bool:
     """Route diagnostics_state commands from drone @hooks."""
     if command in ("--help", "-h", "help") or (command == "diagnostics_state" and wants_help(args)):
-        CONSOLE.print("[bold cyan]diagnostics_state[/bold cyan] — what the edit gate remembers")
-        CONSOLE.print()
-        CONSOLE.print("  drone @hooks diagnostics_state    Show recorded errors and re-check them live")
+        print_help()
         return True
 
     if command == "diagnostics_state":

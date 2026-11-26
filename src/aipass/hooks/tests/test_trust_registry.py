@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_trust_registry.py
-# Version: 2.3.0
+# Version: 2.3.1
 # Description: Tests for trusted-project registry — DPLAN-0244 Layer B
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-15
-# Modified: 2026-11-18
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/config/trust_registry.py and apps/handlers/config/loader.py's trust integration."""
@@ -27,7 +27,7 @@ import pytest
 
 import aipass.hooks as hooks_door
 from aipass.hooks.apps.handlers.config import gates, loader, trust_registry
-from aipass.hooks.apps import sound
+from aipass.hooks.apps.handlers.notification import sound
 from aipass.hooks.apps.modules import engine, grounding_content, sandbox
 from aipass.hooks.apps.handlers.config.trust_registry import (
     bootstrap,

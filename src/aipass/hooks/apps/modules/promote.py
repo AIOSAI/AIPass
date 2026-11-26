@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: promote.py
-# Version: 1.3.1
+# Version: 1.3.2
 # Description: The one step that makes edited hook code live: check, copy, smoke, then point (drone @hooks promote)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Hook code goes live through one explicit step, never by being saved (DPLAN-0356 item 3).
@@ -263,14 +263,23 @@ def print_introspection():
     """Print module structure for drone routing."""
     CONSOLE.print("[bold cyan]promote[/bold cyan] — edited hook code goes live only through this step")
     CONSOLE.print(f"[dim]Live copy: {live_name() or 'none promoted — the source tree serves'}[/dim]")
+    CONSOLE.print("[dim]Run drone @hooks promote --help for usage.[/dim]")
 
 
-def _print_help() -> None:
+def print_help() -> None:
+    """Print the promote command lines and examples."""
     CONSOLE.print("[bold cyan]promote[/bold cyan] — make edited hook code live")
     CONSOLE.print()
-    CONSOLE.print("  drone @hooks promote          ruff + compile + suite, copy, smoke through the bridge, point")
-    CONSOLE.print("  drone @hooks promote status   which copy every hook process runs")
-    CONSOLE.print("  drone @hooks promote rollback point at the newest older copy, after its smoke passes")
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print(
+        "  drone @hooks [cyan]promote[/cyan]          ruff + compile + suite, copy, smoke through the bridge, point"
+    )
+    CONSOLE.print("  drone @hooks [cyan]promote status[/cyan]   which copy every hook process runs")
+    CONSOLE.print("  drone @hooks [cyan]promote rollback[/cyan] point at the newest older copy, after its smoke passes")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  drone @hooks promote status")
+    CONSOLE.print("  drone @hooks promote")
     CONSOLE.print()
     CONSOLE.print("Workflow: edit, test, promote. Saving a file changes no seat; promote does.")
 
@@ -280,7 +289,7 @@ def handle_command(command: str, args: list) -> bool:
     if command != "promote":
         return False
     if wants_help(args):
-        _print_help()
+        print_help()
         return True
     if args and args[0] == "status":
         CONSOLE.print(f"live: {live_name() or 'none promoted — the source tree serves'}")
@@ -293,7 +302,7 @@ def handle_command(command: str, args: list) -> bool:
             sys.exit(1)
         return True
     if args:
-        _print_help()
+        print_help()
         sys.exit(1)
     ok, report = promote()
     for line in report:

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hooks.py
-# Version: 1.3.1
+# Version: 1.3.2
 # Description: Hook infrastructure — drone entry point
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-18
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -21,7 +21,7 @@ from typing import Any
 os.environ.setdefault("AIPASS_BRANCH_NAME", "hooks")
 
 from aipass.prax import logger
-from aipass.cli import console, err_console
+from aipass.cli import console, err_console, header_version
 
 MODULES_DIR = Path(__file__).parent / "modules"
 _DISABLED_MARK = "(disabled)"
@@ -81,7 +81,9 @@ def print_help():
     """Print CLI help — usage instructions and available commands."""
     modules = discover_modules()
     console.print()
-    console.print("[bold cyan]hooks[/bold cyan] [dim]v1.3.1[/dim] — Hook Infrastructure for AIPass")
+    console.print(
+        f"[bold cyan]hooks[/bold cyan] [dim]v{header_version(__file__)}[/dim] — Hook Infrastructure for AIPass"
+    )
     console.print()
     console.print("[dim]Dispatches hooks across platforms with per-project config, logging, and crash isolation.[/dim]")
     console.print()
@@ -162,7 +164,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command in ["--version", "-V"]:
-        console.print("hooks 1.3.1")
+        console.print(f"hooks v{header_version(__file__)}", highlight=False)
         return True
 
     return route_command(command, args, modules)

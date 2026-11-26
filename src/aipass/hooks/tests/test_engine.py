@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 2.7.2
+# Version: 2.7.3
 # Description: Tests for hook engine dispatch logic: the dispatcher core; contracts and safeguards in two siblings
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/engine.py: the dispatcher core and the hook dispatch it drives."""
@@ -799,6 +799,11 @@ class TestHooksEntryPoint:
         with patch("sys.argv", ["hooks", "help"]):
             assert main() == 0
 
+    def test_engine_help_prints_usage_and_examples(self, capsys):
+        assert engine_module.handle_command("engine", ["--help"]) is True
+        err = capsys.readouterr().err
+        assert "Usage:" in err and "Examples:" in err
+
 
 class TestRunEvent:
     """The bridges' logic, served from the promoted copy (DPLAN-0356 item 3)."""
@@ -929,7 +934,7 @@ def _fault_lines(handle, mock_logger, hook: str = "h", timeout: int = 5) -> tupl
     with (
         patch("aipass.hooks.apps.modules.engine._log"),
         patch("aipass.hooks.apps.modules.engine._import_handler_module", return_value=module),
-        patch("aipass.hooks.apps.sound.speak"),
+        patch("aipass.hooks.apps.handlers.notification.sound.speak"),
     ):
         result = dispatch("UserPromptSubmit", "{}", {"hooks_enabled": True, "UserPromptSubmit": {hook: hook_def}})
     render = lambda calls: [c.args[0] % c.args[1:] for c in calls]  # noqa: E731
