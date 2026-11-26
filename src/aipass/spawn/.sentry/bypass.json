@@ -94,17 +94,9 @@
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision; HELD in leg 7). File-wide because sleep_in_test passes no line (is_bypassed without a line, sleep_in_test_check.py 146); it covers exactly the three sleeps at 109, 121 and 161. 109 and 121 are the 1ms yields between turns of the racer's writer and readers. The yield is the subject: zero-delay loops starved CI to reads == 0 (08-18, 08-28). 161 is the timed race window, whose length is the exposure. The start already waits on the real condition (the _saw_read and _saw_write Events); no event marks enough interleavings, so there is nothing to poll."
     },
     {
-      "file": "apps/handlers/meta_ops.py",
-      "standard": "logged_fallback",
-      "lines": [
-        63
-      ],
-      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): None is never a registry here. The other None (line 67) is the not-found refusal, logged by logger.warning; it is a failure. The docstring names None as missing/unreadable, and every caller (update_ops 256, mint_ops 199, sync_registry_ops 320, mint_verify 47, regenerate_registry_ops 62) reads None as no registry."
-    },
-    {
       "file": "apps/handlers/update_ops.py",
       "standard": "fallback",
-      "lines": [240],
+      "lines": [243],
       "reason": "Not a stand-in: a template file that is not UTF-8 text is the binary lane. copy_undecodable copies it byte for byte and raises if it carries a {{ placeholder, so nothing ships unrendered; the warning names the file."
     },
     {
@@ -132,15 +124,9 @@
       "reason": "'' is the docstring's failure value, never a hash (success is twelve hex characters), so an unreadable file can never compare equal to a real hash; logged at warning. See the logged_fallback row for line 43."
     },
     {
-      "file": "apps/handlers/meta_ops.py",
-      "standard": "fallback",
-      "lines": [61],
-      "reason": "None is the docstring's missing-or-unreadable answer and is logged at error. regenerate_registry refuses on it when the file exists; mint, update, sync and mint_verify skip branch meta on None. Whether those four should refuse a corrupt manifest instead is an open question for the owner, not cured here."
-    },
-    {
       "file": "apps/handlers/sync_registry_ops.py",
       "standard": "fallback",
-      "lines": [87, 97],
+      "lines": [88, 98],
       "reason": "Description lookup for an auto-registered row: passport purpose/role, then README first line, then 'Auto-registered branch'. The description is display text, not identity; each unreadable source is logged at warning naming the branch."
     },
     {

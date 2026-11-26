@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: sync_registry_ops.py
 # Description: Registry sync handler — implementation logic for registry repair
-# Version: 1.4.3
+# Version: 1.5.0
 # Created: 2026-03-07
 # Modified: 2026-11-26
 # =============================================
@@ -47,6 +47,7 @@ from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.passport_migration import backup_passport
 from aipass.spawn.apps.handlers.class_registry import (
     LEGACY_CLASSES,
+    get_available_classes,
     get_template_dir,
     refuse_retired_or_forbidden,
 )
@@ -155,6 +156,10 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
         return {"error": "no registry found above the current directory", **empty}
     registry_path = Path(registry_path)
     project_root = registry_path.parent
+    if fix:
+        # Read every class's manifest before the registry save: a corrupt one raises with nothing written.
+        for citizen_class in get_available_classes():
+            load_template_registry(get_template_dir(citizen_class))
 
     with registry_lock(registry_path):
         # load_registry answers an unreadable file with an empty document; --fix would then re-register

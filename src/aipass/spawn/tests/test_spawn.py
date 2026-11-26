@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.5.1
+# Version: 1.6.0
 # Created: 2026-03-05
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/core.py (spawn_agent) and apps/handlers/registry.py."""
@@ -24,7 +24,10 @@ import pytest
 
 from aipass.spawn import restore_citizen, spawn_agent
 from aipass.spawn.apps.handlers.seed_ops import export_seeds
-from aipass.spawn.apps.handlers import mint_ops
+from aipass.spawn.apps import spawn as spawn_entry
+from aipass.spawn.apps.handlers import mint_ops, sync_registry_ops, update_ops
+from aipass.spawn.apps.handlers.meta_ops import CorruptTemplateManifest
+from aipass.spawn.apps.handlers.mint_verify import expected_mint_paths
 from aipass.spawn.apps.handlers.class_registry import get_template_dir
 from aipass.spawn.apps.handlers.metadata import (
     BRANCH_NAME_RULE,
@@ -838,3 +841,84 @@ class TestMixedRegistry:
         assert set(rows()) == {"kept", "fresh", "adoptee", "stray"}
         kept = rows()["kept"]
         assert (kept["path"], kept["registry_id"], kept["owner"], kept["admin"]) == ("kept", "cid-cap", True, True)
+
+
+def _corrupt_template(tmp_path, content=b'{"files": '):
+    """A copy of the shipped template whose manifest is there but cannot be read."""
+    template = tmp_path / "tmpl"
+    shutil.copytree(get_template_dir(), template)
+    manifest = template / ".spawn" / ".template_registry.json"
+    manifest.write_bytes(content)
+    return template, manifest
+
+
+def _snapshot(root):
+    """Every file under root with its bytes, so 'nothing was written' is measured."""
+    return {p: p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+class TestCorruptTemplateManifestStops:
+    """Missing is tolerated; corrupt raises with the path, before any write. Mutant: return None -> red."""
+
+    def test_a_mint_raises_naming_the_path_and_writes_nothing(self, tmp_path, tmp_agent, tmp_registry):
+        template, manifest = _corrupt_template(tmp_path)
+
+        with pytest.raises(CorruptTemplateManifest, match=str(manifest)):
+            spawn_agent(str(tmp_agent), template_dir=str(template), registry_path=str(tmp_registry))
+
+        assert not tmp_agent.exists()
+        assert not tmp_registry.exists()
+
+    def test_the_entry_point_prints_one_line_and_exits_1(self, tmp_path, tmp_agent, tmp_registry, monkeypatch, capsys):
+        template, manifest = _corrupt_template(tmp_path, b"[]")
+        argv = ["create", str(tmp_agent), "--template", str(template), "--registry", str(tmp_registry)]
+        monkeypatch.setattr(sys, "argv", ["spawn", *argv])
+
+        assert spawn_entry.main() == 1
+
+        err = " ".join(capsys.readouterr().err.split())
+        assert f"spawn {' '.join(argv)} stopped: template manifest {manifest} cannot be read" in err
+        assert "Nothing was written." in err
+        assert not tmp_agent.exists()
+
+    def test_verify_raises_rather_than_trusting_the_tree_alone(self, tmp_path):
+        template, manifest = _corrupt_template(tmp_path)
+
+        with pytest.raises(CorruptTemplateManifest, match=str(manifest)):
+            expected_mint_paths(template, {}, "probe")
+
+    def test_an_update_raises_before_it_writes(self, tmp_path, tmp_registry, monkeypatch):
+        seat = tmp_path / "seat"
+        assert spawn_agent(str(seat), registry_path=str(tmp_registry))["success"] is True
+        (seat / "README.md").unlink()  # the walk would re-add it, so a write would show
+        before = _snapshot(seat)
+        template, manifest = _corrupt_template(tmp_path)
+        monkeypatch.setattr(update_ops, "get_template_dir", lambda _cls=None: template)
+        monkeypatch.setattr(update_ops, "_read_identity", lambda _d: {"citizen_class": "specialist"})
+
+        with pytest.raises(CorruptTemplateManifest, match=str(manifest)):
+            update_ops.update_branch("seat", dry_run=False, registry_path=tmp_registry)
+
+        assert _snapshot(seat) == before
+
+    def test_a_sync_fix_raises_before_the_registry_save(self, tmp_path, tmp_registry, monkeypatch):
+        assert spawn_agent(str(tmp_path / "seat"), registry_path=str(tmp_registry))["success"] is True
+        registry = load_registry(tmp_registry)
+        registry["branches"] = []
+        tmp_registry.write_text(json.dumps(registry), encoding="utf-8")
+        before = tmp_registry.read_bytes()
+        template, manifest = _corrupt_template(tmp_path)
+        monkeypatch.setattr(sync_registry_ops, "get_template_dir", lambda _cls=None: template)
+
+        with pytest.raises(CorruptTemplateManifest, match=str(manifest)):
+            sync_registry(fix=True, registry_path=tmp_registry)
+
+        assert tmp_registry.read_bytes() == before
+
+    def test_a_missing_manifest_still_mints_against_the_tree(self, tmp_path, tmp_agent, tmp_registry):
+        template, manifest = _corrupt_template(tmp_path)
+        manifest.unlink()
+
+        result = spawn_agent(str(tmp_agent), template_dir=str(template), registry_path=str(tmp_registry))
+
+        assert result["success"] is True, result.get("error")

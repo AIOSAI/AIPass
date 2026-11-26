@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: update.py
 # Description: Update orchestrator — thin CLI layer for branch updates
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-07
 # Modified: 2026-11-26
 # =============================================
@@ -20,6 +20,7 @@ from aipass.spawn.apps.handlers.update_ops import (
     update_all,
 )
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.meta_ops import CorruptTemplateManifest
 from aipass.spawn.apps.handlers.seat_gate import PREVIEW_NOTE, seat_refusal
 from aipass.spawn.apps.handlers.registry import find_registry
 
@@ -164,6 +165,8 @@ def _run(args: list[str], apply: bool) -> int:
 
     try:
         result = update_branch(branch_name, dry_run=dry_run, trace=trace)
+    except CorruptTemplateManifest:
+        raise
     except Exception as exc:
         logger.error(f"[update] Unexpected error updating {branch_name}: {exc}")
         error(f"Error updating {branch_name}: {exc}")

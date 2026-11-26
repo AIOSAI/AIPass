@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: regenerate_registry.py
 # Description: CLI module for regenerating template registries
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-25
 # Modified: 2026-11-26
 # =============================================
@@ -20,6 +20,7 @@ from aipass.spawn.apps.handlers.class_registry import (
     refuse_retired_or_forbidden,
 )
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.meta_ops import CorruptTemplateManifest, load_template_registry
 
 
 def print_introspection():
@@ -68,6 +69,9 @@ def handle_regenerate_registry(args: list[str]) -> int:
         all_results: list[dict] = []
         had_error = False
 
+        # Every manifest is read before the first regenerates: a corrupt one stops the run with none written.
+        for template_dir in template_dirs:
+            load_template_registry(template_dir)
         for template_dir in template_dirs:
             try:
                 result = regenerate_template_registry(template_dir)
@@ -76,6 +80,8 @@ def handle_regenerate_registry(args: list[str]) -> int:
                     had_error = True
                 else:
                     all_results.append(result)
+            except CorruptTemplateManifest:
+                raise
             except Exception as exc:
                 logger.error(f"[regenerate-registry] Error for {template_dir.name}: {exc}")
                 error(f"[{template_dir.name}] {exc}")
@@ -111,6 +117,8 @@ def handle_regenerate_registry(args: list[str]) -> int:
     try:
         template_dir = get_template_dir(class_name)
         result = regenerate_template_registry(template_dir)
+    except CorruptTemplateManifest:
+        raise
     except Exception as exc:
         logger.error(f"[regenerate-registry] Unexpected error: {exc}")
         error(str(exc))

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: sync_registry.py
 # Description: Registry repair — thin CLI layer for registry synchronization
-# Version: 1.5.2
+# Version: 1.6.0
 # Created: 2026-03-07
 # Modified: 2026-11-26
 # =============================================
@@ -25,6 +25,7 @@ from aipass.spawn.apps.handlers.sync_registry_ops import (
     rebuild_registry,
 )
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.meta_ops import CorruptTemplateManifest
 from aipass.spawn.apps.handlers.seat_gate import PREVIEW_NOTE, seat_refusal
 
 
@@ -142,6 +143,8 @@ def handle_sync_registry(args: list[str]) -> int:
 
     try:
         result = sync_registry(fix=fix and not dry_run, registry_path=registry_path)
+    except CorruptTemplateManifest:
+        raise
     except Exception as exc:
         logger.error(f"[sync-registry] Unexpected error: {exc}")
         error(str(exc))

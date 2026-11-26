@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: meta_ops.py
 # Description: Branch metadata operations for update tracking
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-26
 # =============================================
 
 """Branch metadata operations — manages .spawn/.branch_meta.json for per-branch tracking."""
@@ -43,10 +43,19 @@ def compute_file_hash(file_path: Path) -> str:
         return ""
 
 
+class CorruptTemplateManifest(Exception):
+    """A template manifest exists but cannot be read; damage must never read as absence."""
+
+    def __init__(self, path: Path, cause: Exception):
+        self.path = path
+        super().__init__(f"template manifest {path} cannot be read ({type(cause).__name__}: {cause})")
+
+
 def load_template_registry(template_dir: Path) -> Optional[dict]:
     """Load .spawn/.template_registry.json from a template directory.
 
-    Returns None when the registry is missing or unreadable.
+    Returns None when the manifest is missing (a bare template is a real state).
+    Raises CorruptTemplateManifest when it exists but is unreadable or not a JSON object.
     """
     template_dir = Path(template_dir)
     registry_path = template_dir / _BRANCH_META_DIR / _TEMPLATE_REGISTRY_FILE
@@ -57,10 +66,13 @@ def load_template_registry(template_dir: Path) -> Optional[dict]:
 
     try:
         data = json.loads(registry_path.read_text(encoding="utf-8"))
-        return data
-    except (json.JSONDecodeError, IOError) as exc:
-        logger.error(f"Failed to load template registry: {exc}")
-        return None
+        if not isinstance(data, dict):
+            raise ValueError(f"top level is {type(data).__name__}, not an object")
+    except (ValueError, OSError) as exc:
+        corrupt = CorruptTemplateManifest(registry_path, exc)
+        logger.error("[spawn] %s", corrupt)
+        raise corrupt from exc
+    return data
 
 
 def load_branch_meta(branch_dir: Path) -> Optional[dict]:

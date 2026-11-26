@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Main orchestrator for agent spawning
-# Version: 1.8.0
+# Version: 1.8.1
 # Created: 2026-03-05
 # Modified: 2026-11-26
 # =============================================
@@ -17,7 +17,7 @@ from aipass.prax import logger
 
 from aipass.cli import console
 
-# apps/spawn.py imports these two from here, so they are re-exported by name.
+# apps/spawn.py imports these from here, so they are re-exported by name.
 from aipass.spawn.apps.handlers.metadata import (
     get_branch_name as get_branch_name,
     normalize_branch_name as normalize_branch_name,
@@ -31,6 +31,7 @@ from aipass.spawn.apps.handlers.class_registry import (
 )
 from aipass.spawn.apps.handlers.mint_ops import INCOMPLETE_MARKER as INCOMPLETE_MARKER, spawn_at
 from aipass.spawn.apps.handlers.registry import find_registry as find_registry
+from aipass.spawn.apps.handlers.meta_ops import CorruptTemplateManifest as CorruptTemplateManifest
 
 _META_TAB_KEYS = {"TODOS_META", "KEY_LEARNINGS_META", "SESSIONS_META", "OBSERVATIONS_META"}
 

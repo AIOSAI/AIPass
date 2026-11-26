@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: regenerate_registry_ops.py
 # Description: Regenerate .template_registry.json for spawn template directories
-# Version: 1.0.4
+# Version: 1.1.0
 # Created: 2026-03-25
-# Modified: 2026-10-24
+# Modified: 2026-11-26
 # =============================================
 
 """Regenerate template registry — walk template directory, hash files, build registry."""
@@ -53,14 +53,10 @@ def regenerate_template_registry(template_dir: Path) -> dict:
         logger.error(f"Template directory does not exist: {template_dir}")
         return {"error": f"Template directory does not exist: {template_dir}"}
 
-    # A manifest that exists but cannot be read is refused, not read as absent: fresh ids written
-    # over it are a wrong identity.
+    # A corrupt manifest raises CorruptTemplateManifest here, before anything is written: fresh ids
+    # written over it would be a wrong identity.
     registry_path = template_dir / _SPAWN_DIR / _TEMPLATE_REGISTRY_FILE
     existing_registry = load_template_registry(template_dir)
-    if existing_registry is None and registry_path.exists():
-        msg = f"Template registry {registry_path} is there but cannot be read; fix or remove it (nothing regenerated)"
-        logger.error(f"[regenerate-registry] {msg}")
-        return {"error": msg}
 
     files, directories = _scan_template_directory(template_dir, existing_registry)
 

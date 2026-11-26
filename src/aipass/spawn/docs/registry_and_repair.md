@@ -140,6 +140,16 @@ of every file and directory the template ships, each with a content hash. It is 
 `create` verifies a mint against and the file `update` walks, so **any change to a template
 file must be followed by a regeneration** or the manifest and the tree disagree.
 
+A missing manifest is tolerated: a bare template is a real state, and the mint verifies
+against the on-disk contents alone. A manifest that exists but cannot be read (bad JSON, not
+an object, an OS error) raises `CorruptTemplateManifest` in `meta_ops.py`. `create`, `update`,
+`sync-registry --fix` and `regenerate-registry` read the manifest before their first write,
+so the command stops with nothing written. The entry point prints one line and exits 1:
+
+```
+spawn <command and args> stopped: template manifest <path> cannot be read (<ErrorType>: <error>). Nothing was written.
+```
+
 ---
 
 ## Repair

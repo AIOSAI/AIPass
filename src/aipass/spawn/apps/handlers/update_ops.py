@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.8.0
+# Version: 2.9.0
 # Created: 2026-03-07
-# Modified: 2026-11-23
+# Modified: 2026-11-26
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -23,6 +23,7 @@ from aipass.spawn.apps.handlers.json_merge import backup_json, deep_merge
 from aipass.spawn.apps.handlers.class_registry import get_template_dir, resolve_template_class
 from aipass.spawn.apps.handlers.meta_ops import (
     generate_branch_meta,
+    CorruptTemplateManifest,
     load_template_registry,
     save_branch_meta,
 )
@@ -137,6 +138,8 @@ def update_branch(
 
     if not template_dir.is_dir():
         return _result(branch_name, False, counts, [f"Template directory not found: {template_dir}"], dry_run)
+    # Read before the walk writes anything: a corrupt manifest raises here, with nothing changed.
+    template_registry = load_template_registry(template_dir)
 
     if trace:
         logger.info("[update] Citizen class: %s, template: %s", citizen_class, template_dir)
@@ -291,7 +294,6 @@ def update_branch(
                 errors.append(f"JSON merge failed for {resolved_path}")
 
     if not dry_run:
-        template_registry = load_template_registry(template_dir)
         if template_registry:
             updated_meta = generate_branch_meta(branch_dir, template_registry)
             updated_meta["metadata"]["last_updated"] = datetime.now().strftime("%Y-%m-%d")
@@ -372,6 +374,9 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
         try:
             result = update_branch(lower_name, dry_run=dry_run, trace=trace, registry_path=citizen["registry_path"])
             results.append(result)
+        except CorruptTemplateManifest:
+            # One template serves the fleet: a corrupt manifest stops the run, not one row.
+            raise
         except Exception as exc:
             logger.error("[update] Error updating %s: %s", name, exc)
             results.append(_failed_row(lower_name, exc, dry_run))

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.5.2
+# Version: 1.6.0
 # Created: 2026-03-05
 # Modified: 2026-11-26
 # =============================================
@@ -15,6 +15,7 @@ import argparse
 
 from aipass.prax import logger
 from aipass.cli import console, header, header_version, error, warning, reset_command_state, resolve_exit
+from aipass.spawn.apps.modules.core import CorruptTemplateManifest
 
 
 def print_help():
@@ -384,7 +385,16 @@ def _resolved(code: int) -> int:
 
 
 def main():
-    """Main entry point."""
+    """Main entry point: a corrupt template manifest stops any command here, in one line."""
+    try:
+        return _main()
+    except CorruptTemplateManifest as exc:
+        error(f"spawn {' '.join(sys.argv[1:])} stopped: {exc}. Nothing was written.")
+        return 1
+
+
+def _main():
+    """Route one command."""
     # The failure flag is process-level and drone routes in-process: a stale one would convict this command.
     reset_command_state()
     args = sys.argv[1:]

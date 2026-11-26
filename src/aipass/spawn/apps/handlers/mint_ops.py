@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mint_ops.py
 # Description: The mint of a new citizen from the template, step by step
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-09-28
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """The mint body: a validated target becomes a registered citizen."""
@@ -194,6 +194,8 @@ def mint_citizen(
     localize=False,
 ) -> dict:
     """Mint a citizen at a target that does not exist yet, from template."""
+    # Read before the first write (the stale-row save below): a corrupt manifest raises with nothing on disk.
+    load_template_registry(template)
     folder_name = get_branch_name(target)
     branch_lower = normalize_branch_name(folder_name)
     detected_profile = profile or detect_profile(target)
