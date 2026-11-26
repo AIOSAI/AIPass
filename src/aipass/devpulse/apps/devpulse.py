@@ -22,7 +22,7 @@ from aipass.cli import console, err_console, error, resolve_exit, reset_command_
 # The self-map and --help go to stdout like every branch's; never alias console to err_console here.
 
 # The one version source in the branch: keep it in step with the header's Version line.
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 
 MODULES_DIR = Path(__file__).parent / "modules"
 
@@ -123,7 +123,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command in ["--version", "-V"]:
-        console.print(f"devpulse {VERSION}")
+        console.print(f"devpulse v{VERSION}", highlight=False)
         return True
 
     return route_command(command, args, modules)
