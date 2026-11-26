@@ -3,7 +3,7 @@
 # Description: Tests for aipass doctor: the command, the run and the provider checks
 # Version: 1.10.0
 # Created: 2026-04-16
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""
@@ -1142,7 +1142,7 @@ class TestCheckWireVerify:
     def test_pass_on_zero_exit(self) -> None:
         """Exit 0 from drone @hooks verify produces a PASS row."""
         fake = MagicMock(returncode=0, stdout="✓ Wire check passed\n\n0 errors, 0 warnings\n")
-        with patch("aipass.aipass.apps.modules._doctor_wire.subprocess.run", return_value=fake):
+        with patch("aipass.aipass.apps.handlers.wire_verify.subprocess.run", return_value=fake):
             results = check_wire_verify()
         assert len(results) == 1
         assert results[0].label == "wire verify"
@@ -1161,7 +1161,7 @@ class TestCheckWireVerify:
             "2 errors, 0 warnings\n"
         )
         fake = MagicMock(returncode=1, stdout="", stderr=report)
-        with patch("aipass.aipass.apps.modules._doctor_wire.subprocess.run", return_value=fake) as run:
+        with patch("aipass.aipass.apps.handlers.wire_verify.subprocess.run", return_value=fake) as run:
             results = check_wire_verify()
         assert len(results) == 1
         assert results[0].glyph == "[red]✗[/red]"
@@ -1174,7 +1174,7 @@ class TestCheckWireVerify:
     def test_warn_on_drone_not_found(self) -> None:
         """FileNotFoundError (drone missing) produces a WARN row."""
         with patch(
-            "aipass.aipass.apps.modules._doctor_wire.subprocess.run",
+            "aipass.aipass.apps.handlers.wire_verify.subprocess.run",
             side_effect=FileNotFoundError("drone"),
         ):
             results = check_wire_verify()
@@ -1186,7 +1186,7 @@ class TestCheckWireVerify:
         import subprocess as sp
 
         with patch(
-            "aipass.aipass.apps.modules._doctor_wire.subprocess.run",
+            "aipass.aipass.apps.handlers.wire_verify.subprocess.run",
             side_effect=sp.TimeoutExpired(cmd="drone", timeout=10),
         ):
             results = check_wire_verify()

@@ -125,22 +125,6 @@
       "reason": "_shell_from_parent_proc is a probe: None is 'not detected', the same answer as no /proc entry, and its one caller (detect_shell, system_detector.py:123) keeps its 'unknown' value on None as documented. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: detect_claude_code above it)."
     },
     {
-      "file": "apps/handlers/sandbox_check/sandbox_checker.py",
-      "standard": "logged_fallback",
-      "lines": [
-        113
-      ],
-      "reason": "_find_srt_resolver is a probe: None is 'resolver not found', the same answer as a missing spec or file, and its one caller (check_srt_resolvable, sandbox_checker.py:166) reports the resolver as not found on None. Re-read in fleet green leg 7 (aipass's decision)."
-    },
-    {
-      "file": "tests/test_aipass_main.py",
-      "standard": "through_the_command",
-      "lines": [
-        29
-      ],
-      "reason": "Ruling (b), fleet green leg 7: the public door, aipass --version, starts the walk at Path(__file__), the live repo, so the walk's contract cannot be handed a tmp tree through it: nearest pyproject named aipass wins, a foreign name or malformed TOML is walked past, a version-less one answers None. The command path itself is pinned through main() in the same class. A start parameter on _resolve_version would exist for the test alone."
-    },
-    {
       "file": "tests/test_install.py",
       "standard": "through_the_command",
       "lines": [
@@ -368,30 +352,6 @@
       "reason": "_shell_from_parent_proc is the second probe for the shell name, run only when $SHELL is unset: None means 'not detected', the same answer as no /proc entry. The doctor System row prints the shell as 'unknown', so the person sees that the shell was not detected; nothing is judged on the shell name."
     },
     {
-      "file": "apps/handlers/sandbox_check/sandbox_checker.py",
-      "standard": "fallback",
-      "lines": [
-        91
-      ],
-      "reason": "_read_userns_sysctl is read only after the bwrap trivial sandbox already failed, to add the AppArmor sysctl as a hint. sysctl missing (non-Ubuntu) or timing out drops only the '(apparmor_restrict_unprivileged_userns=N)' suffix; doctor's 'bwrap functional' row is FAIL either way, carrying bwrap's own exit code and stderr."
-    },
-    {
-      "file": "apps/handlers/sandbox_check/sandbox_checker.py",
-      "standard": "fallback",
-      "lines": [
-        131
-      ],
-      "reason": "_srt_install_hint builds remediation text, not a verdict: with no npm on PATH the plain 'npm install -g @anthropic-ai/sandbox-runtime' is the right hint. The srt row it decorates is already FAIL in doctor's Sandbox group; the node row above it is FAIL when node (and so npm) is missing."
-    },
-    {
-      "file": "apps/handlers/sandbox_check/sandbox_checker.py",
-      "standard": "fallback",
-      "lines": [
-        145
-      ],
-      "reason": "_srt_install_hint: 'npm root -g' failing only drops the '(installs to <prefix>)' courtesy suffix from the hint; the hint still names the install command, and the srt row it sits on is FAIL in doctor's Sandbox group."
-    },
-    {
       "file": "shared/project_home.py",
       "standard": "fallback",
       "lines": [
@@ -424,15 +384,6 @@
       "reason": "No tomllib and no tomli: the reason ('no TOML parser: Python X.Y has no tomllib and tomli is not installed') goes into *why* and the function returns None for 'unknown', never 'no packages'. Doctor's Structure group prints it as a WARN row with 'install tomli or fix pyproject.toml' (doctor.py), and placement is not measured against unknown packages."
     },
     {
-      "file": "apps/handlers/provider_wire.py",
-      "standard": "unused_function",
-      "functions": [
-        "refresh_provider_hooks",
-        "refresh_codex"
-      ],
-      "reason": "Called from setup.sh's venv-python heredoc via dynamic import (setup.sh:704-707, DPLAN-0279) — a cross-language caller the AST/corpus scanner can't see. That heredoc is its ONLY caller; no in-process Python caller makes this reachable. Covered directly by tests/test_provider_wire.py. Verified live 2026-08-09. refresh_codex (2026-10-26): the same pattern from setup.sh's Codex block (codex on PATH), its only caller; covered by TestCodexHooks and TestCodexPins."
-    },
-    {
       "file": "apps/handlers/readme_map/__init__.py",
       "standard": "fallback",
       "lines": [
@@ -449,11 +400,6 @@
       "file": "apps/handlers/init/scaffold_manifest.py",
       "standard": "json_structure",
       "reason": "scaffold_manifest.py is a step of bootstrap's init/update: its operation is recorded once by its module: init_flow.py logs aipass_init and aipass_init_update through json_handler with the handler's whole result; a handler log_operation would record the same run twice."
-    },
-    {
-      "file": "shared/json_ops.py",
-      "standard": "trigger",
-      "reason": "backup_json is one step of @spawn's update (spawn/apps/handlers/update_ops.py), which records the run itself (update_executed); the event belongs to the caller that knows what was backed up and why, not to the shared helper."
     },
     {
       "file": "apps/modules/init_flow.py",
@@ -479,14 +425,6 @@
         796
       ],
       "reason": "796: the repoint question is builtins.input in the product, its only seam; the test answers it to pin the terminal branch. monkeypatch restores it."
-    },
-    {
-      "file": "tests/test_aipass_main.py",
-      "standard": "stdlib_patch",
-      "lines": [
-        297
-      ],
-      "reason": "297: patches aipass.py's own tomllib name to None to stand for Python 3.10 with no tomli: the module-level import is the only seam for the no-TOML-reader reason --version prints."
     },
     {
       "file": "tests/test_doctor.py",
@@ -571,6 +509,11 @@
       "file": "apps/modules/_doctor_fix.py",
       "standard": "modules",
       "reason": "Private helper module (leading underscore) holding doctor's --fix remediation report; discover_modules skips underscore names, so it is never a routed command and has no handle_command to give. Its caller's handle_command is the door. 2026-11-26."
+    },
+    {
+      "file": "apps/modules/_doctor_wire.py",
+      "standard": "modules",
+      "reason": "Private helper module (leading underscore) holding doctor's provider wiring rows and wire prompt; discover_modules skips underscore names, so it is never a routed command and has no handle_command to give. doctor.py's handle_command is the door. 2026-11-26."
     }
   ]
 }
