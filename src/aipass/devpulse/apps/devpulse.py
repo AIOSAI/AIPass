@@ -87,7 +87,9 @@ def print_help():
     console.print('  drone @devpulse compass query "registry"     Search rated decisions')
     console.print("  drone @devpulse watchdog agent @flow         Watch a dispatched agent")
     console.print("  drone @devpulse feedback inbox               Check cross-project feedback")
-    console.print("  drone @devpulse release-notify v2.8.4        Mail every project manager a release", highlight=False)
+    console.print(
+        "  drone @devpulse release-notify v2.8.4        Mail every project manager a release", highlight=False
+    )
 
 
 def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
