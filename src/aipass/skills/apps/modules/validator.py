@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: validator.py
 # Description: Skill validation module
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Skill validator module."""
@@ -24,7 +24,7 @@ def handle_command(command: str, args: list) -> bool:
         error("Error: skill name required. Usage: skills validate <name>")
         return False
     if any(arg in ("--help", "-h", "help") for arg in args):
-        print_validate_help()
+        print_help()
         return True
 
     name = args[0]
@@ -70,12 +70,15 @@ def validate_skill(skill_metadata):
     return result
 
 
-def print_validate_help():
+def print_help():
     """Print the usage page for this verb."""
-    console.print("skills Validate - Check a skill's requirements")
+    console.print("[bold cyan]skills Validate[/bold cyan] - Check a skill's requirements")
     console.print()
-    console.print("Usage:")
+    console.print("[yellow]Usage:[/yellow]")
     console.print("  drone @skills validate <name>    Report whether the skill's requirements are met")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @skills validate github[/green]")
 
 
 def print_introspection():
@@ -87,4 +90,6 @@ def print_introspection():
     console.print("[bold]Connected Handlers:[/bold]")
     console.print("  [cyan]handlers/[/cyan]")
     console.print("    [dim]- validator.py (validate_skill — check pip, bins, and config requirements)[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @skills validate --help' for usage information[/dim]")
     console.print()

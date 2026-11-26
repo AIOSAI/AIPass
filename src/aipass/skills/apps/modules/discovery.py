@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Find skills across search paths
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Skill discovery module."""
@@ -19,7 +19,7 @@ from aipass.skills.apps.handlers.json import json_handler
 def handle_command(command: str, args: list) -> bool:
     """Handle the list command routed by the entry point."""
     if any(arg in ("--help", "-h", "help") for arg in args):
-        print_list_help()
+        print_help()
         print_introspection()
         return True
     if command != "list":
@@ -28,7 +28,7 @@ def handle_command(command: str, args: list) -> bool:
 
 
 def list_skills():
-    """Print every discovered skill grouped by source, OFF ones marked; False only when the switch state is unreadable."""
+    """Print every discovered skill by source, OFF ones marked; False only when the switch state is unreadable."""
     skills = discover_all()
 
     # A switched-off skill is still listed, marked, so it can be turned back on.
@@ -45,7 +45,7 @@ def list_skills():
         return True
 
     logger.info(f"list: found {len(skills)} skill(s)")
-    console.print(f"  Found {len(skills)} skill(s):")
+    console.print(f"  Found [cyan]{len(skills)}[/cyan] skill(s):")
     console.print()
 
     sources = {}
@@ -78,12 +78,15 @@ def discover_all():
     return result
 
 
-def print_list_help():
+def print_help():
     """Print the usage page for this verb."""
-    console.print("skills List - Show every discovered skill")
+    console.print("[bold cyan]skills List[/bold cyan] - Show every discovered skill")
     console.print()
-    console.print("Usage:")
+    console.print("[yellow]Usage:[/yellow]")
     console.print("  drone @skills list    List project, global and built-in skills, OFF ones marked")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @skills list[/green]")
 
 
 def print_introspection():
@@ -95,7 +98,9 @@ def print_introspection():
     console.print("[bold]Connected Handlers:[/bold]")
     console.print("  [cyan]handlers/[/cyan]")
     console.print(
-        "    [dim]- discovery_handler.py (get_search_paths, discover_skills_in_path — path scanning and SKILL.md parsing)[/dim]"
+        "    [dim]- discovery_handler.py (get_search_paths, discover_skills_in_path — scan paths, parse SKILL.md)[/dim]"
     )
     console.print("    [dim]- registry.py (build_registry — deduplicated skill registry from search paths)[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @skills list --help' for usage information[/dim]")
     console.print()

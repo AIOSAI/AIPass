@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: creator.py
 # Description: Scaffold new skills from templates
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Skill creator module."""
@@ -25,7 +25,7 @@ def handle_command(command: str, args: list) -> bool:
         return False
     # A help flag anywhere is a question, never a skill name to scaffold.
     if any(arg in ("--help", "-h", "help") for arg in args):
-        print_create_help()
+        print_help()
         return True
 
     name = args[0]
@@ -44,19 +44,22 @@ def handle_command(command: str, args: list) -> bool:
     return True
 
 
-def print_create_help():
+def print_help():
     """Print the create usage page: flags and what each tier writes."""
-    console.print("skills Create - Scaffold a new skill from a template")
+    console.print("[bold cyan]skills Create[/bold cyan] - Scaffold a new skill from a template")
     console.print()
-    console.print("Usage:")
+    console.print("[yellow]Usage:[/yellow]")
     console.print("  drone @skills create <name>                Create a markdown-only skill")
     console.print("  drone @skills create <name> --with-handler Create with handler.py")
-    console.print("  drone @skills create <name> --full         Create with full 3-layer structure")
+    console.print("  drone @skills create <name> --full         Create with full 3-layer structure", highlight=False)
     console.print()
-    console.print("Templates:")
-    console.print("  markdown_only   SKILL.md with instructions (AI reads and follows)")
-    console.print("  with_handler    SKILL.md + handler.py (programmatic execution)")
-    console.print("  full            SKILL.md + apps/ structure (complex skills)")
+    console.print("[yellow]Templates:[/yellow]")
+    console.print("  [cyan]markdown_only[/cyan]   SKILL.md with instructions (AI reads and follows)")
+    console.print("  [cyan]with_handler[/cyan]    SKILL.md + handler.py (programmatic execution)")
+    console.print("  [cyan]full[/cyan]            SKILL.md + apps/ structure (complex skills)")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @skills create my-skill --with-handler[/green]")
 
 
 def create_skill(name, template_type="markdown_only", target_dir=None):
@@ -68,7 +71,7 @@ def create_skill(name, template_type="markdown_only", target_dir=None):
 
         console.print(f"  Created skill '{name}' at {result['path']}")
         console.print(f"  Template: {template_type}")
-        console.print(f"  Files: {len(result['files'])}")
+        console.print(f"  Files: [cyan]{len(result['files'])}[/cyan]")
         for f in result["files"]:
             console.print(f"    - {f}")
 
@@ -95,4 +98,6 @@ def print_introspection():
         "    [dim]- creator_handler.py (create_skill — validate name, resolve template, copy to target)[/dim]"
     )
     console.print("    [dim]- template.py (copy_template, get_template — template resolution and file copy)[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @skills create --help' for usage information[/dim]")
     console.print()

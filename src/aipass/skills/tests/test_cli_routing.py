@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Unit tests for skills.py CLI routing
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-03-10
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # Category: skills/tests
 # =============================================
 
@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from aipass.cli import header_version
 from aipass.skills.apps import skills as entry
 from aipass.skills.apps.modules import runner
 from aipass.skills.apps.modules.switch import read_state
@@ -92,13 +93,16 @@ class TestHandleCommand:
     def test_version_command(self, capsys):
         result = handle_command("--version")
         assert result is True
-        assert capsys.readouterr().out.strip() == f"skills v{entry.VERSION}"
+        assert capsys.readouterr().out.strip() == f"skills v{header_version(entry.__file__)}"
 
     def test_version_short_flag(self, capsys):
-        # Mutant killed: -V split off to print a bare VERSION.
+        # Mutant killed: -V split off to print a bare version.
         result = handle_command("-V")
         assert result is True
-        assert capsys.readouterr().out.strip() == f"skills v{entry.VERSION}"
+        assert capsys.readouterr().out.strip() == f"skills v{header_version(entry.__file__)}"
+
+    def test_the_header_is_the_only_version(self):
+        assert not hasattr(entry, "VERSION")
 
     def test_unknown_command_returns_false(self):
         result = handle_command("bogus_command_xyz")
@@ -375,6 +379,13 @@ class TestReadVerbsHelpPrintsUsage:
         out = capsys.readouterr().out
         assert title in out
         assert f"drone @skills {verb}" in out
+
+    @pytest.mark.parametrize("verb", ["list", "info", "run", "create", "validate", "switch"])
+    def test_every_verb_help_ends_on_a_worked_example(self, capsys, verb):
+        assert handle_command(verb, ["--help"]) is True
+        out = capsys.readouterr().out
+        assert "Examples:" in out
+        assert out.index("Usage:") < out.index("Examples:")
 
 
 class TestSwitchVerbsHelpWritesNothing:

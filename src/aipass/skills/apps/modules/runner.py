@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runner.py
 # Description: Execute skills
-# Version: 1.3.4
+# Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Skill runner module."""
@@ -25,7 +25,7 @@ def handle_command(command: str, args: list) -> bool:
         error("Error: skill name required. Usage: skills run <name> [action] [args...]")
         return False
     if args[0] in ("--help", "-h", "help"):
-        print_run_help()
+        print_help()
         return True
 
     name = args[0]
@@ -117,13 +117,16 @@ def run_skill(name, action=None, args=None, config=None):
     return result
 
 
-def print_run_help():
+def print_help():
     """Print the usage page for this verb."""
-    console.print("skills Run - Execute a skill")
+    console.print("[bold cyan]skills Run[/bold cyan] - Execute a skill")
     console.print()
-    console.print("Usage:")
+    console.print("[yellow]Usage:[/yellow]")
     console.print("  drone @skills run <name> \\[action] \\[args]    Run a handler action, or render a markdown skill")
     console.print("  drone @skills run <name> --help             Show the skill's SKILL.md instead of running it")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @skills run system_status summary[/green]")
 
 
 def print_introspection():
@@ -141,4 +144,6 @@ def print_introspection():
     console.print("[bold]Connected Modules:[/bold]")
     console.print("  [cyan]modules/[/cyan]")
     console.print("    [dim]- loader.py (load_skill — load skill metadata, body, and handler)[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @skills run --help' for usage information[/dim]")
     console.print()

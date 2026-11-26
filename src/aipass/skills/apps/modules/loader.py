@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: loader.py
 # Description: Load SKILL.md and handlers; the info command
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Skill loader module."""
@@ -25,7 +25,7 @@ def handle_command(command: str, args: list) -> bool:
         error("Error: skill name required. Usage: skills info <name>")
         return False
     if any(arg in ("--help", "-h", "help") for arg in args):
-        print_info_help()
+        print_help()
         return True
     return print_skill_info(args[0])
 
@@ -115,12 +115,15 @@ def _switch_notice(name):
     }
 
 
-def print_info_help():
+def print_help():
     """Print the usage page for this verb."""
-    console.print("skills Info - Show one skill")
+    console.print("[bold cyan]skills Info[/bold cyan] - Show one skill")
     console.print()
-    console.print("Usage:")
+    console.print("[yellow]Usage:[/yellow]")
     console.print("  drone @skills info <name>    Print a skill's metadata and SKILL.md body")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @skills info screen_lock[/green]")
 
 
 def print_introspection():
@@ -138,4 +141,6 @@ def print_introspection():
     console.print("[bold]Connected Modules:[/bold]")
     console.print("  [cyan]modules/[/cyan]")
     console.print("    [dim]- discovery.py (discover_all — skill registry for name lookup)[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @skills info --help' for usage information[/dim]")
     console.print()
