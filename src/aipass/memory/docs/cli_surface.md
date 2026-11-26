@@ -56,6 +56,11 @@ Every module routes its help check through `handlers/cli/help_flags.wants_help()
 
 A dashed flag (`--help`, `-h`) counts anywhere on the line. The bare word `help` counts anywhere only for modules whose subcommands take no free text (`rollover`, `config`, `templates`, `pool`, `lint`, `push`, `todo`, `health`); for `search`, `symbolic` and `verify` it counts in the first slot only, so `drone @memory search rollover help` stays a three-word query.
 
+Every module answers the same two ways: a help spelling prints its help page (bold title, USAGE,
+EXAMPLES) through `print_help`, and the bare verb prints its self-map through `print_introspection`,
+which ends with the `--help` pointer. `limits`, `fleet`, `governance` and `roots` read the help spelling with their own check: the first slot for the first three, any slot
+for `roots`, so `roots add --help` is help and never a path.
+
 `search` takes two forms. `drone @memory search <query> [--type T] [--n N]` reads the caller's own local
 store; `drone @memory search global <query> [--branch B] [--type T] [--n N]` reads the global store and is
 open to `@memory`'s seat and the verified admin only. The global form is chosen only by a first argument of

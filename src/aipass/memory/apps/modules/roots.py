@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: roots.py
 # Description: Declared-roots module — the operator lane for AIPASS_ROOTS.json
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-30
 # Modified: 2026-11-26
 # =============================================
@@ -98,7 +98,7 @@ def handle_command(command: str, args: list) -> bool:
 
         # Help anywhere: `roots add --help` must not be read as a path.
     if any(token in ("--help", "-h", "help") for token in args):
-        print_introspection()
+        print_help()
         return True
 
     verb, rest = args[0], args[1:]

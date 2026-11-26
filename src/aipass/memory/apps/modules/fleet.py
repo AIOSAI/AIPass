@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: fleet.py
 # Description: Fleet definition module — introspection of the fleet names the package door hands out
-# Version: 2.1.1
+# Version: 2.2.0
 # Created: 2026-08-30
 # Modified: 2026-11-26
 # =============================================
@@ -70,7 +70,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if args[0] in ("--help", "-h", "help"):
-        print_introspection()
+        print_help()
         return True
 
     from aipass.cli import error

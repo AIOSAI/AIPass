@@ -1,15 +1,14 @@
 # =================== AIPass ====================
 # Name: test_governance.py
 # Description: Surfacing governance module — state API, rejection paths, command exit seam
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-07-16
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for handlers/governance/engine.py (pure state-in/state-out API) and apps/modules/governance.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(shared) — handle_command's --help lane: the same print_introspection() the bare verb reads
 # sentry: no-test-needed(shared) — json_handler.log_operation() audit line on each command; the memory log writer
 
 import pytest
@@ -274,6 +273,14 @@ class TestTheUnknownSubcommandRefusalReachesTheExitCode:
         captured = capsys.readouterr()
         assert "governance Module" in captured.out
         assert "should_surface" in captured.out
+
+    @pytest.mark.parametrize("args", [["--help"], ["-h"], ["help"]])
+    def test_every_help_spelling_prints_the_help_page(self, capsys, args):
+        """The house pattern: help is title, USAGE and EXAMPLES; the self-map is the bare verb's."""
+        assert governance_module.handle_command("governance", args) is True
+        out = capsys.readouterr().out
+        assert "governance - " in out and "USAGE:" in out and "EXAMPLES:" in out
+        assert "governance Module" not in out, "help routed to the self-map"
 
 
 class TestTheModuleIsNotASecondDoor:

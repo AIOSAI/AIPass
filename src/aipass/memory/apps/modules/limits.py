@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: limits.py
 # Description: Entry-limits module — introspection of the shape, the caps and the budgets
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-09-15
 # Modified: 2026-11-26
 # =============================================
@@ -70,7 +70,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if args[0] in ("--help", "-h", "help"):
-        print_introspection()
+        print_help()
         return True
 
     from aipass.cli import error

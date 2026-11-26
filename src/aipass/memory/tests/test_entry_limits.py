@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_entry_limits.py
 # Description: entry_limits config reader and the apps/modules/limits.py introspection module
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-13
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # Category: memory/tests
 # =============================================
 
@@ -496,14 +496,21 @@ class TestTheLimitsModuleIsNotASecondDoor:
         assert limits.handle_command("rollover", []) is False
         assert limits.handle_command("lint", ["fields"]) is False
 
-    @pytest.mark.parametrize("args", [[], ["--help"], ["-h"], ["help"]])
-    def test_the_bare_command_and_every_help_spelling_introspect(
-        self, capsys: pytest.CaptureFixture, args: list
-    ) -> None:
+    def test_the_bare_command_prints_the_self_map(self, capsys: pytest.CaptureFixture) -> None:
+        limits, _ = _get_gateway()
+
+        assert limits.handle_command("limits", []) is True
+        assert "limits Module" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("args", [["--help"], ["-h"], ["help"]])
+    def test_every_help_spelling_prints_the_help_page(self, capsys: pytest.CaptureFixture, args: list) -> None:
+        """The house pattern: help is title, USAGE and EXAMPLES; the self-map is the bare command's."""
         limits, _ = _get_gateway()
 
         assert limits.handle_command("limits", args) is True
-        assert "limits Module" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "limits - " in out and "USAGE:" in out and "EXAMPLES:" in out
+        assert "limits Module" not in out, "help routed to the self-map"
 
     def test_an_unknown_subcommand_is_named_and_exits_nonzero(self, capsys: pytest.CaptureFixture) -> None:
         """Claimed and REPORTED with a nonzero exit — never a silent no-op that looks like success."""
