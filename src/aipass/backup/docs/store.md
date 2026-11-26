@@ -12,6 +12,7 @@ Each registered project gets a `.backup/` directory at its root:
 ├── snapshots/           # Full mirror copies (eager — created on register)
 ├── timestamps.json      # Per-file mtime index for change detection (lazy)
 ├── changelog.json       # Change history (lazy)
+├── last_good_run.json   # Files and bytes of the last completed snapshot, the growth ceiling's base (lazy)
 ├── running/             # One <lane>.json per lane in flight, removed when it ends (lazy)
 └── drive_tracker.json   # Drive sync dedup tracker (lazy)
 ```

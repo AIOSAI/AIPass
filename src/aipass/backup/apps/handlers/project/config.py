@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Project config handler — load/save per-project backup config
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-10-24
+# Modified: 2026-11-26
 # =============================================
 
 """Project configuration handler."""
@@ -13,12 +13,14 @@ from aipass.prax import logger
 from ..audit import trail
 from ..json import json_handler
 from ..path import builder
+from ..scan.ceiling import DEFAULT_GROWTH_RATIO, DEFAULT_MAX_FILES, DEFAULT_MAX_TOTAL_GB
 
 DEFAULTS = {
     "version": "1.0.0",
     "max_file_size_mb": 100,
-    "max_backup_files": 25000,
-    "max_backup_size_gb": 10,
+    "max_backup_files": DEFAULT_MAX_FILES,
+    "max_backup_size_gb": DEFAULT_MAX_TOTAL_GB,
+    "max_growth_ratio": DEFAULT_GROWTH_RATIO,
     "drive_sync": False,
     "whitelist": [],
 }

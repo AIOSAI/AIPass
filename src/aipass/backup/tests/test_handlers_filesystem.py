@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_handlers_filesystem.py
 # Description: Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/
-# Version: 1.2.7
+# Version: 1.2.8
 # Created: 2026-06-12
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/."""
@@ -165,8 +165,9 @@ class TestProjectConfig:
         result = load_project_config(str(tmp_path))
 
         assert isinstance(result, dict)
-        assert result["max_backup_files"] == 25000
+        assert result["max_backup_files"] == 100000
         assert result["max_backup_size_gb"] == 10
+        assert result["max_growth_ratio"] == 3
         assert result["whitelist"] == []
 
     def test_config_written_by_setup_identifies_the_project(self, tmp_path: Path) -> None:
@@ -178,7 +179,7 @@ class TestProjectConfig:
         assert isinstance(result, dict)
         assert result["project_name"] == tmp_path.name
         assert Path(result["project_path"]) == tmp_path
-        assert result["max_backup_files"] == 25000
+        assert result["max_backup_files"] == 100000
 
 
 class TestPathBuilder:

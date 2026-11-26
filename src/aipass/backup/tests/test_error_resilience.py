@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_error_resilience.py
 # Description: Tests for error resilience in snapshot.py, the document handlers and audit trail
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-06-12
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for error resilience in apps/modules/snapshot.py, the document handlers and audit trail."""
@@ -515,6 +515,7 @@ class TestAuditLog:
             "append_changelog",
             "snapshot_complete",
             "save_timestamps",
+            "save_baseline",
         ], "a refused append stopped the run's later audit calls"
         assert warned.count("Failed to write operation log: audit stream unwritable") == len(attempted)
 

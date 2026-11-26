@@ -26,7 +26,8 @@ drone @backup status @myapp                            # what is stored, and whe
 - **Ignore rules** — gitignore-style patterns, with a built-in floor that reaches
   every project whether or not its ignore file knows about the rule.
 - **A run ceiling** — every run measures what it is about to copy and refuses
-  loudly rather than walking a build-artifact tree for hours.
+  loudly rather than walking a build-artifact tree for hours: first against 3x
+  the last good run, then against absolute walls.
 - **Drive sync** — optional, off by default, and the only lane that leaves the
   machine. It uploads the snapshot store and holds
   back secrets and key files whatever the ignore file says.

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: all.py
 # Description: All module — full cycle: snapshot + drive (shared scan)
-# Version: 5.0.1
+# Version: 5.1.0
 # Created: 2026-04-17
 # Modified: 2026-11-26
 # =============================================
@@ -28,6 +28,7 @@ from aipass.backup.apps.handlers.project.setup import create_backup_dir
 from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 from aipass.backup.apps.handlers.scan.filter import filter_paths
 from aipass.backup.apps.handlers.scan.walk import walk_project
+from aipass.backup.apps.handlers.state.baseline import load_baseline
 from aipass.backup.apps.handlers.state.progress import LaneProgress
 from aipass.backup.apps.handlers.state.stop_flag import catch_sigterm, run_was_stopped, stop_requested
 from aipass.backup.apps.modules.display import refuse_missing_root, refuse_oversized_run
@@ -112,7 +113,7 @@ def _all_run(project_root: str, show_panels: bool) -> dict:
         filtered = filter_paths(all_files, spec, whitelist_entries, max_size)
 
     # Refuse the whole cycle here: a refusal inside run_snapshot alone falls through to drive_sync.
-    breach = check_ceiling(filtered, config)
+    breach = check_ceiling(filtered, config, load_baseline(project_root))
     if breach is not None:
         refuse_oversized_run("all", project_root, breach, show_panels)
         summary["seconds"] = time.monotonic() - start
