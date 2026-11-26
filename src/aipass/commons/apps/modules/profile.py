@@ -3,7 +3,7 @@
 # Description: Social Profile Orchestration Module
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -24,18 +24,42 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("profile")
-    console.print("Social profile orchestration — viewing, editing profiles and listing members")
+    console.print("[bold cyan]profile - Social Profiles[/bold cyan]")
+    console.print("[dim]Social profile orchestration — viewing, editing profiles and listing members[/dim]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/profiles/")
-    console.print("    - profile_ops.py (show_profile — display or update a branch profile)")
-    console.print("    - profile_ops.py (list_members — list all registered members)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/profiles/[/cyan]")
+    console.print("    [cyan]-[/cyan] profile_ops.py [dim](show_profile — display or update a branch profile)[/dim]")
+    console.print("    [cyan]-[/cyan] profile_ops.py [dim](list_members — list all registered members)[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @commons <verb> --help' for usage[/dim]")
+
+
+def print_help():
+    """Display usage help for profile commands."""
+    console.print()
+    console.print("[bold cyan]profile - Social Profiles[/bold cyan]")
+    console.print("[dim]View or edit a branch profile, and list everyone in The Commons.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone @commons profile[/cyan] \\[branch] [dim](yours when no branch is given)[/dim]")
+    console.print("  [cyan]drone @commons profile set[/cyan] <bio|status|role> <text>")
+    console.print("  [cyan]drone @commons who[/cyan] [dim](list all members)[/dim]")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [cyan]drone @commons profile[/cyan]")
+    console.print("  [cyan]drone @commons profile sentry[/cyan]")
+    console.print('  [cyan]drone @commons profile set status "Reviewing plans"[/cyan]')
+    console.print("  [cyan]drone @commons who[/cyan]")
     console.print()
 
 
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle profile and who commands."""
+    if command in ("profile", "who") and ("--help" in args or "-h" in args):
+        print_help()
+        return True
+
     if command == "profile":
         result = _handle_profile(args)
     elif command == "who":

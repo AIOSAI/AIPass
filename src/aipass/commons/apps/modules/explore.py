@@ -3,7 +3,7 @@
 # Description: Exploration Module
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -30,13 +30,32 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("explore")
-    console.print("Router and display layer for secret room exploration commands.")
+    console.print("[bold cyan]explore - Secret Room Exploration[/bold cyan]")
+    console.print("[dim]Router and display layer for secret room exploration commands.[/dim]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/rooms/")
-    console.print("    - explore_ops.py (explore_rooms — discover hidden rooms based on visit history)")
-    console.print("    - explore_ops.py (list_secrets — list discovered secret rooms)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/rooms/[/cyan]")
+    console.print(
+        "    [cyan]-[/cyan] explore_ops.py [dim](explore_rooms — discover hidden rooms based on visit history)[/dim]"
+    )
+    console.print("    [cyan]-[/cyan] explore_ops.py [dim](list_secrets — list discovered secret rooms)[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @commons explore --help' or 'drone @commons secrets --help' for usage[/dim]")
+
+
+def print_help():
+    """Display usage help for the explore and secrets commands."""
+    console.print()
+    console.print("[bold cyan]explore - Secret Room Exploration[/bold cyan]")
+    console.print("[dim]Search for hidden rooms and list the secret rooms you have discovered[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone @commons explore[/cyan]")
+    console.print("  [cyan]drone @commons secrets[/cyan]")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [cyan]drone @commons explore[/cyan]")
+    console.print("  [cyan]drone @commons secrets[/cyan]")
     console.print()
 
 
@@ -51,7 +70,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     if "--help" in args or "-h" in args:
-        print_introspection()
+        print_help()
         return True
 
     if command == "explore":

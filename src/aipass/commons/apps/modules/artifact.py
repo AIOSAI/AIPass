@@ -3,7 +3,7 @@
 # Description: Artifact Orchestration Module
 # Version: 1.0.2
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -44,18 +44,50 @@ RARITY_COLORS = {
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("artifact")
+    console.print("[bold cyan]artifact - Artifacts[/bold cyan]")
+    console.print("[dim]Crafts, lists, inspects, collaborates on and signs artifacts.[/dim]")
+    console.print()
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/artifacts/[/cyan]")
+    console.print("    [cyan]-[/cyan] artifact_ops.py [dim](craft_artifact — create a new artifact)[/dim]")
     console.print(
-        "Router and display layer for artifact workflows — crafting, listing, inspecting, collaborating, and signing."
+        "    [cyan]-[/cyan] artifact_ops.py [dim](list_artifacts — list artifacts in collection or system)[/dim]"
+    )
+    console.print(
+        "    [cyan]-[/cyan] artifact_ops.py [dim](inspect_artifact — show artifact details and provenance)[/dim]"
+    )
+    console.print(
+        "    [cyan]-[/cyan] artifact_ops.py [dim](collab_artifact — initiate a joint artifact requiring multiple signers)[/dim]"
+    )
+    console.print(
+        "    [cyan]-[/cyan] artifact_ops.py [dim](sign_artifact — add signature to a pending joint artifact)[/dim]"
     )
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/artifacts/")
-    console.print("    - artifact_ops.py (craft_artifact — create a new artifact)")
-    console.print("    - artifact_ops.py (list_artifacts — list artifacts in collection or system)")
-    console.print("    - artifact_ops.py (inspect_artifact — show artifact details and provenance)")
-    console.print("    - artifact_ops.py (collab_artifact — initiate a joint artifact requiring multiple signers)")
-    console.print("    - artifact_ops.py (sign_artifact — add signature to a pending joint artifact)")
+    console.print("[dim]Run 'drone @commons craft --help' for usage[/dim]")
+    console.print()
+
+
+def print_help():
+    """Display usage help."""
+    console.print()
+    console.print("[bold cyan]artifact - Artifacts[/bold cyan]")
+    console.print("[dim]Crafts, lists, inspects, collaborates on and signs artifacts.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print(
+        '  [cyan]drone @commons craft[/cyan] "name" "description" \\[--type TYPE] \\[--rarity RARITY] \\[--metadata JSON]'
+    )
+    console.print("  [cyan]drone @commons artifacts[/cyan] \\[--all] \\[--type TYPE] \\[--rarity RARITY]")
+    console.print("  [cyan]drone @commons inspect[/cyan] <artifact_id> \\[--full]")
+    console.print('  [cyan]drone @commons collab[/cyan] "name" "description" @signer1 @signer2 \\[--rarity RARITY]')
+    console.print("  [cyan]drone @commons sign[/cyan] <pending_id>")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print('  [cyan]drone @commons craft "Lantern" "A small light" --rarity rare[/cyan]')
+    console.print("  [cyan]drone @commons artifacts --all[/cyan]")
+    console.print("  [cyan]drone @commons inspect 4 --full[/cyan]")
+    console.print('  [cyan]drone @commons collab "Charter" "Founding doc" @seedgo @drone[/cyan]')
+    console.print("  [cyan]drone @commons sign 2[/cyan]")
     console.print()
 
 
@@ -66,6 +98,10 @@ def print_introspection():
 
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle artifact-related commands."""
+    if command in ("craft", "artifacts", "inspect", "collab", "sign") and ("--help" in args or "-h" in args):
+        print_help()
+        return True
+
     if command not in ["craft", "artifacts", "inspect", "collab", "sign"]:
         return False
 

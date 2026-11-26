@@ -8,52 +8,52 @@
     {
       "file": "apps/modules/feed.py",
       "standard": "introspection",
-      "reason": "Action command — feed with no args shows the feed, not introspection. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
+      "reason": "Action command \u2014 feed with no args shows the feed, not introspection. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/catchup.py",
       "standard": "introspection",
-      "reason": "Action command — catchup with no args shows missed activity. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
+      "reason": "Action command \u2014 catchup with no args shows missed activity. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/activity.py",
       "standard": "introspection",
-      "reason": "Action command — activity with no args shows recent activity. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
+      "reason": "Action command \u2014 activity with no args shows recent activity. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/welcome.py",
       "standard": "introspection",
-      "reason": "Action command — welcome with no args generates welcome post. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
+      "reason": "Action command \u2014 welcome with no args generates welcome post. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/digest.py",
       "standard": "introspection",
-      "reason": "Action command — digest with no args shows 24h digest. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
+      "reason": "Action command \u2014 digest with no args shows 24h digest. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/engagement.py",
       "standard": "introspection",
-      "reason": "Action command — prompt/event with no args generates content. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
+      "reason": "Action command \u2014 prompt/event with no args generates content. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/search.py",
       "standard": "introspection",
-      "reason": "Action command — search requires query arg but log does not. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
+      "reason": "Action command \u2014 search requires query arg but log does not. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/explore.py",
       "standard": "introspection",
-      "reason": "Action command — explore with no args discovers hints. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
+      "reason": "Action command \u2014 explore with no args discovers hints. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/leaderboard.py",
       "standard": "introspection",
-      "reason": "Action command — leaderboard with no args shows rankings. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
+      "reason": "Action command \u2014 leaderboard with no args shows rankings. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/commons_identity.py",
       "standard": "introspection",
-      "reason": "Identity utility module — not a user-facing command. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
+      "reason": "Identity utility module \u2014 not a user-facing command. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/capsule.py",
@@ -113,130 +113,161 @@
     {
       "file": "apps/commons.py",
       "standard": "deep_nesting",
-      "reason": "main() depth 5 — app initialization flow: ensure_database, discover_modules, route_command. Legitimate entry point control flow."
+      "reason": "main() depth 5 \u2014 app initialization flow: ensure_database, discover_modules, route_command. Legitimate entry point control flow."
     },
     {
       "file": "apps/handlers/feed/feed_ops.py",
       "standard": "deep_nesting",
-      "reason": "format_time_ago() depth 5, display_feed() depth 8 — tight utilities for feed rendering. Feed display requires nested iteration over posts with conditional formatting."
+      "reason": "format_time_ago() depth 5, display_feed() depth 8 \u2014 tight utilities for feed rendering. Feed display requires nested iteration over posts with conditional formatting."
     },
     {
       "file": "apps/handlers/notifications/notification_ops.py",
       "standard": "deep_nesting",
-      "reason": "_set_notification_level() depth 5 — shared notification logic (watch/mute/track). Private helper, tight coupling justified."
+      "reason": "_set_notification_level() depth 5 \u2014 shared notification logic (watch/mute/track). Private helper, tight coupling justified."
     },
     {
       "file": "apps/handlers/search/search_ops.py",
       "standard": "deep_nesting",
-      "reason": "_parse_search_args() depth 5 — tightly scoped flag parsing loop. Private utility correctly extracted from run_search."
+      "reason": "_parse_search_args() depth 5 \u2014 tightly scoped flag parsing loop. Private utility correctly extracted from run_search."
     },
     {
       "file": "apps/modules/artifact.py",
       "standard": "deep_nesting",
-      "reason": "handle_command() depth 5, _handle_inspect() depth 6 — complex command routing with subcommand dispatch (craft/inspect/collab/sign). Inherent complexity from multiple artifact subcommands."
+      "reason": "handle_command() depth 5, _handle_inspect() depth 6 \u2014 complex command routing with subcommand dispatch (craft/inspect/collab/sign). Inherent complexity from multiple artifact subcommands."
     },
     {
       "file": "apps/modules/trade.py",
       "standard": "deep_nesting",
-      "reason": "handle_command() depth 5 — multi-subcommand routing (gift/trade/drop/find/mint). Inherent complexity from varied trade operations."
+      "reason": "handle_command() depth 5 \u2014 multi-subcommand routing (gift/trade/drop/find/mint). Inherent complexity from varied trade operations."
     },
     {
       "file": "apps/handlers/feed/feed_ops.py",
       "standard": "naming",
-      "reason": "Redundant prefix — file naming convention inherited from port, all handlers follow {domain}_ops.py pattern for consistency"
+      "reason": "Redundant prefix \u2014 file naming convention inherited from port, all handlers follow {domain}_ops.py pattern for consistency"
     },
     {
       "file": "apps/handlers/search/search_ops.py",
       "standard": "naming",
-      "reason": "Redundant prefix — file naming convention inherited from port, all handlers follow {domain}_ops.py pattern for consistency"
+      "reason": "Redundant prefix \u2014 file naming convention inherited from port, all handlers follow {domain}_ops.py pattern for consistency"
     },
     {
       "file": "apps/handlers/activity/activity_ops.py",
       "standard": "naming",
-      "reason": "Redundant prefix — file naming convention inherited from port, all handlers follow {domain}_ops.py pattern for consistency"
+      "reason": "Redundant prefix \u2014 file naming convention inherited from port, all handlers follow {domain}_ops.py pattern for consistency"
     },
     {
       "file": "apps/handlers/catchup/catchup_ops.py",
       "standard": "naming",
-      "reason": "Redundant prefix — all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"
+      "reason": "Redundant prefix \u2014 all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"
     },
     {
       "file": "apps/handlers/welcome/welcome_ops.py",
       "standard": "naming",
-      "reason": "Redundant prefix — all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"
+      "reason": "Redundant prefix \u2014 all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"
     },
     {
       "file": "apps/handlers/curation/curation_ops.py",
       "standard": "naming",
-      "reason": "Redundant prefix — all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"
+      "reason": "Redundant prefix \u2014 all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"
     },
     {
       "file": "apps/handlers/digest/digest_ops.py",
       "standard": "naming",
-      "reason": "Redundant prefix — all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"
+      "reason": "Redundant prefix \u2014 all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"
     },
     {
       "file": "apps/handlers/engagement/engagement_ops.py",
       "standard": "naming",
-      "reason": "Redundant prefix — all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"
+      "reason": "Redundant prefix \u2014 all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"
     },
     {
       "file": "apps/handlers/identity/identity_ops.py",
       "standard": "naming",
-      "reason": "Redundant prefix — all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"
+      "reason": "Redundant prefix \u2014 all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"
     },
     {
       "file": "apps/handlers/welcome/welcome_handler.py",
       "standard": "naming",
-      "reason": "Redundant prefix — all handlers follow {domain}_{type}.py pattern for consistency across 19 handler domains"
+      "reason": "Redundant prefix \u2014 all handlers follow {domain}_{type}.py pattern for consistency across 19 handler domains"
     },
     {
       "file": "apps/handlers/search/search_queries.py",
       "standard": "naming",
-      "reason": "Redundant prefix — all handlers follow {domain}_{type}.py pattern for consistency across 19 handler domains"
+      "reason": "Redundant prefix \u2014 all handlers follow {domain}_{type}.py pattern for consistency across 19 handler domains"
     },
     {
       "file": "apps/handlers/profiles/profile_queries.py",
       "standard": "deep_nesting",
-      "reason": "format_time_ago() depth 5 — tight utility with try/except + if/elif for time delta calculation. Duplicate of feed_ops pattern."
+      "reason": "format_time_ago() depth 5 \u2014 tight utility with try/except + if/elif for time delta calculation. Duplicate of feed_ops pattern."
     },
     {
       "file": "apps/handlers/curation/reaction_queries.py",
       "standard": "unused_function",
-      "reason": "get_reaction_summary() — social utility called by other branches via drone @commons for displaying reaction summaries on posts/comments"
+      "reason": "get_reaction_summary() \u2014 social utility called by other branches via drone @commons for displaying reaction summaries on posts/comments"
     },
     {
       "file": "apps/handlers/notifications/preferences.py",
       "standard": "unused_function",
-      "reason": "should_notify() and get_watchers() — notification decision functions used by the dashboard pipeline to determine which branches to notify"
+      "reason": "should_notify() and get_watchers() \u2014 notification decision functions used by the dashboard pipeline to determine which branches to notify"
     },
     {
       "file": "apps/handlers/profiles/profile_queries.py",
       "standard": "unused_function",
-      "reason": "get_activity_stats() — profile enrichment query used by other branches to display activity stats on social profiles"
+      "reason": "get_activity_stats() \u2014 profile enrichment query used by other branches to display activity stats on social profiles"
     },
     {
       "file": "apps/handlers/rooms/room_state_ops.py",
       "standard": "unused_function",
-      "reason": "get_room_state(), set_mood(), set_flavor(), set_entrance() — spatial room state API used by space module and external branch visitors"
+      "reason": "get_room_state(), set_mood(), set_flavor(), set_entrance() \u2014 spatial room state API used by space module and external branch visitors"
     },
     {
       "file": "apps/commons.py",
       "standard": "logged_fallback",
-      "lines": [99],
-      "reason": "True here means the command was claimed, not that it succeeded: the reader of stdout closed the pipe, so there is no caller left to tell (commons' decision, DPLAN-0354 leg 5)"
+      "reason": "True here means the command was claimed, not that it succeeded: the reader of stdout closed the pipe, so there is no caller left to tell (commons' decision, DPLAN-0354 leg 5)",
+      "lines": [
+        106
+      ]
     },
     {
       "file": "apps/modules/commons_identity.py",
       "standard": "logged_fallback",
-      "lines": [83],
-      "reason": "Router after error(): error() marks the command failed and cli resolve_exit answers 2; True means claimed, the protocol of every handle_command (commons' decision, DPLAN-0354 leg 5)"
+      "reason": "Router after error(): error() marks the command failed and cli resolve_exit answers 2; True means claimed, the protocol of every handle_command (commons' decision, DPLAN-0354 leg 5)",
+      "lines": [
+        102
+      ]
     },
     {
       "file": "apps/modules/space.py",
       "standard": "logged_fallback",
-      "lines": [231],
-      "reason": "Router after error(): error() marks the command failed and cli resolve_exit answers 2; True means claimed, pinned by test_decorate_refuses_naming_a_failed_caller_lookup (commons' decision, DPLAN-0354 leg 5)"
+      "reason": "Router after error(): error() marks the command failed and cli resolve_exit answers 2; True means claimed, pinned by test_decorate_refuses_naming_a_failed_caller_lookup (commons' decision, DPLAN-0354 leg 5)",
+      "lines": [
+        260
+      ]
+    },
+    {
+      "file": "apps/commons.py",
+      "standard": "fallback",
+      "functions": [
+        "discover_modules",
+        "route_command"
+      ],
+      "reason": "Contract: one broken module never takes every other verb down. Its import error is logged at error level and its verbs answer Unknown command; a closed stdout pipe has no reader left to warn, so it is logged at info"
+    },
+    {
+      "file": "apps/handlers/identity/identity_ops.py",
+      "standard": "fallback",
+      "functions": [
+        "_load_alias_cache"
+      ],
+      "reason": "Contract: aliases are display sugar; with the registry unreadable every name shows as its raw branch name, which is always correct, and the failure is logged at warning"
+    },
+    {
+      "file": "apps/handlers/artifacts/artifact_ops.py",
+      "standard": "fallback",
+      "functions": [
+        "inspect_artifact"
+      ],
+      "reason": "Contract: inspect shows an artifact even when its stored metadata JSON is corrupt; the metadata panel is empty and the parse failure is logged at warning"
     },
     {
       "file": "tests/__init__.py",

@@ -3,7 +3,7 @@
 # Description: Activity Feed Orchestration Module
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -27,19 +27,42 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("activity")
-    console.print("Thin router for the activity command. Queries recent activity and renders it as a Rich table.")
+    console.print("[bold cyan]activity - Activity Feed[/bold cyan]")
+    console.print("[dim]Queries recent comment activity across The Commons and renders it as a table.[/dim]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/activity/")
-    console.print("    - activity_ops.py (run_activity — query recent community activity feed)")
-    console.print("  handlers/identity/")
-    console.print("    - identity_ops.py (resolve_display_name — resolve branch agent to display name)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/activity/[/cyan]")
+    console.print("    [cyan]-[/cyan] activity_ops.py [dim](run_activity — query recent community activity feed)[/dim]")
+    console.print("  [cyan]handlers/identity/[/cyan]")
+    console.print(
+        "    [cyan]-[/cyan] identity_ops.py [dim](resolve_display_name — resolve branch agent to display name)[/dim]"
+    )
+    console.print()
+    console.print("[dim]Run 'drone @commons activity --help' for usage[/dim]")
+    console.print()
+
+
+def print_help():
+    """Display usage help."""
+    console.print()
+    console.print("[bold cyan]activity - Activity Feed[/bold cyan]")
+    console.print("[dim]Queries recent comment activity across The Commons and renders it as a table.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone @commons activity[/cyan] \\[--limit N] \\[--room ROOM]")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [cyan]drone @commons activity[/cyan]")
+    console.print("  [cyan]drone @commons activity --limit 10 --room general[/cyan]")
     console.print()
 
 
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle activity-related commands."""
+    if command == "activity" and ("--help" in args or "-h" in args):
+        print_help()
+        return True
+
     if command != "activity":
         return False
 

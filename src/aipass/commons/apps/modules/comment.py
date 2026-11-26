@@ -3,7 +3,7 @@
 # Description: Comment orchestration module
 # Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Comment Orchestration Module"""
@@ -21,20 +21,45 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("comment")
-    console.print("Comment and vote orchestration — adding comments and voting on content")
+    console.print("[bold cyan]comment - Comments and Votes[/bold cyan]")
+    console.print("[dim]Adds comments to posts and records up/down votes on content.[/dim]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/comments/")
-    console.print("    - comment_ops.py (add_comment — add a comment to a post)")
-    console.print("    - comment_ops.py (vote_on_content — upvote or downvote content)")
-    console.print("  handlers/identity/")
-    console.print("    - identity_ops.py (resolve_display_name — map branch name to display name)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/comments/[/cyan]")
+    console.print("    [cyan]-[/cyan] comment_ops.py [dim](add_comment — add a comment to a post)[/dim]")
+    console.print("    [cyan]-[/cyan] comment_ops.py [dim](vote_on_content — upvote or downvote content)[/dim]")
+    console.print("  [cyan]handlers/identity/[/cyan]")
+    console.print(
+        "    [cyan]-[/cyan] identity_ops.py [dim](resolve_display_name — map branch name to display name)[/dim]"
+    )
+    console.print()
+    console.print("[dim]Run 'drone @commons comment --help' for usage[/dim]")
+    console.print()
+
+
+def print_help():
+    """Display usage help."""
+    console.print()
+    console.print("[bold cyan]comment - Comments and Votes[/bold cyan]")
+    console.print("[dim]Adds comments to posts and records up/down votes on content.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone @commons comment[/cyan] <post_id> <content> \\[--parent <parent_id>]")
+    console.print("  [cyan]drone @commons vote[/cyan] <post|comment> <id> <up|down>")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print('  [cyan]drone @commons comment 12 "Nice work"[/cyan]')
+    console.print('  [cyan]drone @commons comment 12 "Agreed" --parent 3[/cyan]')
+    console.print("  [cyan]drone @commons vote post 12 up[/cyan]")
     console.print()
 
 
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle comment and vote commands; False if the command is not ours."""
+    if command in ("comment", "vote") and ("--help" in args or "-h" in args):
+        print_help()
+        return True
+
     if command == "comment":
         result = _handle_comment(args)
     elif command == "vote":

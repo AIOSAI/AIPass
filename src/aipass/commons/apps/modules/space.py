@@ -3,7 +3,7 @@
 # Description: Spatial Navigation Module
 # Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -31,17 +31,42 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("space")
-    console.print("Spatial navigation — entering rooms, looking around, decorating, and visitor tracking")
+    console.print("[bold cyan]space - Spatial Navigation[/bold cyan]")
+    console.print("[dim]Spatial navigation — entering rooms, looking around, decorating, and visitor tracking[/dim]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/rooms/")
-    console.print("    - space_ops.py (get_room_enter_data — retrieve room data for entering)")
-    console.print("    - space_ops.py (get_room_look_data — retrieve room data for looking around)")
-    console.print("    - space_ops.py (place_decoration — place a decoration in a room)")
-    console.print("    - space_ops.py (get_visitors_data — get recent visitors for a room)")
-    console.print("  handlers/identity/")
-    console.print("    - identity_ops.py (get_caller_branch — detect calling branch for decorate)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/rooms/[/cyan]")
+    console.print("    [cyan]-[/cyan] space_ops.py [dim](get_room_enter_data — retrieve room data for entering)[/dim]")
+    console.print(
+        "    [cyan]-[/cyan] space_ops.py [dim](get_room_look_data — retrieve room data for looking around)[/dim]"
+    )
+    console.print("    [cyan]-[/cyan] space_ops.py [dim](place_decoration — place a decoration in a room)[/dim]")
+    console.print("    [cyan]-[/cyan] space_ops.py [dim](get_visitors_data — get recent visitors for a room)[/dim]")
+    console.print("  [cyan]handlers/identity/[/cyan]")
+    console.print(
+        "    [cyan]-[/cyan] identity_ops.py [dim](get_caller_branch — detect calling branch for decorate)[/dim]"
+    )
+    console.print()
+    console.print("[dim]Run 'drone @commons enter --help' for usage[/dim]")
+
+
+def print_help():
+    """Display usage help for the space module."""
+    console.print()
+    console.print("[bold cyan]space - Spatial Navigation[/bold cyan]")
+    console.print("[dim]Enter rooms, look around, decorate them, and see who visited.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone @commons enter[/cyan] <room>")
+    console.print("  [cyan]drone @commons look[/cyan] \\[room]")
+    console.print('  [cyan]drone @commons decorate[/cyan] <room> "item_name" "description"')
+    console.print("  [cyan]drone @commons visitors[/cyan] <room>")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [cyan]drone @commons enter general[/cyan]")
+    console.print("  [cyan]drone @commons look general[/cyan]")
+    console.print('  [cyan]drone @commons decorate general "plant" "A small fern by the window"[/cyan]')
+    console.print("  [cyan]drone @commons visitors general[/cyan]")
     console.print()
 
 
@@ -69,6 +94,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     """Handle spatial navigation commands."""
     if command not in ["enter", "look", "decorate", "visitors"]:
         return False
+
+    if "--help" in args or "-h" in args:
+        print_help()
+        return True
 
     # look/visitors are valid with no args: route them before the introspection gate.
     if command in ("look", "visitors"):

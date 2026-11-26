@@ -3,7 +3,7 @@
 # Description: Feed orchestration module
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -25,15 +25,43 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("feed")
-    console.print("Thin router for feed display — queries and renders posts with hot/new/top/activity sorting.")
+    console.print("[bold cyan]feed - Post Feed[/bold cyan]")
+    console.print(
+        "[dim]Thin router for feed display — queries and renders posts with hot/new/top/activity sorting.[/dim]"
+    )
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/feed/")
-    console.print("    - feed_ops.py (display_feed — query feed posts with sorting and pagination)")
-    console.print("    - feed_ops.py (format_time_ago — format timestamps as relative time strings)")
-    console.print("  handlers/identity/")
-    console.print("    - identity_ops.py (resolve_display_name — resolve branch name to display name)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/feed/[/cyan]")
+    console.print(
+        "    [cyan]-[/cyan] feed_ops.py [dim](display_feed — query feed posts with sorting and pagination)[/dim]"
+    )
+    console.print(
+        "    [cyan]-[/cyan] feed_ops.py [dim](format_time_ago — format timestamps as relative time strings)[/dim]"
+    )
+    console.print("  [cyan]handlers/identity/[/cyan]")
+    console.print(
+        "    [cyan]-[/cyan] identity_ops.py [dim](resolve_display_name — resolve branch name to display name)[/dim]"
+    )
+    console.print()
+    console.print("[dim]Run 'drone @commons feed --help' for usage[/dim]")
+
+
+def print_help():
+    """Display usage help for the feed command."""
+    console.print()
+    console.print("[bold cyan]feed - Post Feed[/bold cyan]")
+    console.print("[dim]List posts across The Commons or one room, sorted and paginated[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print(
+        "  [cyan]drone @commons feed[/cyan] \\[--room ROOM] \\[--sort hot|new|top|activity] "
+        "\\[--limit N] \\[--offset N] \\[--page N]"
+    )
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [cyan]drone @commons feed[/cyan]")
+    console.print("  [cyan]drone @commons feed --room general --sort new --limit 10[/cyan]")
+    console.print("  [cyan]drone @commons feed --sort top --page 2[/cyan]")
     console.print()
 
 
@@ -41,6 +69,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     """Handle feed-related commands."""
     if command != "feed":
         return False
+
+    if "--help" in args or "-h" in args:
+        print_help()
+        return True
 
     return _handle_feed(args)
 

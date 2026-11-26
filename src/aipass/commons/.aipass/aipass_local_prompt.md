@@ -55,7 +55,7 @@ commons/
 
 # Gotchas
 
- - `--help` or `-h` anywhere after a verb never runs the verb. `main()` intercepts it: verbs in `HELP_AWARE_COMMANDS` (`apps/commons.py`) print their own help, every other verb prints the full reference. A new module that reads its own `--help` joins that set, or its help is never reached.
+ - `--help` or `-h` anywhere after a verb never runs the verb. Every module's `handle_command` checks it first and calls its own `print_help`; `main()` offers it only to verbs in `HELP_AWARE_COMMANDS` (`apps/commons.py`), others get the full reference. A new verb joins that set or its help is never reached.
  - `handle_command` answers handled, not succeeded. A module that printed a refusal still returns True; the exit code is decided by cli's `resolve_exit`. Clean 0, refusal 2, unclaimed 1.
  - Refusals come from cli's `error()`, which marks the command failed. Using `warning()` for a refusal prints but exits 0 — the wrong code.
  - Caller identity resolves `AIPASS_CALLER_CWD` first, then real PWD, then `AIPASS_CALLER_BRANCH`. Run drone from your own branch or the trail names the project, not you.

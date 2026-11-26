@@ -3,7 +3,7 @@
 # Description: Database Module Layer
 # Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Database module: schema setup for the entry point, and introspection of handlers/database."""
@@ -27,20 +27,38 @@ def init_schema() -> None:
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("database")
-    console.print("Service module providing database initialization and connection management.")
+    console.print("[bold cyan]database - Database Service[/bold cyan]")
+    console.print("[dim]Service module providing database initialization and connection management.[/dim]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/database/")
-    console.print("    - db.py (init_db — initialize SQLite database and create schema)")
-    console.print("    - db.py (close_db — safely close a database connection)")
-    console.print("    - db.py (get_db — get or create a database connection)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/database/[/cyan]")
+    console.print("    [cyan]-[/cyan] db.py [dim](init_db — initialize SQLite database and create schema)[/dim]")
+    console.print("    [cyan]-[/cyan] db.py [dim](close_db — safely close a database connection)[/dim]")
+    console.print("    [cyan]-[/cyan] db.py [dim](get_db — get or create a database connection)[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @commons database --help' for usage[/dim]")
+
+
+def print_help():
+    """Display usage help for the database command."""
+    console.print()
+    console.print("[bold cyan]database - Database Service[/bold cyan]")
+    console.print("[dim]Show the database module's connected handlers[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone @commons database[/cyan]")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [cyan]drone @commons database[/cyan]")
     console.print()
 
 
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle only bare `database` (introspection); every other command is declined."""
     if command == "database":
+        if "--help" in args or "-h" in args:
+            print_help()
+            return True
         if not args:
             print_introspection()
             json_handler.log_operation("database_executed", {"command": "database", "success": True})

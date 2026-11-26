@@ -3,7 +3,7 @@
 # Description: Search & Log Orchestration Module
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -24,18 +24,45 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("search")
-    console.print("Thin router for search and log export workflows.")
+    console.print("[bold cyan]search - Search & Log[/bold cyan]")
+    console.print("[dim]Thin router for search and log export workflows.[/dim]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/search/")
-    console.print("    - search_ops.py (run_search — execute content search across posts and comments)")
-    console.print("    - search_ops.py (run_log_export — export activity log for a branch or room)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/search/[/cyan]")
+    console.print(
+        "    [cyan]-[/cyan] search_ops.py [dim](run_search — execute content search across posts and comments)[/dim]"
+    )
+    console.print(
+        "    [cyan]-[/cyan] search_ops.py [dim](run_log_export — export activity log for a branch or room)[/dim]"
+    )
+    console.print()
+    console.print("[dim]Run 'drone @commons search --help' for usage[/dim]")
+
+
+def print_help():
+    """Display usage help for the search module."""
+    console.print()
+    console.print("[bold cyan]search - Search & Log[/bold cyan]")
+    console.print("[dim]Search posts and comments, or export a room's activity log.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print(
+        '  [cyan]drone @commons search[/cyan] "query" \\[--room ROOM] \\[--author AUTHOR] \\[--type posts|comments]'
+    )
+    console.print("  [cyan]drone @commons log[/cyan] <room_name> \\[--limit N]")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print('  [cyan]drone @commons search "memory" --room general[/cyan]')
+    console.print("  [cyan]drone @commons log general --limit 20[/cyan]")
     console.print()
 
 
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle search and log commands."""
+    if command in ("search", "log") and ("--help" in args or "-h" in args):
+        print_help()
+        return True
+
     if command == "search":
         result = _handle_search(args)
     elif command == "log":
@@ -70,6 +97,7 @@ def _handle_search(args: List[str]) -> bool:
 
     if posts:
         console.print("[bold]Posts:[/bold]")
+        console.print("[dim]Posts whose title or content matches the query[/dim]")
         for post in posts:
             snippet = post.get("content_snippet", "")
             if len(snippet) > 60:
@@ -77,13 +105,15 @@ def _handle_search(args: List[str]) -> bool:
             score = post["vote_score"]
             score_str = f"+{score}" if score >= 0 else str(score)
             console.print(
-                f'  #{post["id"]} [{score_str}] "{post["title"]}" by {post["author"]} in r/{post["room_name"]}'
+                f'  #{post["id"]} [{score_str}] "{post["title"]}" by {post["author"]} in r/{post["room_name"]}',
+                highlight=False,
             )
             console.print(f"       [dim]{snippet}[/dim]")
         console.print()
 
     if comments_list:
         console.print("[bold]Comments:[/bold]")
+        console.print("[dim]Comments whose content matches the query[/dim]")
         for comment in comments_list:
             snippet = comment.get("content_snippet", "")
             if len(snippet) > 60:
@@ -93,7 +123,7 @@ def _handle_search(args: List[str]) -> bool:
             console.print(
                 f'  On post #{comment["post_id"]} "{comment["post_title"]}":',
             )
-            console.print(f"    {comment['author']}: {snippet} [{score_str}]")
+            console.print(f"    {comment['author']}: {snippet} [{score_str}]", highlight=False)
         console.print()
 
     if not posts and not comments_list:

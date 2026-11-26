@@ -3,7 +3,7 @@
 # Description: Leaderboard Module
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -24,13 +24,34 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("leaderboard")
-    console.print("Thin router for leaderboard queries rendered as Rich tables.")
+    console.print("[bold cyan]leaderboard - Commons Leaderboards[/bold cyan]")
+    console.print("[dim]Thin router for leaderboard queries rendered as Rich tables.[/dim]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/social/")
-    console.print("    - leaderboard_ops.py (show_leaderboard — query ranked leaderboard data by category)")
-    console.print("    - leaderboard_ops.py (VALID_CATEGORIES — list of supported leaderboard categories)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/social/[/cyan]")
+    console.print(
+        "    [cyan]-[/cyan] leaderboard_ops.py [dim](show_leaderboard — query ranked leaderboard data by category)[/dim]"
+    )
+    console.print(
+        "    [cyan]-[/cyan] leaderboard_ops.py [dim](VALID_CATEGORIES — list of supported leaderboard categories)[/dim]"
+    )
+    console.print()
+    console.print("[dim]Run 'drone @commons leaderboard --help' for usage[/dim]")
+
+
+def print_help():
+    """Display usage help for leaderboard commands."""
+    console.print()
+    console.print("[bold cyan]leaderboard - Commons Leaderboards[/bold cyan]")
+    console.print("[dim]Show ranked leaderboards for artifacts, trades, posts, rooms and karma.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone @commons leaderboard[/cyan] \\[--category artifacts|trades|posts|rooms|karma]")
+    console.print("  [cyan]drone @commons leaderboards[/cyan] [dim](alias of leaderboard)[/dim]")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [cyan]drone @commons leaderboard[/cyan]")
+    console.print("  [cyan]drone @commons leaderboards --category karma[/cyan]")
     console.print()
 
 
@@ -38,6 +59,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     """Handle leaderboard commands."""
     if command not in ("leaderboard", "leaderboards"):
         return False
+
+    if "--help" in args or "-h" in args:
+        print_help()
+        return True
 
     return _handle_leaderboard(args)
 

@@ -4,7 +4,7 @@
 # Description: main()'s help/introspection/exit-code routing, route_command, and the json shim's contracts
 # Version: 1.3.1
 # Created: 2026-03-28
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -42,7 +42,7 @@ from aipass.commons.apps.commons import (
     route_command,
     ensure_database,
 )
-from aipass.cli import error as cli_error, command_failed
+from aipass.cli import error as cli_error, command_failed, header_version
 import aipass.commons.apps.handlers.json.json_handler as jh
 from aipass.commons.apps.modules import catchup as catchup_module
 from aipass.commons.apps.modules import commons_identity as identity_module
@@ -93,11 +93,11 @@ def test_help_word_returns_zero():
 @pytest.mark.parametrize(
     ("module", "command", "verb", "headline"),
     [
-        (catchup_module, "catchup", "run_catchup", "Catchup orchestration"),
-        (digest_module, "digest", "show_digest", "Thin router for community digest workflows"),
-        (explore_module, "explore", "explore_rooms", "secret room exploration"),
-        (explore_module, "secrets", "list_secrets", "secret room exploration"),
-        (identity_module, "whoami", "get_caller_branch", "Branch identity detection"),
+        (catchup_module, "catchup", "run_catchup", "drone @commons catchup"),
+        (digest_module, "digest", "show_digest", "drone @commons digest"),
+        (explore_module, "explore", "explore_rooms", "drone @commons explore"),
+        (explore_module, "secrets", "list_secrets", "drone @commons secrets"),
+        (identity_module, "whoami", "get_caller_branch", "drone @commons whoami"),
     ],
 )
 def test_a_help_flag_prints_the_module_help_and_never_runs_the_verb(module, command, verb, headline, flag, capsys):
@@ -110,26 +110,43 @@ def test_a_help_flag_prints_the_module_help_and_never_runs_the_verb(module, comm
 
 
 @pytest.mark.parametrize(
-    ("argv", "target"),
+    ("argv", "module_path", "verb"),
     [
-        (["prompt", "--help"], "aipass.commons.apps.modules.engagement.generate_prompt"),
-        (["prompt", "-h"], "aipass.commons.apps.modules.engagement.generate_prompt"),
-        (["comment", "12", "--help"], "aipass.commons.apps.modules.comment.add_comment"),
-        (["post", "general", "Title", "-h"], "aipass.commons.apps.modules.post.create_post"),
+        (["prompt", "--help"], "aipass.commons.apps.modules.engagement", "generate_prompt"),
+        (["prompt", "-h"], "aipass.commons.apps.modules.engagement", "generate_prompt"),
+        (["comment", "12", "--help"], "aipass.commons.apps.modules.comment", "add_comment"),
+        (["post", "general", "Title", "-h"], "aipass.commons.apps.modules.post", "create_post"),
     ],
 )
-def test_a_help_flag_on_an_unguarded_verb_prints_general_help_and_never_runs_it(argv, target):
+def test_a_help_flag_anywhere_after_a_verb_prints_its_module_help_and_never_runs_it(argv, module_path, verb):
     """A help flag anywhere after the verb explains, never executes: 'prompt --help' must not post a live prompt."""
     with (
         patch("sys.argv", ["commons", *argv]),
         patch.object(commons_main, "ensure_database", return_value=True),
-        patch(target) as ran,
-        patch.object(commons_main, "print_help") as mock_ph,
+        patch(f"{module_path}.{verb}") as ran,
+        patch(f"{module_path}.print_help") as module_help,
+        patch.object(commons_main, "print_help") as general_help,
     ):
         assert main() == 0
 
     ran.assert_not_called()
-    mock_ph.assert_called_once()
+    module_help.assert_called_once()
+    general_help.assert_not_called()
+
+
+def test_a_help_flag_on_a_verb_no_module_reads_prints_the_general_help():
+    """A verb outside HELP_AWARE_COMMANDS is never offered to a module with --help; the full reference answers."""
+    module = MagicMock()
+    with (
+        patch("sys.argv", ["commons", "nosuchverb", "--help"]),
+        patch.object(commons_main, "ensure_database", return_value=True),
+        patch.object(commons_main, "discover_modules", return_value=[module]),
+        patch.object(commons_main, "print_help") as general_help,
+    ):
+        assert main() == 0
+
+    module.handle_command.assert_not_called()
+    general_help.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -398,6 +415,6 @@ def test_the_started_program_restores_the_kernel_default(tmp_path):
     child = _child(code, tmp_path)
 
     assert child.returncode == 0, child.stderr
-    assert f"commons v{commons_main.VERSION}" in child.stdout
+    assert f"commons v{header_version(commons_main.__file__)}" in child.stdout
     reported = [line for line in child.stderr.splitlines() if line.startswith("SIGPIPE ")]
     assert reported == [f"SIGPIPE {int(signal.SIG_DFL)}"], child.stderr

@@ -3,7 +3,7 @@
 # Description: Notification Preferences Module
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -29,15 +29,46 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("notification")
-    console.print("Thin router for notification preference commands — watch, mute, track, and preferences display.")
+    console.print("[bold cyan]notification - Notification Preferences[/bold cyan]")
+    console.print(
+        "[dim]Thin router for notification preference commands — watch, mute, track, and preferences display.[/dim]"
+    )
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/notifications/")
-    console.print("    - notification_ops.py (set_watch — set watch level for all activity notifications)")
-    console.print("    - notification_ops.py (set_mute — mute notifications for a target)")
-    console.print("    - notification_ops.py (set_track — set track level for mentions and replies only)")
-    console.print("    - notification_ops.py (show_preferences — display all notification preferences)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/notifications/[/cyan]")
+    console.print(
+        "    [cyan]-[/cyan] notification_ops.py [dim](set_watch — set watch level for all activity notifications)[/dim]"
+    )
+    console.print("    [cyan]-[/cyan] notification_ops.py [dim](set_mute — mute notifications for a target)[/dim]")
+    console.print(
+        "    [cyan]-[/cyan] notification_ops.py [dim](set_track — set track level for mentions and replies only)[/dim]"
+    )
+    console.print(
+        "    [cyan]-[/cyan] notification_ops.py [dim](show_preferences — display all notification preferences)[/dim]"
+    )
+    console.print()
+    console.print("[dim]Run 'drone @commons <verb> --help' for usage[/dim]")
+
+
+def print_help():
+    """Display usage help for notification preference commands."""
+    console.print()
+    console.print("[bold cyan]notification - Notification Preferences[/bold cyan]")
+    console.print("[dim]Set how much you hear about a room, post or thread, and list your settings.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone @commons watch[/cyan] <room|post|thread> <name_or_id> [dim](all activity)[/dim]")
+    console.print(
+        "  [cyan]drone @commons track[/cyan] <room|post|thread> <name_or_id> [dim](mentions and replies only)[/dim]"
+    )
+    console.print("  [cyan]drone @commons mute[/cyan] <room|post|thread> <name_or_id> [dim](no notifications)[/dim]")
+    console.print("  [cyan]drone @commons preferences[/cyan] [dim](show all your notification preferences)[/dim]")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [cyan]drone @commons watch room general[/cyan]")
+    console.print("  [cyan]drone @commons track post 42[/cyan]")
+    console.print("  [cyan]drone @commons mute thread 17[/cyan]")
+    console.print("  [cyan]drone @commons preferences[/cyan]")
     console.print()
 
 
@@ -45,6 +76,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     """Handle notification preference commands."""
     if command not in ("watch", "mute", "track", "preferences"):
         return False
+
+    if "--help" in args or "-h" in args:
+        print_help()
+        return True
 
     # preferences takes no args, so it must route before the no-args introspection gate.
     if command == "preferences":

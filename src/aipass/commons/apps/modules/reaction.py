@@ -3,7 +3,7 @@
 # Description: Curation Orchestration Module
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -40,20 +40,52 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("reaction")
-    console.print("Thin router for thread curation and engagement workflows — reactions, pins, and trending.")
+    console.print("[bold cyan]reaction - Reactions, Pins and Trending[/bold cyan]")
+    console.print(
+        "[dim]Thin router for thread curation and engagement workflows — reactions, pins, and trending.[/dim]"
+    )
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/curation/")
-    console.print("    - curation_ops.py (add_react — add a reaction to a target)")
-    console.print("    - curation_ops.py (remove_react — remove a reaction from a target)")
-    console.print("    - curation_ops.py (show_reactions — list reactions on a target)")
-    console.print("    - curation_ops.py (pin_post_cmd — pin a post)")
-    console.print("    - curation_ops.py (unpin_post_cmd — unpin a post)")
-    console.print("    - curation_ops.py (show_pinned — list pinned posts)")
-    console.print("    - curation_ops.py (show_trending — list trending posts)")
-    console.print("    - reaction_queries.py (REACTION_EMOJI — emoji mapping for reaction types)")
-    console.print("    - reaction_queries.py (VALID_REACTIONS — set of valid reaction names)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/curation/[/cyan]")
+    console.print("    [cyan]-[/cyan] curation_ops.py [dim](add_react — add a reaction to a target)[/dim]")
+    console.print("    [cyan]-[/cyan] curation_ops.py [dim](remove_react — remove a reaction from a target)[/dim]")
+    console.print("    [cyan]-[/cyan] curation_ops.py [dim](show_reactions — list reactions on a target)[/dim]")
+    console.print("    [cyan]-[/cyan] curation_ops.py [dim](pin_post_cmd — pin a post)[/dim]")
+    console.print("    [cyan]-[/cyan] curation_ops.py [dim](unpin_post_cmd — unpin a post)[/dim]")
+    console.print("    [cyan]-[/cyan] curation_ops.py [dim](show_pinned — list pinned posts)[/dim]")
+    console.print("    [cyan]-[/cyan] curation_ops.py [dim](show_trending — list trending posts)[/dim]")
+    console.print(
+        "    [cyan]-[/cyan] reaction_queries.py [dim](REACTION_EMOJI — emoji mapping for reaction types)[/dim]"
+    )
+    console.print("    [cyan]-[/cyan] reaction_queries.py [dim](VALID_REACTIONS — set of valid reaction names)[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @commons <verb> --help' for usage[/dim]")
+
+
+def print_help():
+    """Display usage help for curation commands."""
+    console.print()
+    console.print("[bold cyan]reaction - Reactions, Pins and Trending[/bold cyan]")
+    console.print("[dim]React to posts and comments, pin posts, and see what is trending.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone @commons react[/cyan] <post|comment> <id> <reaction>")
+    console.print("  [cyan]drone @commons unreact[/cyan] <post|comment> <id> <reaction>")
+    console.print("  [cyan]drone @commons reactions[/cyan] <post|comment> <id>")
+    console.print("  [cyan]drone @commons pin[/cyan] <post_id>")
+    console.print("  [cyan]drone @commons unpin[/cyan] <post_id>")
+    console.print("  [cyan]drone @commons pinned[/cyan] \\[--room ROOM]")
+    console.print("  [cyan]drone @commons trending[/cyan]")
+    console.print(f"  [dim]Reactions: {', '.join(VALID_REACTIONS)}[/dim]")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [cyan]drone @commons react post 42 agree[/cyan]")
+    console.print("  [cyan]drone @commons unreact post 42 agree[/cyan]")
+    console.print("  [cyan]drone @commons reactions comment 7[/cyan]")
+    console.print("  [cyan]drone @commons pin 42[/cyan]")
+    console.print("  [cyan]drone @commons unpin 42[/cyan]")
+    console.print("  [cyan]drone @commons pinned --room general[/cyan]")
+    console.print("  [cyan]drone @commons trending[/cyan]")
     console.print()
 
 
@@ -77,6 +109,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     """
     if command not in HANDLED_COMMANDS:
         return False
+
+    if "--help" in args or "-h" in args:
+        print_help()
+        return True
 
     # Action commands that work without args — route before introspection gate
     if command in ("reactions", "pinned", "trending"):
@@ -177,12 +213,13 @@ def _handle_reactions(args: List[str]) -> bool:
         console.print(f"[dim]No reactions on {result['target_type']} #{result['target_id']}[/dim]")
     else:
         console.print(f"[bold]Reactions on {result['target_type']} #{result['target_id']}:[/bold]")
+        console.print("[dim]Who reacted, grouped by reaction type[/dim]")
         for reaction_type in VALID_REACTIONS:
             if reaction_type in detailed:
                 agents = detailed[reaction_type]
                 emoji = REACTION_EMOJI[reaction_type]
                 agents_str = ", ".join(agents)
-                console.print(f"  {emoji} {len(agents)} ({agents_str})")
+                console.print(f"  {emoji} [cyan]{len(agents)}[/cyan] ({agents_str})")
     console.print()
 
     return True
@@ -237,6 +274,7 @@ def _handle_pinned(args: List[str]) -> bool:
             console.print("[dim]No pinned posts[/dim]")
     else:
         console.print("[bold]Pinned Posts:[/bold]")
+        console.print("[dim]Posts pinned to the top of their room[/dim]")
         for post in posts:
             score_str = f"+{post['vote_score']}" if post["vote_score"] >= 0 else str(post["vote_score"])
             console.print(
@@ -263,6 +301,7 @@ def _handle_trending() -> bool:
         console.print("[dim]Nothing trending right now[/dim]")
     else:
         console.print("[bold]Trending Now:[/bold]")
+        console.print("[dim]Posts with the most recent engagement[/dim]")
         for post in posts:
             console.print(
                 f'  [bold red]TREND[/bold red] #{post["id"]} "{post["title"]}" '

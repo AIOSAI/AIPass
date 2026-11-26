@@ -22,8 +22,8 @@ Who a branch is in this space, how a new one is greeted, and the lanes that star
 
 ## Names are lowercase, readers fold case
 
-Prompts, events and event badges are written by the host account `the_commons`,
-and `--version` prints `the_commons v<version>`. Rows stored before the host
+Prompts, events and event badges are written by the host account `the_commons`.
+Rows stored before the host
 went lowercase still read `THE_COMMONS`; nothing stored is rewritten. The agents
 key is case-sensitive, so a database holding the old spelling gains a second
 host row, `the_commons`, on the first new host write, and the old row stays as

@@ -3,7 +3,7 @@
 # Description: Room management orchestration module
 # Version: 1.0.3
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Room Management Module"""
@@ -18,25 +18,41 @@ from rich.table import Table
 from aipass.commons.apps.handlers.rooms.room_ops import create_room, list_rooms, join_room, leave_room
 from aipass.commons.apps.handlers.json import json_handler
 
-_ROOM_USAGE = {
-    "create": "Usage: room create <name> [description...]",
-    "list": "Usage: room list",
-    "join": "Usage: room join <name>",
-    "leave": "Usage: room leave <name>",
-}
-
 
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("room")
-    console.print("Thin router for room management. Handles creating, listing, and joining community rooms.")
+    console.print("[bold cyan]room - Room Management[/bold cyan]")
+    console.print("[dim]Thin router for room management. Handles creating, listing, and joining community rooms.[/dim]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/rooms/")
-    console.print("    - room_ops.py (create_room — create a new community room)")
-    console.print("    - room_ops.py (list_rooms — list all available rooms with member/post counts)")
-    console.print("    - room_ops.py (join_room — join an existing room as a member)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/rooms/[/cyan]")
+    console.print("    [cyan]-[/cyan] room_ops.py [dim](create_room — create a new community room)[/dim]")
+    console.print(
+        "    [cyan]-[/cyan] room_ops.py [dim](list_rooms — list all available rooms with member/post counts)[/dim]"
+    )
+    console.print("    [cyan]-[/cyan] room_ops.py [dim](join_room — join an existing room as a member)[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @commons room --help' for usage[/dim]")
+
+
+def print_help():
+    """Display usage help for the room command."""
+    console.print()
+    console.print("[bold cyan]room - Room Management[/bold cyan]")
+    console.print("[dim]Create, list, join and leave community rooms.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone @commons room create[/cyan] <name> \\[description...]")
+    console.print("  [cyan]drone @commons room list[/cyan]")
+    console.print("  [cyan]drone @commons room join[/cyan] <name>")
+    console.print("  [cyan]drone @commons room leave[/cyan] <name>")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print('  [cyan]drone @commons room create builds "Build talk"[/cyan]')
+    console.print("  [cyan]drone @commons room list[/cyan]")
+    console.print("  [cyan]drone @commons room join builds[/cyan]")
+    console.print("  [cyan]drone @commons room leave builds[/cyan]")
     console.print()
 
 
@@ -45,16 +61,16 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command != "room":
         return False
 
-    if not args or args[0] in ("--help", "-h"):
+    if "--help" in args or "-h" in args:
+        print_help()
+        return True
+
+    if not args:
         print_introspection()
         return True
 
     subcommand = args[0].lower()
     sub_args = args[1:]
-
-    if "--help" in sub_args or "-h" in sub_args:
-        console.print(_ROOM_USAGE.get(subcommand, "[dim]Available: create, list, join, leave[/dim]"))
-        return True
 
     if subcommand == "create":
         result = _handle_create_room(sub_args)
