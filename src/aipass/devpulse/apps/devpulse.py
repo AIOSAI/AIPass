@@ -3,7 +3,7 @@
 # Description: Entry point for devpulse branch — auto-discovers modules
 # Version: 1.0.5
 # Created: 2026-03-07
-# Modified: 2026-11-22
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -17,12 +17,11 @@ from pathlib import Path
 from typing import Any
 
 from aipass.prax import logger
-from aipass.cli import console, err_console, error, resolve_exit, reset_command_state, warning
+from aipass.cli import console, err_console, error, header_version, resolve_exit, reset_command_state, warning
 
 # The self-map and --help go to stdout like every branch's; never alias console to err_console here.
 
 # The one version source in the branch: keep it in step with the header's Version line.
-VERSION = "1.0.5"
 
 MODULES_DIR = Path(__file__).parent / "modules"
 
@@ -88,7 +87,7 @@ def print_help():
     console.print("  drone @devpulse watchdog agent @flow         Watch a dispatched agent")
     console.print("  drone @devpulse feedback inbox               Check cross-project feedback")
     console.print(
-        "  drone @devpulse release-notify v2.8.4        Mail every project manager a release", highlight=False
+        "  drone @devpulse release-notify <version>     Mail every project manager a release", highlight=False
     )
 
 
@@ -125,7 +124,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command in ["--version", "-V"]:
-        console.print(f"devpulse v{VERSION}", highlight=False)
+        console.print(f"devpulse v{header_version(__file__)}", highlight=False)
         return True
 
     return route_command(command, args, modules)
