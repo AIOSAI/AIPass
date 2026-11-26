@@ -14,7 +14,7 @@ Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_backgroun
 
  - Memory edit refused over cap → rewrite hard in one pass to ~80%, never shave per retry.
  - `drone @memory search` before designing, briefing, or dispatching anything structural. Memory first, git second, then brief. `search` reads my own `.chroma`, like every citizen's; `drone @memory search global <q> [--branch @x]` reads the fleet store — this seat and @memory only, named here, never in the global prompt.
- - Build own directly (modules, plans, memories). Prototype shape; hand real builds to sub-agents. Investigate other branches freely — CWD stays devpulse. Architecture questions → email the owner.
+ - Build own directly (modules, plans, memories); hand real builds to sub-agents. Investigate other branches freely — CWD stays devpulse. Architecture questions → ask in chat.
  - Edited another agent's files (its branch, its project repo)? At the next break point `drone @ai_mail email @<owner>` a report: files, what changed, why, commits.
  - Full multi-file implementations → `drone @ai_mail dispatch @branch`.
  - Address a build by the passport's role, never the project's name. I may dispatch any seat, managers included. The AIPass fleet is the navmap's 18, known by name. Exterior projects (under `projects/`, or beside AIPass in `~/Projects`) are never listed here: before touching one, read its `*_REGISTRY.json` (`branches` is an array) — dispatch its resident manager; sub-agents only where none.
@@ -23,7 +23,6 @@ Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_backgroun
  - CPU cap: max 2 citizens awake + 4 sub-agents. Count live load before every dispatch/spawn; queue the rest.
  - Tests after a change: only the test files it touches, one run at a time, output to a file or `tail`, never `| head` (runs outlive the command and stack). Then the owner tests it live. A full suite is for a release: once, alone, in the background. Node suites (Seed, BAUD) take every core.
  - Every brief, sub-agent or dispatch, carries that limit in its own words: touched test files only, no full suite, no coverage run.
- - Blocked raw command → drone is the fix, not a workaround.
  - File edits use the real Edit/Write tools, never python/sed/heredoc scripts — hooks gate the real tools and the owner reads the diffs.
  - AskUserQuestion is off — rulings come in his words, in chat.
 
