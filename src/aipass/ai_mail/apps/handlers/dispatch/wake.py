@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.12.5
+# Version: 3.12.6
 # Created: 2026-03-02
 # Modified: 2026-11-26
 # =============================================
@@ -293,6 +293,14 @@ def prepend_path(spawn_env: dict, directory: str) -> None:
         spawn_env["PATH"] = directory + os.pathsep + spawn_env.get("PATH", "")
 
 
+def _replace_lock(lock_file: Path, lock_data: dict) -> None:
+    """Rewrite the dispatch lock by rename, never truncation: the monitor refuses a lock it reads empty."""
+    staged = lock_file.with_name(lock_file.name + ".staged")
+    with open(staged, "w", encoding="utf-8") as f:
+        json.dump(lock_data, f, indent=2)
+    os.replace(staged, lock_file)
+
+
 def spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, lock_file_path, custom_message, status):
     """Spawn monitor in its own systemd unit to survive cgroup cleanup.
 
@@ -360,8 +368,7 @@ def spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, lo
                 "branch": str(branch_path),
                 "subject": custom_message or "daemon wake",
             }
-            with open(lock_file_path, "w", encoding="utf-8") as f:
-                json.dump(lock_data, f, indent=2)
+            _replace_lock(Path(lock_file_path), lock_data)
     except (subprocess.SubprocessError, ValueError, OSError) as e:
         logger.warning("[wake] Could not query systemd unit PID: %s", e)
         status.warn("pid", f"systemd unit PID unknown ({e}); no dispatch lock written")
@@ -1042,8 +1049,7 @@ def wake_branch(
                 "branch": str(branch_path),
                 "subject": custom_message or "manual wake",
             }
-            with open(lock_file, "w", encoding="utf-8") as f:
-                json.dump(lock_data, f, indent=2)
+            _replace_lock(lock_file, lock_data)
 
             status.ok("spawn", f"Monitor started as a plain child, outside a systemd scope (PID {monitor_pid})")
 

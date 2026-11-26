@@ -167,11 +167,11 @@
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "logged_fallback",
       "lines": [
-        167,
-        246,
-        692
+        169,
+        248,
+        694
       ],
-      "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined 2026-10-08, 2026-10-16, 2026-11-15 and 2026-11-26). 167: wake_sender returns an outcome word, and 'failed' is what its normal path also answers when the sender was not woken; a crash in the wake-back is that same outcome, it never reads as 'success', and the report's wake_result carries it. 246: _mail_wake_back returns True only when the mail went; False is its one failure answer, the same as a non-zero exit, and its caller turns it into 'failed_manager_mail'. 692: _parse_result_json documents {} for a stdout log that is missing or holds no JSON, which is what an unreadable log is to the report: build_report then records cost, tokens and turns as null, not as values."
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined 2026-10-08, 2026-10-16, 2026-11-15 and 2026-11-26). 169: wake_sender returns an outcome word, and 'failed' is what its normal path also answers when the sender was not woken; a crash in the wake-back is that same outcome, it never reads as 'success', and the report's wake_result carries it. 248: _mail_wake_back returns True only when the mail went; False is its one failure answer, the same as a non-zero exit, and its caller turns it into 'failed_manager_mail'. 694: _parse_result_json documents {} for a stdout log that is missing or holds no JSON, which is what an unreadable log is to the report: build_report then records cost, tokens and turns as null, not as values."
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
@@ -206,20 +206,20 @@
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "fallback",
-      "lines": [857],
+      "lines": [859],
       "reason": "run_with_startup_check (ai_mail, FPLAN-1221): a stdout log that cannot be opened runs the agent with stdout to DEVNULL rather than not at all; its work (reply, memories) is the dispatch's point. The warning names the file. The result JSON then reads as absent, which the bounce and report state; a streaming provider (codex, opencode) shows no stdout byte and fails at the startup timeout through the 3-strike path."
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "fallback",
-      "lines": [981, 1001, 1204],
-      "reason": "main() keeps the agent running over a side file it cannot use (ai_mail, FPLAN-1221); each warns with the file. 981: the lock cannot take the monitor's PID, so it keeps the wake's pre-spawn PID; known cost, raised to the owner: pid_lock reads that lock stale once the wake's PID exits. 1001: the stderr log cannot be opened; the agent inherits the monitor's stderr, the attempt lines go unwritten, and the bounce states '(no stderr captured)'. 1204: the max-turns label cannot be read; the status comes from the exit code alone. A raise in any of them loses the dispatch's bounce, report, wake-back and lock release."
+      "lines": [1006, 1209],
+      "reason": "main() keeps the agent running over a side file it cannot use (ai_mail, FPLAN-1221); each warns with the file. A lock that cannot take the monitor's PID is not one of them: that refuses the wake. 1006: the stderr log cannot be opened; the agent inherits the monitor's stderr, the attempt lines go unwritten, and the bounce states '(no stderr captured)'. 1209: the max-turns label cannot be read; the status comes from the exit code alone. A raise in any of them loses the dispatch's bounce, report, wake-back and lock release."
     },
     {
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "logged_fallback",
       "lines": [
-        395
+        402
       ],
       "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined in legs 13 and 16): is_manager's FileNotFoundError arm answers False because a branch with no passport has declared no class, which is what wake_branch's manager gate also does for a missing passport (pinned: test_missing_passport_continues). A passport that exists but cannot be read is the other arm, and since leg 11 it fails closed (True) under @devpulse's ruling e; since leg 12 an unreadable registry fails closed too. Line shifted 381 -> 394 by the Linux-only purge (2026-11-14), 394 -> 395 by a wrapped line (FPLAN-1221)."
     },
@@ -228,9 +228,9 @@
       "standard": "fallback",
       "lines": [
         151,
-        396
+        403
       ],
-      "reason": "Fails closed, a refusal not a pass (FPLAN-1221); the checker reads the function name, not the polarity. 151: fable_allowed answers an empty grant for an unreadable safety config, logged at error, so nobody runs Fable and resolve_wake_model refuses the model; a raise would end every wake over a model grant. 396: is_manager answers True (manager) for a passport that exists but cannot be read, logged at warning, under @devpulse's ruling e: a manager is never woken, so the target is mailed, not spawned, and dispatch says so.",
+      "reason": "Fails closed, a refusal not a pass (FPLAN-1221); the checker reads the function name, not the polarity. 151: fable_allowed answers an empty grant for an unreadable safety config, logged at error, so nobody runs Fable and resolve_wake_model refuses the model; a raise would end every wake over a model grant. 403: is_manager answers True (manager) for a passport that exists but cannot be read, logged at warning, under @devpulse's ruling e: a manager is never woken, so the target is mailed, not spawned, and dispatch says so.",
       "measured": "2026-11-26 (FPLAN-1221) — added for these two sites; both arms fail toward refusing, never toward spawning."
     },
     {
@@ -296,10 +296,10 @@
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "logged_fallback",
       "lines": [
-        313,
-        335
+        321,
+        343
       ],
-      "reason": "Said out loud, not dressed (ai_mail, fleet green leg 12; rewritten in the Linux-only purge 2026-11-14). 313 and 335: spawn_in_systemd_scope answers False when the env file cannot be written or systemd-run cannot run, the same as a non-zero systemd-run; each arm records a 'scope' warn step naming the failure, and the caller then starts the monitor as a plain child and reports it as one ('Monitor started as a plain child, outside a systemd scope'), so neither reads as a scope start."
+      "reason": "Said out loud, not dressed (ai_mail, fleet green leg 12; rewritten in the Linux-only purge 2026-11-14). 321 and 343: spawn_in_systemd_scope answers False when the env file cannot be written or systemd-run cannot run, the same as a non-zero systemd-run; each arm records a 'scope' warn step naming the failure, and the caller then starts the monitor as a plain child and reports it as one ('Monitor started as a plain child, outside a systemd scope'), so neither reads as a scope start."
     },
     {
       "file": "apps/handlers/dispatch/pid_lock.py",

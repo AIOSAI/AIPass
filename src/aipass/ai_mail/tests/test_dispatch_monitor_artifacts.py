@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_artifacts.py
 # Description: Tests for what each dispatch attempt leaves behind - stdout, exit codes, result JSON, the lock
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-10-08
 # Modified: 2026-11-26
 # =============================================
@@ -306,20 +306,31 @@ def test_a_lock_turned_unreadable_mid_run_is_left_in_place(monkeypatch, main_arg
     bounce.assert_not_called()
 
 
-def test_a_lock_that_cannot_take_the_monitor_pid_is_warned_and_the_agent_still_runs(monkeypatch, main_argv, tmp_path):
+@pytest.mark.parametrize(
+    "spoil, error",
+    [
+        (lambda lock: lock.write_text("not json", encoding="utf-8"), "Expecting value"),
+        (lambda lock: lock.unlink(), "no lock file"),
+    ],
+    ids=["unreadable", "absent"],
+)
+def test_a_monitor_that_cannot_own_its_lock_refuses_the_wake(monkeypatch, main_argv, tmp_path, spoil, error):
     argv, lock_file, _ = main_argv
-    lock_file.write_text("not json", encoding="utf-8")
+    spoil(lock_file)
     ran = MagicMock(return_value=0)
-    bounce = MagicMock()
+    bounce = MagicMock(return_value=True)
+    woke = MagicMock(return_value="success")
     monkeypatch.setattr(mod, "_send_bounce", bounce)
+    monkeypatch.setattr(mod, "wake_sender", woke)
 
     code, _ = _run_main(monkeypatch, argv, tmp_path, [ran])
 
-    assert code == 0
-    ran.assert_called_once()
-    bounce.assert_not_called()
-    warnings = [c.args[0] % c.args[1:] for c in cast(MagicMock, mod.logger).warning.call_args_list]
-    assert any(w.startswith(f"[monitor] Could not self-register PID in lock file {lock_file}") for w in warnings)
+    assert code == 1
+    ran.assert_not_called()
+    reason = bounce.call_args.args[1]
+    assert reason.startswith(f"Refused: the monitor cannot own its lock {lock_file} (")
+    assert error in reason
+    assert woke.call_args.args[2] == mod.LOCK_REFUSED
 
 
 def test_a_lock_that_cannot_be_removed_is_warned_and_left(monkeypatch, main_argv, tmp_path):

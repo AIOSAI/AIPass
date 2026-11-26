@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.17.1
+# Version: 2.17.2
 # Created: 2026-03-02
 # Modified: 2026-11-26
 # =============================================
@@ -90,6 +90,8 @@ CODEX_STREAM_FAILED = -5
 OPENCODE = session_pointer.OPENCODE
 # Exit 0 whose stream carries no `text` part: an OpenCode run that never answered.
 OPENCODE_STREAM_FAILED = -6
+# The monitor could not write its pid into the dispatch lock: no agent spawned, never an unlocked run.
+LOCK_REFUSED = -7
 # The providers whose stdout streams live: startup is the first stdout byte, not a JSONL transcript.
 STREAMING_PROVIDERS = (CODEX, OPENCODE)
 WAKE_RESULT_DECLINED = "declined"
@@ -972,14 +974,17 @@ def main():
     json_handler.log_operation("dispatch_monitor_start", {"branch": branch_email, "sender": sender})
 
     # The lock may hold the parent's pre-spawn PID, or the caller's under systemd-run.
+    lock_refusal = ""
     try:
         lock_path_obj = Path(lock_file)
-        if lock_path_obj.exists():
-            ld = json.loads(lock_path_obj.read_text(encoding="utf-8"))
-            ld["pid"] = os.getpid()
-            lock_path_obj.write_text(json.dumps(ld, indent=2), encoding="utf-8")
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("[monitor] Could not self-register PID in lock file %s: %s", lock_file, e)
+        if not lock_path_obj.exists():
+            raise FileNotFoundError("no lock file")
+        ld = json.loads(lock_path_obj.read_text(encoding="utf-8"))
+        ld["pid"] = os.getpid()
+        lock_path_obj.write_text(json.dumps(ld, indent=2), encoding="utf-8")
+    except (json.JSONDecodeError, OSError, TypeError) as e:
+        lock_refusal = f"Refused: the monitor cannot own its lock {lock_file} ({e}); no agent was started."
+        logger.warning("[monitor] %s", lock_refusal)
 
     # The systemd-scope lane never learns this pid at the wake; without it a dead monitor's row reads alive.
     own_dispatch_id = report_mod.current_dispatch_id()
@@ -1057,11 +1062,11 @@ def main():
         logger.info("[monitor] Sandbox ENABLED for %s", branch_email)
 
     attempts = []
-    exit_code = -1
+    exit_code = LOCK_REFUSED if lock_refusal else -1
     bg_orphaned = False
     cmd = list(claude_cmd)
 
-    for attempt in range(1, 4):
+    for attempt in range(1, 1 if lock_refusal else 4):
         cmd, mode = cmd_for_attempt(claude_cmd, attempt, branch_path, provider)
         if attempt == 3 and mode == "fresh" and cmd != claude_cmd:
             logger.info("[monitor] %s attempt %d/3: switching to --fresh", branch_email, attempt)
@@ -1231,7 +1236,9 @@ def main():
 
         content = _read_agent_stderr(stderr_log)
         final_stream = parse_opencode_stream(stdout_log) if provider == OPENCODE else {}
-        if final_stream.get("rate_limited"):
+        if lock_refusal:
+            reason = lock_refusal
+        elif final_stream.get("rate_limited"):
             retry = final_stream["retry_after_s"]
             reason = (
                 f"API rate limit (opencode 429, retryAfter {retry if retry is not None else 'unknown'}s, {duration}s)"
@@ -1263,6 +1270,8 @@ def main():
     # Log completion to Prax (tests/test_dispatch_completion_ordering.py anchors on this line)
     branch_name = branch_email.lstrip("@")
     status = "completed" if exit_code == 0 else f"FAILED (code {exit_code})"
+    if lock_refusal:
+        status = "REFUSED (lock not owned)"
     if bg_orphaned:
         status = f"INCOMPLETE (bg tasks terminated, {duration}s)"
     if max_turns_hit:

@@ -24,8 +24,15 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
    - **Lock cleanup** — removes `.dispatch.lock` when agent exits; a lock it cannot
      remove, or cannot prove it owns, is left in place with a warning
    - **Side files fail loud, the agent runs on** — an unreadable stream, stderr or
-     result file, or a lock that will not take the monitor's pid, logs a warning and
-     is named in the outcome; it never stops a running agent
+     result file logs a warning and is named in the outcome; it never stops a running agent
+   - **Never an unlocked run** — before the first attempt the monitor writes its own pid
+     into `.dispatch.lock`. A lock that is missing, unreadable or will not take the pid
+     refuses the wake: no agent starts, the sender gets a bounce reading
+     `Refused: the monitor cannot own its lock <path> (<error>); no agent was started.`,
+     the report and register close as `REFUSED (lock not owned)`, the wake-back runs, and
+     the monitor exits 1 (`LOCK_REFUSED`, -7). It leaves a lock it cannot prove it owns
+     in place. The wake rewrites the lock with the monitor's pid by rename, never by
+     truncation, so the monitor never reads it empty
    - **Transcripts** — `dispatch_stdout.out`, `dispatch_stderr.out` and
      `dispatch_stdout.attempt-N.out` (N 1-3) in the target's `logs/`, rotated
      to `.out.1`; never `.log`, which trigger's watcher reads.

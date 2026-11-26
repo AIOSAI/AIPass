@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_wake_helpers.py
 # Description: Tests for the wake's small parts - dispatch status, the grant read, pid lock and branch resolution
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-10-08
 # Modified: 2026-11-26
 # =============================================
@@ -202,6 +202,29 @@ def test_scans_that_cannot_run_are_said_and_the_wake_goes_on(tmp_path, monkeypat
     assert "cannot scan for zombie processes" in _step(status, "pre-flight")[2]
     assert _step(status, "occupancy")[0] == "warn" and "No such file" in _step(status, "occupancy")[2]
     assert _step(status, "notify") == ("warn", "notify", "notification feed not written: feed is read-only")
+
+
+def test_the_lock_is_never_empty_while_the_wake_hands_it_to_the_monitor(tmp_path, monkeypatch):
+    """The monitor refuses a lock it cannot read, so the post-spawn rewrite must never truncate it."""
+    branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+    lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
+    _patch_wake_deps(monkeypatch, acquire_lock=acquire_lock)
+    spawned, seen = [], []
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: spawned.append(1) or _FakeProc())
+    real_dump = json.dump
+
+    def _dump_and_look(obj, fp, **kw):
+        if spawned:
+            seen.append(lock_file.read_text(encoding="utf-8"))
+        real_dump(obj, fp, **kw)
+
+    monkeypatch.setattr(json, "dump", _dump_and_look)
+
+    status, ok = wake_branch("@testbranch")
+
+    assert ok is True
+    assert seen and all(json.loads(text)["pid"] for text in seen)
+    assert json.loads(lock_file.read_text(encoding="utf-8"))["pid"] == 55555
 
 
 # --- check_pid_alive tests -------------------------------------------
@@ -457,7 +480,8 @@ def test_check_lock_corrupt_lock_names_why_it_is_held(tmp_path):
     lock_dir = tmp_path / ".ai_mail.local"
     lock_dir.mkdir(parents=True)
     (lock_dir / ".dispatch.lock").write_text("{bad json", encoding="utf-8")
-    assert check_lock(tmp_path)["corrupt"].startswith("not JSON: ")
+    held = check_lock(tmp_path)
+    assert held is not None and held["corrupt"].startswith("not JSON: ")
     (lock_dir / ".dispatch.lock").write_text("[1, 2]", encoding="utf-8")
     assert check_lock(tmp_path) == {"corrupt": "not a JSON object (list)"}
 
