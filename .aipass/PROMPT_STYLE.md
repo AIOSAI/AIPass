@@ -13,6 +13,7 @@ Goal: signal density over prose. Prompts are injected every turn — every line 
  - Section intros are 1–2 lines max. If you need a paragraph, the section is too broad — split it.
  - Voice: terse imperative, reference-style. Like API docs or CLI help, not a tutorial.
  - Code blocks: inline backticks for commands (`` `drone @ai_mail dispatch` ``). Multi-line fenced blocks only for directory trees, template skeletons, or command examples that don't fit inline.
+ - Placeholders wear angle brackets: `@<self>`, `@<owner>`, `<path>`. A bare `@name` is a real address; `@owner` reads as a mailbox that does not exist.
  - File length: aim for under 230 lines. Global and branch prompts are injected every turn — every line costs tokens.
 
 # Writing voice (agent output + memory)
