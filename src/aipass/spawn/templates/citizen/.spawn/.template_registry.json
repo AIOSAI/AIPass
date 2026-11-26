@@ -189,19 +189,19 @@
       "path": ".trinity/README.md"
     },
     "f012": {
-      "content_hash": "362216e7b9fc",
+      "content_hash": "720bfb09b6e4",
       "has_branch_placeholder": false,
       "name": "local.json",
       "path": ".trinity/local.json"
     },
     "f013": {
-      "content_hash": "7e5de8f0ee63",
+      "content_hash": "b4fcf4e19973",
       "has_branch_placeholder": false,
       "name": "observations.json",
       "path": ".trinity/observations.json"
     },
     "f014": {
-      "content_hash": "8f16ca495272",
+      "content_hash": "23315d695ebf",
       "has_branch_placeholder": false,
       "name": "passport.json",
       "path": ".trinity/passport.json"

@@ -105,6 +105,10 @@ dry-run by default, can be restricted to a single branch, can be pointed at anot
 root, and backs each passport up before writing. It either completes a passport or raises;
 there is no partial write.
 
+It drops four keys and nothing else: `citizenship.owner`, `document_metadata.note`,
+`document_metadata.last_updated` and the top-level `family`. Unknown keys are kept and
+reported. It writes no date stamp, so a re-run over a migrated passport changes nothing.
+
 The citizens it walks are the ones @memory's door (`fleet_branches`) answers for the root:
 core, resident and external, each with the residency the door gives it. Spawn keeps no census
 and no expected count; the receipt's `Fleet:` line is the count the door answered, by tier. A

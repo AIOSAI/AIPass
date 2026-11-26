@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repair_ops.py
 # Description: Repair handler — move branches, update registry paths, clean pollution
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-05-15
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """Repair handler implementation for project structure fixes.
@@ -342,9 +342,7 @@ def rename_branch(old_name, new_name, registry_path=None, dry_run=True):
             info["path"] = new_rel
             info["module"] = ".".join(new if seg == old else seg for seg in info.get("module", "").split("."))
             if name == old:
-                passport.setdefault("document_metadata", {}).update(
-                    document_name=f"{new}.PASSPORT", managed_by=new, last_updated=datetime.now().strftime("%Y-%m-%d")
-                )
+                passport.setdefault("document_metadata", {}).update(document_name=f"{new}.PASSPORT", managed_by=new)
                 info.update(branch_name=new, email=f"@{new}")
                 identity = passport.get("identity", {})
                 if isinstance(identity.get("purpose"), str):

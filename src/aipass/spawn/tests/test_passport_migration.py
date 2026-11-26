@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_passport_migration.py
 # Description: DPLAN-0319 — passport 2.0 fleet migration: order, drops, lanes, idempotency
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-28
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/passport_migration.py's fleet-wide passport 2.0 migration (DPLAN-0319 deliverable 3)."""
@@ -25,6 +25,7 @@ from aipass.spawn.apps.handlers.passport_migration import (
     BACKUP_SUFFIX,
     BLOCK_ORDER,
     CANONICAL_REGISTRY_PATH,
+    DROPPED_KEYS,
     KEY_ORDER,
     IDENTITY_CONTENT_KEYS,
     PassportMigrationError,
@@ -55,7 +56,6 @@ CONTRACT_KEY_ORDER = {
         "version",
         "schema_version",
         "created",
-        "last_updated",
         "managed_by",
         "tags",
     ),
@@ -436,8 +436,10 @@ class TestBlockAndKeyOrder:
         gold = json.loads(gold_path.read_text(encoding="utf-8"))
         migrated = _migrated(live_fleet_copy, "src/aipass/devpulse")
         assert list(migrated) == list(gold)
+        # The draft predates the last_updated drop; a key the migration drops is no part of the shape.
         for section in gold:
-            assert list(migrated[section]) == list(gold[section]), section
+            expected = [k for k in gold[section] if k not in DROPPED_KEYS.get(section, ())]
+            assert list(migrated[section]) == expected, section
 
 
 class TestDrops:
@@ -579,8 +581,8 @@ class TestValueLanes:
         before = _read(_passport(synthetic_fleet, "src/aipass/spawn"))["document_metadata"]["created"]
         assert _migrated(synthetic_fleet, "src/aipass/spawn")["document_metadata"]["created"] == before
 
-    def test_last_updated_becomes_the_run_date(self, synthetic_fleet):
-        assert _migrated(synthetic_fleet, "src/aipass/spawn")["document_metadata"]["last_updated"] == RUN_DATE
+    def test_last_updated_is_dropped(self, synthetic_fleet):
+        assert "last_updated" not in _migrated(synthetic_fleet, "src/aipass/spawn")["document_metadata"]
 
 
 def _expected_traits(original: object) -> object:
@@ -718,11 +720,11 @@ class TestIdempotency:
         second = migrate_fleet(live_fleet_copy, confirm=True, run_date="2026-12-31")
         assert (second["changed"], second["backups_written"]) == (0, 0)
 
-    def test_last_updated_is_not_touched_when_nothing_else_changed(self, synthetic_fleet):
+    def test_a_rerun_on_a_later_date_stamps_nothing(self, synthetic_fleet):
         migrate_fleet(synthetic_fleet, confirm=True, run_date=RUN_DATE)
         migrate_fleet(synthetic_fleet, confirm=True, run_date="2026-12-31")
         meta = _read(_passport(synthetic_fleet, "src/aipass/spawn"))["document_metadata"]
-        assert meta["last_updated"] == RUN_DATE
+        assert "last_updated" not in meta
 
 
 class TestNoHardcodedHomePaths:
@@ -758,20 +760,20 @@ class TestRefusals:
             branch_name="rogue", path="src/aipass/rogue", module="aipass.rogue", citizen_class="admin"
         )
         with pytest.raises(PassportMigrationError, match="admin"):
-            migrate_document(document, residency="core", relative_path="src/aipass/rogue", run_date=RUN_DATE)
+            migrate_document(document, residency="core", relative_path="src/aipass/rogue")
 
     def test_unknown_class_is_refused_rather_than_defaulted(self):
         document = _legacy_passport(
             branch_name="rogue", path="src/aipass/rogue", module="aipass.rogue", citizen_class="wizard"
         )
         with pytest.raises(PassportMigrationError, match="wizard"):
-            migrate_document(document, residency="core", relative_path="src/aipass/rogue", run_date=RUN_DATE)
+            migrate_document(document, residency="core", relative_path="src/aipass/rogue")
 
     def test_conflicting_principles_refuse_rather_than_discard_one(self):
         document = _legacy_passport(branch_name="rogue", path="src/aipass/rogue", module="aipass.rogue")
         document["identity"]["principles"] = ["a different set"]
         with pytest.raises(PassportMigrationError, match="principles"):
-            migrate_document(document, residency="core", relative_path="src/aipass/rogue", run_date=RUN_DATE)
+            migrate_document(document, residency="core", relative_path="src/aipass/rogue")
 
     def test_refused_passport_is_reported_and_left_untouched(self, tmp_path):
         root = tmp_path / "repo"

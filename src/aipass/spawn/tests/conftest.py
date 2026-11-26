@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared test fixtures for spawn test suite
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-07
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Shared test fixtures for spawn test suite."""
@@ -222,7 +222,6 @@ def make_passport(branch: str = "wanderer") -> dict:
             "version": "2.0.0",
             "schema_version": "2.0.0",
             "created": "2026-03-05",
-            "last_updated": "2026-08-28",
             "managed_by": branch,
             "tags": ["identity", "passport", "branch_profile"],
         },
