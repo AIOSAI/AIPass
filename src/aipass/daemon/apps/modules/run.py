@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.11.0
+# Version: 1.11.1
 # Created: 2026-06-15
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -78,6 +78,7 @@ def print_introspection():
     console.print("[yellow]Fires via:[/yellow]")
     console.print("  [cyan]*[/cyan] wake_branch() [dim](ai_mail dispatch — direct import)[/dim]")
     console.print("  [cyan]*[/cyan] a drone subprocess [dim](command jobs — no wake, DPLAN-0338)[/dim]")
+    console.print("Run [green]drone @daemon run --help[/green] for usage information")
     console.print()
 
 
@@ -93,6 +94,8 @@ def print_help():
     console.print("  evaluates due-ness, and wakes each due branch via wake_branch().")
     for line in job_reference_lines():
         console.print(line)
+    console.print("\n[yellow]EXAMPLES:[/yellow]")
+    console.print("  drone @daemon run --dry-run")
 
 
 def _event(message: str) -> None:
@@ -350,7 +353,7 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
 
     enabled = [j for j in jobs if j.get("enabled", True)]
     results["enabled"] = len(enabled)
-    console.print(f"Found {len(jobs)} job(s), {len(enabled)} enabled")
+    console.print(f"Found {len(jobs)} job(s), {len(enabled)} enabled", highlight=False)
 
     if not enabled:
         console.print("No enabled jobs.")
@@ -381,7 +384,7 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
         results["drained"] = catch_up_lane.drain_one(runstate, enabled, dry_run, lane_log, _fire_job)
         return results
 
-    console.print(f"{len(due_jobs)} job(s) due:")
+    console.print(f"{len(due_jobs)} job(s) due:", highlight=False)
     for j in due_jobs:
         console.print(f"  {j['owner']}/{j['id']} ({j['schedule']['type']})")
 

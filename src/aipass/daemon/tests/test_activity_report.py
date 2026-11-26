@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_activity_report.py
 # Description: Tests for the activity_report CLI module
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-04-03
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/activity_report.py — activity, activity-report, branch-health."""
@@ -121,10 +121,13 @@ class TestActivityReportAlias:
         assert result is True
         mock_gen.assert_called_once()
 
-    def test_activity_report_alias_help(self, capsys):
+    def test_activity_report_alias_help_prints_the_module_help_with_examples(self, capsys):
+        """--help printed the introspection screen, which carries no usage or examples."""
         result = handle_command("activity_report", ["--help"])
         assert result is True
-        assert "activity_report Module" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "activity_report - Fleet Activity Reports" in out
+        assert "EXAMPLES:" in out and "drone @daemon branch-health drone" in out
 
 
 COLLECTOR = "aipass.daemon.apps.handlers.monitoring.activity_collector"

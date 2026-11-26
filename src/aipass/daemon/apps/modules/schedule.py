@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: schedule.py
 # Description: DAEMON Scheduled Follow-ups Module (RETIRED)
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-02-04
-# Modified: 2026-10-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -29,6 +29,21 @@ def print_introspection():
     console.print()
 
 
+def print_help():
+    """Retired verb: the only usage left is the notice; jobs are authored in .daemon/schedule.json."""
+    console.print()
+    console.print("[bold cyan]schedule[/bold cyan] [yellow](RETIRED)[/yellow]")
+    console.print()
+    console.print("[yellow]USAGE:[/yellow]")
+    console.print("  drone @daemon schedule           Print the retirement notice")
+    console.print("  drone @daemon run --help        The job schema that replaced it")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  drone @daemon queue")
+    console.print("  drone @daemon run --dry-run")
+    console.print()
+
+
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle 'schedule' command — retired, shows migration notice."""
     if command != "schedule":
@@ -39,7 +54,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     if args[0] in ("--help", "-h", "help"):
-        print_introspection()
+        print_help()
         return True
 
     # Notice first, then refuse by name: exiting 0 would tell the caller's `&&` the retired verb worked.

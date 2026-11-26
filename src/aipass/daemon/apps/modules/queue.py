@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: queue.py
 # Description: Unified job queue view (drone @daemon queue)
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-06-25
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -41,6 +41,7 @@ def print_introspection():
     console.print("[yellow]Reads:[/yellow]")
     console.print("  [cyan]*[/cyan] src/aipass/*/.daemon/*.json [dim](per-branch schedule files)[/dim]")
     console.print("  [cyan]*[/cyan] daemon_json/daemon_runstate.json [dim](last_run/status state)[/dim]")
+    console.print("Run [green]drone @daemon queue --help[/green] for usage information")
     console.print()
 
 
@@ -54,7 +55,10 @@ def print_help():
     console.print("\n[yellow]CATCH-UP QUEUE:[/yellow]")
     console.print("  Shown under the job table when the fleet owes catch-up wakes")
     console.print("  after a gap: who, how many windows, the oldest, the cause,")
-    console.print("  and whether it is waiting, in flight, or parked after 3 tries.")
+    console.print("  and whether it is waiting, in flight, or parked after 3 tries.", highlight=False)
+    console.print("\n[yellow]EXAMPLES:[/yellow]")
+    console.print("  drone @daemon queue")
+    console.print("  drone @daemon queue --json")
     console.print()
 
 

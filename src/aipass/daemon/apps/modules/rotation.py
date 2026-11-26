@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rotation.py
 # Description: Rounds firing + status surface (drone @daemon rotation)
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-08-12
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -62,6 +62,7 @@ def print_introspection():
     console.print()
     console.print("[yellow]Wakes via:[/yellow]")
     console.print("  [cyan]*[/cyan] wake_branch() [dim](ai_mail dispatch — direct import)[/dim]")
+    console.print("Run [green]drone @daemon rotation --help[/green] for usage information")
     console.print()
 
 
@@ -74,20 +75,22 @@ def print_help():
     console.print("  drone @daemon rotation --help    Show this help message")
     console.print("\n[yellow]DESCRIPTION:[/yellow]")
     console.print("  The rounds fire from a rotation-type job (id: rounds) in daemon's")
-    console.print("  .daemon/schedule.json. Each night at 05:00 it wakes the next citizen")
+    console.print("  .daemon/schedule.json. Each night at 05:00 it wakes the next citizen", highlight=False)
     console.print("  on the roster with the rounds prompt, then advances the pointer — busy")
     console.print("  targets are logged as a miss and get their next turn in the cycle.")
     console.print("\n[yellow]ROSTER RULES:[/yellow]")
     console.print("  [cyan]*[/cyan] Framework fleet only — branches under this install's src/aipass/;")
-    console.print("    projects/* residents and external roots are excluded by ruling (2026-09-10)")
+    console.print("    projects/* residents and external roots are excluded by ruling (2026-09-10)", highlight=False)
     console.print("  [cyan]*[/cyan] Alphabetical by email")
     console.print("  [cyan]*[/cyan] @devpulse is never on the roster")
     console.print("  [cyan]*[/cyan] Managers are excluded unless config.include_managers is true")
     console.print("  [cyan]*[/cyan] Manager wakes also need ai_mail's scheduled lane — skipped if absent")
     console.print("\n[yellow]JOB STANZA:[/yellow]")
-    console.print('  {"id": "rounds", "schedule": {"type": "rotation", "time": "05:00"},')
+    console.print('  {"id": "rounds", "schedule": {"type": "rotation", "time": "05:00"},', highlight=False)
     console.print('   "wake": {"fresh": true, "model": "opus"},')
     console.print('   "config": {"include_managers": false}, "prompt": "ROUNDS for {branch}..."}')
+    console.print("\n[yellow]EXAMPLES:[/yellow]")
+    console.print("  drone @daemon rotation")
     console.print()
 
 

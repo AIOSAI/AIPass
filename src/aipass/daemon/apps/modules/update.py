@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update.py
 # Description: daemon Status Digest Module
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-01-29
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -15,7 +15,7 @@ from typing import Dict, Any, List
 
 from aipass.prax import logger
 
-from aipass.cli import console, error, warning
+from aipass.cli import console, error, escape, warning
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.update.data_loader import (
@@ -46,6 +46,7 @@ def print_introspection():
     console.print(
         "  [cyan]*[/cyan] data_loader.py [dim](load_inbox, categorize_messages, get_escalations — inbox data)[/dim]"
     )
+    console.print("Run [green]drone @daemon update --help[/green] for usage information")
     console.print()
 
 
@@ -60,8 +61,8 @@ def _print_digest(inbox_data: Dict[str, Any]) -> None:
 
     console.print("[bold cyan]INBOX STATUS[/bold cyan]")
     console.print(f"  Total messages: {inbox_data.get('total_messages', 0)}")
-    console.print(f"  Unread (new):   {len(categories['new'])}")
-    console.print(f"  Opened:         {len(categories['opened'])}")
+    console.print(f"  Unread (new):   {len(categories['new'])}", highlight=False)
+    console.print(f"  Opened:         {len(categories['opened'])}", highlight=False)
     console.print()
 
     console.print("[bold yellow]ACTIONABLE ITEMS[/bold yellow]")
@@ -70,7 +71,7 @@ def _print_digest(inbox_data: Dict[str, Any]) -> None:
             from_addr = msg.get("from", "unknown")
             subject = str(msg.get("subject", "No subject"))[:50]
             status = msg.get("status", "new")
-            console.print(f"  [{status}] {from_addr}: {subject}")
+            console.print(f"  \\[{status}] {from_addr}: {escape(subject)}")
     else:
         console.print("  [dim]None pending[/dim]")
     console.print()
@@ -105,6 +106,8 @@ def print_help() -> None:
     console.print("    - Inbox status (total, unread, opened)")
     console.print("    - Actionable items (tasks, builds, requests)")
     console.print("    - Escalations needed (blocked, urgent)")
+    console.print("\n[yellow]EXAMPLES:[/yellow]")
+    console.print("  drone @daemon update")
     console.print()
 
 

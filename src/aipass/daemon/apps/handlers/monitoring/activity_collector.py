@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: activity_collector.py
 # Description: Branch Activity Data Collector
-# Version: 0.5.0
+# Version: 0.5.1
 # Created: 2026-01-30
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -196,18 +196,3 @@ def get_all_branch_activity(
         "total_files_modified": total_files,
         "branches": results,
     }
-
-
-if __name__ == "__main__":
-    print("Testing activity_collector...")
-
-    branches = get_branch_paths()
-    print(f"Found {len(branches)} branches")
-
-    if branches:
-        first = branches[0]
-        print(f"\nScanning {first['name']}...")
-        activity = scan_branch_activity(first["name"], first["path"])
-        print(f"  Code files: {len(activity['code_files'])}")
-        print(f"  Memory files: {len(activity['memory_files'])}")
-        print(f"  Last activity: {activity['last_activity']}")

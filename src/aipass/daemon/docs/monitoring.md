@@ -6,7 +6,8 @@ Home for the monitoring handlers — activity collection, red flags, memory heal
 
 Every report names a branch in lowercase, whatever its registry row holds: `get_branch_paths()` lowercases
 the name once, and the activity, red-flag, memory-health and `--json` keys all come from it. Reports are
-printed, never stored, so no older report with capital keys is read back.
+printed, never stored, so no older report with capital keys is read back. `drone @daemon activity_report --help`
+lists the three verbs with examples; each verb's own `--help` gives its options.
 
 ---
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: red_flag_detector.py
 # Description: Branch Red Flag Detection Engine
-# Version: 0.2.0
+# Version: 0.2.1
 # Created: 2026-01-30
-# Modified: 2026-11-09
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -216,33 +216,3 @@ def get_red_flag_summary(
         "violations": violations,
         "all_branches": all_results,
     }
-
-
-if __name__ == "__main__":
-    print("Testing red_flag_detector...")
-    print("=" * 60)
-
-    summary = get_red_flag_summary()
-
-    print(f"Scan time: {summary['scan_time']}")
-    print(f"Time window: {summary['time_window_hours']} hours")
-    print(f"Threshold: {summary['threshold_hours']} hours")
-    print(f"\nTotal branches: {summary['total_branches']}")
-    print(f"  RED FLAGS: {summary['red_flags']}")
-    print(f"  OK: {summary['ok']}")
-    print(f"  No activity: {summary['no_activity']}")
-    print(f"  Errors: {summary['errors']}")
-
-    if summary["violations"]:
-        print(f"\n{'=' * 60}")
-        print("RED FLAG VIOLATIONS:")
-        print("=" * 60)
-        for v in summary["violations"]:
-            print(f"\n  Branch: {v['branch_name']}")
-            print(f"  Status: {v['status']}")
-            print(f"  Reason: {v['reason']}")
-            print(f"  Code changes: {v['code_change_count']}")
-            print(f"  Latest code change: {v['latest_code_change']}")
-            print(f"  Memory last update: {v['memory_last_update']}")
-    else:
-        print("\nNo red flag violations detected.")

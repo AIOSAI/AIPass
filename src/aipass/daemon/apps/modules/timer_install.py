@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: timer_install.py
 # Description: Idempotent systemd user timer installer for daemon scheduler
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-06-25
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -50,6 +50,7 @@ def print_introspection():
     console.print(f"  [cyan]*[/cyan] {_DAEMON_ROOT / _SERVICE_NAME}")
     console.print(f"  [cyan]*[/cyan] {_DAEMON_ROOT / _TIMER_NAME}")
     console.print(f"  [cyan]*[/cyan] Installs to: {_UNIT_DIR}/")
+    console.print("Run [green]drone @daemon install-timer --help[/green] for usage information")
     console.print()
 
 
@@ -67,6 +68,9 @@ def print_help():
     console.print("  Idempotent — safe to run multiple times.")
     console.print("  An install that cannot enable the timer puts the unit folder back as it was.")
     console.print(f"  The admin seat ({ADMIN_SEAT}) only, run from its folder: the timer wakes the whole fleet.")
+    console.print("\n[yellow]EXAMPLES:[/yellow]")
+    console.print("  drone @daemon install-timer")
+    console.print("  drone @daemon uninstall-timer")
     console.print()
 
 

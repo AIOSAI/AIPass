@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_sweep.py
 # Description: Fleet inbox sweep — wake branches sitting on mail unread past 24h
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-08-11
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -59,6 +59,7 @@ def print_introspection():
     console.print()
     console.print("[yellow]Wakes via:[/yellow]")
     console.print("  [cyan]*[/cyan] wake_branch() [dim](ai_mail dispatch — direct import)[/dim]")
+    console.print("Run [green]drone @daemon inbox-sweep --help[/green] for usage information")
     console.print()
 
 
@@ -68,8 +69,8 @@ def print_help():
     console.print("\n[yellow]USAGE:[/yellow]")
     console.print("  drone @daemon inbox-sweep              Wake owners of stale unread mail")
     console.print("  drone @daemon inbox-sweep --dry-run    Show who WOULD wake, wake nobody")
-    console.print("  drone @daemon inbox-sweep --hours N    Staleness threshold (default 24)")
-    console.print("  drone @daemon inbox-sweep --limit N    Max branches to wake (default 5)")
+    console.print("  drone @daemon inbox-sweep --hours N    Staleness threshold (default 24)", highlight=False)
+    console.print("  drone @daemon inbox-sweep --limit N    Max branches to wake (default 5)", highlight=False)
     console.print("  drone @daemon inbox-sweep --help       Show this help message")
     console.print("\n[yellow]DESCRIPTION:[/yellow]")
     console.print("  Replies never wake their recipient, so unread mail sits invisible in")
@@ -80,8 +81,11 @@ def print_help():
     console.print("  [cyan]*[/cyan] Managers are never woken — their mail lands live")
     console.print(f"  [cyan]*[/cyan] At most {MAX_WAKES} wakes per pass, oldest mailbox first")
     console.print("\n[yellow]SCHEDULE:[/yellow]")
-    console.print("  None — hand tool only since 2026-09-10. The nightly rounds")
+    console.print("  None — hand tool only since 2026-09-10. The nightly rounds", highlight=False)
     console.print("  (drone @daemon rotation) take each citizen's inbox to zero.")
+    console.print("\n[yellow]EXAMPLES:[/yellow]")
+    console.print("  drone @daemon inbox-sweep --dry-run")
+    console.print("  drone @daemon inbox-sweep --hours 48 --limit 3", highlight=False)
     console.print()
 
 

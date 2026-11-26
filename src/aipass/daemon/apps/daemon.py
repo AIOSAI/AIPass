@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Entry point CLI for drone @daemon
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-08
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -15,7 +15,7 @@ from typing import List, Any
 
 from aipass.prax import logger
 
-from aipass.cli import console, error, reset_command_state, resolve_exit
+from aipass.cli import console, error, header_version, reset_command_state, resolve_exit
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.modules import (
     UnknownArgument,
@@ -179,7 +179,7 @@ def main():
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print("daemon v1.1.0")
+        console.print(f"daemon v{header_version(__file__)}", highlight=False)
         return 0
 
     if args[0] in ["--help", "-h", "help"]:
