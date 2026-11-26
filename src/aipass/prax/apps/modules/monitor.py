@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitor.py
 # Description: Unified Monitoring Module
-# Version: 0.6.0
+# Version: 0.7.0
 # Created: 2025-11-23
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """PRAX Monitor Module - Mission Control for Autonomous Branches."""
@@ -97,7 +97,7 @@ def print_help():
         ),
         ("drone @prax monitor --help", "Show this help"),
     ]
-    console.print("\n[yellow]Commands:[/yellow]")
+    console.print("\n[yellow]Usage:[/yellow]")
     for cmd, desc in _cmds:
         console.print(f"\n  [cyan]{cmd}[/cyan]\n    {desc}")
     console.print("\n[yellow]Interactive Mode Commands:[/yellow]")
@@ -170,7 +170,7 @@ def _known_branch_names() -> set:
 
         return set(get_detector().known_branches)
     except Exception as e:
-        logger.info("[monitor] Could not read known branches for scope check: %s", e)
+        logger.warning("[monitor] Could not read known branches, scope typo check skipped: %s", e)
         return set()
 
 
@@ -584,7 +584,7 @@ def _rate_tracker_worker():
         try:
             scan_rates()
         except Exception as exc:
-            logger.info("[monitor] Rate tracker scan error: %s", exc)
+            logger.warning("[monitor] Rate tracker scan failed, retrying next interval: %s", exc)
         _stop_event.wait(SCAN_INTERVAL)
 
 
@@ -637,7 +637,7 @@ def _interactive_loop():
             console.print("\n[yellow]Stopping monitoring...[/yellow]")
             break
         except EOFError:
-            logger.info("[monitor] EOF received, stopping interactive loop")
+            logger.warning("[monitor] stdin closed (EOF), stopping the interactive loop")
             break
 
 
@@ -647,6 +647,7 @@ def _print_status():
 
     console.print()
     console.print("[bold cyan]Monitoring Status:[/bold cyan]")
+    console.print("[dim]  What this monitor is watching right now[/dim]")
     console.print(f"  [green]Mode:[/green] {_mode_line(_active_scope)}")
     if _event_queue:
         console.print(f"  [yellow]Queue size:[/yellow] {_event_queue.size()}")

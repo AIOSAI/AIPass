@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_devpulse_dashboard_plugin.py
 # Description: Tests for devpulse dashboard plugin
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-05-16
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/plugins/devpulse_dashboard/git_section.py, dispatch_section.py and refresh.py."""
@@ -309,13 +309,26 @@ class TestDispatchSection:
         assert self._section(branch_path)["agents_active"] == []
 
     def test_build_dispatch_section_corrupt_lock(self, branch_path):
-        """An unparseable lock is held as mid-write, so it still counts as active."""
+        """An unparseable lock counts as active and names its error; mutant: the bare stand-in record."""
         self._lock("sentry", "broken json{{{")
 
         dispatch = self._section(branch_path)
 
         assert "sentry" in dispatch["agents_active"]
-        assert dispatch["details"]["sentry"] == {"pid": None, "timestamp": ""}
+        details = dispatch["details"]["sentry"]
+        assert (details["pid"], details["timestamp"]) == (None, "")
+        assert details["error"].startswith("unreadable lock: Expecting")
+
+    def test_an_unprobeable_pid_is_alive_and_warned_about(self, branch_path, monkeypatch):
+        """A lock held by init (EPERM to signal) stays active with a warning; mutant: a silent True."""
+        if os.geteuid() == 0:
+            pytest.skip("root may signal init, so EPERM never happens")
+        warned = MagicMock()
+        monkeypatch.setattr(dispatch_section.logger, "warning", warned)
+        self._lock("prax", {"pid": 1, "timestamp": "2026-05-16T14:00:00", "branch": "/x/prax"})
+
+        assert "prax" in self._section(branch_path)["agents_active"]
+        assert any("counting it as alive" in c[0][0] for c in warned.call_args_list)
 
 
 class TestRefresh:

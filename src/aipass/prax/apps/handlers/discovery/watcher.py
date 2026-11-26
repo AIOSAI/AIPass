@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watcher.py
 # Description: File System Watching
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2025-11-26
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """PRAX File Watcher (Handler)
@@ -102,7 +102,7 @@ class PythonFileWatcher(FileSystemEventHandler):
         try:
             relative_path = py_file.relative_to(ECOSYSTEM_ROOT)
         except ValueError as e:
-            logger.info(f"[watcher] Path outside ecosystem root, skipping {py_file}: {e}")
+            logger.warning(f"[watcher] {py_file} is outside the ecosystem root, so it was not registered: {e}")
             return
 
         # One stat: the file may vanish mid-handler, the ordinary case, so it is
@@ -176,12 +176,12 @@ def is_file_watcher_active() -> bool:
 
 
 def _report_watcher_death() -> None:
-    """Say loudly that the watcher died. Best-effort; never raises."""
+    """Say loudly that the watcher died; never raises."""
     queued = None
     try:
         queued = _observer.event_queue.qsize()
     except Exception as e:  # a missing diagnostic must not mask the report below
-        logger.debug(f"[watcher] could not read queue depth for the death report: {e}")
+        logger.warning(f"[watcher] could not read the queue depth, so the death report omits it: {e}")
 
     detail = "" if queued is None else f" ~{queued} events are queued with nobody draining them."
     logger.error(
@@ -208,32 +208,28 @@ def _report_watcher_death() -> None:
 def check_file_watcher_liveness(force: bool = False) -> bool:
     """Periodic health check: is the watcher we started still running?
 
-    True when no watcher was started here. Throttled and never raises: the logger calls it."""
-    try:
-        if _observer is None:
-            return True  # No watcher in this process - nothing to be dead.
+    True when no watcher was started here. Throttled. Raises when the observer cannot be probed."""
+    if _observer is None:
+        return True  # No watcher in this process - nothing to be dead.
 
-        now = time.monotonic()
+    now = time.monotonic()
 
-        # Lock-free fast path: this runs on every log call; a racy read costs one extra is_alive().
+    # Lock-free fast path: a racy read costs one extra is_alive().
+    if not force and (now - _LIVENESS.last_check) < _LIVENESS_CHECK_INTERVAL_SEC:
+        return not _LIVENESS.death_reported
+
+    with _LIVENESS.lock:
         if not force and (now - _LIVENESS.last_check) < _LIVENESS_CHECK_INTERVAL_SEC:
             return not _LIVENESS.death_reported
+        _LIVENESS.last_check = now
 
-        with _LIVENESS.lock:
-            if not force and (now - _LIVENESS.last_check) < _LIVENESS_CHECK_INTERVAL_SEC:
-                return not _LIVENESS.death_reported
-            _LIVENESS.last_check = now
+        if _observer.is_alive():
+            _LIVENESS.death_reported = False  # A fresh observer clears the latch.
+            return True
 
-            if _observer.is_alive():
-                _LIVENESS.death_reported = False  # A fresh observer clears the latch.
-                return True
+        if _LIVENESS.death_reported:
+            return False  # Already announced; do not flood.
+        _LIVENESS.death_reported = True
 
-            if _LIVENESS.death_reported:
-                return False  # Already announced; do not flood.
-            _LIVENESS.death_reported = True
-
-        _report_watcher_death()
-        return False
-    except Exception as e:  # see docstring
-        logger.warning(f"[watcher] liveness check itself failed: {e}")
-        return True
+    _report_watcher_death()
+    return False

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logger_module.py
 # Description: Unit tests for PRAX logger module (public API)
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-04-03
-# Modified: 2026-11-18
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/logger.py."""
@@ -269,6 +269,7 @@ class TestHandleCommand:
         """Record each print_introspection call handle_command makes: the effect, not the True."""
         seen = []
         monkeypatch.setattr(mod, "print_introspection", lambda: seen.append("introspection"))
+        monkeypatch.setattr(mod, "print_help", lambda: seen.append("help"))
         return seen
 
     def test_no_args_calls_introspection_returns_true(self, monkeypatch, tmp_path):
@@ -282,34 +283,34 @@ class TestHandleCommand:
         assert seen == ["introspection"]
 
     def test_help_flag_returns_true(self, monkeypatch, tmp_path):
-        """--help flag prints introspection and returns True."""
+        """--help flag prints the help, not introspection. Mutant: the old introspection-as-help."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
         seen = self._introspections(monkeypatch, mod)
 
         result = mod.handle_command("logger", ["--help"])
 
         assert result is True
-        assert seen == ["introspection"]
+        assert seen == ["help"]
 
     def test_h_flag_returns_true(self, monkeypatch, tmp_path):
-        """-h flag prints introspection and returns True."""
+        """-h flag prints the help, not introspection. Mutant: the old introspection-as-help."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
         seen = self._introspections(monkeypatch, mod)
 
         result = mod.handle_command("logger", ["-h"])
 
         assert result is True
-        assert seen == ["introspection"]
+        assert seen == ["help"]
 
     def test_help_word_returns_true(self, monkeypatch, tmp_path):
-        """'help' subcommand prints introspection and returns True."""
+        """'help' subcommand prints the help, not introspection. Mutant: the old introspection-as-help."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
         seen = self._introspections(monkeypatch, mod)
 
         result = mod.handle_command("logger", ["help"])
 
         assert result is True
-        assert seen == ["introspection"]
+        assert seen == ["help"]
 
     def test_unknown_arg_returns_false(self, monkeypatch, tmp_path):
         """Unknown argument returns False (unhandled) and prints nothing."""
@@ -848,3 +849,18 @@ class TestPublishedLoggingFacts:
         assert logger_module.log_backup_count() == max(
             config_load.DEFAULT_SYSTEM_LOGS["backup_count"], config_load.DEFAULT_LOCAL_LOGS["backup_count"]
         )
+
+
+class TestPrintHelp:
+    """Tests for print_help() — the logger's Python API help."""
+
+    def test_prints_usage_and_examples_headings(self, monkeypatch, tmp_path, capsys):
+        """Mutant: no print_help at all, the old logger, raises AttributeError here."""
+        mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
+
+        capsys.readouterr()
+        mod.print_help()
+
+        lines = capsys.readouterr().out.splitlines()
+        assert "Usage:" in lines
+        assert "Examples:" in lines

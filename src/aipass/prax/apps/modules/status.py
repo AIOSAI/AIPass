@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: PRAX Status Command
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2025-11-15
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """PRAX Status Module"""
@@ -22,8 +22,14 @@ def print_help():
     """Display module help and connected handlers"""
     console.print()
     console.print("[bold cyan]prax Status Commands:[/bold cyan]")
-    console.print("  [white]status[/white]              Show prax system status")
-    console.print("  [white]status help[/white]         Show this help")
+    console.print("[dim]Module count, log dirs, registry file and the last discovery scan[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [white]drone @prax status[/white]           Show prax system status")
+    console.print("  [white]drone @prax status --help[/white]    Show this help")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [green]drone @prax status[/green]")
     console.print()
 
 
@@ -78,12 +84,14 @@ def handle_command(command: str, args: List[str]) -> bool:
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("status Module")
-    console.print("Implements the 'status' command to display prax system status dashboard")
+    console.print("[bold cyan]status Module[/bold cyan]")
+    console.print("[dim]Implements the 'status' command to display prax system status dashboard[/dim]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  modules/")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]modules/[/cyan]")
     console.print("    - logger.py (get_system_status — returns module count, log dirs, registry, last scan)")
+    console.print()
+    console.print("[dim]Run 'drone @prax status --help' for usage[/dim]")
     console.print()
 
 

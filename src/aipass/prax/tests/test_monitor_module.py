@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitor_module.py
 # Description: Tests for the unified monitoring module
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/monitor.py."""
@@ -994,7 +994,9 @@ class TestInteractiveLoop:
             assert mod._interactive_loop() is None
 
         mock_input.assert_called_once()
-        _doubled("logger").info.assert_called_once_with("[monitor] EOF received, stopping interactive loop")
+        _doubled("logger").warning.assert_called_once_with(
+            "[monitor] stdin closed (EOF), stopping the interactive loop"
+        )
         # Unlike Ctrl+C, EOF is not announced: a piped-in stdin ending is not news.
         assert capsys.readouterr().out == ""
         assert mod._stop_event.is_set() is False

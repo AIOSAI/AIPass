@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_pusher.py
 # Description: Dashboard Template Push Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-02-25
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -195,7 +195,7 @@ def _push_one(
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("Unreadable dashboard for %s: %s", branch_name, e)
         result["branches_skipped"] += 1
-        result["errors"].append(f"{branch_name}: invalid JSON in dashboard, skipped")
+        result["errors"].append(f"{branch_name}: unreadable dashboard ({e}), skipped")
         return
     if not isinstance(data, dict):
         result["branches_skipped"] += 1

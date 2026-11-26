@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations.py
 # Description: Unit tests for dashboard operations handler
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-03-24
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for the dashboard file and its budget: apps/handlers/dashboard/operations.py."""
@@ -436,8 +436,8 @@ class TestCreateFreshDashboard:
         finally:
             ops._PRAX_ROOT = original
 
-    def test_falls_back_on_corrupted_template(self, tmp_path):
-        """If template JSON is invalid, falls back to hardcoded structure."""
+    def test_a_corrupted_template_raises(self, tmp_path):
+        """A corrupt shipped template raises; mutant: the hardcoded dashboard returned in its place."""
         ops = _load_ops()
         fake_prax = tmp_path / "prax"
         templates_dir = fake_prax / "templates"
@@ -449,11 +449,7 @@ class TestCreateFreshDashboard:
         try:
             branch_dir = tmp_path / "broken"
             branch_dir.mkdir()
-            result = ops.create_fresh_dashboard(branch_dir)
-
-            # Should still return a valid hardcoded dashboard
-            assert result["branch"] == "broken"
-            assert "sections" in result
-            assert "_warning" in result
+            with pytest.raises(ValueError, match="unreadable"):
+                ops.create_fresh_dashboard(branch_dir)
         finally:
             ops._PRAX_ROOT = original

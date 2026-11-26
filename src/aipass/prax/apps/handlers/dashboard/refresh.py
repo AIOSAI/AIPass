@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: refresh.py
 # Description: Dashboard Refresh Handler
-# Version: 0.9.0
+# Version: 0.10.0
 # Created: 2026-02-25
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Dashboard Refresh Handler
@@ -19,7 +19,7 @@ from typing import Dict, List
 from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 
 from .operations import cap_subject, create_fresh_dashboard, dashboard_lock, get_dashboard_path, save_dashboard
-from .status import calculate_quick_status, merge_quick_status
+from .status import UNREADABLE, calculate_quick_status, merge_quick_status
 
 from ..central.reader import read_all_centrals
 
@@ -213,7 +213,7 @@ def _read_existing_dashboard(branch_path: Path) -> "Dict | None":
             dashboard_path,
             type(exc).__name__,
         )
-        return None
+        return UNREADABLE
     return data if isinstance(data, dict) else None
 
 

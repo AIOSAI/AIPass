@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watchdog.py
 # Description: System Log Size Watchdog
-# Version: 0.3.0
+# Version: 0.4.0
 # Created: 2026-02-26
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """System Log Size Watchdog
@@ -54,17 +54,15 @@ def _count_lines(filepath: Path) -> int:
     try:
         with open(filepath, "rb") as f:
             return sum(1 for _ in f)
-    except OSError as e:
-        logger.info("Failed to count lines", path=str(filepath), error=str(e))
-        return 0
+    except FileNotFoundError:
+        return 0  # rotated away between the glob and the open; any other OSError is a real fault and raises
 
 
 def _get_file_size_kb(filepath: Path) -> float:
     """Get file size in kilobytes."""
     try:
         return filepath.stat().st_size / 1024.0
-    except OSError as e:
-        logger.info("Failed to stat file", path=str(filepath), error=str(e))
+    except FileNotFoundError:
         return 0.0
 
 
@@ -292,8 +290,8 @@ def sweep_stale_logs(max_age_days: int = SWEEP_MAX_AGE_DAYS) -> Dict[str, Any]:
 if __name__ == "__main__":
     import json
 
-    print("Log health summary:")
+    print("[bold cyan]Log health summary:[/bold cyan]")
     print(json.dumps(log_health_summary(), indent=2))
     print()
-    print("Oversized files:")
+    print("[bold cyan]Oversized files:[/bold cyan]")
     print(json.dumps(get_oversized_files(), indent=2))

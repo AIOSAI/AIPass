@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_health.py
 # Description: PRAX Log Health Command — rate overview
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-14
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -58,6 +58,11 @@ def print_help():
     console.print("  [dim]# Show last known rates without scanning[/dim]")
     console.print("  $ drone @prax log-health snapshot")
     console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print()
+    console.print("  [green]drone @prax log-health scan[/green]")
+    console.print("  [green]drone @prax log-health snapshot[/green]")
+    console.print()
 
 
 def _display_rates(results: list, is_scan: bool) -> None:
@@ -75,8 +80,8 @@ def _display_rates(results: list, is_scan: bool) -> None:
     idle = [r for r in results if r["rate_lines_per_min"] == 0]
     flagged = [r for r in results if r.get("severity")]
 
-    console.print(f"  Files tracked: {len(results)}")
-    console.print(f"  Active: {len(active)}, Idle: {len(idle)}")
+    console.print(f"  Files tracked: {len(results)}", highlight=False)
+    console.print(f"  Active: {len(active)}, Idle: {len(idle)}", highlight=False)
     if flagged:
         console.print(f"  [yellow]Flagged: {len(flagged)}[/yellow]")
 
@@ -96,6 +101,7 @@ def _display_rates(results: list, is_scan: bool) -> None:
     if flagged:
         console.print()
         console.print("[yellow]Flagged files:[/yellow]")
+        console.print("[dim]  Logs growing past the warning or critical rate[/dim]")
         for r in sorted(flagged, key=lambda x: x["rate_lines_per_min"], reverse=True):
             sev = r["severity"] or ""
             color = "red" if "critical" in sev else "yellow"
@@ -108,6 +114,7 @@ def _display_rates(results: list, is_scan: bool) -> None:
     if active:
         console.print()
         console.print("[cyan]Active files:[/cyan]")
+        console.print("[dim]  Logs written since the last sample, below the warning rate[/dim]")
         for r in sorted(active, key=lambda x: x["rate_lines_per_min"], reverse=True):
             if r.get("severity"):
                 continue

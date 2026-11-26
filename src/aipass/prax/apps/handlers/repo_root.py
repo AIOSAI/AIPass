@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_root.py
 # Description: Repo-Root Resolution That Never Reads The Process CWD
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-31
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Repo-root walk that never reads the process cwd: it runs at import time inside logger construction, so trail only."""
@@ -63,7 +63,7 @@ def find_repo_root(start: Optional[Path] = None) -> Path:
                 return parent
         except OSError as exc:
             # Unreadable is not "no repo here": keep walking.
-            logger.info("[repo_root] a directory is unreadable, continuing the walk", path=str(parent), error=str(exc))
+            logger.warning("[repo_root] unreadable directory, continuing the walk", path=str(parent), error=str(exc))
             continue
 
     fallback = source_root(anchor)

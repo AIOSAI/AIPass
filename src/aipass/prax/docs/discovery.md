@@ -12,7 +12,8 @@ The scheduled scan that builds the registry, and the watcher's own lifecycle eve
 as a **snapshot**: modules added, modules whose file is gone removed,
 `discovered_time` carried over for anything already on record. A second run over
 an unchanged tree reports 0 added and 0 removed, which is what makes it safe to
-schedule. It is defined as the daily job `module-scan-daily` in `.daemon/schedule.json` (04:30,
+schedule. A save over a registry that exists but cannot be read fails and leaves
+the file untouched; only a missing registry is written fresh. It is defined as the daily job `module-scan-daily` in `.daemon/schedule.json` (04:30,
 `timeout_seconds` 60, `notify: false`) and ships disabled (`"enabled": false`). Bare `drone @prax discover` shows
 introspection and scans nothing — the fleet's module standard, and the right
 default for a verb that rewrites a registry.
@@ -69,8 +70,8 @@ against broken code):
 - **A liveness check that fires.** `check_file_watcher_liveness()` is throttled
   (one real check per 60 s), reports a death loudly **once** with the stranded
   queue depth, writes the `died` record and fires `file_watcher_died` on the
-  trigger bus. Nothing calls it today: the logger's hook that did was cut
-  (FPLAN-0932), since no production process starts a watcher.
+  trigger bus. A probe that cannot run raises rather than reading as alive.
+  Nothing calls it: no production process starts a watcher.
 
 The check is throttled *and* lock-free in the common case, both pinned — the
 throttle moving inside the lock would change cost rather than answers, and would

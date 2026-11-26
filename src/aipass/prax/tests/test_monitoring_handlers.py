@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitoring_handlers.py
 # Description: Unit tests for monitoring handler modules
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-04-25
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py, the detector and its branch registry."""
@@ -197,6 +197,21 @@ class TestDetectFromPath:
         assert answers == ["UNKNOWN"] * 3
         unlabelled = [c for c in _detector_log().info.call_args_list if "Could not detect branch" in c.args[0]]
         assert len(unlabelled) == 1
+
+    def test_an_unreadable_passport_warns_once_for_all_its_files(self, tmp_path):
+        """Mutants killed: the old logger.info (no warning), and a warning per file under the passport."""
+        mod = _import_branch_detector()
+        detector = _make_detector_with_branches(mod)
+        detector._repo_root = tmp_path
+        trinity = tmp_path / "flow" / ".trinity"
+        trinity.mkdir(parents=True)
+        (trinity / "passport.json").write_text("{bad", encoding="utf-8")
+
+        answers = [detector._detect_from_passport(tmp_path / "flow" / name) for name in ("a.py", "b.py")]
+
+        assert answers == [None, None]
+        assert _detector_log().warning.call_count == 1
+        assert "path matching" in _detector_log().warning.call_args.args[0]
 
 
 class TestDetectFromLog:

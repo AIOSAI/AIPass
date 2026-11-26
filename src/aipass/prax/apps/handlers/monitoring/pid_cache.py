@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pid_cache.py
 # Description: PID cache for branch-to-agent mapping
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-10
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """PID cache — maps branch names to active agent PIDs from dispatch lock files.
@@ -28,6 +28,9 @@ _pid_cache: dict[str, int] = {}
 _pid_cache_lock = threading.Lock()
 _pid_cache_last_refresh: float = 0.0
 _PID_CACHE_TTL = 30.0
+#: Last failure per lock file and for the refresh, so each is warned once, not every 30s.
+_lock_errors: dict[str, Exception] = {}
+_refresh_error: Optional[Exception] = None
 
 
 def parse_lock_pid(branch_entry: dict, new_cache: dict[str, int], repo_root: Path) -> None:
@@ -46,12 +49,18 @@ def parse_lock_pid(branch_entry: dict, new_cache: dict[str, int], repo_root: Pat
         if name:
             new_cache[name] = pid
     except (ValueError, OSError) as e:
-        logger.info("[pid_cache] Skipping dispatch lock %s: %s", lock_path, e)
+        if str(lock_path) not in _lock_errors:
+            logger.warning(
+                "[pid_cache] Cannot read dispatch lock %s (%s); that branch shows no PID in the monitor.",
+                lock_path,
+                e,
+            )
+        _lock_errors[str(lock_path)] = e
 
 
 def refresh(repo_root: Optional[Path] = None) -> None:
     """Scan dispatch lock files to build branch-to-PID mapping."""
-    global _pid_cache_last_refresh
+    global _pid_cache_last_refresh, _refresh_error
 
     now = _time.time()
     with _pid_cache_lock:
@@ -73,7 +82,9 @@ def refresh(repo_root: Optional[Path] = None) -> None:
             _pid_cache.update(new_cache)
         json_handler.log_operation("pid_cache_refresh", {"count": len(new_cache)})
     except Exception as e:
-        logger.info("[pid_cache] Refresh failed: %s", e)
+        if repr(e) != repr(_refresh_error):
+            logger.warning("[pid_cache] PID refresh failed (%s); the monitor keeps the last known PIDs.", e)
+        _refresh_error = e
 
 
 def get_pid_for_branch(branch: str) -> Optional[int]:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watcher.py
 # Description: Tests for file system watcher handlers
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/discovery/watcher.py."""
@@ -316,6 +316,18 @@ class TestDispatcherSurvivesHandlerFailure:
             f"the miss must still be on the record, naming the file: {infos}"
         )
         assert asked == [gone], "the ignore filter was never consulted"
+
+    def test_a_file_outside_the_root_is_warned_about(self, tmp_path, monkeypatch):
+        """A path outside the ecosystem root is skipped with a warning; mutant: the info line nobody reads."""
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path / "root")
+        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+        recorder = self._close_the_far_side(mod, monkeypatch, tmp_path)
+        event = MagicMock(is_directory=False, src_path=str(tmp_path / "stray.py"))
+
+        mod.PythonFileWatcher()._register_created_module(event)
+
+        assert "outside the ecosystem root" in recorder.warning.call_args[0][0]
 
     def test_a_healthy_created_file_is_still_registered(self, tmp_path, monkeypatch):
         """Vacuity floor: a healthy new file is still registered, at its real on-disk size (bytes, not str)."""
@@ -634,14 +646,29 @@ class TestWatcherLiveness:
         assert len(errors) == 2, "a second, distinct death went unreported"
         assert [c.args[0] for c in bus.fire.call_args_list] == ["file_watcher_died", "file_watcher_died"]
 
-    def test_the_liveness_check_never_raises(self, monkeypatch):
-        """It is called BY the logger. A health check that breaks logging is worse."""
+    def test_a_liveness_check_that_cannot_run_raises(self, monkeypatch):
+        """A probe that fails raises; mutant: True returned, an unrun check read as alive."""
         mod = self._fresh_module()
         exploding = MagicMock()
         exploding.is_alive.side_effect = RuntimeError("observer internals exploded")
         monkeypatch.setattr(mod, "_observer", exploding)
 
-        assert mod.check_file_watcher_liveness(force=True) is True  # fails open
+        with pytest.raises(RuntimeError, match="exploded"):
+            mod.check_file_watcher_liveness(force=True)
+
+    def test_an_unreadable_queue_depth_is_warned_about(self, monkeypatch):
+        """The death report says its queue depth is missing; mutant: a debug line nobody reads."""
+        mod = self._fresh_module()
+        obs = self._dead_observer()
+        obs.event_queue.qsize.side_effect = NotImplementedError("no qsize on this platform")
+        monkeypatch.setattr(mod, "_observer", obs)
+        warnings = []
+        monkeypatch.setattr(mod.logger, "warning", lambda msg, *a, **kw: warnings.append(str(msg)))
+        self._recording_bus(mod, monkeypatch)
+
+        mod.check_file_watcher_liveness(force=True)
+
+        assert any("queue depth" in w for w in warnings)
 
     def test_a_failed_trigger_does_not_silence_the_log_line(self, monkeypatch):
         """The log line is the primary report; trigger is the nice-to-have."""

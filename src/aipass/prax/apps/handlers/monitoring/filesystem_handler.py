@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: filesystem_handler.py
 # Description: FileSystem Event Handler
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2026-03-08
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """PRAX Filesystem Event Handler"""
@@ -46,6 +46,7 @@ class MonitoringFileHandler(FileSystemEventHandler):
         self._session_models: Dict[str, str] = {}
         self._session_branches: Dict[str, str] = {}
         self._branch_warn_logged: set = set()
+        self._malformed_jsonl: Dict[str, Exception] = {}
 
     @property
     def event_queue(self) -> Optional[MonitoringQueue]:
@@ -175,25 +176,28 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
     def _read_codex_cwd(self, file_path) -> Optional[str]:
         """Read CWD from the first line (session_meta) of a Codex JSONL file."""
-        try:
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                first_line = f.readline().strip()
-            if not first_line:
-                return None
-            meta = _json.loads(first_line)
-            if meta.get("type") != "session_meta":
-                return None
-            return meta.get("payload", {}).get("cwd", "")
-        except (OSError, _json.JSONDecodeError) as e:
-            logger.info(f"[monitor] Could not read Codex session_meta: {e}")
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            first_line = f.readline().strip()
+        if not first_line:
             return None
+        meta = _json.loads(first_line)
+        if meta.get("type") != "session_meta":
+            return None
+        return meta.get("payload", {}).get("cwd", "")
 
     def _get_codex_branch(self, file_path, path_key: str) -> str:
         """Get branch for a Codex session, reading session_meta if needed."""
         if path_key in self._session_branches:
             return self._session_branches[path_key]
 
-        cwd = self._read_codex_cwd(file_path)
+        try:
+            cwd = self._read_codex_cwd(file_path)
+        except (OSError, _json.JSONDecodeError) as e:
+            logger.warning(
+                f"[monitor] Could not read the Codex session header of {file_path} ({e}); "
+                f"its activity is labelled CODEX instead of its branch."
+            )
+            cwd = None
         branch = self._branch_from_cwd(cwd) if cwd else None
         result = branch or "CODEX"
         self._session_branches[path_key] = result
@@ -279,12 +283,21 @@ class MonitoringFileHandler(FileSystemEventHandler):
         lines, self._jsonl_positions[path_key] = read_new_lines(file_path, self._jsonl_positions.get(path_key, 0))
         return lines or None
 
-    def _safe_parse_json(self, line: str, label: str) -> Optional[dict]:
-        """Parse a JSON line, logging errors. Returns None on failure."""
+    def _warn_malformed_once(self, path_key: str, label: str, error: Exception) -> None:
+        """Warn about a malformed JSONL line once per file, so a corrupt transcript cannot flood the logs."""
+        if path_key not in self._malformed_jsonl:
+            logger.warning(
+                f"[monitor] Skipping malformed {label} JSONL line(s) in {path_key} ({error}); those lines are "
+                f"left out of the live monitor. Further bad lines in this file are skipped without a warning."
+            )
+        self._malformed_jsonl[path_key] = error
+
+    def _safe_parse_json(self, line: str, label: str, path_key: str) -> Optional[dict]:
+        """Parse a JSON line, warning once per file on errors. Returns None on failure."""
         try:
             return _json.loads(line)
         except _json.JSONDecodeError as e:
-            logger.info(f"[monitor] Skipping malformed {label} JSONL: {e}")
+            self._warn_malformed_once(path_key, label, e)
             return None
 
     def _emit_agent_event(self, path_key: str, branch: str, action_text: str) -> bool:
@@ -324,7 +337,7 @@ class MonitoringFileHandler(FileSystemEventHandler):
                 return True
 
             for line in reversed(lines):
-                entry = self._safe_parse_json(line, "Codex")
+                entry = self._safe_parse_json(line, "Codex", path_key)
                 if entry is None:
                     continue
                 self._extract_codex_model(entry, path_key)
@@ -357,7 +370,7 @@ class MonitoringFileHandler(FileSystemEventHandler):
                 try:
                     entry = _json.loads(line)
                 except _json.JSONDecodeError as e:
-                    logger.info(f"[monitor] Skipping malformed JSONL line: {e}")
+                    self._warn_malformed_once(path_key, "agent", e)
                     continue
 
                 model = self._extract_model_from_entry(entry)

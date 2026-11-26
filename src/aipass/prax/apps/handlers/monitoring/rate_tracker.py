@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rate_tracker.py
 # Description: Log file rate tracking for runaway detection
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-07-14
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -89,23 +89,23 @@ class FileRateState:
         """
         state = cls(d.get("last_offset", 0), d.get("last_check", 0.0))
         cutoff = time.time() - _RATE_STALE_AFTER
-        malformed = 0
+        malformed: list = []
         for sample in d.get("rates", []):
             try:
                 ts, rate = sample[0], sample[1]
-            except (TypeError, IndexError):
-                logger.debug("[rate_tracker] Unreadable rate sample discarded: %r", sample)
-                malformed += 1
+            except (TypeError, IndexError) as exc:
+                malformed.append(exc)
                 continue
             if ts >= cutoff:
                 state.rates.append((ts, rate))
         if malformed:
             # Counted, not logged per sample: a corrupt file would flood the logs this tracker measures.
             logger.warning(
-                "[rate_tracker] Skipped %d unreadable rate sample(s) while restoring persisted state. "
-                "Growth measurement continues from the samples that did load; nothing was written back "
-                "and no log file is affected.",
-                malformed,
+                "[rate_tracker] Skipped %d unreadable rate sample(s) while restoring persisted state "
+                "(last: %s). Growth measurement continues from the samples that did load; nothing was "
+                "written back and no log file is affected.",
+                len(malformed),
+                malformed[-1],
             )
         state.warning_sustained = d.get("warning_sustained", 0)
         state.critical_sustained = d.get("critical_sustained", 0)
@@ -117,6 +117,8 @@ class FileRateState:
 _tracked: Dict[str, FileRateState] = {}
 
 _suppressed_files: set = set()
+#: Files whose stat failed, so each is warned about once rather than every scan.
+_stat_errors: Dict[str, OSError] = {}
 
 _logs_dir: Optional[Path] = None
 
@@ -208,8 +210,17 @@ def scan_rates() -> list:
 
         try:
             size = log_file.stat().st_size
+        except FileNotFoundError:
+            logger.debug("[rate_tracker] %s rotated away between glob and stat", log_file.name)
+            continue
         except OSError as exc:
-            logger.info("[rate_tracker] Cannot stat %s: %s", log_file.name, exc)
+            if file_key not in _stat_errors:
+                logger.warning(
+                    "[rate_tracker] Cannot stat %s (%s); its log rate is not measured until it can be read.",
+                    log_file.name,
+                    exc,
+                )
+            _stat_errors[file_key] = exc
             continue
 
         state = _tracked.get(file_key)
@@ -369,11 +380,13 @@ def _resolve_severity(state: FileRateState) -> Optional[str]:
 
 
 def _file_size(path: str) -> int:
-    """Read file size, returning 0 on any OS error."""
+    """Read file size, returning 0 when the file is gone or unreadable."""
     try:
         return Path(path).stat().st_size
-    except OSError:
-        logger.info("[rate_tracker] Cannot stat %s for snapshot", Path(path).name)
+    except OSError as exc:
+        if path not in _stat_errors:
+            logger.warning("[rate_tracker] Cannot stat %s (%s); its size shows as 0 KB.", Path(path).name, exc)
+        _stat_errors[path] = exc
         return 0
 
 

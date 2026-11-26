@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: setup.py
 # Description: Logger Setup & Management
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2025-11-10
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """PRAX Logger Setup"""
@@ -52,9 +52,10 @@ class SafeRotatingFileHandler(RotatingFileHandler):
         if self.stream is None:
             return False
         try:
-            moved = os.stat(self.baseFilename).st_ino != os.fstat(self.stream.fileno()).st_ino
+            on_disk = os.stat(self.baseFilename).st_ino
         except FileNotFoundError:
-            moved = True
+            on_disk = None  # rotated away by another process: reopen below
+        moved = on_disk != os.fstat(self.stream.fileno()).st_ino
         if moved:
             self.stream.close()
             self.stream = self._open()

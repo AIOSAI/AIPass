@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: save.py
 # Description: Save Module Registry Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Save Module Registry Handler"""
@@ -28,12 +28,11 @@ MODULE_NAME = "save"
 def _existing_last_scan() -> Optional[Dict[str, Any]]:
     """The last_scan block already on disk, or None when there is none.
 
-    Never raises: losing the previous scan stamp must not cost the write."""
+    An unreadable registry raises: the save then fails loudly rather than write over a file it could not read."""
     try:
         with open(REGISTRY_FILE, "r", encoding="utf-8") as handle:
             existing = json.load(handle)
-    except (OSError, ValueError) as exc:
-        logger.debug("save: no previous last_scan to carry over", error=str(exc))
+    except FileNotFoundError:
         return None
     block = existing.get("last_scan") if isinstance(existing, dict) else None
     return block if isinstance(block, dict) else None

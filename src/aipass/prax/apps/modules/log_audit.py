@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_audit.py
 # Description: PRAX Log Audit Command
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2026-02-26
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """PRAX Log Audit Module: reports oversized logs and sweeps stale ones; never truncates (writers rotate themselves)."""
@@ -60,6 +60,11 @@ def print_help():
     console.print("  [dim]# Delete .log files older than 30 days[/dim]")
     console.print("  $ drone @prax log-audit sweep")
     console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print()
+    console.print("  [green]drone @prax log-audit audit[/green]")
+    console.print("  [green]drone @prax log-audit sweep[/green]")
+    console.print()
 
 
 def _display_audit(files: list, summary: dict) -> None:
@@ -67,9 +72,11 @@ def _display_audit(files: list, summary: dict) -> None:
     console.print()
     console.print("[bold cyan]System Log Audit[/bold cyan] [dim](system_logs/)[/dim]")
     console.print(f"  Total files: {summary['total_files']}")
-    console.print(f"  Total lines: {summary['total_lines']:,}")
+    console.print(f"  Total lines: {summary['total_lines']:,}", highlight=False)
     if summary.get("largest_file"):
-        console.print(f"  Largest: {summary['largest_file']} ({summary.get('largest_lines', 0):,} lines)")
+        console.print(
+            f"  Largest: {summary['largest_file']} ({summary.get('largest_lines', 0):,} lines)", highlight=False
+        )
     else:
         console.print("  Largest: (no log files found)")
 
@@ -82,11 +89,13 @@ def _display_audit(files: list, summary: dict) -> None:
     if oversized:
         console.print()
         console.print("[yellow]Oversized files:[/yellow]")
+        console.print("[dim]  System logs past the line limit; writers rotate them on their next write[/dim]")
         for f in oversized:
             status_color = "red" if f["status"] == "critical" else "yellow"
             console.print(
                 f"  [{status_color}]{f['status'].upper()}[/{status_color}] "
-                f"{f['name']}: {f['lines']:,} lines ({f['size_kb']} KB)"
+                f"{f['name']}: {f['lines']:,} lines ({f['size_kb']} KB)",
+                highlight=False,
             )
     console.print()
 
@@ -114,7 +123,8 @@ def _display_branch_audit(files: list, summary: dict) -> None:
             console.print(
                 f"  [{status_color}]{f['status'].upper()}[/{status_color}] "
                 f"{f['branch']}/{f['name']}: {f['size_mb']} MB, "
-                f"{f['lines']:,} lines, {rotation}"
+                f"{f['lines']:,} lines, {rotation}",
+                highlight=False,
             )
     console.print()
 

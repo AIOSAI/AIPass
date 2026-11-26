@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detector.py
 # Description: Branch Attribution Handler
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2025-11-23
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -36,6 +36,7 @@ class BranchDetector:
         self.log_map: Dict[str, str] = {}  # log file -> branch
         self.known_branches: Set[str] = set()
         self._repo_root: Optional[Path] = None
+        self._bad_passports: Dict[str, Exception] = {}
         self._load_registry()
         json_handler.log_operation("branch_detected", {"known_branches": len(self.known_branches)})
 
@@ -153,21 +154,28 @@ class BranchDetector:
         for parent in path.parents:
             passport = parent / ".trinity" / "passport.json"
             if passport.is_file():
-                try:
-                    data = json.loads(passport.read_text(encoding="utf-8"))
-                except (json.JSONDecodeError, OSError) as exc:
-                    logger.info(
-                        "[branch_detector] Passport at %s is unreadable (%s); falling back to path "
-                        "matching for this file.",
-                        passport,
-                        type(exc).__name__,
-                    )
-                    return None
-                name = (data.get("branch_info", {}) or {}).get("branch_name", "")
-                return str(name).lower() or None
+                return self._passport_name(passport)
             if parent == repo_root:
                 break
         return None
+
+    def _passport_name(self, passport: Path) -> Optional[str]:
+        """The lower-cased branch name a passport holds, or None when it is unreadable or names none."""
+        try:
+            data = json.loads(passport.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            # Once per passport: every file under it would otherwise repeat the warning.
+            if str(passport) not in self._bad_passports:
+                logger.warning(
+                    "[branch_detector] Passport at %s is unreadable (%s); files under it are "
+                    "labelled by path matching instead.",
+                    passport,
+                    type(exc).__name__,
+                )
+            self._bad_passports[str(passport)] = exc
+            return None
+        name = (data.get("branch_info", {}) or {}).get("branch_name", "")
+        return str(name).lower() or None
 
     def _detect_from_compound_parts(self, path_parts: list) -> Optional[str]:
         """Check compound path parts for known branch names."""

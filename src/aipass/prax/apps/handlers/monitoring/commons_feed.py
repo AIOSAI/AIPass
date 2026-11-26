@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commons_feed.py
 # Description: Commons Live Social Feed (read-only monitor view)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-07-21
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -307,6 +307,7 @@ Available Commands:
 def _print_feed_status(state: FeedState) -> None:
     console.print()
     console.print("[bold cyan]Commons Feed Status:[/bold cyan]")
+    console.print("  [dim]What this feed has seen since it started.[/dim]")
     console.print(f"  [green]Rooms seen:[/green] {len(state.rooms_seen)}")
     console.print(f"  [green]Agents seen:[/green] {len(state.agents_seen)}")
     console.print(f"  [green]Events streamed:[/green] {state.events_count}")
@@ -371,7 +372,7 @@ def _interactive_feed_loop(state: FeedState) -> None:
             console.print("\n[yellow]Stopping feed...[/yellow]")
             break
         except EOFError:
-            logger.info("[commons_feed] EOF received, stopping interactive loop")
+            logger.warning("[commons_feed] Input closed (EOF), so the feed stops. No posts are lost.")
             break
 
 

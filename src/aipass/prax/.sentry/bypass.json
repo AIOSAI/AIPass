@@ -72,7 +72,7 @@
       "file": "apps/prax.py",
       "standard": "logged_fallback",
       "lines": [
-        137
+        131
       ],
       "reason": "prax, leg 7: same contract as status.py:132. The router's True means a module owned the command, as its docstring says, and the failure is reported through error() on the line above, which sets the exit code."
     },
@@ -80,7 +80,7 @@
       "file": "apps/handlers/json/json_service.py",
       "standard": "logged_fallback",
       "lines": [
-        202
+        205
       ],
       "reason": "prax, leg 7: 'unknown' means one thing on both paths, as the docstring says: there is no module behind frame 2. sys._getframe raises ValueError exactly when the stack is too shallow to have that frame; it is the same answer, not a failure dressed as one."
     },
@@ -96,19 +96,11 @@
       "file": "apps/handlers/monitoring/branch_detector.py",
       "standard": "logged_fallback",
       "lines": [
-        165,
-        261,
-        300
+        176,
+        269,
+        308
       ],
-      "reason": "prax, leg 7: these are display labels and detector hints, and the value means the same on both paths. None at 165 is 'this detector has no answer, try the next' (an unreadable passport falls back to path matching); 'UNKNOWN' at 261/300 is the label for 'branch not determined', which is true when detection failed. The event is still displayed either way; no caller acts on the difference."
-    },
-    {
-      "file": "apps/handlers/monitoring/filesystem_handler.py",
-      "standard": "logged_fallback",
-      "lines": [
-        189
-      ],
-      "reason": "prax, leg 7: None means 'this session file names no working directory', which is what an unreadable session file tells the caller as well; the caller then labels the event by the next means. The read is a display hint and the failure is logged at the line above."
+      "reason": "prax, leg 7: these are display labels and detector hints, and the value means the same on both paths. None at 176 is 'this detector has no answer, try the next' (an unreadable passport falls back to path matching); 'UNKNOWN' at 269/308 is the label for 'branch not determined', which is true when detection failed. The event is still displayed either way; no caller acts on the difference."
     },
     {
       "file": "tests/test_watcher.py",
@@ -129,18 +121,10 @@
       "reason": "prax, leg 14. 503: load's lane of the repo root; its one public reader, get_system_logs_dir outside a pytest session, ends in a mkdir of the live system_logs, so the lane is asked by name (prax, leg 5, HELD; re-read this leg, unchanged)."
     },
     {
-      "file": "apps/handlers/discovery/watcher.py",
-      "standard": "logged_fallback",
-      "lines": [
-        239
-      ],
-      "reason": "prax, leg 15. Fail-safe True: the liveness check exists to report a death, its one caller (logger.py get_status) ignores the answer, and nothing restarts or is taken on True. The failure is logged as a warning beside it."
-    },
-    {
       "file": "apps/handlers/monitoring/event_queue.py",
       "standard": "logged_fallback",
       "lines": [
-        104
+        107
       ],
       "reason": "prax, leg 15. False means the event did not enter the queue, the same answer a duplicate gets, which is the truth; the drop is counted and reported by the rate-limited _report_drops."
     },
@@ -231,7 +215,7 @@
       "file": "apps/handlers/logging/setup.py",
       "standard": "logged_fallback",
       "lines": [
-        71
+        72
       ],
       "reason": "shouldRollover's False is 'do not roll now', the truth for a file whose size cannot be read: it cannot be rotated either. The next record asks again; a raise here would drop the record inside logging's handler."
     },
@@ -239,16 +223,15 @@
       "file": "apps/handlers/dashboard/operations.py",
       "standard": "logged_fallback",
       "lines": [
-        136,
-        184
+        180
       ],
-      "reason": "136: _load_for_write's docstring names None as 'unreadable'; its success path returns a dict, never None, and the error is logged beside it. 184: write_section's False means 'not written', the same answer a failed save gives, logged at error; callers retry or report, neither treats False as written."
+      "reason": "write_section's False means 'not written', the same answer a failed save gives, logged at error; callers retry or report, neither treats False as written."
     },
     {
       "file": "apps/plugins/devpulse_dashboard/dispatch_section.py",
       "standard": "logged_fallback",
       "lines": [
-        29
+        30
       ],
       "reason": "_pid_alive's docstring makes unknown count as alive, so a live dispatch never vanishes from the dashboard. An OSError other than ProcessLookupError (EPERM) means the process exists, so True is the truth there too."
     },
@@ -276,6 +259,22 @@
       "file": "apps/handlers/repo_root.py",
       "standard": "json_structure",
       "reason": "Runs at import inside door one's construction (config/load.py resolves the repo root for every logger). It imports prax's trail only; a log_operation here would write a json record on every process's first import."
+    },
+    {
+      "file": "apps/handlers/config/load.py",
+      "standard": "fallback",
+      "lines": [
+        266
+      ],
+      "reason": "Keeps logging alive: load_log_config runs inside every logger build fleet-wide, the hooks' included. When the logger config file is unreadable, raising would stop every branch from logging at all, so the code defaults stand in. The failure is already written at error level to prax's trail (a plain JSONL file, not the logger being configured), which is the only place it can go without recursing into the logger this function builds."
+    },
+    {
+      "file": "apps/handlers/json/json_service.py",
+      "standard": "fallback",
+      "lines": [
+        540
+      ],
+      "reason": "Keeps logging alive: _bump_data runs inside log_operation after the operation entry has already been written. A raise here would turn a missed lifetime counter into a failed log call for the caller. A count that cannot be read starts again from a fresh document; the failure is logged at warning to prax's trail (a plain JSONL file, not the logger)."
     }
   ],
   "notes": {

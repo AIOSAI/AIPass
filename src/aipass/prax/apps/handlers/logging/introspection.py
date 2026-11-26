@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: introspection.py
 # Description: Stack Introspection
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2025-11-10
-# Modified: 2026-11-18
+# Modified: 2026-11-26
 # =============================================
 
 """PRAX Logging Introspection"""
@@ -101,7 +101,7 @@ def _resolve_caller_path(module_path: str) -> Optional[Path]:
     try:
         return candidate.resolve()
     except OSError as exc:
-        logger.info("Caller path could not be resolved", path=module_path, error=str(exc))
+        logger.warning("Caller path could not be resolved", path=module_path, error=str(exc))
         return None
 
 

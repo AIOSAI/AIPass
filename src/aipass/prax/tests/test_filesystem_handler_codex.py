@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_filesystem_handler_codex.py
 # Description: Unit tests for filesystem_handler's Codex session lane
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/monitoring/filesystem_handler.py, its Codex session lane."""
@@ -126,18 +126,23 @@ class TestReadCodexCwd:
         assert result is None
 
     def test_os_error(self, tmp_path):
-        """Should return None when the session file cannot be opened: here, it is absent."""
+        """An unopenable session file raises to the caller, which states the CODEX label it uses."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
-        result = handler._read_codex_cwd(str(tmp_path / "session.jsonl"))
-        assert result is None
+        with pytest.raises(OSError):
+            handler._read_codex_cwd(str(tmp_path / "session.jsonl"))
 
     def test_json_decode_error(self, tmp_path):
-        """Should return None on JSONDecodeError."""
+        """A bad session header labels the session CODEX with a warning.
+
+        Mutant killed: the old logger.info, which nobody reads at the fleet's level.
+        """
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
-        result = handler._read_codex_cwd(str(_on_disk(tmp_path, "not json\n")))
-        assert result is None
+        with patch.object(mod, "logger") as log:
+            result = handler._get_codex_branch(str(_on_disk(tmp_path, "not json\n")), "k")
+        assert result == "CODEX"
+        assert "labelled CODEX" in log.warning.call_args.args[0]
 
 
 # =============================================

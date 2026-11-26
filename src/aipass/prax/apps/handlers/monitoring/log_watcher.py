@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Log File Monitor
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2025-11-23
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """PRAX Log Watcher - Event Queue Integration"""
@@ -62,6 +62,7 @@ class LogFileWatcher(FileSystemEventHandler):
         self.event_queue = event_queue
         self.log_positions: Dict[str, int] = {}
         self.last_command_per_branch: Dict[str, str] = {}
+        self._read_errors: Dict[str, Exception] = {}
 
     def _process_log_line(self, branch: str, line: str) -> None:
         """Process a single log line: detect hooks, commands, or emit as log event."""
@@ -105,7 +106,13 @@ class LogFileWatcher(FileSystemEventHandler):
                 self._process_log_line(branch, line)
 
         except Exception as e:
-            logger.info(f"Error reading log file {file_path}: {e}")
+            # Once per file: a broken file is modified on every write and would flood the logs.
+            if file_path not in self._read_errors:
+                logger.warning(
+                    f"[log_watcher] Could not read new lines from {file_path} ({type(e).__name__}: {e}); "
+                    f"they are left out of the live monitor. The log file itself is untouched."
+                )
+            self._read_errors[file_path] = e
 
     _HOOK_PATTERN = re.compile(r"\[HOOKS\]\s+(\w+)\s+(\w+)", re.IGNORECASE)
 
@@ -387,7 +394,10 @@ class LogFileWatcher(FileSystemEventHandler):
             try:
                 self.log_positions[str(log_file)] = log_file.stat().st_size
             except Exception as e:
-                logger.info(f"Could not get size for {log_file}: {e}")
+                logger.warning(
+                    f"[log_watcher] Could not get the size of {log_file} ({e}); the monitor will show "
+                    f"it from its first line when it next changes, instead of only new lines."
+                )
 
 
 def start_log_watcher(event_queue: MonitoringQueue, use_polling: bool = False) -> Any:

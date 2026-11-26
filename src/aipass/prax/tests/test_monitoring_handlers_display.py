@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitoring_handlers_display.py
 # Description: Unit tests for the monitor's command parsing and stream display
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/monitoring/interactive_filter.py and unified_stream.py, the command and display."""
@@ -179,7 +179,14 @@ class TestPrintEvent:
 
     @pytest.mark.parametrize(
         ("branch", "sgr"),
-        [("commons", "92"), ("canary", "97"), ("daemon", "34"), ("hooks", "94"), ("skills", "95"), ("spawn", "32")],
+        [
+            ("commons", "92"),
+            ("canary_test", "97"),
+            ("daemon", "34"),
+            ("hooks", "94"),
+            ("skills", "95"),
+            ("spawn", "32"),
+        ],
     )
     def test_every_fleet_branch_has_its_own_colour(self, monkeypatch, branch, sgr):
         """Mutant: dropping a key (or keeping "the_commons") prints that branch white."""

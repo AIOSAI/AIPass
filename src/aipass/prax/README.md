@@ -4,7 +4,6 @@
 
 **Purpose:** The logging and monitoring backbone of AIPass. Every branch imports one logger and its lines route themselves; on top of that sit Mission Control, the branch dashboards, and the audits that catch a log growing out of control.
 **Module:** `aipass.prax`
-**Version:** 2.4.0
 
 ---
 
@@ -57,6 +56,9 @@ down here and cannot go stale:
 
 - `drone @prax` — the self-map: every discovered module, with the version.
 - `drone @prax --help` — the full command surface: every verb, its arguments and its flags.
+- `drone @prax --version` — `prax v<number>`, read from the `# Version` header of `apps/prax.py`; the header is the only version.
+
+A command module that fails to import stops `drone @prax` with the import error, so a broken module is seen rather than its commands quietly missing.
 
 Each module carries its own reference too, reached by adding `--help` to the verb.
 

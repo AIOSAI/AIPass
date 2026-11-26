@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discover.py
 # Description: PRAX Discover Command
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-12
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """PRAX Discover Module
@@ -28,9 +28,14 @@ def print_help():
     """Display module help and connected handlers"""
     console.print()
     console.print("[bold cyan]prax Discover Commands:[/bold cyan]")
-    console.print("  [white]discover run[/white]        Scan the ecosystem and rewrite the module registry")
-    console.print("  [white]discover[/white]            Show what this module is and what it connects to")
-    console.print("  [white]discover help[/white]       Show this help")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [white]drone @prax discover run[/white]       Scan the ecosystem and rewrite the module registry")
+    console.print("  [white]drone @prax discover[/white]           Show what this module is and what it connects to")
+    console.print("  [white]drone @prax discover --help[/white]    Show this help")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [green]drone @prax discover run[/green]")
     console.print()
     console.print("[dim]The scan is a snapshot: modules whose file is gone are removed, not kept.[/dim]")
     console.print("[dim]Runs daily as the module-scan-daily job in .daemon/schedule.json.[/dim]")
@@ -75,9 +80,9 @@ def handle_command(command: str, args: List[str]) -> bool:
     if result["previous_unreadable"]:
         # With no readable registry to compare against, every module reads as added.
         warning("The previous registry could not be read; it was rebuilt from disk.")
-    console.print(f"  Added:      {len(result['added'])}")
+    console.print(f"  Added:      {len(result['added'])}", highlight=False)
     _print_names("added", result["added"])
-    console.print(f"  Removed:    {len(result['removed'])}")
+    console.print(f"  Removed:    {len(result['removed'])}", highlight=False)
     _print_names("removed", result["removed"])
     console.print(f"  Unchanged:  {result['unchanged']}")
     console.print(f"  Total:      {result['total']}")
@@ -109,6 +114,8 @@ def print_introspection():
     console.print("  [cyan]handlers/registry/[/cyan]")
     console.print("    [dim]→ save.py (save_module_registry — atomic write, carries the scan stats)[/dim]")
     console.print("    [dim]→ load.py (load_module_registry — what was on record before the walk)[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @prax discover --help' for usage[/dim]")
     console.print()
 
 

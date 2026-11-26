@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logging_handlers.py
 # Description: Tests for prax logging handler modules
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-04-25
-# Modified: 2026-11-18
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
@@ -260,6 +260,19 @@ class TestGetOversizedFiles:
             assert len(result) == 1
             assert result[0]["name"] == "big.log"
             assert result[0]["lines"] >= 100
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root reads a 000 file: the unreadable route needs a non-root user")
+    def test_an_unreadable_log_raises_instead_of_reading_as_zero_lines(self, mock_prax_infrastructure, tmp_path):
+        """Mutant: _count_lines catching OSError and answering 0, which reports an unreadable log as ok."""
+        logs_dir = tmp_path / "system_logs"
+        logs_dir.mkdir()
+        locked = logs_dir / "locked.log"
+        locked.write_text("line\n" * 20000, encoding="utf-8")
+        locked.chmod(0)
+
+        with patch.object(log_watchdog, "_get_system_logs_dir", return_value=logs_dir):
+            with pytest.raises(PermissionError):
+                log_watchdog.scan_log_files()
 
     def test_nonexistent_dir_returns_empty(self, mock_prax_infrastructure, tmp_path):
         """Returns empty list when system_logs dir does not exist."""

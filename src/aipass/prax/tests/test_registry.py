@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry.py
 # Description: Tests for registry load and save handlers
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-04-03
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/registry/load.py and apps/handlers/registry/save.py."""
@@ -275,6 +275,17 @@ class TestSaveModuleRegistry:
         assert result is False
         save_mod.logger.error.assert_called_once()  # type: ignore[union-attr]
         assert "failed to save the module registry" in save_mod.logger.error.call_args[0][0]  # type: ignore[union-attr]
+
+    def test_a_save_over_an_unreadable_registry_fails_and_leaves_it_untouched(
+        self, mock_prax_infrastructure, monkeypatch, tmp_path
+    ):
+        """Mutant: _existing_last_scan answering None for a corrupt file, so the save overwrites it."""
+        _patch_registry_save(monkeypatch, tmp_path)
+        save_mod.PRAX_JSON_DIR.mkdir()
+        save_mod.REGISTRY_FILE.write_text("{not json", encoding="utf-8")
+
+        assert save_mod.save_module_registry({"x": {}}) is False
+        assert save_mod.REGISTRY_FILE.read_text(encoding="utf-8") == "{not json"
 
     def test_logs_operation_on_success(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Should call json_handler.log_operation after successful save."""

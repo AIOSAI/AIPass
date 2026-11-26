@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations_refresh.py
 # Description: Unit tests for the dashboard refresh and section writes
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-10-08
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for the refresh and section writes: apps/handlers/dashboard/refresh.py and status.py."""
@@ -394,3 +394,36 @@ class TestResolveBranchPathWrapper:
         mod.handle_command("dashboard", ["refresh", "@flow"])
 
         assert refreshed == [fake_path]
+
+
+class TestRegisteredBranchWalk:
+    """_registered_branch_at walks up to the registry's branch; an unreadable registry is warned, not skipped silently."""
+
+    def test_an_unreadable_registry_is_logged_at_warning(self, monkeypatch, tmp_path):
+        """Mutant: the old except that logged at info and walked on unseen."""
+        mod = _load_dashboard_module()
+
+        def unreadable(ref):
+            raise json.JSONDecodeError("bad", "{", 0)
+
+        monkeypatch.setattr(mod, "resolve_branch_path", unreadable)
+
+        assert mod._registered_branch_at(tmp_path) is None
+        assert mod.logger.warning.called
+        assert "Registry unreadable" in mod.logger.warning.call_args.args[0]
+
+    def test_a_missing_row_walks_up_to_the_registered_parent(self, monkeypatch, tmp_path):
+        """Mutant: treat a missing row as the end of the walk, and the parent branch is never found."""
+        mod = _load_dashboard_module()
+        child = tmp_path / "sub"
+        child.mkdir()
+
+        def resolve(ref):
+            if ref == tmp_path.name:
+                return tmp_path
+            raise FileNotFoundError(ref)
+
+        monkeypatch.setattr(mod, "resolve_branch_path", resolve)
+
+        assert mod._registered_branch_at(child) == tmp_path
+        assert not mod.logger.warning.called

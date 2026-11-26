@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_filesystem_handler_agent_activity.py
 # Description: Unit tests for filesystem_handler's JSONL reading and agent activity
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/monitoring/filesystem_handler.py, its JSONL reading and agent activity."""
@@ -17,7 +17,7 @@
 # sentry: no-test-needed(through_the_command) — _shorten_model, covered by tests/test_filesystem_handler_tool_action.py
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -90,15 +90,21 @@ class TestSafeParseJson:
         """Should parse valid JSON."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
-        result = handler._safe_parse_json('{"key": "value"}', "test")
+        result = handler._safe_parse_json('{"key": "value"}', "test", "f.jsonl")
         assert result == {"key": "value"}
 
     def test_invalid_json(self):
-        """Should return None for invalid JSON."""
+        """Bad lines return None and warn once per file, not once per line.
+
+        Mutants killed: the old logger.info (no warning), and a warning per line (a log storm).
+        """
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
-        result = handler._safe_parse_json("not json", "test")
-        assert result is None
+        with patch.object(mod, "logger") as log:
+            assert handler._safe_parse_json("not json", "test", "f.jsonl") is None
+            assert handler._safe_parse_json("also not json", "test", "f.jsonl") is None
+        assert log.warning.call_count == 1
+        assert "f.jsonl" in log.warning.call_args.args[0]
 
 
 # =============================================

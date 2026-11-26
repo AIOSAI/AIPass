@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rate_tracker.py
 # Description: Tests for the rate tracker runaway-log detector
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-07-14
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/monitoring/rate_tracker.py"""
@@ -53,6 +53,7 @@ def _reset_tracker(monkeypatch, logs_dir=None):
     monkeypatch.setattr(mod, "_state_loaded", False)
     monkeypatch.setattr(mod, "_logs_dir", None)
     monkeypatch.setattr(mod, "_EVENT_CALLBACK", None)
+    monkeypatch.setattr(mod, "_stat_errors", {})
     mod.configure(logs_dir=logs_dir, event_callback=event_mock, suppressed_files=set())
     return event_mock
 
@@ -558,6 +559,43 @@ class TestFileDisappearance:
         mod.scan_rates()
 
         assert mod.get_snapshot() == []
+
+
+class TestUnstatableFile:
+    """A log file that cannot be stat'ed is warned about once, not every scan."""
+
+    def test_scan_warns_once_and_skips_the_file(self, tmp_path, monkeypatch):
+        """Mutants killed: the old logger.info (no warning), and a warning per scan (a log storm)."""
+        logs_dir = tmp_path / "system"
+        logs_dir.mkdir()
+        (logs_dir / "locked.log").write_text("x", encoding="utf-8")
+        _reset_tracker(monkeypatch, logs_dir=logs_dir)
+        original_stat = Path.stat
+
+        def failing_stat(self_path, *args, **kwargs):
+            if self_path.suffix == ".log":
+                raise PermissionError("denied")
+            return original_stat(self_path, *args, **kwargs)
+
+        with patch.object(Path, "stat", failing_stat):
+            assert mod.scan_rates() == []
+            assert mod.scan_rates() == []
+
+        assert cast(MagicMock, mod.logger).warning.call_count == 1
+
+    def test_snapshot_size_reads_zero_with_a_warning(self, tmp_path, monkeypatch):
+        """Mutant killed: the old logger.info when the snapshot cannot size a file."""
+        logs_dir = tmp_path / "system"
+        logs_dir.mkdir()
+        (logs_dir / "locked.log").write_text("x" * 2048, encoding="utf-8")
+        _reset_tracker(monkeypatch, logs_dir=logs_dir)
+        mod.scan_rates()
+
+        with patch.object(Path, "stat", side_effect=PermissionError("denied")):
+            [row] = mod.get_snapshot()
+
+        assert row["size_kb"] == 0
+        assert "0 KB" in cast(MagicMock, mod.logger).warning.call_args.args[0]
 
 
 class TestSnapshot:

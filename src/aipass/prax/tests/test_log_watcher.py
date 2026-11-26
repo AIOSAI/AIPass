@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_log_watcher.py
 # Description: Tests for log file monitoring handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-04-03
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/monitoring/log_watcher.py."""
@@ -619,7 +619,10 @@ class TestOnModified:
         mock_process.assert_called_once_with("PRAX", "line one")
 
     def test_handles_read_exception(self, tmp_path):
-        """Should catch exceptions during log reading."""
+        """A read failure is warned once per file, however often the file changes.
+
+        Mutants killed: the old logger.info (no warning), and a warning per event (a log storm).
+        """
         mod = _import_log_watcher()
         watcher, mock_queue = _make_watcher(mod)
 
@@ -631,11 +634,14 @@ class TestOnModified:
         with (
             patch.object(mod, "get_system_logs_dir", return_value=system_logs_dir),
             patch.object(watcher, "_read_new_content", side_effect=OSError("disk error")),
+            patch.object(mod, "logger") as log,
         ):
-            # Should not raise
+            watcher.on_modified(event)
             watcher.on_modified(event)
 
         mock_queue.enqueue.assert_not_called()
+        assert log.warning.call_count == 1
+        assert "disk error" in log.warning.call_args.args[0]
 
 
 class TestMatchFlowCommand:
@@ -908,10 +914,13 @@ class TestInitializePositionsAdditional:
         with (
             patch.object(mod, "get_system_logs_dir", return_value=tmp_path),
             patch.object(Path, "stat", failing_stat),
+            patch.object(mod, "logger") as log,
         ):
             watcher.initialize_positions()
 
         assert str(log_file) not in watcher.log_positions
+        # Mutant killed: the old logger.info, which nobody reads at the fleet's level.
+        assert "stat failed" in log.warning.call_args.args[0]
 
 
 class TestExtractHookInfo:

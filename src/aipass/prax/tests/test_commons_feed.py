@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_commons_feed.py
 # Description: Tests for the commons live feed handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-07-21
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/monitoring/commons_feed.py."""
@@ -13,7 +13,9 @@
 # sentry: no-test-needed(through_the_command) — routing to run_commons_feed, covered by tests/test_monitor_module.py
 
 import importlib
+import os
 import sqlite3
+from unittest.mock import patch
 
 import pytest
 
@@ -333,3 +335,23 @@ class TestGetCommonsDbPath:
         monkeypatch.delenv("AIPASS_COMMONS_DB_PATH", raising=False)
         path = feed._get_commons_db_path()
         assert path.parts[-2:] == ("commons", "commons.db")
+
+
+class TestInteractiveLoop:
+    def test_closed_input_stops_the_feed_with_a_warning(self, monkeypatch):
+        """Mutant killed: the old logger.info on EOF, which nobody reads at the fleet's level."""
+        master, slave = os.openpty()  # a real terminal, so the loop takes its interactive path
+        os.write(master, b"\x04")  # Ctrl-D: the terminal reports end of input
+        with os.fdopen(slave, "r", encoding="utf-8") as tty:
+            monkeypatch.setattr(feed.sys, "stdin", tty)
+            with patch.object(feed, "logger") as log:
+                feed._interactive_feed_loop(feed.FeedState())
+        os.close(master)
+        assert "Input closed" in log.warning.call_args.args[0]
+
+    def test_status_heading_is_explained(self, capsys):
+        """Mutant killed: dropping the line under the heading that says what the status group is."""
+        feed._print_feed_status(feed.FeedState())
+        lines = capsys.readouterr().out.splitlines()
+        heading = lines.index("Commons Feed Status:")
+        assert lines[heading + 1].strip() == "What this feed has seen since it started."

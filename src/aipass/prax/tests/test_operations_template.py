@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations_template.py
 # Description: Unit tests for the dashboard template lane
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for the template lane: apps/handlers/dashboard/template_differ.py and template_pusher.py."""
@@ -332,6 +332,16 @@ class TestPushDashboardTemplate:
         assert result["branches_created"] == 0
         assert result["branches_skipped"] == 1
         assert (tmp_path / "flow" / "DASHBOARD.local.json").read_text(encoding="utf-8") == ""
+
+    def test_an_unreadable_dashboard_names_its_error(self, tmp_path, monkeypatch):
+        """The skip carries the parse error; mutant: a fixed message that drops why the read failed."""
+        mod = _load_pusher()
+        self._setup_template_and_registry(tmp_path, mod, monkeypatch, ["flow"])
+        (tmp_path / "flow" / "DASHBOARD.local.json").write_text("{", encoding="utf-8")
+
+        result = mod.push_dashboard_template(dry_run=False)
+
+        assert any("flow: unreadable dashboard (Expecting" in err for err in result["errors"])
 
     def test_dry_run_does_not_write_files(self, tmp_path, monkeypatch):
         """Dry run reports changes but does not create files on disk."""
