@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.13.0
+# Version: 3.13.2
 # Created: 2026-03-02
 # Modified: 2026-11-26
 # =============================================
@@ -703,6 +703,52 @@ def _cloud_cmd(
     return cloud_lane.start_cmd(script_bin, claude_bin, env_id, prompt, log), cfg
 
 
+def cloud_send_refusal(target: str, admin: bool, local_flags: List[str], body: str) -> str:
+    """Why `dispatch --cloud` must not send, or "": the cloud lane's refusals, then the start's local half here."""
+    from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+
+    ok, why = cloud_lane.dispatch_refusal(target, admin, local_flags, body=body)
+    if not ok:
+        return why
+    try:
+        _find_bin("script")
+        resolved = resolve_branch(target, admin=admin)
+    except (FileNotFoundError, RegistryUnreadable) as e:
+        # Missing script and an unreadable registry are both refusals the sender reads, never a pass.
+        return str(e)
+    held = check_lock(resolved[0]) if resolved else None
+    if resolved and held:
+        return f"{resolved[1]} is busy: its dispatch lock is held (PID {held.get('pid', '?')}); re-run when it is done"
+    return why
+
+
+def cloud_expected_seconds(cloud_cfg: Dict[str, Any]) -> int:
+    """The cloud row's expected run: the start, the ceiling, the read that may start just before it, the last mail."""
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import MAIL_TIMEOUT
+
+    return cloud_lane.START_TIMEOUT + cloud_cfg["ceiling"] + cloud_cfg["poll"] + MAIL_TIMEOUT
+
+
+def _close_gone_rows(email: str, status: DispatchStatus) -> None:
+    """Close this target's open register rows whose monitor is gone; a monitor not known dead keeps its row."""
+    from aipass.ai_mail.apps.handlers.dispatch import register
+
+    try:
+        rows = register.outstanding()
+    except OSError as e:
+        logger.warning("[wake] register unreadable, %s's dead rows stay open: %s", email, e)
+        status.warn("gone", f"register unreadable, rows whose monitor is gone stay open ({e})")
+        return
+    for row in rows:
+        if row.get("target") != email or row.get("monitor_alive") is not False:
+            continue
+        dispatch_id = str(row.get("dispatch_id"))
+        if register.close_dispatch(dispatch_id, f"closed: its monitor was gone when the next wake reached {email}"):
+            status.info("gone", f"closed register row {dispatch_id}: its monitor is gone")
+        else:
+            status.warn("gone", f"register row {dispatch_id} has no monitor but could not be closed")
+
+
 def wake_branch(
     branch_email: str,
     custom_message: Optional[str] = None,
@@ -757,8 +803,9 @@ def wake_branch(
     branch_path, email = result
     status.ok("resolve", f"{email} → {branch_path}")
 
+    # The blocklist, the manager gate and the occupancy check guard the local seat; a cloud session never sits in it.
     # Before the passport read: an unreadable passport must never be why @devpulse is spawned.
-    if (scheduled or admin) and is_wake_blocked(email):
+    if cloud is None and (scheduled or admin) and is_wake_blocked(email):
         lane = "scheduled" if scheduled else "admin"
         status.fail("blocklist", f"{email} is on WAKE_BLOCKLIST — refused in the {lane} lane")
         logger.warning("[wake] BLOCKED %s — %s wake refused by WAKE_BLOCKLIST", email, lane)
@@ -772,7 +819,7 @@ def wake_branch(
     try:
         with open(passport_file, "r", encoding="utf-8") as f:
             passport = json.load(f)
-        citizen_class = passport.get("identity", {}).get("citizen_class", "")
+        citizen_class = passport.get("identity", {}).get("citizen_class", "") if cloud is None else ""
         if citizen_class == MANAGER_CLASS and not (scheduled or admin or sender == "@daemon"):
             # Woken nothing, sent nothing: the caller owns the mail.
             status.info("manager", f"{email} is a manager — wake skipped, caller must mail")
@@ -795,7 +842,7 @@ def wake_branch(
         logger.info("[wake] No passport for %s: %s", email, exc)
     except (json.JSONDecodeError, OSError) as exc:
         # Unknown class may be a manager: fail closed in the lane that never wakes managers.
-        if not (scheduled or admin or sender == "@daemon"):
+        if cloud is None and not (scheduled or admin or sender == "@daemon"):
             status.info(
                 "manager",
                 f"{email} passport unreadable — class unknown, treated as a manager: wake skipped, caller must mail",
@@ -855,9 +902,10 @@ def wake_branch(
         return status, True
 
     status.ok("lock", "No active lock — agent is sleeping")
+    _close_gone_rows(email, status)
 
     try:
-        occupant = branch_occupant(branch_path)
+        occupant = branch_occupant(branch_path) if cloud is None else None
     except (OSError, subprocess.SubprocessError) as e:
         logger.warning("[wake] occupancy scan for %s could not run: %s", email, e)
         status.warn("occupancy", f"cannot scan for an interactive session ({e}); spawning unchecked")
@@ -869,7 +917,10 @@ def wake_branch(
         return status, False
 
     if status.find_step("occupancy") is None:
-        status.ok("occupancy", "No interactive session")
+        status.ok(
+            "occupancy",
+            "No interactive session" if cloud is None else "not checked — the cloud lane runs no local seat",
+        )
 
     # The binary, then the dashboard: after every gate that can refuse, before any lock or spawn.
     try:
@@ -1045,7 +1096,7 @@ def wake_branch(
             sender=sender,
             target=email,
             subject=subject or "",
-            expected_seconds=cloud_cfg["ceiling"] + cloud_lane.START_TIMEOUT if cloud_cfg else HARD_TIMEOUT,
+            expected_seconds=HARD_TIMEOUT if not cloud_cfg else cloud_expected_seconds(cloud_cfg),
             wake_back=wake_back,
             provider=provider,
             grant=grant,

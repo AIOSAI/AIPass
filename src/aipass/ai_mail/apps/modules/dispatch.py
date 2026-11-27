@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.11.0
+# Version: 3.11.1
 # Created: 2026-02-02
 # Modified: 2026-11-26
 # =============================================
@@ -441,7 +441,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     body = filtered[2]
 
     # --from may author the mail but not buy a wake lane; refused BEFORE the send so a spoof delivers nothing.
-    from aipass.ai_mail.apps.handlers.dispatch.cloud import dispatch_refusal as cloud_ok
+    from aipass.ai_mail.apps.handlers.dispatch.wake import cloud_send_refusal
     from aipass.ai_mail.apps.handlers.users import verified_caller
 
     refusal = verified_caller.sender_claim_refusal(from_branch)
@@ -450,9 +450,9 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         return True
 
     is_admin = _admin_lane()
-
-    ok, why = cloud_ok(target, is_admin, [f for f in flags if f in _RUN_FLAGS + _GRANT_FLAGS]) if cloud else (True, "")
-    if not ok:
+    local_flags = [f for f in flags if f in _RUN_FLAGS + _GRANT_FLAGS]
+    why = cloud_send_refusal(target, is_admin, local_flags, body) if cloud else ""
+    if why:
         error(f"Dispatch to {target} not sent: {why}")
         return True
 
@@ -505,7 +505,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     from aipass.ai_mail.apps.handlers.dispatch.wake import is_manager, wake_branch
 
     # A manager's wake is skipped at the gate; "Waking" ahead of that verdict would be false.
-    if is_admin or not is_manager(target):
+    if cloud or is_admin or not is_manager(target):
         console.print(f"\nWaking {target}...")
 
     # The wake is attributed to the VERIFIED caller; --from never moves who the wake came from.
@@ -529,7 +529,8 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
 
     if not wake_ok:
         logger.warning("[dispatch] Wake failed for %s — email was sent", target)
-        error(f"Email sent but wake failed — retry: drone @ai_mail dispatch wake {target}")
+        retry = f'dispatch {target} "S" "B" --cloud' if cloud else f"dispatch wake {target}"
+        error(f"Email sent but wake failed — {'re-run' if cloud else 'retry'}: drone @ai_mail {retry}")
     elif dispatch_status.busy_detail():
         _refuse_busy(dispatch_status.busy_detail(), target)
     elif (gate := dispatch_status.find_step("manager")) and gate[0] == "info":

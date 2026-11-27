@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_email_module_send.py
 # Description: Tests for email_send.py's send lane and email.py's command routing
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-08
 # Modified: 2026-11-26
 # =============================================
@@ -700,20 +700,22 @@ class TestSendRefusesAMissingSubject:
 class TestCloudSteer:
     """`email @x "text" --cloud` queues the text into @x's open cloud session, then records the mail as today."""
 
-    def _steer(self, monkeypatch, tmp_path, messages, answer='{"ok": true}'):
+    def _steer(self, monkeypatch, tmp_path, messages, answer='{"ok": true}', restore=0):
         branch = tmp_path / "hooks"
         (branch / ".ai_mail.local").mkdir(parents=True)
         (branch / ".ai_mail.local" / "inbox.json").write_text(json.dumps({"messages": messages}), encoding="utf-8")
         monkeypatch.setattr(wake_mod, "resolve_branch", lambda target, admin=False: (branch, "@hooks"))
         monkeypatch.setattr(wake_mod, "_find_bin", lambda name, extra_dirs=(): name)
         steers: list = []
-        monkeypatch.setattr(
-            cloud_mod,
-            "run_cli",
-            lambda cmd, cwd=None, env=None, timeout=60: (
-                steers.append(list(cmd)) or subprocess.CompletedProcess(cmd, 0, answer, "")
-            ),
-        )
+
+        def claude(cmd, cwd=None, env=None, timeout=60):
+            steers.append(list(cmd))
+            # A paused VM answers only once it is restored, restore seconds later.
+            if restore > timeout:
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            return subprocess.CompletedProcess(cmd, 0, answer, "")
+
+        monkeypatch.setattr(cloud_mod, "run_cli", claude)
         sent: list = []
         _stub_single_send(monkeypatch, tmp_path, on_send=sent.append)
         errors: list[str] = []
@@ -743,7 +745,25 @@ class TestCloudSteer:
         steers, sent, errors = self._steer(monkeypatch, tmp_path, [open_mail], answer='{"ok": false}')
 
         assert len(steers) == 1 and sent == []
-        assert errors == ['Not steered: claude -p --cloud session_02 exited 0 without ok: {"ok": false}']
+        assert errors == [
+            'Not steered: claude -p --cloud session_02 exited 0 without ok: {"ok": false}; '
+            "the text may still have been queued"
+        ]
+
+    def test_a_steer_to_a_paused_vm_waits_for_its_restore(self, monkeypatch, tmp_path):
+        open_mail = {"id": "m2", "status": "new", "cloud": {"session_id": "session_02"}}
+        steers, sent, errors = self._steer(monkeypatch, tmp_path, [open_mail], restore=90)
+
+        assert len(steers) == 1 and errors == []
+        assert [a[:2] for a in sent] == [("@hooks", "Cloud steer")]
+
+    def test_a_steer_that_never_answers_says_the_text_may_still_be_queued(self, monkeypatch, tmp_path):
+        open_mail = {"id": "m2", "status": "new", "cloud": {"session_id": "session_02"}}
+        _, sent, errors = self._steer(monkeypatch, tmp_path, [open_mail], restore=cloud_mod.START_TIMEOUT + 1)
+
+        assert sent == [] and len(errors) == 1
+        assert errors[0].startswith("Not steered: claude -p --cloud session_02 did not answer")
+        assert errors[0].endswith("; the text may still have been queued")
 
     def test_email_help_names_the_cloud_flag(self, capsys: pytest.CaptureFixture[str]):
         printed = _StdoutLines(capsys)

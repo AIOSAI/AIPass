@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: cloud.py
 # Description: The cloud dispatch lane: start a Claude Code cloud session, record it on the mail, poll for its PR
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-11-26
 # Modified: 2026-11-26
 # =============================================
@@ -35,16 +35,22 @@ POLL_KEY = "cloud_poll_seconds"
 CEILING_KEY = "cloud_ceiling_seconds"
 CONFIG_DEFAULTS = {POLL_KEY: 180, CEILING_KEY: 4 * 3600}
 START_TIMEOUT = 300
-# The monitor's exit code when the start printed no View line: no session exists.
+# The monitor's exit codes: the start output held no session id; the poll could not read pr list.
 START_FAILED = -8
-VIEW_LINE = re.compile(r"View: (https://claude\.ai/code/([A-Za-z0-9_-]+)\S*)")
+POLL_FAILED = -9
+# The URL anywhere in the output: a pty may colour the label, a CLI release may rename it.
+SESSION_URL = re.compile(r"(https://claude\.ai/code/([A-Za-z0-9_-]+)[^\s\x1b]*)")
+MAX_FAILED_READS = 5
+# script -c takes the brief as one argv string; the kernel caps one at 128 KiB.
+MAX_BODY_BYTES = 64_000
 BODY_LINES = 12
 RESULT_KEYS = ("number", "head", "head_sha", "url", "state", "ci")
 
 FOOTER = (
-    "\n\n---\nYou are {target} in a Claude Code cloud VM, at the clone root. AIPass is installed and your hooks "
-    "name you. Do the task above. Open exactly one PR with base dev from your harness branch. The PR body starts "
-    "with the line `dispatch: {mail_id}` and ends with your report. No mail, no dispatch, no git commands: the "
+    "\n\n---\nYou are {target} in a Claude Code cloud VM, at the clone root. First run `drone {target} --help`; if "
+    "AIPass is not installed, open the PR anyway with the setup output in the body. Do the task above. "
+    "Open exactly one PR with base dev from your harness branch. The PR body starts with the line "
+    "`dispatch: {mail_id}` and ends with your report. No mail, no dispatch, no git commands: the "
     "harness's GitHub tools are the route. Touched test files only, no full suite."
 )
 
@@ -108,7 +114,7 @@ def start_refusal(branch_path: Path) -> str:
     return refusal or ahead_refusal(branch_path)
 
 
-def dispatch_refusal(target: str, admin: bool, local_flags: List[str]) -> Tuple[bool, str]:
+def dispatch_refusal(target: str, admin: bool, local_flags: List[str], body: str = "") -> Tuple[bool, str]:
     """(True, "") when `dispatch --cloud` may send to target, else (False, why), decided before any mail.
 
     local_flags are the local-wake flags the caller was given: they have no meaning in a cloud session.
@@ -118,6 +124,8 @@ def dispatch_refusal(target: str, admin: bool, local_flags: List[str]) -> Tuple[
 
     if local_flags:
         return False, f"{', '.join(local_flags)} apply to local wakes, not --cloud"
+    if len(body.encode("utf-8")) > MAX_BODY_BYTES:
+        return False, "cloud briefs are limited to 64 KB; put the log in the repo and name the path"
     try:
         resolved = resolve_branch(target, admin=admin)
     except RegistryUnreadable as e:
@@ -143,8 +151,8 @@ def start_cmd(script_bin: str, claude_bin: str, env_id: str, prompt: str, log: s
 
 
 def parse_view(text: str) -> Optional[Tuple[str, str]]:
-    """(session_id, url) from the start's "View: https://claude.ai/code/<id>?..." line, or None."""
-    match = VIEW_LINE.search(text or "")
+    """(session_id, url) from the first https://claude.ai/code/<id>?... in the start output, or None."""
+    match = SESSION_URL.search(text or "")
     return (match.group(2), match.group(1)) if match else None
 
 
@@ -221,33 +229,34 @@ def steer(text: str, session_id: str) -> Tuple[bool, str]:
 
     json_handler.log_operation("cloud_steer", {"session_id": session_id})
     env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
+    queued = "; the text may still have been queued"
     try:
-        result = run_cli(steer_cmd(_find_bin("claude"), text, session_id), env=env)
-    except (OSError, subprocess.SubprocessError) as e:
+        # A paused VM restores before it answers: the start's timeout, not run_cli's 60 s.
+        result = run_cli(steer_cmd(_find_bin("claude"), text, session_id), env=env, timeout=START_TIMEOUT)
+    except OSError as e:
         return False, f"claude -p --cloud {session_id} could not run ({e})"
+    except subprocess.SubprocessError as e:
+        return False, f"claude -p --cloud {session_id} did not answer ({e}){queued}"
     said = (result.stderr or result.stdout).strip()[:200]
     try:
         answer = json.loads(result.stdout)
     except json.JSONDecodeError as e:
-        return False, f"claude -p --cloud {session_id} exited {result.returncode} with no JSON ({e}): {said}"
+        return False, f"claude -p --cloud {session_id} exited {result.returncode} with no JSON ({e}): {said}{queued}"
     if result.returncode != 0 or not (isinstance(answer, dict) and answer.get("ok")):
-        return False, f"claude -p --cloud {session_id} exited {result.returncode} without ok: {said}"
+        return False, f"claude -p --cloud {session_id} exited {result.returncode} without ok: {said}{queued}"
     return True, ""
 
 
-def pr_rows(mail_id: str, cwd: Path) -> Optional[List[dict]]:
-    """The PRs whose body carries this mail id, base dev, head claude/; None when the read failed."""
+def pr_rows(mail_id: str, cwd: Path) -> Tuple[Optional[List[dict]], str]:
+    """(the PRs in any state and on any base whose body carries this mail id, head claude/, ""), or (None, why)."""
     rows, why = drone_json(
-        ["@git", "pr", "list", "--base", "dev", "--head", "claude/", "--marker", mail_id, "--json"], cwd
+        ["@git", "pr", "list", "--head", "claude/", "--marker", mail_id, "--state", "all", "--json"], cwd
     )
     if not isinstance(rows, list):
-        logger.warning("[cloud] pr list for %s unreadable, next poll retries: %s", mail_id, why or rows)
-        return None
-    return [
-        r
-        for r in rows
-        if isinstance(r, dict) and r.get("base") == "dev" and str(r.get("head", "")).startswith("claude/")
-    ]
+        why = why or f"drone @git pr list answered {rows!r}, not a list"
+        logger.warning("[cloud] pr list for %s unreadable, next poll retries: %s", mail_id, why)
+        return None, why
+    return [r for r in rows if isinstance(r, dict) and str(r.get("head", "")).startswith("claude/")], ""
 
 
 def pr_body_head(number: object, cwd: Path) -> str:
@@ -276,12 +285,25 @@ def wake_back_mail(target: str, mail_id: str, row: dict, url: str, body_head: st
     return subject, body
 
 
-def timeout_mail(target: str, mail_id: str, url: str, ceiling: int) -> Tuple[str, str]:
+def timeout_mail(target: str, mail_id: str, url: str, ceiling: int, failed: int, reads: int) -> Tuple[str, str]:
     """(subject, body) of the ceiling mail: no PR came; the dispatch mail stays open."""
     subject = f"Cloud dispatch timeout: {target}, no PR after {ceiling // 60} min"
     body = (
         f"{target}'s cloud session for mail {mail_id} opened no PR with `dispatch: {mail_id}` in "
         f"{ceiling // 60} minutes; the poll has stopped and the mail stays open.\n"
+        f"{failed} of the {reads} pr list reads failed.\n"
+        f"Session: {url}\n"
+        f'Steer it: drone @ai_mail email {target} "text" --cloud (nobody polls for its PR now)'
+    )
+    return subject, body
+
+
+def failed_mail(target: str, mail_id: str, url: str, why: str) -> Tuple[str, str]:
+    """(subject, body) of the mail when pr list could not be read MAX_FAILED_READS times in a row."""
+    subject = f"Cloud dispatch failed: {target}, pr list unreadable"
+    body = (
+        f"{MAX_FAILED_READS} drone @git pr list reads in a row failed, so the poll for mail {mail_id} has stopped; "
+        f"{target}'s session may still open a PR and the mail stays open.\nLast error: {why}\n"
         f"Session: {url}\n"
         f'Steer it: drone @ai_mail email {target} "text" --cloud (nobody polls for its PR now)'
     )
@@ -296,17 +318,21 @@ def _is_new(row: dict, reported: Dict[object, dict]) -> bool:
 
 def _poll(
     cfg: dict, cwd: Path, target: str, url: str, inbox_file: Path, mail: Callable[[str, str], bool]
-) -> Tuple[List[dict], str]:
-    """Poll until the ceiling, mailing every new PR number; (the PRs reported, why the poll ended)."""
+) -> Tuple[List[dict], str, dict]:
+    """Poll until the ceiling, mailing every new PR; (the PRs reported, why the poll ended, the read counts)."""
     mail_id, deadline = cfg["mail"], time.time() + cfg["ceiling"]
     reported: Dict[object, dict] = {}
+    reads = {"reads": 0, "failed": 0, "in_a_row": 0, "why": ""}
     while time.time() < deadline:
         time.sleep(cfg["poll"])
-        rows = pr_rows(mail_id, cwd)
+        rows, why = pr_rows(mail_id, cwd)
+        reads["reads"] += 1
         if rows is None:
+            reads.update(failed=reads["failed"] + 1, in_a_row=reads["in_a_row"] + 1, why=why)
+            if reads["in_a_row"] >= MAX_FAILED_READS:
+                return list(reported.values()), "pr list failed", reads
             continue
-        if reported and not rows:
-            return list(reported.values()), "closed"
+        reads["in_a_row"] = 0
         for row in (r for r in rows if _is_new(r, reported)):
             reported[row.get("number")] = row
             row["mailed"] = mail(*wake_back_mail(target, mail_id, row, url, pr_body_head(row.get("number"), cwd)))
@@ -314,15 +340,26 @@ def _poll(
                 logger.warning("[cloud] result mail for %s PR #%s NOT delivered", mail_id, row.get("number"))
             results = [{k: r.get(k) for k in RESULT_KEYS} for r in reported.values()]
             update_mail(inbox_file, mail_id, done=True, results=results)
-    return list(reported.values()), "ceiling"
+        # New rows are mailed first: a PR opened and merged between two reads still gets its mail.
+        if reported and all(r.get("state") != "OPEN" for r in rows):
+            return list(reported.values()), "closed", reads
+    return list(reported.values()), "ceiling", reads
 
 
 def run(
-    cmd: List[str], cwd: Path, env: dict, cfg: dict, target: str, inbox_file: Path, mail: Callable[[str, str], bool]
+    cmd: List[str],
+    cwd: Path,
+    env: dict,
+    cfg: dict,
+    target: str,
+    inbox_file: Path,
+    mail: Callable[[str, str], bool],
+    started: Callable[[], None],
 ) -> dict:
     """Start the session, record it on the mail, poll for its PR; the monitor's outcome fields.
 
-    cfg is {"mail", "poll", "ceiling"}; mail(subject, body) sends to the dispatcher and says whether it went.
+    cfg is {"mail", "poll", "ceiling"}; mail(subject, body) sends to the dispatcher and says whether it went;
+    started() runs once the session is on the mail: nothing runs locally after that, so the lock can go.
     """
     json_handler.log_operation("cloud_run", {"target": target, "mail": cfg.get("mail")})
     log = Path(cmd[-1])
@@ -340,13 +377,13 @@ def run(
         tail = "\n".join(text.strip().splitlines()[-10:])
         sent = mail(
             f"Cloud dispatch refused: {target}",
-            f"The cloud start for mail {cfg['mail']} printed no View line, so no session exists; nothing ran "
-            f"locally either.\n\nStart output (last lines):\n{tail}",
+            f"The cloud start for mail {cfg['mail']}: no session id found in the start output; a session may "
+            f"still exist, check claude.ai/code. Nothing ran locally.\n\nStart output (last lines):\n{tail}",
         )
-        logger.warning("[cloud] %s start printed no View line — refused", target)
+        logger.warning("[cloud] %s start output holds no session id — refused", target)
         return {
             "exit_code": START_FAILED,
-            "status": "REFUSED (cloud start printed no View line)",
+            "status": "REFUSED (no session id in the cloud start output)",
             "wake_result": "mailed_refusal" if sent else "failed_refusal_mail",
             "run_line": "run: cloud · no session",
         }
@@ -355,7 +392,8 @@ def run(
         inbox_file, cfg["mail"], session_id=session_id, url=url, started=datetime.now().astimezone().isoformat()
     )
     logger.info("[cloud] %s session %s started for mail %s: %s", target, session_id, cfg["mail"], url)
-    reported, ended = _poll(cfg, cwd, target, url, inbox_file, mail)
+    started()
+    reported, ended, reads = _poll(cfg, cwd, target, url, inbox_file, mail)
     update_mail(inbox_file, cfg["mail"], ended=ended)
     run_line = f"run: cloud · session {url}"
     if reported:
@@ -366,7 +404,15 @@ def run(
             "wake_result": "mailed" if all(r["mailed"] for r in reported) else "failed_result_mail",
             "run_line": run_line,
         }
-    sent = mail(*timeout_mail(target, cfg["mail"], url, cfg["ceiling"]))
+    if ended == "pr list failed":
+        sent = mail(*failed_mail(target, cfg["mail"], url, reads["why"]))
+        return {
+            "exit_code": POLL_FAILED,
+            "status": f"FAILED (pr list failed {MAX_FAILED_READS} times in a row: {reads['why']})",
+            "wake_result": "mailed_failure" if sent else "failed_failure_mail",
+            "run_line": run_line,
+        }
+    sent = mail(*timeout_mail(target, cfg["mail"], url, cfg["ceiling"], reads["failed"], reads["reads"]))
     return {
         "exit_code": 0,
         "status": f"TIMEOUT (cloud, no PR in {cfg['ceiling']}s)",

@@ -167,11 +167,11 @@
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "logged_fallback",
       "lines": [
-        172,
-        251,
-        697
+        174,
+        253,
+        708
       ],
-      "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined 2026-10-08, 2026-10-16, 2026-11-15 and 2026-11-26 twice, the second by the FPLAN-1249 cloud lane imports). 172: wake_sender returns an outcome word, and 'failed' is what its normal path also answers when the sender was not woken; a crash in the wake-back is that same outcome, it never reads as 'success', and the report's wake_result carries it. 251: _mail_wake_back returns True only when the mail went; False is its one failure answer, the same as a non-zero exit, and its caller turns it into 'failed_manager_mail'. 697: _parse_result_json documents {} for a stdout log that is missing or holds no JSON, which is what an unreadable log is to the report: build_report then records cost, tokens and turns as null, not as values."
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined 2026-10-08, 2026-10-16, 2026-11-15 and 2026-11-26 three times, the second by the FPLAN-1249 cloud lane imports, the third by FPLAN-1251's MAIL_TIMEOUT and _cloud_notice). 174: wake_sender returns an outcome word, and 'failed' is what its normal path also answers when the sender was not woken; a crash in the wake-back is that same outcome, it never reads as 'success', and the report's wake_result carries it. 253: _mail_wake_back returns True only when the mail went; False is its one failure answer, the same as a non-zero exit, and its caller turns it into 'failed_manager_mail'. 708: _parse_result_json documents {} for a stdout log that is missing or holds no JSON, which is what an unreadable log is to the report: build_report then records cost, tokens and turns as null, not as values."
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
@@ -206,14 +206,14 @@
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "fallback",
-      "lines": [862],
+      "lines": [873],
       "reason": "run_with_startup_check (ai_mail, FPLAN-1221): a stdout log that cannot be opened runs the agent with stdout to DEVNULL rather than not at all; its work (reply, memories) is the dispatch's point. The warning names the file. The result JSON then reads as absent, which the bounce and report state; a streaming provider (codex, opencode) shows no stdout byte and fails at the startup timeout through the 3-strike path."
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "fallback",
-      "lines": [1012, 1235],
-      "reason": "main() keeps the agent running over a side file it cannot use (ai_mail, FPLAN-1221); each warns with the file. A lock that cannot take the monitor's PID is not one of them: that refuses the wake. 1012: the stderr log cannot be opened; the agent inherits the monitor's stderr, the attempt lines go unwritten, and the bounce states '(no stderr captured)'. 1235: the max-turns label cannot be read; the status comes from the exit code alone. A raise in any of them loses the dispatch's bounce, report, wake-back and lock release."
+      "lines": [1025, 1249],
+      "reason": "main() keeps the agent running over a side file it cannot use (ai_mail, FPLAN-1221); each warns with the file. A lock that cannot take the monitor's PID is not one of them: that refuses the wake. 1025: the stderr log cannot be opened; the agent inherits the monitor's stderr, the attempt lines go unwritten, and the bounce states '(no stderr captured)'. 1249: the max-turns label cannot be read; the status comes from the exit code alone. A raise in any of them loses the dispatch's bounce, report, wake-back and lock release."
     },
     {
       "file": "apps/handlers/dispatch/wake.py",

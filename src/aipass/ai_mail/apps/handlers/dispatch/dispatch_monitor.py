@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.18.0
+# Version: 2.18.2
 # Created: 2026-03-02
 # Modified: 2026-11-26
 # =============================================
@@ -36,6 +36,8 @@ STARTUP_TIMEOUT = 90
 RATE_LIMIT_DELAY = 30
 HARD_TIMEOUT = 7200  # 2 hours
 POLL_INTERVAL = 5
+# One notice send; the cloud register row's expected-by allows for the last one.
+MAIL_TIMEOUT = 30
 
 
 def is_sandbox_enabled() -> bool:
@@ -211,7 +213,7 @@ def _send_from_ai_mail(
         ["drone", "@ai_mail", "send", recipient, subject, body] + (["--kind", kind] if kind else []),
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=MAIL_TIMEOUT,
         cwd=str(_sending_home(recipient, target_home)),
         env=env,
     )
@@ -248,6 +250,15 @@ def _mail_wake_back(
         return True
     except (OSError, subprocess.SubprocessError) as e:
         logger.warning("[monitor] Wake-back mail to manager %s failed: %s", sender, e)
+        return False
+
+
+def _cloud_notice(sender: str, subject: str, body: str, target_home: Path) -> bool:
+    """The cloud lane's mail: True when drone took it; a hung or missing drone is False, never a dead monitor."""
+    try:
+        return _send_from_ai_mail(sender, subject, body, target_home, kind="notice").returncode == 0
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.warning("[monitor] cloud mail %r to %s failed: %s", subject, sender, e)
         return False
 
 
@@ -924,7 +935,9 @@ def run_with_startup_check(
 
 
 def _final_result_json(stdout_log: str, provider: str) -> dict:
-    """The run's result in the report's shape, from the provider's own stdout form."""
+    """The run's result in the report's shape, from the provider's own stdout form; a cloud log is the start's pty."""
+    if provider == cloud_lane.CLOUD:
+        return {}
     if provider == CODEX:
         return parse_codex_stream(stdout_log)
     if provider == OPENCODE:
@@ -1082,7 +1095,8 @@ def main():
             json.loads(cloud_cfg),
             branch_email,
             lock_path.parent / "inbox.json",
-            lambda subject, body: _send_from_ai_mail(sender, subject, body, branch_path, kind="notice").returncode == 0,
+            lambda subject, body: _cloud_notice(sender, subject, body, branch_path),
+            lambda: _cleanup_own_lock(lock_file),
         )
         exit_code = cloud_result["exit_code"]
         attempts.append({"attempt": 1, "exit_code": exit_code, "startup_failed": False, "mode": "cloud"})
@@ -1226,9 +1240,9 @@ def main():
     logger.info("[monitor] %s %s", branch_email, run_line)
 
     max_turns_hit = False
+    # A cloud run's stdout log is its start's pty output, never a print-mode result.
     try:
-        with open(stdout_log, "r", encoding="utf-8") as f:
-            stdout_content = f.read()
+        stdout_content = "" if cloud_result else Path(stdout_log).read_text(encoding="utf-8")
         if '"stop_reason":"max_turns"' in stdout_content or '"stop_reason": "max_turns"' in stdout_content:
             max_turns_hit = True
             logger.warning("[monitor] %s HIT MAX TURNS after %ds — work may be incomplete", branch_email, duration)

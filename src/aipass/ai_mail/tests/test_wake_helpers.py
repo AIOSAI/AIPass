@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_wake_helpers.py
 # Description: Tests for the wake's small parts - dispatch status, the grant read, pid lock and branch resolution
-# Version: 1.3.3
+# Version: 1.3.4
 # Created: 2026-10-08
 # Modified: 2026-11-26
 # =============================================
@@ -23,6 +23,7 @@ from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 import aipass.ai_mail.apps.handlers.dispatch.pid_lock as pid_lock_mod
+from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
 from aipass.ai_mail.apps.handlers.dispatch.pid_lock import (
     acquire_lock,
     check_lock,
@@ -225,6 +226,26 @@ def test_the_lock_is_never_empty_while_the_wake_hands_it_to_the_monitor(tmp_path
     assert ok is True
     assert seen and all(json.loads(text)["pid"] for text in seen)
     assert json.loads(lock_file.read_text(encoding="utf-8"))["pid"] == 55555
+
+
+def test_a_wake_on_a_free_lock_closes_the_targets_rows_whose_monitor_is_gone(tmp_path, monkeypatch):
+    """A monitor killed mid-run leaves its row open; the next wake to that target closes it, and no other."""
+    _make_wake_fixtures(tmp_path, monkeypatch)
+    _patch_wake_deps(monkeypatch)
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
+    rows = {}
+    for name, target, pid in (("gone", "@testbranch", 4242), ("unknown", "@testbranch", 0), ("other", "@other", 4242)):
+        rows[name] = register_mod.open_dispatch(sender="@boss", target=target, subject=name, expected_seconds=600)
+        if pid:
+            register_mod.record_monitor_pid(rows[name], pid)
+    monkeypatch.setattr(register_mod, "check_pid_alive", lambda pid: pid != 4242)
+
+    status, ok = wake_branch("@testbranch")
+
+    assert ok is True
+    still_open = {row["dispatch_id"] for row in register_mod.outstanding()}
+    assert rows["gone"] not in still_open and {rows["unknown"], rows["other"]} <= still_open
+    assert _step(status, "gone") == ("info", "gone", f"closed register row {rows['gone']}: its monitor is gone")
 
 
 # --- check_pid_alive tests -------------------------------------------

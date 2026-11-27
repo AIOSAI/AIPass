@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_wake_blocklist.py
 # Description: Tests for FPLAN-0190 Task B — manual wake blocklist, and the cloud dispatch pre-send refusals
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-20
 # Modified: 2026-11-26
 # =============================================
@@ -211,6 +211,23 @@ class TestCloudDispatch:
 
         send.assert_not_called()
         assert "not sent: --model apply to local wakes, not --cloud" in capsys.readouterr().err
+
+    def test_a_body_over_64_kb_is_refused_before_any_start(self, monkeypatch, tmp_path):
+        """One argv string under script -c: the kernel caps it at 128 KiB, so a pasted log never starts."""
+        branch = tmp_path / "hooks"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"citizenship": {"cloud_environment_id": "env_01X"}}), encoding="utf-8"
+        )
+        monkeypatch.setattr(wake_mod, "resolve_branch", lambda target, admin=False: (branch, "@hooks"))
+        clean = json.dumps({"upstream": "origin/dev", "ahead": 0})
+        monkeypatch.setattr(cloud_mod, "run_cli", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, clean, ""))
+
+        assert cloud_mod.dispatch_refusal("@hooks", False, [], body="x" * 64_000) == (True, "")
+        assert cloud_mod.dispatch_refusal("@hooks", False, [], body="é" * 32_001) == (
+            False,
+            "cloud briefs are limited to 64 KB; put the log in the repo and name the path",
+        )
 
     def test_dispatch_help_names_the_cloud_flag(self, capsys):
         assert dispatch_mod.handle_command("dispatch", ["--help"]) is True

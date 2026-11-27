@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_wake_managers.py
 # Description: Tests for the wake's manager lanes, the cloud lane, the wake-back opt-out, the Fable grant and dashboard
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
 # Modified: 2026-11-26
 # =============================================
@@ -15,6 +15,7 @@
 
 import json
 import shlex
+from datetime import datetime
 import subprocess
 import sys
 import threading
@@ -23,6 +24,7 @@ from pathlib import Path as _Path
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
+import aipass.ai_mail.apps.modules.dispatch as dispatch_mod
 import aipass.ai_mail.apps.handlers.dispatch.wake_dashboard as wake_dashboard_mod
 import aipass.prax
 from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import TRANSCRIPT_NAMES
@@ -761,10 +763,11 @@ SHOW_SECOND_ARG = "#!/bin/sh\nprintf '%s' \"$2\"\n"
 class TestCloudWake:
     """cloud={"body"} spawns the monitor on `script -qfec <one command> <log>`, the mail tagged and named."""
 
-    def _wake(self, tmp_path, monkeypatch, passport):
+    def _wake(self, tmp_path, monkeypatch, passport, deps=None, **kwargs):
         branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
         (branch_path / ".trinity").mkdir()
-        (branch_path / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+        text = passport if isinstance(passport, str) else json.dumps(passport)
+        (branch_path / ".trinity" / "passport.json").write_text(text, encoding="utf-8")
         mail = {"id": "m1", "subject": "Fix it", "status": "new", "auto_execute": True}
         inbox = branch_path / ".ai_mail.local" / "inbox.json"
         inbox.write_text(json.dumps({"messages": [mail]}), encoding="utf-8")
@@ -773,10 +776,10 @@ class TestCloudWake:
         claude = tmp_path / "claude"
         claude.write_text(SHOW_SECOND_ARG, encoding="utf-8")
         claude.chmod(0o755)
-        _patch_wake_deps(monkeypatch, _find_claude_bin=lambda: str(claude))
+        _patch_wake_deps(monkeypatch, _find_claude_bin=lambda: str(claude), **(deps or {}))
         calls = _record_spawn_routes(monkeypatch)
         body = "Print $HOME and `whoami` verbatim; it's 'quoted'"
-        status, ok = wake_branch("@testbranch", subject="Fix it", cloud={"body": body}, fresh=True)
+        status, ok = wake_branch("@testbranch", subject="Fix it", cloud={"body": body}, fresh=True, **kwargs)
         return status, ok, calls, inbox, body
 
     def test_the_brief_reaches_claude_verbatim_through_one_script_command(self, tmp_path, monkeypatch):
@@ -811,3 +814,105 @@ class TestCloudWake:
         assert "has no citizenship.cloud_environment_id" in _step(status, "cloud")[2]
         assert "never falls back to a local wake" in _step(status, "cloud")[2]
         assert "cloud" not in json.loads(inbox.read_text(encoding="utf-8"))["messages"][0]
+
+    def test_the_register_expects_the_row_closed_after_start_ceiling_last_poll_and_last_mail(
+        self, tmp_path, monkeypatch
+    ):
+        self._wake(tmp_path, monkeypatch, {"citizenship": {"cloud_environment_id": "env_01X"}})
+
+        row = register_mod.outstanding()[0]
+        waited = datetime.fromisoformat(row["expected_by"]) - datetime.fromisoformat(row["ts"])
+        assert round(waited.total_seconds()) == 600 + 300 + 60 + 30
+
+    @pytest.mark.parametrize(
+        "passport, blocklist, deps, admin",
+        [
+            ({"identity": {"citizen_class": "manager"}}, frozenset(), {}, False),
+            ({}, frozenset({"@testbranch"}), {}, True),
+            ({}, frozenset(), {"branch_occupant": lambda p: "claude"}, False),
+        ],
+        ids=["manager", "blocklisted-admin", "interactive-seat"],
+    )
+    def test_the_local_seat_gates_never_stop_a_cloud_start(
+        self, tmp_path, monkeypatch, passport, blocklist, deps, admin
+    ):
+        """Manager gate, blocklist and occupancy guard the local seat; the cloud session never sits in it."""
+        monkeypatch.setattr(wake_mod, "WAKE_BLOCKLIST", blocklist)
+        passport = {**passport, "citizenship": {"cloud_environment_id": "env_01X"}}
+
+        status, ok, calls, _, _ = self._wake(tmp_path, monkeypatch, passport, deps, admin=admin)
+
+        assert ok is True and len(calls["popen"]) == 1
+        assert [status.find_step(s) for s in ("manager", "blocklist", "blocked")] == [None, None, None]
+
+    def test_an_unreadable_passport_refuses_the_cloud_start_instead_of_reading_as_a_manager(
+        self, tmp_path, monkeypatch
+    ):
+        status, ok, calls, _, _ = self._wake(tmp_path, monkeypatch, "{not json")
+
+        assert ok is False and calls["popen"] == []
+        assert status.find_step("manager") is None
+        assert "could not be read" in _step(status, "cloud")[2]
+
+
+class TestCloudSendLocalHalf:
+    """`dispatch @x "S" "B" --cloud`: the start's local half is checked before the mail; a failed start says re-run."""
+
+    def _cloud(self, monkeypatch, tmp_path, wake_ok=True, **wake_deps):
+        send = MagicMock(return_value=True)
+        printed: list = []
+        monkeypatch.setattr(dispatch_mod.console, "print", lambda msg="", **kw: printed.append(str(msg)))
+        deps = {
+            "_find_bin": lambda name: f"/usr/bin/{name}",
+            "resolve_branch": lambda target, admin=False: (tmp_path, "@hooks"),
+            "check_lock": lambda path: None,
+            "is_manager": lambda email: True,
+            "wake_branch": MagicMock(return_value=(wake_mod.DispatchStatus(), wake_ok)),
+            **wake_deps,
+        }
+        for name, value in deps.items():
+            monkeypatch.setattr(wake_mod, name, value)
+        monkeypatch.setattr(wake_mod.cloud_lane, "dispatch_refusal", lambda *a, **kw: (True, ""))
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send._send_direct", send)
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.email.send.resolve_sender_info",
+            lambda *a, **kw: {"email_address": "@ai_mail"},
+        )
+        dispatch_mod.handle_command("dispatch", ["@hooks", "S", "B", "--cloud"])
+        return send, printed
+
+    @staticmethod
+    def _no_script(name):
+        raise FileNotFoundError(f"{name} not found on PATH or at /usr/bin/{name}")
+
+    @pytest.mark.parametrize(
+        "deps, why",
+        [
+            ({"_find_bin": _no_script}, "script not found on PATH"),
+            ({"check_lock": lambda path: {"pid": 4242}}, "@hooks is busy: its dispatch lock is held (PID 4242)"),
+        ],
+        ids=["no-script", "lock-held"],
+    )
+    def test_a_start_the_local_half_would_refuse_is_refused_before_any_mail(
+        self, monkeypatch, tmp_path, capsys, deps, why
+    ):
+        send, _ = self._cloud(monkeypatch, tmp_path, **deps)
+
+        send.assert_not_called()
+        err = capsys.readouterr().err
+        assert "Dispatch to @hooks not sent: " in err and why in err
+
+    def test_a_failed_cloud_start_says_re_run_the_cloud_dispatch_and_never_a_local_wake(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        send, _ = self._cloud(monkeypatch, tmp_path, wake_ok=False)
+
+        assert send.call_args.args[:3] == ("@hooks", "S", "B")
+        err = capsys.readouterr().err
+        assert 're-run: drone @ai_mail dispatch @hooks "S" "B" --cloud' in err
+        assert "dispatch wake" not in err
+
+    def test_a_cloud_dispatch_to_a_manager_announces_the_start(self, monkeypatch, tmp_path):
+        _, printed = self._cloud(monkeypatch, tmp_path)
+
+        assert any("Waking @hooks" in line for line in printed)

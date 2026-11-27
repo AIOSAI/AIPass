@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_wake.py
 # Description: Tests for the dispatch monitor's wake-back - the sender wake, its log, the manager mail and the decline
-# Version: 1.3.2
+# Version: 1.3.4
 # Created: 2026-10-08
 # Modified: 2026-11-26
 # =============================================
@@ -814,12 +814,12 @@ class _Clock:
 URL12 = "https://github.com/o/r/pull/12"
 
 
-def _pr(number, head="claude/fix-abc", sha="a1"):
-    row = {"number": number, "head": head, "base": "dev", "state": "OPEN", "ci": "success", "title": f"T{number}"}
+def _pr(number, head="claude/fix-abc", sha="a1", base="dev", state="OPEN"):
+    row = {"number": number, "head": head, "base": base, "state": state, "ci": "success", "title": f"T{number}"}
     return {**row, "head_sha": sha, "url": f"https://github.com/o/r/pull/{number}"}
 
 
-def _cloud_run(tmp_path, monkeypatch, polls=(), view=True, delivered=True):
+def _cloud_run(tmp_path, monkeypatch, polls=(), view=True, delivered=True, ceiling=900):
     """Run the cloud lane with script, pr list and pr view faked; (result, argvs, mails sent, the mail after)."""
     inbox = tmp_path / "inbox.json"
     mail = {"id": MAIL, "subject": "S", "status": "new", "auto_execute": True, "cloud": {"requested": True}}
@@ -833,15 +833,31 @@ def _cloud_run(tmp_path, monkeypatch, polls=(), view=True, delivered=True):
             Path(cmd[-1]).write_text(said, encoding="utf-8")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if cmd[2:4] == ["pr", "list"]:
-            return SimpleNamespace(returncode=0, stdout=json.dumps(answers.pop(0) if answers else []), stderr="")
+            rows = answers.pop(0) if answers else []
+            if rows is None:
+                return SimpleNamespace(returncode=1, stdout="", stderr="gh: auth token expired")
+            # As drone @git pr list answers: --state defaults to open, --base filters the base.
+            flags = dict(zip(cmd[4::2], cmd[5::2]))
+            rows = [r for r in rows if flags.get("--state") == "all" or r["state"] == "OPEN"]
+            rows = [r for r in rows if "--base" not in flags or r["base"] == flags["--base"]]
+            return SimpleNamespace(returncode=0, stdout=json.dumps(rows), stderr="")
         return SimpleNamespace(returncode=0, stdout=f"#{cmd[4]} T\n\ndispatch: {MAIL}\nDid the thing.", stderr="")
 
     monkeypatch.setattr(cloud_mod, "run_cli", fake_cli)
     monkeypatch.setattr(cloud_mod, "time", _Clock())
     mails: list = []
     cmd = cloud_mod.start_cmd("script", "claude", "env_1", "brief", str(tmp_path / "start.out"))
-    cfg = {"mail": MAIL, "poll": 180, "ceiling": 900}
-    result = cloud_mod.run(cmd, tmp_path, {}, cfg, "@hooks", inbox, lambda s, b: mails.append((s, b)) or delivered)
+    cfg = {"mail": MAIL, "poll": 180, "ceiling": ceiling}
+    result = cloud_mod.run(
+        cmd,
+        tmp_path,
+        {},
+        cfg,
+        "@hooks",
+        inbox,
+        lambda s, b: mails.append((s, b)) or delivered,
+        lambda: argvs.append(["released", json.loads(inbox.read_text(encoding="utf-8"))["messages"][0]["cloud"]]),
+    )
     return result, argvs, mails, json.loads(inbox.read_text(encoding="utf-8"))["messages"][0]
 
 
@@ -876,12 +892,12 @@ class TestCloudLane:
             "@git",
             "pr",
             "list",
-            "--base",
-            "dev",
             "--head",
             "claude/",
             "--marker",
             MAIL,
+            "--state",
+            "all",
             "--json",
         ]
         assert len(lists) == 4
@@ -900,6 +916,62 @@ class TestCloudLane:
             "mailed",
         )
 
+    def test_the_session_id_parses_from_a_coloured_or_renamed_label(self):
+        """Under script's pty the label may carry colour codes or a new name; the URL alone is the session."""
+        for said in (f"\x1b[1mView:\x1b[0m \x1b[4m{URL}?from=cli\x1b[0m\n", f"Open: {URL}?from=cli\n"):
+            assert cloud_mod.parse_view(said) == ("session_01ABC", f"{URL}?from=cli"), said
+
+    def test_a_pr_merged_before_its_first_sighting_is_mailed_and_ends_the_poll(self, monkeypatch, tmp_path):
+        merged = [_pr(12, state="MERGED")]
+        result, argvs, mails, mail = _cloud_run(tmp_path, monkeypatch, [merged] * 5)
+
+        assert len(_pr_lists(argvs)) == 1
+        assert [s for s, _ in mails] == ["Cloud dispatch result: @hooks PR #12 (ci success)"]
+        assert "state MERGED" in mails[0][1]
+        assert (mail["cloud"]["ended"], result["status"]) == ("closed", "completed (cloud PR #12)")
+
+    def test_a_second_pr_merged_between_two_reads_is_still_mailed(self, monkeypatch, tmp_path):
+        polls = [[_pr(12)], [_pr(12, state="MERGED"), _pr(13, state="MERGED")]]
+        result, _, mails, _ = _cloud_run(tmp_path, monkeypatch, polls)
+
+        assert [s.split(" PR ")[1] for s, _ in mails] == ["#12 (ci success)", "#13 (ci success)"]
+        assert result["status"] == "completed (cloud PR #12, #13)"
+
+    def test_a_pr_against_the_wrong_base_is_mailed_with_its_base(self, monkeypatch, tmp_path):
+        polls = [[_pr(12, base="main")], [_pr(12, base="main", state="CLOSED")]]
+        result, _, mails, _ = _cloud_run(tmp_path, monkeypatch, polls)
+
+        assert [s for s, _ in mails] == ["Cloud dispatch result: @hooks PR #12 (ci success)"]
+        assert "Head: claude/fix-abc -> main" in mails[0][1]
+        assert result["status"] == "completed (cloud PR #12)"
+
+    def test_five_failed_pr_list_reads_in_a_row_end_the_poll_failed_with_the_last_error(self, monkeypatch, tmp_path):
+        result, argvs, mails, mail = _cloud_run(
+            tmp_path, monkeypatch, [None, [], None, None, None, None, None], ceiling=3600
+        )
+
+        assert len(_pr_lists(argvs)) == 7
+        assert [s for s, _ in mails] == ["Cloud dispatch failed: @hooks, pr list unreadable"]
+        assert "5 drone @git pr list reads in a row failed" in mails[0][1]
+        assert "gh: auth token expired" in mails[0][1] and f"Session: {URL}" in mails[0][1]
+        assert result["status"].startswith("FAILED (pr list failed 5 times in a row: drone @git pr list")
+        assert "gh: auth token expired" in result["status"] and result["wake_result"] == "mailed_failure"
+        assert result["exit_code"] == cloud_mod.POLL_FAILED and mail["cloud"]["ended"] == "pr list failed"
+
+    def test_the_timeout_mail_counts_the_failed_pr_list_reads(self, monkeypatch, tmp_path):
+        _, _, mails, _ = _cloud_run(tmp_path, monkeypatch, [None, [], None])
+
+        assert "2 of the 5 pr list reads failed" in mails[0][1]
+
+    def test_the_brief_footer_tells_the_session_to_check_its_install(self):
+        said = cloud_mod.brief("Do it.", "@hooks", MAIL)
+
+        assert said.startswith("Do it.\n\n---\nYou are @hooks in a Claude Code cloud VM")
+        assert (
+            "First run `drone @hooks --help`; if AIPass is not installed, open the PR anyway with the setup output "
+            "in the body." in said
+        )
+
     def test_a_second_pr_after_a_steer_is_a_new_result(self, monkeypatch, tmp_path):
         _, _, mails, mail = _cloud_run(tmp_path, monkeypatch, [[_pr(12)], [_pr(12), _pr(13)]])
 
@@ -912,6 +984,21 @@ class TestCloudLane:
         assert [s for s, _ in mails] == ["Cloud dispatch result: @hooks PR #12 (ci success)"] * 2
         assert "PR: #12 https://github.com/o/r/pull/12" in mails[0][1]
         assert [r["head_sha"] for r in mail["cloud"]["results"]] == ["b2"]
+
+    def test_the_local_lock_is_released_once_the_session_is_on_the_mail_and_before_the_poll(
+        self, monkeypatch, tmp_path
+    ):
+        _, argvs, _, _ = _cloud_run(tmp_path, monkeypatch, [[_pr(12)], []])
+
+        released = [i for i, a in enumerate(argvs) if a[0] == "released"]
+        assert len(released) == 1
+        assert argvs[released[0]][1]["session_id"] == "session_01ABC"
+        assert released[0] < argvs.index(_pr_lists(argvs)[0])
+
+    def test_no_session_releases_nothing_early(self, monkeypatch, tmp_path):
+        _, argvs, _, _ = _cloud_run(tmp_path, monkeypatch, view=False)
+
+        assert not [a for a in argvs if a[0] == "released"]
 
     def test_a_result_mail_that_did_not_go_is_not_reported_as_mailed(self, monkeypatch, tmp_path):
         result, _, mails, _ = _cloud_run(tmp_path, monkeypatch, [[_pr(12)], []], delivered=False)
@@ -933,9 +1020,10 @@ class TestCloudLane:
         result, argvs, mails, mail = _cloud_run(tmp_path, monkeypatch, view=False)
 
         assert result["exit_code"] == cloud_mod.START_FAILED
-        assert result["status"] == "REFUSED (cloud start printed no View line)"
+        assert result["status"] == "REFUSED (no session id in the cloud start output)"
         assert [s for s, _ in mails] == ["Cloud dispatch refused: @hooks"]
-        assert "printed no View line" in mails[0][1] and "Error: no environment" in mails[0][1]
+        said = "no session id found in the start output; a session may still exist, check claude.ai/code"
+        assert said in mails[0][1] and "Error: no environment" in mails[0][1]
         assert _pr_lists(argvs) == [] and "session_id" not in mail["cloud"]
 
     def test_the_monitor_runs_the_cloud_lane_in_place_of_an_agent_and_reports_its_wake_back(
