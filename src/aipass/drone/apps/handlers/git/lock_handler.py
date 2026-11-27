@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lock_handler.py
 # Description: Atomic lock management for git PR workflow
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-17
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -21,7 +21,7 @@ from pathlib import Path
 from aipass.prax import logger
 from aipass.drone.apps.handlers.exceptions import RepoRootError
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.drone.apps.handlers.router_handler import caller_cwd, registry_named_entries
+from aipass.drone.apps.handlers.router_handler import caller_seat, registry_named_entries
 
 _LOCK_FILENAME = ".git_pr.lock"
 _STALE_THRESHOLD_SECONDS = 600
@@ -54,7 +54,7 @@ def find_repo_root() -> Path:
     uses find_registry's order, AIPASS_HOME then the walk up from this file.
     Raises RepoRootError when the CWD is in no git repository and below no registry.
     """
-    cwd = caller_cwd()
+    cwd = caller_seat()
     current = cwd
     while current is not None and current != current.parent:
         if registry_named_entries(current):

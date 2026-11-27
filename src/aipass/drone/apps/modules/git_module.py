@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.21.0
+# Version: 1.21.1
 # Created: 2026-03-17
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -55,7 +55,7 @@ from aipass.drone.apps.handlers.git import (
 )
 from aipass.drone.apps.handlers.deletion_log import UNKNOWN_CALLER
 from aipass.drone.apps.handlers.help_flags import help_topic, wants_help
-from aipass.drone.apps.handlers.router_handler import caller_cwd
+from aipass.drone.apps.handlers.router_handler import caller_cwd, caller_seat
 from aipass.drone.apps.handlers.json_flags import strip_json_flag, wants_json
 
 DRONE_MODULE = {
@@ -138,7 +138,7 @@ def _detect_branch_dir() -> tuple[str, Path] | None:
     Returns None when the process has no CWD. Raises ValueError on an unreadable
     passport: corrupt is a failure to report, never "not inside a branch".
     """
-    cwd = caller_cwd()
+    cwd = caller_seat()
     if cwd is None:
         return None
     current = cwd.resolve()

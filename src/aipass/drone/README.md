@@ -103,7 +103,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | Doc | What it covers |
 |---|---|
 | [docs/routing_and_resolution.md](docs/routing_and_resolution.md) | The routing decision tree, the two kinds of module, registry resolution, the Python API, interactive commands, the help-flag rule, external projects |
-| [docs/caller_identity.md](docs/caller_identity.md) | Who a routed command is attributed to, why provenance travels with the name, and what each log level means |
+| [docs/caller_identity.md](docs/caller_identity.md) | Who a routed command is attributed to, why provenance travels with the name, what each log level means, and the cloud seat (`AIPASS_SEAT`) at a repo root |
 | [docs/subprocess_timeouts.md](docs/subprocess_timeouts.md) | The deadline ladder: the default, the idle grace, the ceiling, and why output extends life |
 | [docs/git_access.md](docs/git_access.md) | The three tiers, how owner and ci-cure are earned per repo, the session fence, the upstream issue lane, the two refusal species, the dev branch model, the plugins |
 | [docs/git_interface.md](docs/git_interface.md) | What each verb does: scoping, the `--json` machine surface, remote redaction, the commit subject cap, commit with paths, the pre-commit lane, tag lanes, gh passthrough |
@@ -134,7 +134,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ---
 
-**Last Updated:** 2026-11-25
+**Last Updated:** 2026-11-26
 
 ---
 [← Back to AIPass](../../../README.md)

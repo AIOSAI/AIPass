@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: deletion_log.py
 # Description: Durable record of every delete and archive-move drone performs
-# Version: 1.6.1
+# Version: 1.6.2
 # Created: 2026-08-14
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Durable record of every delete and archive-move drone performs: docs/rm_and_the_record.md."""
@@ -20,7 +20,7 @@ from pathlib import Path
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.router_handler import (
-    caller_cwd,
+    caller_seat,
     find_project_root,
     resolve_caller_identity_signal,
 )
@@ -246,7 +246,7 @@ def record_deletion(
     ``mode``/``age``/``target``/``moved_to``/``exemption`` add keys only when given; a plain delete keeps twelve.
     Never raises: losing the log must not turn into losing the delete. ``strict`` re-raises a store failure.
     """
-    cwd = Path(cwd) if cwd is not None else caller_cwd()
+    cwd = Path(cwd) if cwd is not None else caller_seat()
     caller = caller or _resolve_citizen_caller(cwd)
     shape = measurement or _kind_only(resolved)
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-03-05
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -29,7 +29,7 @@ from aipass.drone.apps.modules import (
     RepoRootError,
 )
 from aipass.drone.apps.modules.resolver import branch_exists, get_all_branches
-from aipass.drone.apps.modules.router import caller_cwd, registry_named_entries, route_command
+from aipass.drone.apps.modules.router import caller_cwd, caller_seat, registry_named_entries, route_command
 from aipass.drone.apps.modules.module_registry import (
     is_module,
     list_modules,
@@ -534,7 +534,7 @@ def _find_seat_inbox() -> Path | None:
     The first passport found is the only seat this caller may address, even if its inbox is absent.
     No CWD means no seat.
     """
-    cwd = caller_cwd()
+    cwd = caller_seat()
     if cwd is None:
         return None
     for parent in [cwd] + list(cwd.parents):

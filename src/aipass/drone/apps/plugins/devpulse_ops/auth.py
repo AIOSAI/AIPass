@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.16.0
+# Version: 1.16.1
 # Created: 2026-03-30
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -21,7 +21,7 @@ from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.repo_context import AIPASS_REGISTRY_NAME
 from aipass.drone.apps.handlers.git import release_handler, repo_door, session_home
-from aipass.drone.apps.modules.router import caller_cwd
+from aipass.drone.apps.modules.router import caller_seat
 from aipass.drone.apps.modules import RegistryMismatchError
 from aipass.drone.apps.modules.config import get_registry_path
 from aipass.drone.apps.modules.registry import load_registry
@@ -240,7 +240,7 @@ def _resolve_caller() -> Caller:
 
     Raises PermissionError if no readable, named passport is found, or there is no cwd (fails closed).
     """
-    cwd = caller_cwd()
+    cwd = caller_seat()
     if cwd is None:
         msg = (
             "This process has no current directory — it was deleted out from under it. "

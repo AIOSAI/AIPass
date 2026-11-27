@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router.py
 # Description: Command routing logic for the drone module
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-03-09
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -19,8 +19,9 @@ from aipass.drone.apps.handlers.executor import CommandResult, resolve_timeout
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.router_handler import (
     execute_branch_command,
-    caller_cwd,
+    caller_seat,
     # Re-exported for apps/drone.py: the entry point keeps one seam into handlers.
+    caller_cwd,  # noqa: F401
     registry_named_entries,  # noqa: F401
     resolve_caller_identity,
 )
@@ -101,7 +102,7 @@ def route_command(
     extend_on_output = timeout is None
 
     # Same resolver execute_branch_command uses, so the tag names who is stamped on the work.
-    caller = resolve_caller_identity(caller_cwd())
+    caller = resolve_caller_identity(caller_seat())
     # UNKNOWN, not an empty tag: an omitted caller hides the gap.
     caller_tag = f" [CALLER:{caller}]" if caller else " [CALLER:UNKNOWN]"
     logger.info(

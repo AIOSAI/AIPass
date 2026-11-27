@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_handler.py
 # Description: Handler for registry file operations
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-03-09
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -25,7 +25,7 @@ from .exceptions import (
     RegistryPermissionError,
 )
 from aipass.drone.apps.handlers.json import json_handler
-from .router_handler import caller_cwd, registry_named_entries
+from .router_handler import caller_seat, registry_named_entries
 
 
 def _validate_branch_path(branch_path: Path, project_root: Path, branch_name: str) -> bool:
@@ -251,7 +251,7 @@ def _registry_matches_credential(registry_path: Path) -> bool:
     if not registry_id:
         return True
 
-    cwd = caller_cwd()
+    cwd = caller_seat()
     if cwd is None:
         logger.info(
             "Credential pre-check for %s has no current directory to walk from — "
@@ -284,7 +284,7 @@ def find_registry() -> Path:
     Order: walk up from cwd (skipping credential mismatches), the AIPass home,
     walk up from this package, then the package's project root.
     """
-    cwd = caller_cwd()
+    cwd = caller_seat()
     if cwd is not None:
         for parent in [cwd] + list(cwd.parents):
             hit = _first_registry_in(parent)
@@ -340,7 +340,7 @@ def _verify_registry_credential(registry_path: Path, registry_data: Dict[str, An
         if not registry_id:
             return
 
-        cwd = caller_cwd()
+        cwd = caller_seat()
         if cwd is None:
             logger.info(
                 "Registry credential verification for %s has no current directory to walk from — "
