@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_start.py
-# Version: 1.6.1
+# Version: 1.6.2
 # Description: Resets cadence counter on new chat / clear; injects the culture file; writes the session pointer
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-07
-# Modified: 2026-11-22
+# Modified: 2026-11-27
 # =============================================
 
 """SessionStart: resets the cadence counter, injects the culture file, writes the session pointer.
@@ -70,7 +70,7 @@ def _handle_culture(hook_data: dict) -> dict:
 
 
 def _interactive(provider: str, hook_data: dict) -> bool:
-    """Whether a person runs this session: Codex's rollout session_meta source is not "exec", Claude's argv has no -p.
+    """Whether a person runs this session: Codex's rollout source is not "exec", Claude's argv has no -p or --cloud.
 
     Unreadable, or a Seed head (no resume to reopen), answers False: a headless pointer reopens an empty chat."""
     if provider == "seed":
@@ -86,7 +86,8 @@ def _interactive(provider: str, hook_data: dict) -> bool:
         return isinstance(source, str) and source != "exec"
     sessions = importlib.import_module("aipass.hooks.apps.modules.cc_sessions")
     args = sessions.cli_ancestor("claude")
-    return args is not None and not {"-p", "--print"} & set(args[1:])
+    # --cloud: a local launcher for a VM session that never writes a transcript here.
+    return args is not None and not {"-p", "--print", "--cloud"} & set(args[1:])
 
 
 def handle_session_pointer(hook_data: dict) -> dict:

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_start.py
-# Version: 1.6.0
+# Version: 1.6.1
 # Description: Tests for the SessionStart handlers: cadence reset, the culture file, the session pointer
 # Branch: hooks
 # Created: 2026-07-07
-# Modified: 2026-11-16
+# Modified: 2026-11-27
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_start.py."""
@@ -102,7 +102,7 @@ class TestSessionPointer:
         assert pointer is not None
         assert (pointer["session_id"], pointer["provider"]) == ("s-claude", "claude")
 
-    @pytest.mark.parametrize("flag", ["-p", "--print"])
+    @pytest.mark.parametrize("flag", ["-p", "--print", "--cloud"])
     def test_a_headless_claude_session_writes_no_pointer(self, tmp_path, claude_argv, flag):
         claude_argv["args"] = ["/home/u/.local/bin/claude", "--resume", "s-claude", flag, "Hi."]
         branch = _branch(tmp_path)
