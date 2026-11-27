@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.10.0
+# Version: 2.10.2
 # Created: 2026-03-05
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 """Branch Audit Handler — auto-discovers checkers from handlers/*_standards/ packs via glob."""
 
@@ -16,7 +16,7 @@ from aipass.prax import logger
 from aipass.sentry.apps.handlers.bypass import dead_rules, ignore_handler, inert
 from aipass.sentry.apps.handlers.aipass_standards import applicability
 from aipass.sentry.apps.handlers.aipass_standards.skip_dirs import is_disabled_file, is_throwaway_path
-from aipass.sentry.apps.handlers.audit import incremental_cache
+from aipass.sentry.apps.handlers.audit import grouping, incremental_cache
 from aipass.sentry.apps.handlers.audit.artifact import DEFAULT_PACK_NAME
 from aipass.sentry.apps.handlers.audit.discovery import measure_pack_corpus, pack_corpus
 from aipass.sentry.apps.handlers.checklist import verdicts
@@ -27,12 +27,15 @@ from aipass.sentry.apps.handlers.test_map.function_scanner import scan_branch
 OBSERVE_LOG_MODULE = "branch_observe"
 
 
+DEFAULT_PACK_DIR = Path(__file__).resolve().parent.parent / "aipass_standards"
+
+
 def discover_checkers(pack_path: Path | None = None) -> Dict[str, Any]:
     """Auto-discover all *_check.py modules from a pack directory (default handlers/aipass_standards/).
 
     Memoised on the checker files' stamps; a copy is returned because callers add entries.
     """
-    standards_dir = pack_path if pack_path is not None else Path(__file__).resolve().parent.parent / "aipass_standards"
+    standards_dir = pack_path if pack_path is not None else DEFAULT_PACK_DIR
     stamps = tuple(sorted(incremental_cache.compute_checker_stamps(standards_dir).items()))
     return dict(_load_checkers(standards_dir.resolve(), stamps))
 
@@ -382,8 +385,9 @@ def _run_all_files(
     bypass_rules: list,
     file_result_cache: Dict[str, Dict[str, Any]] | None = None,
     unchanged_files: set | None = None,
+    counts: Dict[str, List[int]] | None = None,
 ) -> tuple:
-    """Run checker on every file. Returns (violations, scores, declined).
+    """Run checker on every file. Returns (violations, scores, declined); each judged file's checks tally into counts.
 
     A file stands down only by contract: all checks pass and one carries ``"declined": True``;
     the message text is never read to decide it.
@@ -404,6 +408,8 @@ def _run_all_files(
             declined.append(fi.get("rel") or fi["name"])
         elif checks:
             scores.append(score)
+            if counts is not None:
+                grouping.tally(counts, checks)
         # A file scoring 75-99 still lowers the score, so its violations must be reported.
         if failed:
             msgs = [c.get("message", "Unknown") for c in failed]
@@ -499,9 +505,47 @@ def _bypass_hygiene(
         files_with_init = _collect_py_files(branch_path, include_init=True)
     corpus = [fi["file"] for fi in files_with_init]
     return {
-        "bypass_dead": dead_rules.dead_rules(branch_path, bypass_rules, known),
+        "bypass_dead": dead_rules.dead_rules(branch_path, bypass_rules, known, listers=checkers),
         "bypass_markers": dead_rules.bypass_markers(branch_path, corpus),
     }
+
+
+def _apply_registry_rows(
+    results: Dict[str, Any],
+    scores: Dict[str, int],
+    violations: Dict[str, list],
+    pack_dir: Path,
+    branch_path: Path,
+    checkers,
+) -> None:
+    """The pack_registry row: judged on the branch that holds the pack, stood down on every other."""
+    if not pack_dir.is_relative_to(branch_path.resolve()):
+        results[grouping.REGISTRY_ROW] = grouping.registry_stood_down()
+        return
+    problems = grouping.registry_problems(pack_dir, set(checkers) - {"diagnostics"})
+    results[grouping.REGISTRY_ROW] = grouping.registry_result(problems)
+    scores[grouping.REGISTRY_ROW] = results[grouping.REGISTRY_ROW]["score"]
+    path = (pack_dir / grouping.REGISTRY_FILE).as_posix()
+    found = {
+        "file": grouping.REGISTRY_FILE,
+        "path": path,
+        "score": 0,
+        "issues": problems,
+        "message": "; ".join(problems),
+    }
+    violations[grouping.REGISTRY_ROW] = [found] if problems else []
+
+
+def _apply_registry(output: Dict[str, Any], pack_dir: Path, branch_path: Path, checkers) -> None:
+    """Refresh a cached output's registry row, its violations and its groups from the pack as it is now."""
+    violations: Dict[str, list] = {}
+    _apply_registry_rows(output["results"], output["scores"], violations, pack_dir, branch_path, checkers)
+    if grouping.REGISTRY_ROW in violations:
+        output[f"{grouping.REGISTRY_ROW}_violations"] = violations[grouping.REGISTRY_ROW]
+    output["groups"] = grouping.group_rows(output["scores"], pack_dir)
+    advisory = set(output.get("advisory_standards", []))
+    gating = [score for name, score in output["scores"].items() if name not in advisory]
+    output["average"] = int(sum(gating) / len(gating)) if gating else 0
 
 
 def audit_branch(
@@ -532,6 +576,7 @@ def audit_branch(
     ignored_paths = sorted(rel for rels in ignored.values() for rel in rels)
 
     results, scores, all_violations, declined_files = {}, {}, {}, {}
+    rule_counts: Dict[str, Dict[str, List[int]]] = {}
 
     try:
         diag_mod = _load_diagnostics_checker()
@@ -555,6 +600,7 @@ def audit_branch(
                     logger.info("Branch-level checker %s is not applicable for %s", name, branch_path)
                 else:
                     scores[name] = r.get("score", 0)
+                    grouping.tally(rule_counts.setdefault(name, {}), r.get("checks", []))
                 all_violations[name] = _extract_branch_level_violations(r)
             except Exception as e:
                 logger.info("Branch-level checker %s failed: %s", name, e)
@@ -581,12 +627,15 @@ def audit_branch(
         results[name] = r
         if r.get("not_applicable") is not True:
             scores[name] = r.get("score", 0)
+            if scope != "all_files":
+                grouping.tally(rule_counts.setdefault(name, {}), r.get("checks", []))
         if scope == "all_files" and all_files:
             # The entry pass above already judged entry_file; served from its fresh result, not recomputed.
             reuse: set = set(unchanged_files or ())
             if runs_on_entry_file and "error" not in r:
                 reuse.add(entry_rel)
-            v, s, d = _run_all_files(checker, name, scan_files, bypass_rules, file_result_cache, reuse)
+            counts = rule_counts.setdefault(name, {})
+            v, s, d = _run_all_files(checker, name, scan_files, bypass_rules, file_result_cache, reuse, counts)
             all_violations[name] = v
             if d:
                 declined_files[name] = d
@@ -633,6 +682,9 @@ def audit_branch(
                     {"name": "Post-check ran", "passed": False, "message": detail}
                 )
 
+    pack_dir = (pack_path if pack_path is not None else DEFAULT_PACK_DIR).resolve()
+    _apply_registry_rows(results, scores, all_violations, pack_dir, branch_path, checkers)
+
     info_lines = _collect_branch_info(checkers, branch_path, branch["name"])
     observations = _collect_branch_observations(checkers, branch_path, branch["name"], bypass_rules)
 
@@ -657,6 +709,7 @@ def audit_branch(
         "branch": branch,
         "results": results,
         "scores": scores,
+        "rule_scores": {name: rows for name, c in sorted(rule_counts.items()) if (rows := grouping.rule_scores(c))},
         # The files each row did not judge; its number averages the rest.
         "declined": declined_files,
         "ignored": {pattern: sorted(rels) for pattern, rels in ignored.items()},
@@ -675,8 +728,10 @@ def audit_branch(
         "info_lines": info_lines,
         "observations": observations,
     }
-    for name in checkers:
-        output[f"{name}_violations"] = all_violations.get(name, [])
+    output["groups"] = grouping.group_rows(scores, pack_dir)
+    for name in [*checkers, grouping.REGISTRY_ROW]:
+        if name in checkers or name in scores:
+            output[f"{name}_violations"] = all_violations.get(name, [])
     return output
 
 
@@ -729,6 +784,8 @@ def audit_branch_incremental(
             # Observations read live runtime state; a cached one is a past moment served as current.
             output["observations"] = _collect_branch_observations(checkers, branch_path, branch_name, bypass_rules)
             output.update(_bypass_hygiene(branch_path, bypass_rules, checkers, pack_path))
+            # groups.py carries no stamp: the registry row and the grouping are read live.
+            _apply_registry(output, resolved_pack_path.resolve(), branch_path, checkers)
             output["_cache_hit"] = True
             return output
 

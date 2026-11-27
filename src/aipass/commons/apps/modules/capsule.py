@@ -3,7 +3,7 @@
 # Description: Time Capsule Orchestration Module
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -34,14 +34,34 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("capsule")
-    console.print("Time capsule orchestration — sealing, listing, and opening time capsules")
+    console.print("[bold cyan]capsule - Time Capsules[/bold cyan]")
+    console.print("[dim]Seals, lists and opens time capsules.[/dim]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/artifacts/")
-    console.print("    - capsule_ops.py (seal_capsule — seal a new time capsule)")
-    console.print("    - capsule_ops.py (list_capsules — list all time capsules)")
-    console.print("    - capsule_ops.py (open_capsule — open a ready time capsule)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/artifacts/[/cyan]")
+    console.print("    [cyan]-[/cyan] capsule_ops.py [dim](seal_capsule — seal a new time capsule)[/dim]")
+    console.print("    [cyan]-[/cyan] capsule_ops.py [dim](list_capsules — list all time capsules)[/dim]")
+    console.print("    [cyan]-[/cyan] capsule_ops.py [dim](open_capsule — open a ready time capsule)[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @commons capsule --help' for usage[/dim]")
+    console.print()
+
+
+def print_help():
+    """Display usage help."""
+    console.print()
+    console.print("[bold cyan]capsule - Time Capsules[/bold cyan]")
+    console.print("[dim]Seals, lists and opens time capsules.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print('  [cyan]drone @commons capsule[/cyan] "title" "content" <days>')
+    console.print("  [cyan]drone @commons capsules[/cyan]")
+    console.print("  [cyan]drone @commons open[/cyan] <capsule_id>")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print('  [cyan]drone @commons capsule "Note" "See you later" 7[/cyan]')
+    console.print("  [cyan]drone @commons capsules[/cyan]")
+    console.print("  [cyan]drone @commons open 3[/cyan]")
     console.print()
 
 
@@ -52,6 +72,10 @@ def print_introspection():
 
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle time capsule commands."""
+    if command in ("capsule", "capsules", "open") and ("--help" in args or "-h" in args):
+        print_help()
+        return True
+
     if command not in ["capsule", "capsules", "open"]:
         return False
 

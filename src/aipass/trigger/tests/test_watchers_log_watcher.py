@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_watchers_log_watcher.py
 # Description: Unit tests for centralized system_logs log watcher
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-03
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for the centralized system_logs watcher (apps/handlers/watchers/log_watcher.py)."""
@@ -92,19 +92,19 @@ class TestDetectBranchFromLog:
 
     def test_branch_module_pattern(self):
         """sentry_audit.log returns SENTRY."""
-        assert wlw.detect_branch_from_log("sentry_audit.log") == "SENTRY"
+        assert wlw.detect_branch_from_log("sentry_audit.log") == "sentry"
 
     def test_simple_log(self):
         """simple.log returns SIMPLE."""
-        assert wlw.detect_branch_from_log("simple.log") == "SIMPLE"
+        assert wlw.detect_branch_from_log("simple.log") == "simple"
 
     def test_full_path(self, tmp_path):
         """Works with a full path, not just filename."""
-        assert wlw.detect_branch_from_log(str(tmp_path / "logs" / "trigger_events.log")) == "TRIGGER"
+        assert wlw.detect_branch_from_log(str(tmp_path / "logs" / "trigger_events.log")) == "trigger"
 
     def test_multiple_underscores(self):
         """ai_mail_dispatch.log returns AI (first part before underscore)."""
-        assert wlw.detect_branch_from_log("ai_mail_dispatch.log") == "AI"
+        assert wlw.detect_branch_from_log("ai_mail_dispatch.log") == "ai"
 
 
 class TestDetectLogLevel:
@@ -311,7 +311,7 @@ class TestLogFileWatcherRotationDrain:
         lines = _processed_lines(mock_proc)
         assert any("real tail failure" in line for line in lines)
         assert not any("Module initialized" in line for line in lines)
-        assert all(call.args[0] == "PRAX" for call in mock_proc.call_args_list)
+        assert all(call.args[0] == "prax" for call in mock_proc.call_args_list)
         assert all(call.args[2] == file_path for call in mock_proc.call_args_list)
 
     def test_stale_backup_inode_mismatch_not_reprocessed(self, tmp_path):

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: diagnostics.py
-# Version: 1.2.1
+# Version: 1.2.2
 # Description: JSONL diagnostic logging for hook engine
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-05-19
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """JSONL diagnostic logging — appends structured entries for hook activity."""
@@ -43,7 +43,7 @@ def log_entry(entry: dict) -> None:
     try:
         append_jsonl(_get_log_file(), entry)
     except OSError as exc:
-        logger.error("[HOOKS] log write failed: %s", exc)
+        logger.error("[hooks] log write failed: %s", exc)
 
 
 def trail_event(event: str) -> None:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_hooks_track_e.py
 # Description: DPLAN-0139 Track E — single-path enforcement tests
-# Version: 1.3.3
+# Version: 1.3.4
 # Created: 2026-04-21
-# Modified: 2026-11-17
+# Modified: 2026-11-25
 # =============================================
 """Tests for apps/modules/permissions.py and apps/modules/inbox_audit.py, DPLAN-0139 Track E single-path enforcement."""
 
@@ -118,7 +118,7 @@ def test_handle_command_claims_its_own_command_and_renders_the_trust_list(capsys
         assert member in out
 
     assert permissions.handle_command("permissions", ["--help"]) is True
-    assert "TRUSTED_CROSS_WRITERS" in capsys.readouterr().out
+    assert "Usage:" in capsys.readouterr().out
 
 
 def test_inbox_audit_ignores_non_audit_command():
@@ -286,7 +286,7 @@ def test_inbox_ids_help_does_not_run_the_repo_wide_scan():
     """`drone @sentry audit inbox-ids --help` explains and never runs the scan, asserted on a mock."""
     with (
         patch.object(inbox_audit, "_run_inbox_id_scan") as scan,
-        patch.object(inbox_audit, "print_introspection") as shown,
+        patch.object(inbox_audit, "print_help") as shown,
     ):
         assert inbox_audit.handle_command("audit", ["inbox-ids", "--help"]) is True
 
@@ -312,7 +312,7 @@ def test_inbox_audit_help_flag_does_not_claim_another_audit_subcommand():
 
 def test_permissions_help_after_an_argument_explains():
     """`drone @sentry permissions list --help` fell through to "Unknown command"."""
-    with patch.object(permissions, "print_introspection") as shown:
+    with patch.object(permissions, "print_help") as shown:
         assert permissions.handle_command("permissions", ["list", "--help"]) is True
 
     assert shown.call_count == 1
@@ -320,7 +320,7 @@ def test_permissions_help_after_an_argument_explains():
 
 def test_permissions_does_not_answer_for_another_command():
     """Ownership first: a help flag never makes a module claim a command it does not own."""
-    with patch.object(permissions, "print_introspection") as shown:
+    with patch.object(permissions, "print_help") as shown:
         assert permissions.handle_command("checklist", ["--help"]) is False
 
     assert shown.call_count == 0

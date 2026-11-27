@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: fleet.py
 # Description: Fleet definition module — introspection of the fleet names the package door hands out
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-08-30
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -37,6 +37,24 @@ def print_introspection() -> None:
     console.print("  RESIDENCY_CORE / RESIDENT / EXTERNAL              -> the three tier labels")
     console.print()
     console.print("[dim]Library names — import from: aipass.memory[/dim]")
+    console.print("[dim]Run drone @memory fleet --help for more[/dim]")
+
+
+def print_help() -> None:
+    """Display fleet help (sentry standard)."""
+    from aipass.cli import console
+
+    console.print()
+    console.print("[bold cyan]fleet[/bold cyan] - introspection of the fleet-definition library")
+    console.print()
+    console.print("[bold]USAGE:[/bold]")
+    console.print("  drone @memory fleet             Show the public API")
+    console.print("  drone @memory fleet --help      Show this help")
+    console.print("  Library module, imported from aipass.memory; this verb only describes it")
+    console.print()
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  [dim]drone @memory fleet[/dim]")
+    console.print()
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -52,7 +70,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if args[0] in ("--help", "-h", "help"):
-        print_introspection()
+        print_help()
         return True
 
     from aipass.cli import error

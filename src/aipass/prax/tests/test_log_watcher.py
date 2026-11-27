@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_log_watcher.py
 # Description: Tests for log file monitoring handler
-# Version: 1.3.1
+# Version: 1.6.0
 # Created: 2026-04-03
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/monitoring/log_watcher.py."""
@@ -137,7 +137,7 @@ class TestExtractCommandInfo:
         assert result == {
             "command": "drone dispatch @devpulse Subject, with a comma",
             "caller": None,
-            "target": "DEVPULSE",
+            "target": "devpulse",
         }
 
     def test_flow_creating_plan(self):
@@ -146,6 +146,21 @@ class TestExtractCommandInfo:
         line = "[FLOW] Creating new flow plan"
         result = watcher._extract_command_info(line)
         assert result == {"command": "flow create plan", "caller": None, "target": None}
+
+    def test_flow_tag_in_lowercase_gives_the_same_event(self):
+        """Mutant: the flow match back to a case-sensitive "[FLOW]" drops the lowercase line."""
+        mod = _import_log_watcher()
+        watcher, _ = _make_watcher(mod)
+        assert watcher._extract_command_info("[flow] Creating new flow plan") == {
+            "command": "flow create plan",
+            "caller": None,
+            "target": None,
+        }
+        assert watcher._extract_command_info("[flow_plan] Closing FPLAN-0164") == {
+            "command": "flow close plan 0164",
+            "caller": None,
+            "target": None,
+        }
 
     def test_flow_closing_plan(self):
         mod = _import_log_watcher()
@@ -168,7 +183,7 @@ class TestExtractCommandInfo:
         result = watcher._extract_command_info(line)
         assert result is not None
         assert "sentry audit" in result["command"]
-        assert result["target"] == "PRAX"
+        assert result["target"] == "prax"
 
     def test_ai_mail_send(self):
         mod = _import_log_watcher()
@@ -177,7 +192,7 @@ class TestExtractCommandInfo:
         result = watcher._extract_command_info(line)
         assert result is not None
         assert "ai_mail send" in result["command"]
-        assert result["target"] == "FLOW"
+        assert result["target"] == "flow"
 
     def test_ai_mail_inbox(self):
         mod = _import_log_watcher()
@@ -213,8 +228,17 @@ class TestExtractCommandInfo:
         line = "Routing @flow [CALLER:PRAX] \u2192 create ['.', 'Subject']"
         result = watcher._extract_command_info(line)
         assert result is not None
-        assert result["caller"] == "PRAX"
-        assert result["target"] == "FLOW"
+        assert result["caller"] == "prax"
+        assert result["target"] == "flow"
+
+    def test_caller_tag_in_lowercase_gives_the_same_routing(self):
+        """Mutant: the "[CALLER:" gate or its regex back to case-sensitive loses the caller."""
+        mod = _import_log_watcher()
+        watcher, _ = _make_watcher(mod)
+        result = watcher._extract_command_info("Routing @flow [caller:prax] \u2192 create ['.', 'Subject']")
+        assert result is not None
+        assert result["caller"] == "prax"
+        assert result["target"] == "flow"
 
     def test_executing_command_with_caller(self):
         mod = _import_log_watcher()
@@ -222,7 +246,7 @@ class TestExtractCommandInfo:
         line = "Executing command [CALLER:SENTRY]: /path/to/aipass/prax/apps/status.py audit @prax"
         result = watcher._extract_command_info(line)
         assert result is not None
-        assert result["caller"] == "SENTRY"
+        assert result["caller"] == "sentry"
 
     def test_non_command_line_returns_none(self):
         mod = _import_log_watcher()
@@ -245,7 +269,7 @@ class TestExtractCommandInfo:
         result = watcher._extract_command_info(line)
         assert result is not None
         assert "spawn create branch" in result["command"]
-        assert result["target"] == "NEWMOD"
+        assert result["target"] == "newmod"
 
     def test_trigger_fired(self):
         mod = _import_log_watcher()
@@ -595,7 +619,10 @@ class TestOnModified:
         mock_process.assert_called_once_with("PRAX", "line one")
 
     def test_handles_read_exception(self, tmp_path):
-        """Should catch exceptions during log reading."""
+        """A read failure is warned once per file, however often the file changes.
+
+        Mutants killed: the old logger.info (no warning), and a warning per event (a log storm).
+        """
         mod = _import_log_watcher()
         watcher, mock_queue = _make_watcher(mod)
 
@@ -607,11 +634,14 @@ class TestOnModified:
         with (
             patch.object(mod, "get_system_logs_dir", return_value=system_logs_dir),
             patch.object(watcher, "_read_new_content", side_effect=OSError("disk error")),
+            patch.object(mod, "logger") as log,
         ):
-            # Should not raise
+            watcher.on_modified(event)
             watcher.on_modified(event)
 
         mock_queue.enqueue.assert_not_called()
+        assert log.warning.call_count == 1
+        assert "disk error" in log.warning.call_args.args[0]
 
 
 class TestMatchFlowCommand:
@@ -632,7 +662,7 @@ class TestMatchFlowCommand:
         """Should suppress duplicate 'Loaded module' commands."""
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
-        watcher.last_command_per_branch["FLOW"] = "FLOW:flow command"
+        watcher.last_command_per_branch["flow"] = "flow:flow command"
 
         result = watcher._match_flow_command("Loaded module: flow_planner")
         assert result is None
@@ -695,7 +725,7 @@ class TestExtractCommandInfoAdditional:
         line = "Drone started with args: ['audit', '@prax']"
         result = watcher._extract_command_info(line)
         # The @prax in the args is the target, read as _extract_target_from_cmd reads it (prax, leg 4).
-        assert result == {"command": "drone audit @prax", "caller": None, "target": "PRAX"}
+        assert result == {"command": "drone audit @prax", "caller": None, "target": "prax"}
 
 
 class TestMatchExecutingCommand:
@@ -715,8 +745,18 @@ class TestMatchExecutingCommand:
         line = "Executing command [CALLER:DRONE]: /path/to/aipass/sentry/apps/audit.py @prax"
         result = watcher._match_executing_command(line)
         assert result is not None
-        assert result["caller"] == "DRONE"
-        assert result["target"] == "PRAX"
+        assert result["caller"] == "drone"
+        assert result["target"] == "prax"
+
+    def test_lowercase_caller_tag_gives_the_same_result(self):
+        """Mutant: the command regex back to case-sensitive leaves "[caller:x]:" unmatched -> None."""
+        mod = _import_log_watcher()
+        watcher, _ = _make_watcher(mod)
+        line = "Executing command [caller:drone]: /path/to/aipass/sentry/apps/audit.py @prax"
+        result = watcher._match_executing_command(line)
+        assert result is not None
+        assert result["caller"] == "drone"
+        assert result["target"] == "prax"
 
     def test_without_caller(self):
         """Should work without CALLER tag."""
@@ -724,7 +764,7 @@ class TestMatchExecutingCommand:
         watcher, _ = _make_watcher(mod)
         line = "Executing command: /path/to/aipass/flow run"
         result = watcher._match_executing_command(line)
-        assert result == {"command": "@flow run", "caller": None, "target": "FLOW"}
+        assert result == {"command": "@flow run", "caller": None, "target": "flow"}
 
 
 class TestExtractTargetFromCmd:
@@ -734,14 +774,14 @@ class TestExtractTargetFromCmd:
         """Should extract target from @branch pattern."""
         mod = _import_log_watcher()
         result = mod.LogFileWatcher._extract_target_from_cmd("audit @prax")
-        assert result == "PRAX"
+        assert result == "prax"
 
     def test_extracts_path_target(self, tmp_path):
         """Should extract target from /aipass/branch pattern."""
         mod = _import_log_watcher()
         cmd_path = str(tmp_path / "aipass" / "sentry" / "run.py")
         result = mod.LogFileWatcher._extract_target_from_cmd(cmd_path)
-        assert result == "SENTRY"
+        assert result == "sentry"
 
     def test_returns_none_when_no_target(self):
         """Should return None when no target pattern matches."""
@@ -874,10 +914,13 @@ class TestInitializePositionsAdditional:
         with (
             patch.object(mod, "get_system_logs_dir", return_value=tmp_path),
             patch.object(Path, "stat", failing_stat),
+            patch.object(mod, "logger") as log,
         ):
             watcher.initialize_positions()
 
         assert str(log_file) not in watcher.log_positions
+        # Mutant killed: the old logger.info, which nobody reads at the fleet's level.
+        assert "stat failed" in log.warning.call_args.args[0]
 
 
 class TestExtractHookInfo:
@@ -908,6 +951,14 @@ class TestExtractHookInfo:
         assert result["name"] == "cadence"
         assert result["action"] == "skipped"
         assert result["loader"] == "branch"
+
+    def test_lowercase_hooks_tag_gives_the_same_event(self):
+        """Mutant: _HOOK_PATTERN without re.IGNORECASE drops a "[hooks]" line."""
+        mod = _import_log_watcher()
+        watcher, _ = _make_watcher(mod)
+        line = "cadence fired loader=global turn=35 period=5 offset=0 session=abc12345"
+        assert watcher._extract_hook_info(f"[hooks] {line}") == watcher._extract_hook_info(f"[HOOKS] {line}")
+        assert watcher._extract_hook_info(f"[hooks] {line}")["action"] == "fired"
 
     def test_non_hook_line_returns_none(self):
         """Non-hook log lines should return None."""

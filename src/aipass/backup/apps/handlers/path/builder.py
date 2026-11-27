@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: builder.py
 # Description: Destination path builders for the snapshot store and its config files
-# Version: 3.0.0
+# Version: 3.1.0
 # Created: 2026-04-16
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Path builder handler."""
@@ -39,6 +39,11 @@ def build_ignore_path(project_root: str) -> Path:
 def build_timestamps_path(project_root: str) -> Path:
     """Timestamps file: <project>/.backup/timestamps.json"""
     return backup_root(project_root) / "timestamps.json"
+
+
+def build_baseline_path(project_root: str) -> Path:
+    """Run baseline: <project>/.backup/last_good_run.json"""
+    return backup_root(project_root) / "last_good_run.json"
 
 
 def build_changelog_path(project_root: str) -> Path:

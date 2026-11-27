@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_display_resilience.py
 # Description: The display consumer must survive an unrenderable event
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-08-12
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/monitor.py and apps/handlers/monitoring/unified_stream.py."""
@@ -80,9 +80,9 @@ class TestEventTextIsUntrustedMarkup:
         assert "audit complete" in output
 
     def test_lowercase_branch_label_survives(self):
-        """A label Rich would read as a tag keeps its brackets (uppercase was luck)."""
+        """A label Rich would read as a tag keeps its brackets and its lowercase."""
         output = self._render(lambda m: m.print_event("commons/feed", "post", "info"))
-        assert "COMMONS/FEED" in output
+        assert "[commons/feed" in output
 
     def test_hook_event_message_is_escaped(self):
         """print_hook_event takes the same untrusted text."""
@@ -259,10 +259,10 @@ class TestStandaloneRunArgs:
         assert parse_scope(cmd_args[1:]).is_scoped is False
 
     def test_canary_old_parsing_scoped_to_run(self):
-        """Proof this test can fail: the old form asked for a branch called RUN."""
+        """Proof this test can fail: the old form asked for a branch called run."""
         legacy_scope = parse_scope(["run"])
         assert legacy_scope.is_scoped is True
-        assert list(legacy_scope.names) == ["RUN"]
+        assert list(legacy_scope.names) == ["run"]
 
 
 class TestConsoleFailureIsSwallowed:

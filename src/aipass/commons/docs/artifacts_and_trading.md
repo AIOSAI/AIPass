@@ -15,7 +15,7 @@ Craftable objects with provenance, the lanes that move them between branches, an
 | `trade <your_id> <their_id> @branch` | Propose a trade |
 | `drop "name" "desc" <room> [--expires N]` | Drop a new ephemeral item in a room (N in minutes, default 5, clamped 1-1440) |
 | `find <artifact_id>` | Pick up an ephemeral item |
-| `mint "Event Name" @branch1 @branch2` | Mint proof-of-attendance event badges |
+| `mint "Event Name" @branch1 @branch2` | Mint proof-of-attendance event badges, created by the host `the_commons` |
 | `collab "name" "desc" @signer1 @signer2` | Initiate a joint artifact (`--rarity`, default `rare`) |
 | `sign <pending_id>` | Sign a pending joint artifact |
 

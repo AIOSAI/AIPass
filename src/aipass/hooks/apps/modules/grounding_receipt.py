@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: grounding_receipt.py
-# Version: 1.0.3
+# Version: 1.0.5
 # Description: The grounding receipt, .ai_mail.local/grounding.json: did the five grounding entries reach the model
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-28
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """The grounding receipt beside a branch's session pointer: one current row plus a history of 20.
@@ -115,7 +115,7 @@ def _write(path: Path, row: dict) -> None:
     }:
         history = [old, *history][:HISTORY_CAP]
     if not json_handler.write_json(path, {"current": row, "history": history}):
-        logger.error("[HOOKS] grounding_receipt: receipt not written at %s", path)
+        logger.error("[hooks] grounding_receipt: receipt not written at %s", path)
 
 
 def _base(hook_data: dict, path: Path) -> dict:
@@ -140,7 +140,7 @@ def observe(hook_data: dict) -> str:
         return ""
     if hook_data.get("provider") == "opencode":
         if not context_window.opencode_db_path().is_file():
-            logger.error("[HOOKS] grounding_receipt: no OpenCode store at %s", context_window.opencode_db_path())
+            logger.error("[hooks] grounding_receipt: no OpenCode store at %s", context_window.opencode_db_path())
             return ""
         row = _opencode_row(hook_data["session_id"])
     else:
@@ -188,6 +188,19 @@ def print_introspection() -> None:
     console.print("[bold cyan]grounding_receipt[/bold cyan] — Did the grounding entries reach the model, per seat")
     console.print(f"  Receipt: <branch>/{RECEIPT.as_posix()} · required set {REVISION}: {', '.join(REQUIRED)}")
     console.print("  Written by: handlers/prompt/context_gauge.py (prompt), handlers/lifecycle/compact.py (pending)")
+    console.print("[dim]Shows whether the grounding entries reached the model in this branch.[/dim]")
+    console.print("[dim]Run drone @hooks receipt --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print usage for ``drone @hooks receipt``."""
+    console.print("[bold cyan]receipt[/bold cyan] — the grounding receipt of the branch you stand in")
+    console.print()
+    console.print("[bold]Usage:[/bold]")
+    console.print("  drone @hooks [cyan]receipt[/cyan]     status, generation, boundary, missing and stale keys")
+    console.print()
+    console.print("[bold]Examples:[/bold]")
+    console.print("  drone @hooks receipt")
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -197,8 +210,7 @@ def handle_command(command: str, args: list) -> bool:
     if not args:
         print_introspection()
     if wants_help(args):
-        console.print("[bold cyan]receipt[/bold cyan] — the grounding receipt of the branch you stand in")
-        console.print("  drone @hooks receipt     status, generation, boundary, missing and stale keys")
+        print_help()
         return True
     if args:
         return False

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: extractor.py
 # Description: Memory Extraction Handler
-# Version: 0.10.0
+# Version: 0.10.1
 # Created: 2025-11-16
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -44,13 +44,13 @@ def _write_memory_file(file_path: Path, data: Dict[str, Any]) -> None:
 
 
 def _derive_branch_and_type(file_path: Path) -> tuple[str, str]:
-    """Derive (BRANCH, type) from .trinity/<type>.json or legacy BRANCH.type.json."""
+    """Derive (branch, type) from .trinity/<type>.json or legacy <branch>.type.json, lowercase."""
     if file_path.parent.name == ".trinity":
-        branch_name = file_path.parent.parent.name.upper()
+        branch_name = file_path.parent.parent.name.lower()
         memory_type = file_path.stem  # "local" or "observations"
     else:
         parts = file_path.stem.split(".")
-        branch_name = parts[0] if len(parts) > 0 else "UNKNOWN"
+        branch_name = parts[0].lower() if parts[0] else "unknown"
         memory_type = parts[1] if len(parts) > 1 else "unknown"
     return branch_name, memory_type
 

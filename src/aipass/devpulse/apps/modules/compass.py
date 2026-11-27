@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: compass.py
 # Description: Compass Module — drone command for devpulse's rated decision store
-# Version: 1.0.4
+# Version: 1.0.6
 # Created: 2026-06-16
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -31,9 +31,6 @@ _RATING_STYLE = {
 }
 
 HELP_TEXT = """\
-[bold cyan]compass[/bold cyan] — devpulse rated decision store
-
-[bold]Usage:[/bold]
   compass add "context" "decision" --rating R \\[opts]   Store a rated decision
   compass query "question" [--rating R] [--limit N]     Search (rating shown)
   compass stats                                         Counts by rating/status
@@ -63,8 +60,9 @@ HELP_TEXT = """\
 
 [bold]Options (all subcommands):[/bold]
   --db PATH        Use an alternate SQLite store (testing / power use).
+"""
 
-[bold]Examples:[/bold]
+_EXAMPLES_TEXT = """\
   drone @devpulse compass add "auth fork" "chose JWT over sessions" --rating good
   drone @devpulse compass add "auth fork" "switch to sessions" --rating good --supersedes 4
   drone @devpulse compass query "auth" --rating good --limit 3
@@ -75,7 +73,7 @@ HELP_TEXT = """\
   drone @devpulse compass note 4 "revisited — this held up"
   drone @devpulse compass review
 
-See DPLAN-0212 / DPLAN-0246 (design) and the compass handler (apps/handlers/compass/).
+[dim]See DPLAN-0212 / DPLAN-0246 (design) and the compass handler (apps/handlers/compass/).[/dim]
 """
 
 
@@ -95,12 +93,22 @@ def print_introspection() -> None:
     """Display module introspection info."""
     console.print()
     console.print("[bold cyan]compass Module[/bold cyan]")
-    console.print("[dim]Devpulse rated decision store. The truth-store of choices —[/dim]")
+    console.print("[dim]devpulse rated decision store. The truth-store of choices —[/dim]")
     console.print("[dim]each decision rated; the rating is the signal at a fork.[/dim]")
     console.print()
     console.print("[yellow]Subcommands:[/yellow] [cyan]add, query, stats, rate, archive, note, review[/cyan]")
     console.print("[dim]Run 'compass --help' for full usage.[/dim]")
     console.print()
+
+
+def print_help() -> None:
+    """Print CLI help — usage, options and examples."""
+    console.print("[bold cyan]compass[/bold cyan] — devpulse rated decision store")
+    console.print()
+    console.print("[bold]USAGE:[/bold]")
+    console.print(HELP_TEXT)
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print(_EXAMPLES_TEXT)
 
 
 def _wants_help(args: List[str]) -> bool:
@@ -118,7 +126,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     if _wants_help(args):
-        console.print(HELP_TEXT)
+        print_help()
         return True
 
     subcommand = args[0]
@@ -358,7 +366,7 @@ def _handle_stats(sub_args: List[str]) -> bool:
     console.print(f"  Total decisions: [bold]{data.get('total', 0)}[/bold]")
     console.print("  [yellow]By rating:[/yellow]")
     for rating, count in (data.get("by_rating") or {}).items():
-        console.print(f"    {_rating_tag(rating)} {count}")
+        console.print(f"    {_rating_tag(rating)} {count}", highlight=False)
     console.print("  [yellow]By status:[/yellow]")
     for status, count in (data.get("by_status") or {}).items():
         console.print(f"    [cyan]{status:<10}[/cyan] {count}")

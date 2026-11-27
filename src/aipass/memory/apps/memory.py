@@ -1,16 +1,14 @@
 # =================== AIPass ====================
 # Name: memory.py
 # Description: Entry point CLI for drone @memory
-# Version: 1.3.1
+# Version: 1.3.7
 # Created: 2026-03-08
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
 Memory System - Central Memory Archive & Rollover System
 """
-
-__version__ = "1.3.1"
 
 import sys
 
@@ -23,7 +21,7 @@ from rich import box
 from rich.table import Table
 
 from aipass.prax import logger
-from aipass.cli import console, error, reset_command_state, resolve_exit
+from aipass.cli import console, error, header_version, reset_command_state, resolve_exit
 
 _PACKAGE_BASE = "aipass.memory.apps.modules"
 
@@ -31,7 +29,7 @@ _PACKAGE_BASE = "aipass.memory.apps.modules"
 def print_introspection():
     """Display discovered modules and status"""
     console.print()
-    console.print("[bold cyan]Memory - Central Memory Archive System[/bold cyan]")
+    console.print("[bold cyan]memory - Central Memory Archive System[/bold cyan]")
     console.print()
     console.print("[dim]Manages memory rollover and archival across AIPass branches[/dim]")
     console.print()
@@ -59,7 +57,7 @@ def print_help():
     console.print()
     console.print(
         Panel.fit(
-            "[bold cyan]Memory - Central Memory Archive System[/bold cyan]\n"
+            "[bold cyan]memory - Central Memory Archive System[/bold cyan]\n"
             "[dim]Vector search, memory rollover, and fragmented memory for AIPass[/dim]",
             border_style="cyan",
             box=box.ROUNDED,
@@ -68,12 +66,12 @@ def print_help():
     console.print()
 
     what_content = (
-        "Memory is the [bold]central memory archive[/bold] that:\n\n"
-        "  [green]>[/green] Provides semantic search across all branch memories\n"
+        "memory is the [bold]central memory archive[/bold] that:\n\n"
+        "  [green]>[/green] Gives each branch semantic search over its own local store\n"
         "  [green]>[/green] Archives memories when branches hit rollover limits"
     )
     console.print(
-        Panel(what_content, title="[bold cyan]What is Memory?[/bold cyan]", border_style="dim", box=box.ROUNDED)
+        Panel(what_content, title="[bold cyan]What is memory?[/bold cyan]", border_style="dim", box=box.ROUNDED)
     )
     console.print()
 
@@ -89,10 +87,15 @@ def print_help():
     table.add_row("rollover status", "Show rollover statistics")
     table.add_row("rollover check", "Dry run — check what needs rollover")
     table.add_row("rollover push [--json]", "⚠ Reset ALL per_branch limits to defaults (system-wide)")
+    table.add_row(
+        "rollover backfill-local [--branch @b] [--apply]",
+        "Copy global rows into each local store: @memory or the admin",
+    )
     table.add_row("config get [@branch] [--json]", "Show effective rollover limits (defaults + deviations)")
     table.add_row("config set @branch <type> <n> [--json]", "Set one branch's rollover limit")
     table.add_row("config set-default <type> <n> [--json]", "Set a global default rollover limit")
-    table.add_row("search <query>", "Semantic search across all branch memories")
+    table.add_row("search <query> [--type T] [--n N]", "Semantic search of your own branch's local store")
+    table.add_row("search global <query> [--branch B]", "The global store, every citizen: @memory or the admin")
     # Parked row stays so the verb explains itself instead of reading as unknown.
     table.add_row("symbolic", "⚠ PARKED 2026-08-14 — curated truth lives in Compass (drone @devpulse compass)")
     table.add_row("push [--branch @b] [--confirm]", "Trinity push — rebuild frames, archive drift, gated")
@@ -131,7 +134,7 @@ def print_help():
 
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
-    console.print("  [bold]Via Drone (recommended):[/bold]")
+    console.print("  [bold]Via drone (recommended):[/bold]")
     console.print('    [dim]drone @memory search "performance patterns"[/dim]')
     console.print("    [dim]drone @memory rollover status[/dim]")
     console.print("    [dim]drone @memory rollover run[/dim]")
@@ -145,16 +148,16 @@ def print_help():
 
     console.print("[bold cyan]SEARCH OPTIONS:[/bold cyan]")
     console.print()
-    console.print("  [cyan]--branch BRANCH[/cyan]    Filter by branch (e.g., SENTRY, CLI)")
     console.print("  [cyan]--type TYPE[/cyan]        Filter by memory type (observations, local)")
     console.print("  [cyan]--n N[/cyan]              Number of results (default: 5)")
+    console.print("  [cyan]--branch BRANCH[/cyan]    search global only: filter by branch (e.g. sentry)")
     console.print()
     console.print("-" * 70)
     console.print()
 
     console.print("[bold cyan]EXAMPLES:[/bold cyan]")
     console.print()
-    console.print('    [dim]drone @memory search "registry bugs" --branch SENTRY --n 10[/dim]')
+    console.print('    [dim]drone @memory search "registry bugs" --type observations --n 10[/dim]')
     console.print("    [dim]drone @memory todo backlog[/dim]")
     console.print("    [dim]drone @memory lint[/dim]")
     console.print()
@@ -173,7 +176,7 @@ def print_help():
     console.print()
 
     console.print(
-        "Commands: search, push, rollover \\[run|status|check|push],"
+        "Commands: search, push, rollover \\[run|status|check|push|backfill-local],"
         " config \\[get|set|set-default], lint \\[fields], health, roots, fleet, governance,"
         " pool \\[process|status], templates, todo \\[backlog|restore], verify, watch"
     )
@@ -229,7 +232,7 @@ def main() -> int:
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print(f"memory v{__version__}")
+        console.print(f"memory v{header_version(__file__)}", highlight=False)
         return 0
 
     if args[0] in ["--help", "-h", "help"]:

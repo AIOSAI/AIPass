@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_generator.py
 # Description: README Section Auto-Generator
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -343,7 +343,7 @@ def generate_header_section(branch_path: str) -> str:
 
     Raises JSONDecodeError or OSError on an unreadable passport; generate_all_sections records it."""
     branch_dir = Path(branch_path)
-    branch_name = branch_dir.name.upper().replace("-", "_")
+    branch_name = branch_dir.name.lower().replace("-", "_")
 
     id_file = branch_dir / ".trinity" / "passport.json"
     if not id_file.exists():

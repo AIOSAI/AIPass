@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.19.0
+# Version: 1.20.0
 # Created: 2026-04-16
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """aipass doctor — system health aggregation."""
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import os
 import re
@@ -19,6 +20,7 @@ from typing import Dict, List, NamedTuple, Optional
 
 from rich.text import Text
 from aipass.cli import console, error as cli_error
+from aipass.aipass.apps.handlers import provider_choice
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
@@ -27,15 +29,6 @@ from aipass.aipass.shared.project_home import _detect_aipass_home, find_fenceles
 
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.handlers.settings_backup import DOOR_DOCTOR_FIX, DOOR_INSTALL
-from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
-    check_broker_alive,
-    check_bwrap_functional,
-    check_bwrap_present,
-    check_node_present,
-    check_rg_present,
-    check_sandbox_flag,
-    check_srt_resolvable,
-)
 from aipass.aipass.apps.handlers.admin_lane import check_admin_lane
 from aipass.hooks import read_registry as read_trust_registry
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
@@ -69,6 +62,7 @@ from aipass.aipass.apps.modules._doctor_wire import (
     reconcile_stale_deny,
     settings_fix_report,
 )
+from aipass.aipass.apps.handlers.provider_wire import manifest_settings
 from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_claude_code,
     detect_cpu,
@@ -114,15 +108,11 @@ def _check_system() -> List[CheckResult]:
     results: List[CheckResult] = []
 
     py = detect_python()
-    if py["ok"]:
-        glyph, detail, rem = GLYPH_PASS, py["version"], ""
-    elif py["warning"]:
-        glyph, detail = GLYPH_WARN, py["version"]
-        rem = "Python 3.8 reaches end-of-life — upgrade to 3.9+"
+    if (py["major"], py["minor"]) >= (3, 10):  # pyproject's requires-python
+        results.append(CheckResult("python", GLYPH_PASS, py["version"], ""))
     else:
-        glyph, detail = GLYPH_FAIL, py["version"]
-        rem = "Upgrade Python: https://python.org/downloads"
-    results.append(CheckResult("python", glyph, detail, rem))
+        rem = "AIPass needs Python 3.10+: https://python.org/downloads"
+        results.append(CheckResult("python", GLYPH_FAIL, py["version"], rem))
 
     git = detect_git()
     if git["found"]:
@@ -152,17 +142,50 @@ def _check_system() -> List[CheckResult]:
     method = detect_install_method()
     results.append(CheckResult("install", GLYPH_PASS, method, ""))
 
-    results.append(_claude_code_row())
+    claude = detect_claude_code()
+    results.append(_claude_code_row(claude))
+    results.extend(_claude_pin_row(claude))
 
     return results
 
 
-def _claude_code_row() -> CheckResult:
+def _claude_pin_row(claude: dict) -> list[CheckResult]:
+    """An info row when the running Claude Code is not the manifest's cli.claude.pinned_version.
+
+    No row when they match, when nothing is pinned or claude is absent; an unreadable
+    manifest is the services group's `hooks` row, so it adds nothing here.
+    """
+    manifest_path = _find_manifest() if claude["version"] else None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path else {}
+    except (OSError, ValueError) as exc:
+        logger.info("[doctor] manifest unreadable for the claude pin row: %s", exc)
+        manifest = {}
+    pinned = str(manifest.get("cli", {}).get("claude", {}).get("pinned_version") or "")
+    running = ".".join(str(part) for part in claude["version"] or ())
+    if not pinned or pinned == running:
+        return []
+    try:
+        aipass_version = importlib.metadata.version("aipass")
+    except importlib.metadata.PackageNotFoundError as exc:
+        logger.info("[doctor] aipass package metadata not found: %s", exc)
+        aipass_version = "unknown"
+    return [
+        CheckResult(
+            "claude pin",
+            GLYPH_PASS,
+            f"tested with Claude Code {pinned}; you run {running}",
+            f"AIPass {aipass_version} was verified with {pinned}; if hooks or the boot menu misbehave, "
+            "this gap is the first suspect.",
+        )
+    ]
+
+
+def _claude_code_row(claude: dict) -> CheckResult:
     """The `claude code` row: projects carry their instructions in AGENTS.md only.
 
     No claude on PATH is a plain row, since AIPass runs under other CLIs too.
     """
-    claude = detect_claude_code()
     if not claude["found"]:
         return CheckResult("claude code", GLYPH_PASS, "not on PATH", "")
     version = claude["version"]
@@ -390,7 +413,8 @@ def check_identity() -> List[CheckResult]:
                     "AIPASS_HOME",
                     GLYPH_WARN,
                     "not set",
-                    "Set in ~/.bashrc: export AIPASS_HOME=/path/to/aipass",
+                    "The install writes it to ~/.bashrc: open a new terminal or run 'source ~/.bashrc'; "
+                    "else add export AIPASS_HOME=/path/to/aipass there",
                 )
             )
 
@@ -430,8 +454,11 @@ def check_identity() -> List[CheckResult]:
             )
         )
 
-    passport = _BRANCH_ROOT / ".trinity" / "passport.json"
-    if passport.exists():
+    owner = next((b for b in reg_data.get("branches", []) if isinstance(b, dict) and b.get("owner")), None)
+    passport = reg_path.parent / owner.get("path", "") / ".trinity" / "passport.json" if owner else None
+    if passport is None:
+        results.append(CheckResult("passport", GLYPH_WARN, "no owner in the registry", "Run 'aipass doctor --fix'"))
+    elif passport.exists():
         try:
             with open(passport, "r", encoding="utf-8") as f:
                 pdata = json.load(f)
@@ -439,7 +466,7 @@ def check_identity() -> List[CheckResult]:
             results.append(CheckResult("passport", GLYPH_PASS, f"role: {role}", ""))
         except Exception as exc:
             logger.warning("[doctor] passport read error: %s", exc)
-            results.append(CheckResult("passport", GLYPH_WARN, "unreadable", "Check .trinity/passport.json"))
+            results.append(CheckResult("passport", GLYPH_WARN, "unreadable", f"Check {passport}"))
     else:
         results.append(CheckResult("passport", GLYPH_WARN, "not found", ""))
 
@@ -701,60 +728,11 @@ def _check_drone_systems() -> List[CheckResult]:
     return results
 
 
-def _home_venv_python(home: Path) -> Path:
-    """The home's venv interpreter: .venv/bin/python."""
-    return home / ".venv" / "bin" / "python"
-
-
-def _check_pytest_collect(verbose: bool) -> List[CheckResult]:
-    """Collect the install home's suite with the home's own venv, cwd at the home.
-
-    Never sys.executable: on the pipx route that is pipx's venv, with no pytest and no src/ beside it.
-    """
-    home_val = _configured_aipass_home() or os.environ.get("AIPASS_HOME", "")
-    if not home_val:
-        fix = "Set env.AIPASS_HOME in ~/.claude/settings.json (aipass install does)"
-        return [CheckResult("pytest collect", GLYPH_WARN, "AIPASS_HOME not set", fix)]
-    home = Path(home_val)
-    python = _home_venv_python(home)
-    if not python.is_file():
-        fix = f"Run ./setup.sh in {home} to create it"
-        return [CheckResult("pytest collect", GLYPH_WARN, f"no venv at home ({home})", fix)]
-    try:
-        proc = subprocess.run(
-            [str(python), "-m", "pytest", "src/aipass/", "--collect-only", "-q"],
-            capture_output=True,
-            text=True,
-            timeout=90,
-            cwd=str(home),
-        )
-    except FileNotFoundError as exc:
-        logger.warning("[doctor] home venv python would not run: %s", exc)
-        return [CheckResult("pytest collect", GLYPH_WARN, f"venv python will not run ({python})", "")]
-    except subprocess.TimeoutExpired as exc:
-        logger.warning("[doctor] pytest collect timed out: %s", exc)
-        fix = "Run manually: pytest src/aipass/ --collect-only -q — may just be a slow/shared-CPU environment"
-        return [CheckResult("pytest collect", GLYPH_WARN, "timed out (90s)", fix)]
-    lines = [ln.replace("[", r"\[") for ln in (proc.stdout + proc.stderr).splitlines()]  # markup-escaped
-    if proc.returncode == 0:
-        collected = [ln for ln in lines if "<" in ln or "::" in ln]
-        detail = f"{len(collected)} tests collected" if collected else "ok"
-        return [CheckResult("pytest collect", GLYPH_PASS, detail, "")]
-    if "No module named pytest" in proc.stderr:
-        fix = f"{python} -m pip install pytest"
-        return [CheckResult("pytest collect", GLYPH_WARN, "pytest not installed in the home venv", fix)]
-    # --verbose: pytest's ERROR lines (else its last line) under the row
-    errs = [ln for ln in lines if ln.startswith("ERROR")] or lines[-1:]
-    detail = "collection issues" + "".join(f"\n      {ln}" for ln in errs[:_MAX_NAMED_EXTRAS] if verbose)
-    return [CheckResult("pytest collect", GLYPH_WARN, detail, "Run pytest to diagnose")]
-
-
-def _check_services(verbose: bool = False) -> List[CheckResult]:
+def _check_services() -> List[CheckResult]:
     """Run Services group checks."""
     results: List[CheckResult] = []
 
     results.extend(_check_drone_systems())
-    results.extend(_check_pytest_collect(verbose))
 
     manifest_checks = check_provider_manifest()
     results.extend(manifest_checks)
@@ -936,53 +914,6 @@ def _fix_instruction_shadow() -> List[CheckResult]:
     return _check_instruction_shadow(root) + fixed
 
 
-def _check_sandbox() -> List[CheckResult]:
-    """Run Sandbox group checks — kernel sandbox prerequisites, only when the flag is on.
-
-    Off, the hook gates do the containing, so a missing prerequisite is no finding: one PASS row.
-    """
-    flag = check_sandbox_flag()
-    if not flag["enabled"]:
-        setting = f"={flag['raw_value']}" if flag["raw_value"] else " unset"
-        return [
-            CheckResult("sandbox", GLYPH_PASS, f"off (AIPASS_SANDBOX_ENABLED{setting}); prerequisites not checked", "")
-        ]
-
-    results: List[CheckResult] = []
-    results.append(CheckResult("sandbox flag", GLYPH_PASS, "AIPASS_SANDBOX_ENABLED=ON", ""))
-
-    def _sev(ok: bool) -> str:
-        return GLYPH_PASS if ok else GLYPH_FAIL
-
-    def _found(label: str, probe: dict, cure: str) -> CheckResult:
-        return CheckResult(label, _sev(probe["found"]), probe["path"] or "not found", "" if probe["found"] else cure)
-
-    bwrap = check_bwrap_present()
-    results.append(_found("bwrap", bwrap, "sudo apt install bubblewrap"))
-
-    if bwrap["found"]:
-        func = check_bwrap_functional()
-        detail = func["detail"]
-        if not func["ok"] and func["sysctl_value"] is not None:
-            detail = f"{detail} (apparmor_restrict_unprivileged_userns={func['sysctl_value']})"
-        results.append(CheckResult("bwrap functional", _sev(func["ok"]), detail, ""))
-
-    node = check_node_present()
-    results.append(_found("node", node, "Install Node.js: https://nodejs.org/"))
-
-    srt = check_srt_resolvable()
-    results.append(_found("srt (@anthropic-ai/sandbox-runtime)", srt, srt["install_hint"]))
-
-    rg = check_rg_present()
-    results.append(_found("rg (ripgrep)", rg, "sudo apt install ripgrep  (or static binary to ~/.local/bin/rg)"))
-
-    project_root = find_project_root(Path.cwd())
-    broker = check_broker_alive(project_root)
-    results.append(CheckResult("broker daemon", _sev(broker["alive"]), broker["detail"], ""))
-
-    return results
-
-
 def _check_tier0(root: Path, aipass_home: str | None, preview: str) -> List[CheckResult]:
     """Compare a project's tier0 kernel against AIPASS_HOME, with provenance."""
     from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
@@ -1038,7 +969,7 @@ def _tree_in_use(root: Path) -> str:
     return str(root)
 
 
-_SKILL_ROW_LABELS = ("shared skills", "skills link", "legacy prep", "provider switch", "skills fix")
+_SKILL_ROW_LABELS = ("shared skills", "skills link", "provider switch", "skills fix")
 _FIX_COMMAND = "aipass doctor --fix"
 
 
@@ -1074,13 +1005,6 @@ def _check_shared_skills(root: Path) -> List[CheckResult]:
         detail = f"{bs.SKILLS_LINK_REL} points at {state['link_to']}, not {bs.SKILLS_REL}"
         rows.append(CheckResult("skills link", GLYPH_WARN, detail, f"Point it at ../{bs.SKILLS_REL}"))
 
-    if state["legacy_prep"] == "managed":
-        detail = f"{bs.LEGACY_PREP_REL} beside {bs.PREP_SKILL_REL}: /prep is offered twice"
-        rows.append(CheckResult("legacy prep", GLYPH_WARN, detail, fix))
-    elif state["legacy_prep"] == "edited":
-        detail = f"{bs.LEGACY_PREP_REL} is edited, so it is yours and kept: /prep is offered twice"
-        rows.append(CheckResult("legacy prep", GLYPH_WARN, detail, f"Fold your edits into {bs.PREP_SKILL_REL}"))
-
     if state["switch_missing"]:
         detail = f"missing {', '.join(state['switch_missing'])}: the chat cannot switch CLI here"
         cure = f"Run 'aipass init update {root}'"
@@ -1092,7 +1016,7 @@ def _check_shared_skills(root: Path) -> List[CheckResult]:
 
 
 def _fix_shared_skills() -> List[CheckResult]:
-    """--fix: make a missing skills link, retire an unedited legacy prep command."""
+    """--fix: make a missing skills link."""
     from aipass.aipass.apps.handlers.init.bootstrap import repair_shared_skills
 
     reg_path = _find_registry()
@@ -1195,27 +1119,29 @@ def _wire_gap(row: CheckResult) -> bool:
 
 
 def _compute_doctor_groups(
-    verbose: bool = False,
     interactive: bool = False,
     fix: bool = False,
     door: str = DOOR_DOCTOR_FIX,
     yes: bool = False,
-    non_interactive: bool = False,
+    install: bool = False,
+    set_aside: Optional[List[CheckResult]] = None,
 ) -> Dict[str, List[CheckResult]]:
     """Run all six check groups (optionally auto-fixing). Returns them by group name.
 
+    *install* (the install's health check) writes no provider settings: the provider picked at the
+    install's end is wired there, and every other installed CLI reads as information.
+
     With *fix*, the settings step shows its plan and asks once before writing: *yes* skips
-    the question, *non_interactive* writes nothing, and *door* names the writer in the
+    the question (no tty and no *yes* writes nothing), and *door* names the writer in the
     settings backup and receipt.
     """
     group_specs = [
         ("System", _check_system),
         ("Identity", check_identity),
-        ("Services", lambda: _check_services(verbose=verbose)),
+        ("Services", _check_services),
         ("Community", _check_community),
         ("Structure", _check_structure),
         ("Scaffold", _check_scaffold),
-        ("Sandbox", _check_sandbox),
     ]
     groups: Dict[str, List[CheckResult]] = {}
     with make_doctor_progress() as progress:
@@ -1230,10 +1156,11 @@ def _compute_doctor_groups(
             progress.remove_task(task_id)
 
     if fix:
-        settings_rows = [
-            CheckResult(*row)
-            for row in fix_provider_settings(_find_manifest(), door=door, yes=yes, non_interactive=non_interactive)
-        ]
+        settings_rows = (
+            []
+            if install
+            else [CheckResult(*row) for row in fix_provider_settings(_find_manifest(), door=door, yes=yes)]
+        )
         manifest_results = check_provider_manifest()
         if manifest_results:
             groups["Services"] = merge_manifest_rows(groups.get("Services", []), manifest_results)
@@ -1295,6 +1222,44 @@ def _compute_doctor_groups(
             structure = [r for r in groups.get("Structure", []) if not r.label.startswith("instruction shadow")]
             groups["Structure"] = structure + shadow_fix
 
+    return _set_aside_unchosen(groups, install, set_aside if set_aside is not None else [])
+
+
+def _set_aside_unchosen(
+    groups: Dict[str, List[CheckResult]], install: bool, set_aside: List[CheckResult]
+) -> Dict[str, List[CheckResult]]:
+    """Check only the chosen provider's rows; each other installed CLI is one info row.
+
+    Every row taken out is appended to *set_aside*, so the install can say how many wait for the pick.
+
+    The choice is the install report's `provider`. With none recorded, a plain run checks every
+    provider as before, and the install's own check (the pick still to come) sets all of them aside.
+    """
+    # The home is where the manifest was found, not the shell's AIPASS_HOME: unset until a new shell.
+    manifest_path = _find_manifest()
+    chosen = provider_choice.chosen_provider(manifest_path.parent.parent) if manifest_path else None
+    if chosen is None and not install:
+        return groups
+    if install:
+        set_aside.extend(r for r in groups.get("System", []) if r.label == "claude code")
+        groups["System"] = [r for r in groups.get("System", []) if r.label != "claude code"]
+    aside = [key for key in provider_choice.ORDER if key != chosen]
+    try:
+        scalars = manifest_settings(json.loads(manifest_path.read_text(encoding="utf-8"))) if manifest_path else {}
+    except (OSError, ValueError) as exc:
+        logger.info("[doctor] manifest unreadable for the provider set-aside (the hooks row reports it): %s", exc)
+        scalars = {}
+
+    def owner(label: str) -> Optional[str]:
+        """A settings-scalar row is labelled with its manifest key, so the label list cannot know it."""
+        return "claude" if label in scalars else provider_choice.row_provider(label)
+
+    set_aside.extend(r for r in groups.get("Services", []) if owner(r.label) in aside)
+    services = [r for r in groups.get("Services", []) if owner(r.label) not in aside]
+    for key in aside:
+        if provider_choice.cli_path(key):
+            services.append(CheckResult(key, GLYPH_PASS, f"not chosen: aipass provider {key}", ""))
+    groups["Services"] = services
     return groups
 
 
@@ -1328,8 +1293,21 @@ def _print_doctor_groups(groups: Dict[str, List[CheckResult]]) -> tuple[int, int
     return pass_count, warn_count, error_count
 
 
+#: Rows that read the project doctor runs in; outside one, the scope line stands for them.
+_PROJECT_GROUPS = ("Structure", "Scaffold")
+_PROJECT_ROWS = ("registry", "passport", "hooks.json", "ai_mail")
+
+
+def _machine_rows_only(groups: Dict[str, List[CheckResult]]) -> Dict[str, List[CheckResult]]:
+    """*groups* without the project-scoped groups and rows, so the exit reflects the machine and home."""
+    return {
+        name: [r for r in rows if r.label not in _PROJECT_ROWS]
+        for name, rows in groups.items()
+        if name not in _PROJECT_GROUPS
+    }
+
+
 def run_doctor(
-    verbose: bool = False,
     interactive: bool = False,
     fix: bool = False,
     yes: bool = False,
@@ -1344,11 +1322,16 @@ def run_doctor(
     console.print("[bold cyan]aipass doctor[/bold cyan]")
     # The Structure checks follow the working directory: a clean count from outside a project is no clean project.
     project = find_project_root(Path.cwd())
-    outside = f"no project at {Path.cwd()}: Structure is not checked; run from inside a project"
+    outside = (
+        f"no project at {Path.cwd()}: the project's registry, mailbox, hooks, Structure and Scaffold "
+        "are not checked; run from inside a project"
+    )
     console.print(f"  scope: {f'project {project}' if project else outside}")
     console.print()
 
-    groups = _compute_doctor_groups(verbose=verbose, interactive=interactive, fix=fix, yes=yes)
+    groups = _compute_doctor_groups(interactive=interactive, fix=fix, yes=yes)
+    if project is None:
+        groups = _machine_rows_only(groups)
     if smoke:
         groups["Services"] = groups.get("Services", []) + [CheckResult(*row) for row in check_smoke(model)]
     pass_count, warn_count, error_count = _print_doctor_groups(groups)
@@ -1358,7 +1341,6 @@ def run_doctor(
 
 
 def run_doctor_preflight(
-    non_interactive: bool = False,
     yes: bool = False,
 ) -> tuple[Dict[str, List[CheckResult]], tuple[int, int, int]]:
     """The install's health check: doctor --fix under the install door, printed; *yes* is install's --yes.
@@ -1369,18 +1351,22 @@ def run_doctor_preflight(
     console.print("[bold cyan]Running aipass doctor --fix...[/bold cyan]")
     console.print()
 
-    groups = _compute_doctor_groups(fix=True, door=DOOR_INSTALL, yes=yes, non_interactive=non_interactive)
+    waiting: List[CheckResult] = []
+    groups = _compute_doctor_groups(fix=True, door=DOOR_INSTALL, yes=yes, install=True, set_aside=waiting)
     counts = _print_doctor_groups(groups)
+    if waiting:
+        console.print(f"  [dim]{len(waiting)} provider row(s) wait for your pick at the end of the install[/dim]")
+        console.print()
     logger.info("[doctor] install health check complete — pass=%d warn=%d error=%d", *counts)
     return groups, counts
 
 
-def write_preflight_rows(rows_path: Path, non_interactive: bool = False, yes: bool = False) -> None:
+def write_preflight_rows(rows_path: Path, yes: bool = False) -> None:
     """``doctor --fix --rows-json PATH``: the install's health check, run in the home, its rows for the report.
 
     Writes {"counts": {pass, warn, error}, "rows": every non-PASS row after the fix}; an unwritable path raises.
     """
-    groups, (passed, warned, errored) = run_doctor_preflight(non_interactive=non_interactive, yes=yes)
+    groups, (passed, warned, errored) = run_doctor_preflight(yes=yes)
     rows = [
         {
             "group": group,
@@ -1404,10 +1390,12 @@ def print_introspection() -> None:
     console.print()
     console.print("[bold cyan]doctor Module[/bold cyan]")
     console.print("System health aggregation — flutter-doctor-style output")
+    console.print("[dim]Checks the install, identity, services and structure, and says what to fix.[/dim]")
     console.print()
-    console.print("[yellow]Groups:[/yellow] System, Identity, Services, Community, Structure, Scaffold, Sandbox")
+    console.print("[yellow]Groups:[/yellow] System, Identity, Services, Community, Structure, Scaffold")
     console.print("[yellow]Next:[/yellow]  [green]aipass doctor[/green] / [green]aipass doctor --fix[/green]")
     console.print()
+    console.print("[dim]Run 'aipass doctor --help' for usage and examples.[/dim]")
 
 
 def print_help() -> None:
@@ -1417,13 +1405,12 @@ def print_help() -> None:
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
     console.print("  [green]aipass doctor[/green]           [dim]# Run all checks[/dim]")
-    console.print("  [green]aipass doctor --verbose[/green] [dim]# Show sub-check detail[/dim]")
     console.print("  [green]aipass doctor --fix[/green]     [dim]# Settings plan + diff, ask once; owner repair[/dim]")
     console.print("  [green]aipass doctor --fix --yes[/green][dim]# The same, writing without the question[/dim]")
     console.print("  [green]aipass doctor --fix --json[/green][dim]# Remediation + settings plan as JSON[/dim]")
     console.print(
         "  [green]aipass doctor --fix --rows-json PATH[/green] [dim]# install's health check: rows + counts to PATH;"
-        " --non-interactive writes no settings[/dim]"
+        " --yes writes the settings[/dim]"
     )
     console.print("  [green]aipass doctor --smoke[/green]   [dim]# + one live model turn per installed provider[/dim]")
     console.print("  [green]aipass doctor --smoke --json[/green] [dim]# hooks' smoke results as JSON[/dim]")
@@ -1432,6 +1419,9 @@ def print_help() -> None:
     )
     console.print("    [dim]--smoke spends one model turn per installed provider and needs each one's login;[/dim]")
     console.print("    [dim]not installed, no login, or a spent quota is a skip. Never part of --fix.[/dim]")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]aipass doctor[/green]  /  [green]aipass doctor --fix[/green]")
     console.print()
     console.print("[yellow]OUTPUT:[/yellow]  pass / warn / error (color-coded)")
     console.print("[yellow]EXIT:[/yellow]    0 = pass/warn  |  1 = errors found")
@@ -1451,7 +1441,6 @@ def handle_command(command: str, args: list[str]) -> bool:
         print_introspection()
         return True
 
-    verbose = "--verbose" in args or "-v" in args
     fix_mode = "--fix" in args
     json_mode = "--json" in args
     yes_mode = "--yes" in args
@@ -1463,7 +1452,7 @@ def handle_command(command: str, args: list[str]) -> bool:
         if not fix_mode:
             cli_error("--rows-json reports the install's health check: run it with --fix")
             raise SystemExit(2)
-        write_preflight_rows(Path(rows_json), non_interactive="--non-interactive" in args, yes=yes_mode)
+        write_preflight_rows(Path(rows_json), yes=yes_mode)
         return True
 
     if smoke_mode and fix_mode:
@@ -1485,9 +1474,7 @@ def handle_command(command: str, args: list[str]) -> bool:
             console.print(json.dumps({"provider_settings": settings_report}, indent=2), markup=False, highlight=False)
         return True
 
-    error_count = run_doctor(
-        verbose=verbose, interactive=True, fix=fix_mode, yes=yes_mode, smoke=smoke_mode, model=model
-    )
+    error_count = run_doctor(interactive=True, fix=fix_mode, yes=yes_mode, smoke=smoke_mode, model=model)
     if fix_mode:
         project_root = find_project_root(Path.cwd())
         if project_root:

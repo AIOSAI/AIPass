@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: welcome_handler.py
 # Description: Welcome & Onboarding Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -56,7 +56,7 @@ def create_welcome_post(conn: sqlite3.Connection, branch_name: str) -> Optional[
 def has_been_welcomed(conn: sqlite3.Connection, branch_name: str) -> bool:
     """Check if a welcome post already exists for this branch."""
     row = conn.execute(
-        "SELECT id FROM posts WHERE author = 'SYSTEM' AND title LIKE 'Welcome @' || ? || '%' LIMIT 1",
+        "SELECT id FROM posts WHERE LOWER(author) = 'system' AND title LIKE 'Welcome @' || ? || '%' LIMIT 1",
         (branch_name,),
     ).fetchone()
 
@@ -88,7 +88,7 @@ def welcome_new_branches(conn: sqlite3.Connection, failed: Optional[List[str]] =
     """Scan agents table and create welcome posts for any unwelcomed branches.
 
     A branch that fails is appended to `failed` (if given) and the scan goes on."""
-    rows = conn.execute("SELECT branch_name FROM agents WHERE branch_name != 'SYSTEM'").fetchall()
+    rows = conn.execute("SELECT branch_name FROM agents WHERE LOWER(branch_name) != 'system'").fetchall()
 
     failures = failed if failed is not None else []
     welcomed = []

@@ -28,7 +28,8 @@ drone @spawn delete @my_agent --retire --dry-run   # preview retiring a citizen
   `{{PLACEHOLDER}}` is replaced, an identity is minted once and written twice (passport and
   registry entry), the tree is verified against the template's own manifest, and a birth
   receipt is stamped before the citizen is ever registered. A mint that cannot be completed
-  refuses instead of half-registering.
+  refuses instead of half-registering. `create` at `<project>/src/<package>/<branch>`
+  re-roots the newborn's imports to `<package>.<branch>`.
 - **Updates branches from the template.** Preview-only until `--apply`. Missing files are
   added, JSON is deep-merged, `.py` is skipped by design, markdown is compared and reported
   but never written, and a branch's own `.updateignore` is honoured before every other rule.
@@ -55,7 +56,7 @@ written down on this page and cannot go stale:
 
 - `drone @spawn` — the self-map: every discovered module with its one-line description.
 - `drone @spawn --help` — the command surface, its flags and its examples.
-- `drone @spawn --version` — the version string.
+- `drone @spawn --version` — `spawn v` plus the `# Version` header of `apps/spawn.py`.
 
 ---
 

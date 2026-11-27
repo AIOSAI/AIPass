@@ -89,7 +89,9 @@ per-delivery boundary check.
   project registry says `active` **and** its passport says `resident`. A passport
   can never *add* scope, and a stale registry field can never *carry* one.
 - **Fails closed in both directions.** An unverified caller widens nothing, and a
-  verifier that *raises* is a refusal, not an opening.
+  verifier that *raises* is a refusal, not an opening. A resident project registry
+  that cannot be read raises `RegistryUnreadable` rather than read as no residents;
+  one unreadable passport refuses only that resident, logged at error level.
 - **One inbox, one copy** — a resident already in the core registry is not added
   twice.
 

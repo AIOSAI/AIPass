@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: health.py
 # Description: Branch health module — public API (entry-count + entry-size)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-16
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -115,6 +115,23 @@ def print_introspection() -> None:
     console.print("  get_branch_health(branch_name)")
     console.print()
     console.print("[dim]Also importable: aipass.memory.apps.modules.health[/dim]")
+    console.print("[dim]Run drone @memory health --help for more[/dim]")
+
+
+def print_help() -> None:
+    """Display health help (sentry standard)."""
+    from aipass.cli import console
+
+    console.print()
+    console.print("[bold cyan]health[/bold cyan] - read-only branch health: rollover state + cap violations")
+    console.print()
+    console.print("[bold]USAGE:[/bold]")
+    console.print("  drone @memory health @branch    Render that branch's health")
+    console.print("  drone @memory health --help     Show this help")
+    console.print()
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  [dim]drone @memory health @memory[/dim]")
+    console.print()
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -129,7 +146,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if wants_help(args, allow_bare_word=True):
-        print_introspection()
+        print_help()
         return True
 
     from aipass.cli import error
@@ -168,7 +185,7 @@ def _print_health(result: dict) -> None:
             console.print(f"  {memory_type}.json: ok ({row['current_lines']} lines)")
 
     total = result["entry_size"]["total_violations"]
-    console.print(f"  entry size: {total} violation{'' if total == 1 else 's'}")
+    console.print(f"  entry size: {total} violation{'' if total == 1 else 's'}", highlight=False)
     for v in result["entry_size"]["violations"]:
         if v.get("detail"):
             warning(f"{v['file']} {v['detail']}")

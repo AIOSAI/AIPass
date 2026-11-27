@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 2.7.0
+# Version: 2.7.3
 # Description: Tests for hook engine dispatch logic: the dispatcher core; contracts and safeguards in two siblings
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/engine.py: the dispatcher core and the hook dispatch it drives."""
@@ -753,7 +753,7 @@ class TestHooksEntryPoint:
     def test_print_introspection_prints_output(self, capsys):
         print_introspection()
         captured = capsys.readouterr()
-        assert "HOOKS" in captured.out
+        assert "hooks — Hook Infrastructure" in captured.out
         assert "Discovered Modules" in captured.out
 
     def test_handle_command_returns_bool(self):
@@ -798,6 +798,11 @@ class TestHooksEntryPoint:
     def test_help_word(self):
         with patch("sys.argv", ["hooks", "help"]):
             assert main() == 0
+
+    def test_engine_help_prints_usage_and_examples(self, capsys):
+        assert engine_module.handle_command("engine", ["--help"]) is True
+        err = capsys.readouterr().err
+        assert "Usage:" in err and "Examples:" in err
 
 
 class TestRunEvent:
@@ -899,10 +904,12 @@ class TestEngineJsonlFollowsPraxsStateRoot:
     """engine.jsonl lives in branch_state_root("hooks")/logs: on a wheel that is the home folder, never the package."""
 
     def test_the_log_file_is_the_state_roots_logs_folder(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(prax, "branch_state_root", lambda branch: tmp_path / "state" / branch)
+        fake_root = MagicMock(side_effect=lambda branch: tmp_path / "state" / branch)
+        monkeypatch.setattr(prax, "branch_state_root", fake_root)
         try:
             importlib.reload(diagnostics)
             assert diagnostics.LOG_FILE == tmp_path / "state" / "hooks" / "logs" / "engine.jsonl"
+            fake_root.assert_called_with("hooks")
         finally:
             monkeypatch.undo()
             importlib.reload(diagnostics)
@@ -927,7 +934,7 @@ def _fault_lines(handle, mock_logger, hook: str = "h", timeout: int = 5) -> tupl
     with (
         patch("aipass.hooks.apps.modules.engine._log"),
         patch("aipass.hooks.apps.modules.engine._import_handler_module", return_value=module),
-        patch("aipass.hooks.apps.sound.speak"),
+        patch("aipass.hooks.apps.handlers.notification.sound.speak"),
     ):
         result = dispatch("UserPromptSubmit", "{}", {"hooks_enabled": True, "UserPromptSubmit": {hook: hook_def}})
     render = lambda calls: [c.args[0] % c.args[1:] for c in calls]  # noqa: E731

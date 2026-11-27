@@ -3,7 +3,7 @@
 # Description: Structure remediation report for aipass doctor --fix
 # Version: 1.6.0
 # Created: 2026-05-15
-# Modified: 2026-11-21
+# Modified: 2026-11-24
 # =============================================
 
 """
@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import List, NamedTuple, Optional
 
 from aipass.cli import console
-from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.shared.registry_discovery import find_registry as _discover_registry
@@ -411,40 +410,3 @@ def print_json_report(project_root: Path, provider_settings: Optional[dict] = No
     items = generate_remediation(project_root)
     console.print(format_json_report(items, project_name, provider_settings), markup=False, highlight=False)
     return len(items)
-
-
-def print_introspection() -> None:
-    """Display module info for doctor_fix."""
-    console.print()
-    console.print("[bold cyan]doctor_fix Module[/bold cyan]")
-    console.print("Structure remediation report — doctor --fix / --fix --json")
-    console.print()
-    console.print("[yellow]Provides:[/yellow]")
-    console.print("  [dim]- generate_remediation() — scan + build fix items[/dim]")
-    console.print("  [dim]- format_text_report() — human-readable output[/dim]")
-    console.print("  [dim]- format_json_report() — machine-readable for spawn[/dim]")
-    console.print()
-
-
-def handle_command(command: str, args: list[str]) -> bool:
-    """Handle command routing. Helper module — no standalone commands."""
-    if command != "doctor_fix":
-        return False
-
-    if not args:
-        console.print("[dim]Helper module — use: aipass doctor --fix [--json][/dim]")
-        json_handler.log_operation("doctor_fix_usage", {"command": command})
-        return True
-
-    if wants_help(args):
-        console.print("[dim]Helper module — use: aipass doctor --fix [--json][/dim]")
-        json_handler.log_operation("doctor_fix_help", {"command": command})
-        return True
-
-    if args[0] in ("--info", "info"):
-        print_introspection()
-        json_handler.log_operation("doctor_fix_info", {"command": command})
-        return True
-
-    json_handler.log_operation("doctor_fix_noop", {"command": command})
-    return False

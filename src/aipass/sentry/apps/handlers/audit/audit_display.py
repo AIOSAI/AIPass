@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_display.py
 # Description: Audit Display Module
-# Version: 1.7.0
+# Version: 1.7.3
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -31,8 +31,9 @@ def print_introspection() -> None:
     console.print()
 
     console.print("[yellow]Public API:[/yellow]")
-    console.print("  [dim]- print_branch_summary(audit_result, no_bypass)[/dim]")
-    console.print("  [dim]- print_system_summary(audit_results, no_bypass)[/dim]")
+    console.print("  [dim]- print_branch_summary(audit_result, no_bypass, group)[/dim]")
+    console.print("  [dim]- print_system_summary(audit_results, no_bypass, group)[/dim]")
+    console.print("  [dim]- group_names(audit_results)[/dim]")
     console.print()
 
     console.print("[yellow]External Dependencies:[/yellow]")
@@ -58,7 +59,10 @@ def _render_violations(standard_name: str, violations: list, console_obj) -> Non
     for violation in shown:
         file_path = violation.get("path", violation.get("file", ""))
         score = violation.get("score", 0)
-        console_obj.print(f"    [red]✗[/red] [magenta]{file_path}[/magenta] [dim](score: {score}%)[/dim]")
+        # A path has no space to break at: wrapped, it leaves its cross alone on a line with no reason.
+        console_obj.print(
+            f"    [red]✗[/red] [magenta]{file_path}[/magenta] [dim](score: {score}%)[/dim]", soft_wrap=True
+        )
         for issue in violation.get("issues", []):
             console_obj.print(f"      [dim]• {issue}[/dim]")
         if not violation.get("issues") and violation.get("message"):
@@ -292,17 +296,118 @@ def cache_tag(audit_result: dict) -> str:
     return f" [dim](cached: {', '.join(parts)}{detail})[/dim]"
 
 
+#: The one group a result with no ``groups`` key prints under (tests, saved artifacts).
+LEGACY_GROUP = "standards"
+
+
+def _icon(pct: int) -> str:
+    """The tier icon a score cell carries."""
+    return "✅" if pct >= 90 else "⚠️" if pct >= 75 else "❌"
+
+
+def _cell(name: str, pct: int) -> str:
+    """One score cell of the grid."""
+    return f"  {name.title():15} {pct:3}% {_icon(pct)}"
+
+
+def _groups_of(audit_result: Dict) -> Dict[str, List[str]]:
+    """The result's groups, or every row under the legacy group when it carries none."""
+    return audit_result.get("groups") or {LEGACY_GROUP: sorted(audit_result.get("scores", {}))}
+
+
+def group_names(audit_results: List[Dict]) -> List[str]:
+    """Every group any of these results prints under, alphabetical: what ``--group`` accepts."""
+    return sorted({name for result in audit_results for name in _groups_of(result)})
+
+
+def _mean(values: List[int]) -> int:
+    """The integer mean the grid prints."""
+    return int(sum(values) / len(values))
+
+
+def _row_averages(audit_results: List[Dict]) -> Dict[str, int]:
+    """Each row's average over the results that scored it."""
+    collected = defaultdict(list)
+    for result in audit_results:
+        for row, pct in result["scores"].items():
+            collected[row].append(pct)
+    return {row: _mean(values) for row, values in collected.items()}
+
+
+def _rule_averages(audit_results: List[Dict]) -> Dict[str, Dict[str, int]]:
+    """Each row's rules, each averaged over the results that scored it."""
+    collected: Dict[str, Dict[str, List[int]]] = defaultdict(lambda: defaultdict(list))
+    for result in audit_results:
+        for row, rules in (result.get("rule_scores") or {}).items():
+            for rule, pct in rules.items():
+                collected[row][rule].append(pct)
+    return {row: {rule: _mean(v) for rule, v in sorted(rules.items())} for row, rules in collected.items()}
+
+
+def _union_groups(audit_results: List[Dict]) -> Dict[str, List[str]]:
+    """The groups over every result; a legacy result's rows land under the legacy group only if no group holds them."""
+    merged: Dict[str, set] = defaultdict(set)
+    for result in audit_results:
+        for name, rows in (result.get("groups") or {}).items():
+            merged[name].update(rows)
+    placed = set().union(*merged.values()) if merged else set()
+    for result in audit_results:
+        if not result.get("groups"):
+            merged[LEGACY_GROUP].update(row for row in result.get("scores", {}) if row not in placed)
+    return {name: sorted(rows) for name, rows in sorted(merged.items()) if rows}
+
+
+def _group_rows(audit_results: List[Dict], group: str | None) -> set | None:
+    """The rows ``group`` holds, for filtering the violation blocks; None when no group was asked for."""
+    return None if group is None else set(_union_groups(audit_results).get(group, []))
+
+
+def _render_grid(audit_results: List[Dict], group: str | None = None) -> None:
+    """The score grid by group: a clean group is one line, an open one lists its rows down two columns.
+
+    ``group`` prints that group alone, open, with every row and rule at 100 too.
+    """
+    scores = _row_averages(audit_results)
+    rules = _rule_averages(audit_results)
+    groups = _union_groups(audit_results)
+    if any(not result.get("groups") for result in audit_results):
+        console.print(f"  [dim]this result carries no groups: its rows print under '{LEGACY_GROUP}'[/dim]")
+    for name, rows in groups.items():
+        if group is not None and name != group:
+            continue
+        noun = "row" if len(rows) == 1 else "rows"
+        clean = all(scores[row] >= 100 and all(p >= 100 for p in rules.get(row, {}).values()) for row in rows)
+        # The legacy group prints every row: a result without groups never folds them away.
+        if clean and group is None and name != LEGACY_GROUP:
+            console.print(
+                f"  [bold]{name:<13}[/bold] [cyan]{len(rows):>2}[/cyan] {noun}  [cyan]100%[/cyan] {_icon(100)}"
+            )
+            continue
+        avg = _mean([scores[row] for row in rows])
+        console.print(f"  [bold]{name}[/bold] [dim]{len(rows)} {noun}, average[/dim] [cyan]{avg}%[/cyan] {_icon(avg)}")
+        half = (len(rows) + 1) // 2
+        # Read down: the left column is the first half, the right the second.
+        for left, right in zip(rows[:half], rows[half:] + [None]):
+            line = _cell(left, scores[left]) + (f"  {_cell(right, scores[right])}" if right else "")
+            console.print(line, highlight=False)
+            for row in (left, right) if right else (left,):
+                for rule, pct in rules.get(row, {}).items():
+                    if group is not None or pct < 100:
+                        console.print(f"      [dim]{row} ›[/dim] {rule} [cyan]{pct}%[/cyan]")
+
+
 def print_branch_summary(
     audit_result: Dict,
     no_bypass: bool = False,
+    group: str | None = None,
 ):
     """Print summary for a single branch - always shows full details (audit = comprehensive)
 
-    no_bypass tags the branch and Overall lines, so a raw score never travels unlabelled.
+    no_bypass tags the branch and Overall lines, so a raw score never travels unlabelled;
+    group prints that group alone, and only its violations.
     """
     json_handler.log_operation("audit_display_rendered", {"branch": audit_result["branch"]["name"]})
     branch = audit_result["branch"]
-    scores = audit_result["scores"]
     avg = audit_result["average"]
     files_checked = audit_result.get("files_checked", 0)
 
@@ -319,20 +424,7 @@ def print_branch_summary(
         f"{cached_tag}{no_bypass_tag}"
     )
 
-    score_items = list(scores.items())
-
-    for i in range(0, len(score_items), 2):
-        left_name, left_score = score_items[i]
-        left_icon = "✅" if left_score >= 90 else "⚠️" if left_score >= 75 else "❌"
-        left_display = f"  {left_name.title():15} {left_score:3}% {left_icon}"
-
-        if i + 1 < len(score_items):
-            right_name, right_score = score_items[i + 1]
-            right_icon = "✅" if right_score >= 90 else "⚠️" if right_score >= 75 else "❌"
-            right_display = f"  {right_name.title():15} {right_score:3}% {right_icon}"
-            console.print(f"{left_display}  {right_display}")
-        else:
-            console.print(left_display)
+    _render_grid([audit_result], group)
 
     # The files each row did not judge, so a 100 over a partial corpus says so.
     declined = audit_result.get("declined") or {}
@@ -358,9 +450,10 @@ def print_branch_summary(
     if no_bypass:
         console.print("  [bold yellow]BYPASSES DISABLED[/bold yellow] [dim](--no-bypass) — raw score[/dim]")
 
+    shown = _group_rows([audit_result], group)
     rendered_standards = set()
     for standard_name, score in sorted(audit_result.get("scores", {}).items()):
-        if score >= 100:
+        if score >= 100 or (shown is not None and standard_name not in shown):
             continue
         violations_key = f"{standard_name}_violations"
         violations = audit_result.get(violations_key, [])
@@ -384,13 +477,14 @@ def print_branch_summary(
         if not key.endswith("_violations"):
             continue
         standard_name = key.removesuffix("_violations")
-        if standard_name in rendered_standards:
+        if standard_name in rendered_standards or (shown is not None and standard_name not in shown):
             continue
         violations = audit_result[key]
         if violations:
             _render_violations(standard_name, violations, console)
 
-    _render_type_errors(audit_result, console)
+    if shown is None or "diagnostics" in shown:
+        _render_type_errors(audit_result, console)
 
     _render_test_map(audit_result, console)
 
@@ -402,8 +496,11 @@ def print_branch_summary(
     _render_fleet_table([audit_result], console)
 
 
-def print_system_summary(audit_results: List[Dict], no_bypass: bool = False):
-    """Print system-wide summary with standard averages; no_bypass labels the copied block itself."""
+def print_system_summary(audit_results: List[Dict], no_bypass: bool = False, group: str | None = None):
+    """Print system-wide summary with standard averages; no_bypass labels the copied block itself.
+
+    group prints that group's averages alone.
+    """
     # On a fleet run this is the only place a branch_level checker's per-branch reading appears.
     _render_fleet_table(audit_results, console)
 
@@ -424,58 +521,47 @@ def print_system_summary(audit_results: List[Dict], no_bypass: bool = False):
         console.print("[bold]SYSTEM SUMMARY[/bold] — [bold yellow]BYPASSES DISABLED[/bold yellow][bold]:[/bold]")
     else:
         console.print("[bold]SYSTEM SUMMARY:[/bold]")
-    console.print(f"  Total branches:        {total_branches}")
-    console.print(f"  Average compliance:    {avg_compliance}%")
-    console.print(f"  Branches ≥90%:         {excellent}")
-    console.print(f"  Branches 75-89%:       {good}")
-    console.print(f"  Branches <75%:         {needs_work}")
+    console.print(f"  Total branches:        [cyan]{total_branches}[/cyan]")
+    console.print(f"  Average compliance:    [cyan]{avg_compliance}%[/cyan]")
+    console.print(f"  Branches ≥90%:         [cyan]{excellent}[/cyan]")
+    console.print(f"  Branches 75-89%:       [cyan]{good}[/cyan]")
+    console.print(f"  Branches <75%:         [cyan]{needs_work}[/cyan]")
     if total_type_errors > 0:
-        console.print(f"  Type errors:           {total_type_errors} ({branches_with_type_errors} branches)")
+        console.print(
+            f"  Type errors:           [cyan]{total_type_errors}[/cyan] ({branches_with_type_errors} branches)"
+        )
     else:
-        console.print("  Type errors:           0")
+        console.print("  Type errors:           [cyan]0[/cyan]")
     waived = [r["waived"] for r in audit_results if r.get("waived") is not None]
     if waived:
         console.print(
             f"  Waived sites:          {sum(waived)} [dim](bypass rows; a 100 with rows waived is not a clean 100)[/dim]"
         )
     if cache_served:
-        console.print(f"  Cache-served:          {cache_served}/{total_branches} branches (unchanged, skipped re-scan)")
+        console.print(
+            f"  Cache-served:          [cyan]{cache_served}/{total_branches}[/cyan] branches (unchanged, skipped re-scan)"
+        )
     if no_bypass:
         console.print("  Bypass rules:          [bold yellow]DISABLED[/bold yellow] [dim](raw, not comparable)[/dim]")
     console.print()
 
-    standard_scores = defaultdict(list)
-    for result in audit_results:
-        for standard, score in result["scores"].items():
-            standard_scores[standard].append(score)
-
-    standard_averages = {standard: int(sum(scores) / len(scores)) for standard, scores in standard_scores.items()}
+    standard_averages = _row_averages(audit_results)
 
     console.print("[bold]STANDARD AVERAGES:[/bold]")
-    standard_items = sorted(standard_averages.items(), key=lambda x: x[0])
-
-    for i in range(0, len(standard_items), 2):
-        left_name, left_avg = standard_items[i]
-        left_icon = "✅" if left_avg >= 90 else "⚠️" if left_avg >= 75 else "❌"
-        left_display = f"  {left_name.title():15} {left_avg:3}% {left_icon}"
-
-        if i + 1 < len(standard_items):
-            right_name, right_avg = standard_items[i + 1]
-            right_icon = "✅" if right_avg >= 90 else "⚠️" if right_avg >= 75 else "❌"
-            right_display = f"  {right_name.title():15} {right_avg:3}% {right_icon}"
-            console.print(f"{left_display}  {right_display}")
-        else:
-            console.print(left_display)
+    console.print("  [dim]each row's average over the branches it scored, by group[/dim]")
+    _render_grid(audit_results, group)
 
     console.print()
 
     top_issues = sorted(standard_averages.items(), key=lambda x: x[1])[:3]
 
     if top_issues:
-        console.print("[bold]TOP IMPROVEMENT AREAS:[/bold]")
+        console.print("[bold]TOP IMPROVEMENT AREAS:[/bold] [dim]the three lowest standard averages[/dim]")
         for i, (standard, avg_score) in enumerate(top_issues, 1):
             branches_failing = sum(1 for r in audit_results if r["scores"].get(standard, 100) < 75)
-            console.print(f"  {i}. {standard.title():15} (avg: {avg_score}%, {branches_failing} branches <75%)")
+            console.print(
+                f"  {i}. {standard.title():15} (avg: [cyan]{avg_score}%[/cyan], {branches_failing} branches <75%)"
+            )
 
     console.print("─" * 70)
     console.print()

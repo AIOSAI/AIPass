@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_escalation.py
 # Description: Tests for the escalation lane's signature, counting, windows, gates and state file
-# Version: 1.3.0
+# Version: 1.5.0
 # Created: 2026-08-08
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/escalation.py — the repeat signature, counting, windows, gates and state file."""
@@ -13,6 +13,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(external) — ai_mail delivery of the digest; AIPass tests only its own files
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Dict, Generator
@@ -90,6 +91,11 @@ class TestComputeSignature:
         upper = lane.compute_signature("ERROR", "FLOW", "cfg", "connection refused")
         lower = lane.compute_signature("ERROR", "flow", "cfg", "connection refused")
         assert upper == lower
+
+    def test_the_branch_is_hashed_in_lowercase(self, lane) -> None:
+        """The signature input names the branch the way the system spells it, whatever case the line carried."""
+        minted = hashlib.sha1(b"ERROR|devpulse|cfg|connection refused").hexdigest()[:12]
+        assert lane.compute_signature("ERROR", "DEVPULSE", "cfg", "connection refused") == minted
 
     def test_signature_is_twelve_hex_chars(self, lane) -> None:
         """Signatures are short enough to paste and long enough not to collide."""
@@ -235,6 +241,20 @@ class TestSignatureFragmentation:
         second = lane.compute_signature("WARNING", "prax", "queue", "37 events were skipped")
         assert first == second
 
+    def test_agent_tag_case_does_not_fork_the_signature(self, lane, monkeypatch, tmp_path) -> None:
+        """[hooks] and [HOOKS] are one agent's tag, so one repeat signature; so are [hooks:codex] and [HOOKS:codex]."""
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        hooks = {"name": "HOOKS", "status": "active", "path": "src/aipass/hooks"}
+        registry.write_text(json.dumps({"branches": [hooks]}), encoding="utf-8")
+        monkeypatch.setattr(lane, "BRANCH_REGISTRY_FILE", registry)
+        lane._branch_names_cache = (0.0, None)
+
+        def sign(tag: str) -> str:
+            return lane.compute_signature("ERROR", "hooks", "engine", f"{tag} config unreadable")
+
+        assert sign("[hooks]") == sign("[HOOKS]") == sign("[Hooks]")
+        assert sign("[hooks:codex]") == sign("[HOOKS:codex]")
+
     def test_registry_names_are_reread_after_the_ttl(self, lane, monkeypatch, tmp_path) -> None:
         """A newly spawned citizen collapses without restarting the watcher.
         Freshness is TTL-bound, not mtime-bound: two quick writes can share st_mtime_ns.
@@ -329,6 +349,37 @@ class TestCountingAndThreshold:
         assert entry["samples"] == [WARNING_EVENT["raw_line"]]
         assert entry["first_seen"]
         assert entry["last_seen"]
+
+    def test_an_entry_under_an_earlier_key_carries_on_under_the_new_one(self, lane, outbox) -> None:
+        """A repeat tracked under a key minted before the branch was lowercased keeps its count and aged state."""
+        signature = _fire_warning(lane)["signature"]
+        state = _read_state(lane)
+        earlier = state["signatures"].pop(signature)
+        earlier.update(aged_since="2026-10-23T22:07:00", first_seen="2026-10-01T00:00:00")
+        state["signatures"]["0123456789ab"] = earlier
+        _write_state(lane, state)
+
+        _fire_warning(lane)
+
+        signatures = _read_state(lane)["signatures"]
+        assert list(signatures) == [signature]
+        assert signatures[signature]["total_count"] == 2
+        assert signatures[signature]["aged_since"] == "2026-10-23T22:07:00"
+        assert signatures[signature]["first_seen"] == "2026-10-01T00:00:00"
+
+    @pytest.mark.parametrize("field, other", [("branch", "memory"), ("module", "queue"), ("level", "ERROR")])
+    def test_an_earlier_entry_for_another_repeat_is_never_adopted(self, lane, outbox, field, other) -> None:
+        """An earlier entry that differs in branch, module or level is a different repeat and keeps its own key."""
+        signature = _fire_warning(lane)["signature"]
+        state = _read_state(lane)
+        earlier = state["signatures"].pop(signature)
+        earlier[field] = other
+        state["signatures"]["0123456789ab"] = earlier
+        _write_state(lane, state)
+
+        _fire_warning(lane)
+
+        assert sorted(_read_state(lane)["signatures"]) == sorted(["0123456789ab", signature])
 
     def test_separate_signatures_count_separately(self, lane, outbox) -> None:
         """Two different messages never pool their counts into one digest."""

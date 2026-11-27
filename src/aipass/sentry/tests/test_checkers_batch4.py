@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 sentry checker handlers (batch 4)
-# Version: 1.8.1
+# Version: 1.8.2
 # Created: 2026-03-29
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for 5 checkers: aipass_standards/stderr_routing_check.py, todo, trigger, dead_code, unused_function."""
@@ -207,7 +207,7 @@ class TestTriggerCheck:
         _write_file(py_file, ("def add(a: int, b: int) -> int:\n    return a + b\n"))
         result = trigger_check_module(str(py_file))
         assert result["score"] >= 75
-        assert result["standard"] == "TRIGGER"
+        assert result["standard"] == "trigger"
 
     def test_trigger_violation_caught(self, mock_json, tmp_path: Path) -> None:
         """Code with lifecycle functions but no trigger.fire() is detected."""

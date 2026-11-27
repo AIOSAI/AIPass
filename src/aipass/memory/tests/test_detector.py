@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_detector.py
 # Description: Tests for rollover trigger detection handler
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-11-21
+# Modified: 2026-11-23
 # =============================================
 
 """Tests for apps/handlers/monitor/detector.py."""
@@ -936,3 +936,43 @@ class TestAnOverCountListRolloverCannotOrderIsDamagedNotATrigger:
         _flow_local(tmp_path, monkeypatch, _sessions([None, 2, 1]))
 
         assert detector.check_all_branches()["damaged"] == []
+
+
+class TestTheWriteScopeHoldsDeclaredExternals:
+    """Services write where they serve: the write scope carries every declared external branch, by path."""
+
+    def test_the_write_scope_names_wren_and_the_nested_grow(self, declared_externals):
+        found = {item["name"]: Path(item["path"]) for item in detector.write_scope()}
+
+        assert found == {"wren": declared_externals.wren, "grow": declared_externals.grow}
+
+    def test_an_external_sharing_an_in_scope_name_is_left_out_and_named(self, declared_externals, monkeypatch):
+        """Every write lane matches by name, so a second 'wren' would take the first one's store; reads still see it."""
+        core = declared_externals.home / "src" / "memory"
+        core.mkdir(parents=True)
+        registry = {"branches": [{"name": "WREN", "path": "src/memory", "status": "active"}]}
+        (declared_externals.home / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        log = MagicMock()
+        monkeypatch.setattr(detector, "logger", log)
+
+        written = [Path(item["path"]) for item in detector.write_scope()]
+        read = [Path(item["path"]) for item in detector.read_scope()]
+
+        assert declared_externals.wren not in written and declared_externals.grow in written
+        assert declared_externals.wren in read
+        said = " ".join(str(call) for call in log.warning.call_args_list)
+        assert "wren" in said and "left out of the write scope" in said, said
+
+    def test_the_fleet_walk_triggers_an_external_file(self, declared_externals, monkeypatch):
+        """The walk reads write_scope, so an external over its count is a trigger like any other."""
+        local = declared_externals.wren / ".trinity" / "local.json"
+        local.write_text(_sessions(list(range(18, 0, -1))), encoding="utf-8")
+        monkeypatch.setattr(
+            detector.config_loader,
+            "section",
+            lambda name: {"per_branch": {}, "defaults": {"local": {"sessions": {"count": 15}}}},
+        )
+
+        walk = detector.check_all_branches()
+
+        assert [str(t) for t in walk["triggers"]] == ["wren.local (18/15 sessions)"]

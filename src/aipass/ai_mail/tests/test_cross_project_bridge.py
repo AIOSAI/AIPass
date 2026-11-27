@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cross_project_bridge.py
 # Description: Tests for the verified-admin cross-project bridge + reply return path (FPLAN-0401 ph5/5b)
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-08-12
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py and the cross-project bridge across wake.py and registry/read.py."""
@@ -560,6 +560,13 @@ class TestResidentDiscovery:
         bdir = self._project(tmp_path, "torn", "torn")
         (bdir / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
         assert reg.get_resident_branches(tmp_path) == {}
+
+    def test_an_unreadable_resident_registry_raises_naming_itself(self, tmp_path):
+        """Read as empty, a torn registry would answer "no residents" for a project that has them."""
+        self._project(tmp_path, "torn", "torn")
+        (tmp_path / "projects" / "torn" / "TORN_REGISTRY.json").write_text("{not json", encoding="utf-8")
+        with pytest.raises(reg.RegistryUnreadable, match=r"^TORN_REGISTRY\.json could not be read \("):
+            reg.get_resident_branches(tmp_path)
 
     def test_every_refusal_is_named_at_error_level(self, tmp_path, monkeypatch):
         """A candidate refused silently is indistinguishable from one never found."""

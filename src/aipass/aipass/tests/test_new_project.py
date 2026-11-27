@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.8.0
+# Version: 1.10.0
 # Created: 2026-07-17
-# Modified: 2026-11-20
+# Modified: 2026-11-24
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -15,6 +15,7 @@ import hashlib
 import importlib
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -30,6 +31,7 @@ from aipass.aipass.apps.handlers.init.bootstrap import init_project, is_projects
 from aipass.aipass.apps.handlers.new_project import (
     create_project,
     find_host_root,
+    project_path,
 )
 from aipass.aipass.apps.handlers.new_project.adopt import adopt_project
 from aipass.aipass.shared import scaffold_content as sc
@@ -90,6 +92,25 @@ def test_validate_name_rejects_leading_digit(tmp_path, monkeypatch):
 def test_validate_name_rejects_special_chars(tmp_path, monkeypatch):
     """Mutant: the pattern's anchor `*$"` -> `*"` -> red."""
     assert "Must start with a letter" in _name_answer(tmp_path, monkeypatch, "my app!")
+
+
+def test_validate_name_rejects_a_trailing_newline(tmp_path, monkeypatch):
+    """re.match with `$` accepts 'abc\\n'; a terminal caller has no API fullmatch in front of it."""
+    assert "Must start with a letter" in _name_answer(tmp_path, monkeypatch, "abc\n")
+
+
+@pytest.mark.parametrize("name", ["../escape", "../projects2", ".", "a/../.."])
+def test_a_name_that_leaves_projects_is_refused_before_any_directory(tmp_path, name):
+    """The name rule stops these first at the door, so the containment check is called directly."""
+    host = tmp_path / "host"
+    host.mkdir()
+    with pytest.raises(ValueError, match="leaves"):
+        project_path(host, name)
+    assert not any(host.iterdir())
+
+
+def test_project_path_is_the_named_folder_directly_in_projects(tmp_path):
+    assert project_path(tmp_path, "alpha") == tmp_path / "projects" / "alpha"
 
 
 def _built(host_env, monkeypatch, name: str, template: str = "empty") -> dict:
@@ -374,11 +395,14 @@ def test_create_project_cleans_up_on_failure(host_env, monkeypatch):
             return_value=str(host_env),
         ),
         patch("aipass.aipass.shared.project_home._enroll_project"),
+        patch("aipass.hooks.revoke") as revoke,
         pytest.raises(RuntimeError, match="simulated failure"),
     ):
         create_project("failproj", no_agent=True)
 
     assert not (host_env / "projects" / "failproj").exists()
+    # C20: the rollback took the project out of the trust registry too.
+    revoke.assert_called_once_with(str(host_env / "projects" / "failproj"))
 
 
 def test_create_project_refuses_without_git_identity_before_building(host_env, monkeypatch):
@@ -480,6 +504,34 @@ def _built_with_agent(host_env, monkeypatch, name: str, spawn_answer: dict):
         patch("aipass.aipass.apps.handlers.new_project.spawn_agent", return_value=spawn_answer) as mock_spawn,
     ):
         return create_project(name, no_agent=False), mock_spawn
+
+
+def test_a_newborn_project_citizen_passes_its_own_fence_tests(host_env, monkeypatch):
+    """A real birth (spawn runs, git stubbed), then the newborn's fence file in its own interpreter.
+
+    Mutant: the localizer's `\\{BRANCH\\}` arm dropped -> support_fence's f"aipass.{BRANCH}" names stay
+    unrooted -> No module named aipass.<branch> -> red.
+    """
+    monkeypatch.chdir(host_env)
+    with (
+        patch("subprocess.run", side_effect=_mock_git_run),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=str(host_env)),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
+    ):
+        result = create_project("fenced", no_agent=False)
+    home = Path(result["agent_home"])
+    env = {**os.environ, "PYTHONPATH": str(host_env / "projects" / "fenced" / "src")}
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/test_handlers_fence.py", "-q", "-p", "no:cacheprovider"],
+        cwd=home,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
+    )
+    assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
 
 
 def test_agent_home_simple(host_env, monkeypatch):
@@ -817,10 +869,10 @@ def test_ctrl_c_at_the_template_prompt_creates_nothing(host_env, monkeypatch):
     assert not (host_env / "projects" / "cancelled").exists()
 
 
-def test_tty_auto_launches_agent(host_env, monkeypatch):
-    """On a TTY with an agent created, launch_inline is called.
+def test_a_tty_prints_the_next_steps_and_launches_nothing(host_env, monkeypatch, capsys: pytest.CaptureFixture[str]):
+    """On a TTY with an agent, 'new' prints the next steps and returns: an exec into claude never returns.
 
-    Mutant: the launch_inline command `"claude",` -> `"codex",` -> red.
+    Mutant: the next-steps block put back behind `not sys.stdin.isatty()` -> red.
     """
     monkeypatch.chdir(host_env)
     spawn_ok = {
@@ -844,70 +896,13 @@ def test_tty_auto_launches_agent(host_env, monkeypatch):
             return_value=spawn_ok,
         ),
         patch("aipass.aipass.apps.modules.new_project.sys.stdin") as mock_stdin,
-        patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
     ):
         mock_stdin.isatty.return_value = True
         mock_stdin.readline.return_value = "\n"  # the real agent prompt, answered Enter
-        handle_command("new", ["launch", "--template", "empty"])
-    mock_launch.assert_called_once()
-    assert mock_launch.call_args[0][0] == "claude"
-    assert "launch" in mock_launch.call_args[0][2]
-
-
-def test_no_tty_skips_auto_launch(host_env, monkeypatch, capsys: pytest.CaptureFixture[str]):
-    """On a non-TTY, launch_inline is NOT called — fallback to printed instructions.
-
-    Mutant: 'claude' next-step line not printed -> red.
-    """
-    monkeypatch.chdir(host_env)
-    spawn_ok = {
-        "success": True,
-        "branch_name": "PIPED",
-        "path": str(host_env / "projects" / "piped"),
-        "files_copied": 12,
-        "registry_updated": True,
-        "validation_issues": [],
-    }
-    with (
-        patch("subprocess.run", side_effect=_mock_git_run),
-        patch(
-            "aipass.aipass.shared.project_home._detect_aipass_home",
-            return_value=str(host_env),
-        ),
-        patch("aipass.aipass.shared.project_home._enroll_project"),
-        patch("aipass.aipass.apps.handlers.new_project._localize_imports"),
-        patch(
-            "aipass.aipass.apps.handlers.new_project.spawn_agent",
-            return_value=spawn_ok,
-        ),
-        patch("aipass.aipass.apps.modules.new_project.sys.stdin") as mock_stdin,
-        patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
-    ):
-        mock_stdin.isatty.return_value = False
-        mock_stdin.readline.return_value = "\n"  # the real agent prompt, answered Enter
-        handle_command("new", ["piped", "--template", "empty"])
-    mock_launch.assert_not_called()
+        assert handle_command("new", ["launch", "--template", "empty"]) is True
     out, _err = capsys.readouterr()
-    assert "cd " in out
+    assert "Next steps:" in out
     assert "# meet your project agent" in out
-
-
-def test_no_agent_skips_auto_launch(host_env, monkeypatch):
-    """With --no-agent, launch_inline is not called even on TTY."""
-    monkeypatch.chdir(host_env)
-    with (
-        patch("subprocess.run", side_effect=_mock_git_run),
-        patch(
-            "aipass.aipass.shared.project_home._detect_aipass_home",
-            return_value=str(host_env),
-        ),
-        patch("aipass.aipass.shared.project_home._enroll_project"),
-        patch("aipass.aipass.apps.modules.new_project.sys.stdin") as mock_stdin,
-        patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
-    ):
-        mock_stdin.isatty.return_value = True
-        handle_command("new", ["nolaunch", "--template", "empty", "--no-agent"])
-    mock_launch.assert_not_called()
 
 
 def test_aipass_print_introspection(capsys: pytest.CaptureFixture[str]):
@@ -915,18 +910,19 @@ def test_aipass_print_introspection(capsys: pytest.CaptureFixture[str]):
     entry.print_introspection([])
     out, _err = capsys.readouterr()
     printed = " ".join(out.split())
-    assert "AIPASS \u2014 machine concierge" in printed
+    assert "aipass \u2014 machine concierge" in printed
     assert "--help" in printed
 
 
 def test_aipass_print_help(capsys: pytest.CaptureFixture[str]):
-    """Mutant: doctor command line not printed -> red."""
-    entry.print_help([])
+    """The table comes from each module's own docstring: mutant (doctor's description dropped) -> red."""
+    entry.print_help(entry.discover_modules())
     out, _err = capsys.readouterr()
     printed = " ".join(out.split())
     assert "Usage:" in printed
     assert "aipass <command>" in printed
-    assert "System health \u2014 structure, registry, hooks, tests" in printed
+    assert "doctor system health aggregation." in printed
+    assert "DPLAN-" not in printed
 
 
 # Real git, never a mocked subprocess.run: the branch ordering is only provable

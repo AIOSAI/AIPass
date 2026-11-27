@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations.py
 # Description: Unit tests for dashboard operations handler
-# Version: 1.5.0
+# Version: 1.7.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for the dashboard file and its budget: apps/handlers/dashboard/operations.py."""
@@ -392,7 +392,7 @@ class TestCreateFreshDashboard:
             branch_dir.mkdir()
             result = ops.create_fresh_dashboard(branch_dir)
 
-            assert result["branch"] == "MYBRANCH"
+            assert result["branch"] == "mybranch"
             assert "last_updated" in result
             assert result["last_updated"] != ""
             assert "_warning" in result
@@ -414,7 +414,7 @@ class TestCreateFreshDashboard:
 
         template_data = {
             "_warning": "AUTO-GENERATED",
-            "branch": "{{BRANCHNAME}}",
+            "branch": "{{BRANCH}}",
             "last_updated": "",
             "sections": {
                 "ai_mail": {"managed_by": "ai_mail", "new": 0},
@@ -430,14 +430,14 @@ class TestCreateFreshDashboard:
             branch_dir.mkdir()
             result = ops.create_fresh_dashboard(branch_dir)
 
-            assert result["branch"] == "FLOW"
+            assert result["branch"] == "flow"
             assert result["last_updated"] != ""
             assert result["sections"]["ai_mail"]["new"] == 0
         finally:
             ops._PRAX_ROOT = original
 
-    def test_falls_back_on_corrupted_template(self, tmp_path):
-        """If template JSON is invalid, falls back to hardcoded structure."""
+    def test_a_corrupted_template_raises(self, tmp_path):
+        """A corrupt shipped template raises; mutant: the hardcoded dashboard returned in its place."""
         ops = _load_ops()
         fake_prax = tmp_path / "prax"
         templates_dir = fake_prax / "templates"
@@ -449,11 +449,7 @@ class TestCreateFreshDashboard:
         try:
             branch_dir = tmp_path / "broken"
             branch_dir.mkdir()
-            result = ops.create_fresh_dashboard(branch_dir)
-
-            # Should still return a valid hardcoded dashboard
-            assert result["branch"] == "BROKEN"
-            assert "sections" in result
-            assert "_warning" in result
+            with pytest.raises(ValueError, match="unreadable"):
+                ops.create_fresh_dashboard(branch_dir)
         finally:
             ops._PRAX_ROOT = original

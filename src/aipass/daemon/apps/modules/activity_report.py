@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: activity_report.py
 # Description: Branch Activity Report Generator Module
-# Version: 0.6.0
+# Version: 0.7.0
 # Created: 2026-01-30
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -59,26 +59,47 @@ def print_introspection():
         " [dim](entry-count + entry-size facts for branch-health — severity applied here)[/dim]"
     )
     console.print()
+    console.print("Run [green]drone @daemon activity_report --help[/green] for usage information")
+    console.print()
+
+
+def print_help() -> None:
+    """Module help: the three verbs this module answers; each verb's --help goes deeper."""
+    console.print()
+    console.print("[bold cyan]activity_report - Fleet Activity Reports[/bold cyan]")
+    console.print()
+    console.print("[yellow]USAGE:[/yellow]")
+    console.print("  drone @daemon activity [--hours N]                 Quick summary")
+    console.print("  drone @daemon activity-report [--hours N] [--json] Full report")
+    console.print(f"  {BRANCH_HEALTH_USAGE}  One branch, deep")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  drone @daemon activity --hours 48", highlight=False)
+    console.print("  drone @daemon activity-report --json")
+    console.print("  drone @daemon branch-health drone")
+    console.print()
+    console.print("Each verb takes [green]--help[/green] for its options.")
+    console.print()
 
 
 def _print_activity_help() -> None:
     """Display help for the activity command."""
     console.print()
     console.print("=" * 60)
-    console.print("ACTIVITY - Quick Activity Summary")
+    console.print("[bold cyan]ACTIVITY - Quick Activity Summary[/bold cyan]")
     console.print("=" * 60)
     console.print()
-    console.print("USAGE:")
+    console.print("[yellow]USAGE:[/yellow]")
     console.print("  drone @daemon activity")
     console.print("  daemon activity")
-    console.print("  daemon activity --hours 48")
+    console.print("  daemon activity --hours 48", highlight=False)
     console.print()
-    console.print("DESCRIPTION:")
-    console.print("  Quick 24-hour activity summary (default).")
+    console.print("[yellow]DESCRIPTION:[/yellow]")
+    console.print("  Quick 24-hour activity summary (default).", highlight=False)
     console.print("  Shows branch status, red flags, and recommendations.")
     console.print()
-    console.print("OPTIONS:")
-    console.print("  --hours N, -t N    Time window in hours (default: 24)")
+    console.print("[yellow]OPTIONS:[/yellow]")
+    console.print("  --hours N, -t N    Time window in hours (default: 24)", highlight=False)
     console.print("  --help, -h         Show this help message")
     console.print()
 
@@ -87,21 +108,21 @@ def _print_activity_report_help() -> None:
     """Display help for the activity-report command."""
     console.print()
     console.print("=" * 60)
-    console.print("ACTIVITY-REPORT - Full Detailed Report")
+    console.print("[bold cyan]ACTIVITY-REPORT - Full Detailed Report[/bold cyan]")
     console.print("=" * 60)
     console.print()
-    console.print("USAGE:")
+    console.print("[yellow]USAGE:[/yellow]")
     console.print("  drone @daemon activity-report")
     console.print("  daemon activity-report")
-    console.print("  daemon activity-report --hours 48")
+    console.print("  daemon activity-report --hours 48", highlight=False)
     console.print("  daemon activity-report --json")
     console.print()
-    console.print("DESCRIPTION:")
+    console.print("[yellow]DESCRIPTION:[/yellow]")
     console.print("  Full detailed activity report with file-level changes.")
     console.print("  Includes per-branch breakdown and complete recommendations.")
     console.print()
-    console.print("OPTIONS:")
-    console.print("  --hours N, -t N    Time window in hours (default: 24)")
+    console.print("[yellow]OPTIONS:[/yellow]")
+    console.print("  --hours N, -t N    Time window in hours (default: 24)", highlight=False)
     console.print("  --json, -j         Output raw JSON data")
     console.print("  --help, -h         Show this help message")
     console.print()
@@ -111,21 +132,21 @@ def _print_branch_health_help() -> None:
     """Display help for the branch-health command."""
     console.print()
     console.print("=" * 60)
-    console.print("BRANCH-HEALTH - Single Branch Deep Dive")
+    console.print("[bold cyan]BRANCH-HEALTH - Single Branch Deep Dive[/bold cyan]")
     console.print("=" * 60)
     console.print()
-    console.print("USAGE:")
-    console.print("  drone @daemon branch-health DRONE")
-    console.print("  daemon branch-health FLOW")
-    console.print("  daemon branch-health SENTRY --hours 48")
+    console.print("[yellow]USAGE:[/yellow]")
+    console.print("  drone @daemon branch-health drone")
+    console.print("  daemon branch-health flow")
+    console.print("  daemon branch-health sentry --hours 48", highlight=False)
     console.print()
-    console.print("DESCRIPTION:")
+    console.print("[yellow]DESCRIPTION:[/yellow]")
     console.print("  Deep dive report for a single branch.")
     console.print("  Shows all file changes, memory health, and specific recommendations.")
     console.print()
-    console.print("OPTIONS:")
-    console.print("  <branch_name>      Required - branch name (e.g., DRONE, FLOW, SENTRY)")
-    console.print("  --hours N, -t N    Time window in hours (default: 24)")
+    console.print("[yellow]OPTIONS:[/yellow]")
+    console.print("  <branch_name>      Required - branch name (e.g., drone, flow, sentry)")
+    console.print("  --hours N, -t N    Time window in hours (default: 24)", highlight=False)
     console.print("  --help, -h         Show this help message")
     console.print()
 
@@ -151,7 +172,7 @@ def _render_entry_health(branch_name: str) -> str:
         from aipass.memory import get_branch_health
     # OSError too: a cross-branch import can fail on the filesystem, not only on absence.
     except (ImportError, OSError) as e:
-        logger.warning("[DAEMON] activity_report: @memory health API unavailable: %s", e)
+        logger.warning("[daemon] activity_report: @memory health API unavailable: %s", e)
         lines.append(f"  {SYMBOL_WARNING} UNAVAILABLE - @memory health API not importable: {e}")
         return "\n".join(lines)
 
@@ -159,7 +180,7 @@ def _render_entry_health(branch_name: str) -> str:
 
     if not health.get("success"):
         reason = health.get("error", "unknown error")
-        logger.warning("[DAEMON] activity_report: entry health refused for %s: %s", branch_name, reason)
+        logger.warning("[daemon] activity_report: entry health refused for %s: %s", branch_name, reason)
         lines.append(f"  {SYMBOL_WARNING} {reason}")
         return "\n".join(lines)
 
@@ -221,14 +242,14 @@ def handle_command(command: str, args: List[str]) -> bool:
     # Alias: help shows the module name, so users type it.
     if command == "activity_report":
         if args and args[0] in ("--help", "-h", "help"):
-            print_introspection()
+            print_help()
             return True
         gate(command, args, value_flags=("--hours", "-t"), usage="drone @daemon activity_report [--hours N]")
         json_handler.log_operation("activity_report", {"command": command})
         hours = _parse_hours_arg(args)
         report = generate_activity_report(since_hours=hours, verbosity="normal")
         console.print(report)
-        logger.info("[DAEMON] activity_report: Activity summary generated")
+        logger.info("[daemon] activity_report: Activity summary generated")
         return True
 
     if command == "activity":
@@ -242,7 +263,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         hours = _parse_hours_arg(args)
         report = generate_activity_report(since_hours=hours, verbosity="normal")
         console.print(report)
-        logger.info("[DAEMON] activity_report: Activity summary generated")
+        logger.info("[daemon] activity_report: Activity summary generated")
         return True
 
     if command == "activity-report":
@@ -269,7 +290,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         else:
             report = generate_activity_report(since_hours=hours, verbosity="detailed")
             console.print(report)
-        logger.info("[DAEMON] activity_report: Detailed report generated")
+        logger.info("[daemon] activity_report: Detailed report generated")
         return True
 
     if command == "branch-health":
@@ -335,7 +356,7 @@ def _handle_branch_health(args: List[str]) -> bool:
     report = generate_branch_report(resolved, since_hours=hours)
     console.print(report)
     console.print(_render_entry_health(resolved))
-    logger.info("[DAEMON] activity_report: Branch health report generated for %s", resolved)
+    logger.info("[daemon] activity_report: Branch health report generated for %s", resolved)
     return True
 
 

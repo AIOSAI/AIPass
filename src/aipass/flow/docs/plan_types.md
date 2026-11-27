@@ -42,6 +42,8 @@ No template carries a spoken (TTS) summary section. Each ends its guidance with 
 - Template registry auto-prunes orphaned types (directory deleted → entry + plan registry JSON removed)
 - Plan registries auto-close entries for missing files
 - New template directories auto-register on next command
+- A template registry that cannot be read is reseeded from `templates/` by discovery, with a warning; a bare-number close or restore, and the registry scan, that read it before then fail naming it
+- A missing registry file reads as empty; one that exists but cannot be read fails the command that reads it (create, close, restore, list, the central and dashboard pushes, aggregate) instead of reading as empty
 
 Auto-prune only fires while the type is **still registered** and its directory
 has gone missing. `unregister <dir>` deliberately leaves the plan registry JSON

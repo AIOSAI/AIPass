@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: presence_gate.py
-# Version: 3.5.0
+# Version: 3.7.0
 # Description: Single-session gate — blocks duplicate Claude runtimes per branch
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-29
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Single-session gate — blocks duplicate Claude runtimes per branch.
@@ -20,6 +20,7 @@ import json
 import os
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.config.loader import seat_at_root
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
@@ -42,7 +43,7 @@ _SUB_AGENT_TYPES = frozenset(
 
 
 def _resolve_branch(hook_data: dict) -> str:
-    """Resolve the branch name from hook_data's cwd (session dir, not process cwd)."""
+    """Resolve the branch name from hook_data's cwd (session dir, not process cwd); at a repo root, $AIPASS_SEAT's."""
     cwd = hook_data.get("cwd", "") or str(Path.cwd())
     search = Path(cwd).resolve()
     while search.parent != search:
@@ -53,7 +54,8 @@ def _resolve_branch(hook_data: dict) -> str:
         ):
             break
         search = search.parent
-    return Path(cwd).name
+    seat = seat_at_root(cwd)
+    return seat.name if seat else Path(cwd).name
 
 
 def _format_session_age(session: dict) -> str | None:
@@ -148,6 +150,9 @@ def _decide(hook_data: dict) -> dict:
 
     branch = _resolve_branch(hook_data)
     branch_cwd = hook_data.get("cwd", "") or str(Path.cwd())
+    seat = seat_at_root(branch_cwd)
+    if seat is not None:
+        branch_cwd = str(seat)  # a seated root session is that branch's session: it collides there
 
     cc_sessions = importlib.import_module("aipass.hooks.apps.modules.cc_sessions")
     our_pid = cc_sessions.resolve_session_pid()

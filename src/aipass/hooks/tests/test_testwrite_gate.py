@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_testwrite_gate.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Tests for the test-write gate and its JSON policy switch
 # Branch: hooks
 # Created: 2026-09-01
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/security/testwrite_gate.py and its JSON policy switch."""
@@ -403,6 +403,13 @@ class TestTheResidualIsPublished:
         _policy(project)
         renamed = str(project["tests_dir"] / "brand_new_test.py")
         assert _blocked(_run(project["seat"], file_path=renamed))
+
+
+class TestTheTestwriteHelp:
+    def test_help_prints_usage_and_examples(self, capsys):
+        assert testgate_policy.handle_command("testwrite", ["--help"]) is True
+        err = capsys.readouterr().err
+        assert "Usage:" in err and "Examples:" in err
 
 
 class TestRunningTestsIsNotWritingThem:

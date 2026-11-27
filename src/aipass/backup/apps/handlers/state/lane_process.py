@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lane_process.py
 # Description: The lane's process seen from outside — alive, really a backup lane for this root, and how to end it
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-16
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """A running lane's process, seen from another process (DPLAN-0412)."""
@@ -35,7 +35,7 @@ def open_process(pid: int) -> psutil.Process | None:
     try:
         return psutil.Process(pid)
     except (psutil.NoSuchProcess, ValueError) as exc:
-        logger.info(f"[backup] lane process: no process {pid}: {exc}")
+        logger.warning(f"[backup] lane process: no process {pid}: {exc}")
         return None
 
 
@@ -44,7 +44,7 @@ def _started_epoch(entry: dict) -> float | None:
     try:
         return datetime.fromisoformat(str(entry.get("started_at"))).timestamp()
     except ValueError as exc:
-        logger.info(f"[backup] lane process: unreadable started_at {entry.get('started_at')!r}: {exc}")
+        logger.warning(f"[backup] lane process: unreadable started_at {entry.get('started_at')!r}: {exc}")
         return None
 
 
@@ -61,7 +61,7 @@ def live_lane(entry: dict) -> psutil.Process | None:
     try:
         stale = proc.status() == psutil.STATUS_ZOMBIE or proc.create_time() > started + STARTED_SLACK_SECONDS
     except psutil.NoSuchProcess as exc:
-        logger.info(f"[backup] lane process: {pid} went while being read: {exc}")
+        logger.warning(f"[backup] lane process: {pid} went while being read: {exc}")
         stale = True
     except psutil.AccessDenied as exc:
         # Alive but unreadable: listed, and the stop guard will refuse to signal it.
@@ -125,7 +125,7 @@ def end_process(proc: psutil.Process, wait_seconds: float) -> str:
         proc.terminate()
         proc.wait(timeout=wait_seconds)
     except psutil.NoSuchProcess as exc:
-        logger.info(f"[backup] lane process: already gone on terminate: {exc}")
+        logger.warning(f"[backup] lane process: already gone on terminate: {exc}")
     except psutil.TimeoutExpired as exc:
         logger.warning(f"[backup] lane process: {proc.pid} outlived SIGTERM by {wait_seconds}s, killing: {exc}")
         _kill(proc)
@@ -141,6 +141,6 @@ def _kill(proc: psutil.Process) -> None:
         proc.kill()
         proc.wait(timeout=KILL_WAIT_SECONDS)
     except psutil.NoSuchProcess as exc:
-        logger.info(f"[backup] lane process: already gone on kill: {exc}")
+        logger.warning(f"[backup] lane process: already gone on kill: {exc}")
     except psutil.TimeoutExpired as exc:
         logger.warning(f"[backup] lane process: {proc.pid} not reaped after SIGKILL: {exc}")

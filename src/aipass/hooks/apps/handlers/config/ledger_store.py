@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: ledger_store.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: The injection ledger's file: what counts as injected, one JSONL record per dispatch, folded per turn
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-09-16
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """Storage for the injection ledger (DPLAN-0347, hooks row 3).
@@ -68,7 +68,7 @@ def injected_text(event_type: str, stdout: str) -> str:
         doc = json.loads(text)
     except json.JSONDecodeError as exc:
         # A brace that does not parse is text, but CC will not parse it either: worth a line.
-        logger.info("[HOOKS] injection_ledger: %s output opens like JSON but does not parse: %s", event_type, exc)
+        logger.info("[hooks] injection_ledger: %s output opens like JSON but does not parse: %s", event_type, exc)
         return text if event_type in _PLAIN_IS_CONTEXT else ""
     if not isinstance(doc, dict):
         return text if event_type in _PLAIN_IS_CONTEXT else ""
@@ -91,7 +91,7 @@ def measure_hooks(event_type: str, outputs: list[tuple[str, str, str]]) -> dict[
         hooks[hook_name] = {"chars": chars, "sha": hashlib.sha256(text.encode("utf-8")).hexdigest()[:_SHA_CHARS]}
         if chars > CONTEXT_LIMIT:
             logger.warning(
-                "[HOOKS] injection_ledger: %s.%s injected %d chars, over the %d persist line — "
+                "[hooks] injection_ledger: %s.%s injected %d chars, over the %d persist line — "
                 "the model was shown a preview, not this text",
                 event_type,
                 hook_name,
@@ -123,7 +123,7 @@ def append_record(
         with ledger_path(session_id).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, separators=(",", ":")) + "\n")
     except OSError as exc:
-        logger.warning("[HOOKS] injection_ledger: record NOT written for %s (a gap in the ledger): %s", event_type, exc)
+        logger.warning("[hooks] injection_ledger: record NOT written for %s (a gap in the ledger): %s", event_type, exc)
         return None
     return entry
 
@@ -138,7 +138,7 @@ def read_turns(session_id: str) -> list[dict]:
         try:
             entry = json.loads(line)
         except json.JSONDecodeError as exc:
-            logger.info("[HOOKS] injection_ledger: unreadable line skipped in %s: %s", path.name, exc)
+            logger.info("[hooks] injection_ledger: unreadable line skipped in %s: %s", path.name, exc)
             continue
         key = (entry.get("event"), entry.get("token"))
         row = rows.setdefault(key, {**entry, "hooks": {}, "total": 0, "turn": entry.get("turn")})

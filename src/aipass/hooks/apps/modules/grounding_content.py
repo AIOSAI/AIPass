@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: grounding_content.py
-# Version: 1.5.0
+# Version: 1.5.1
 # Description: Shared content loaders for grounding prompt injections (DPLAN-0276), each rendered under its cap
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-01
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Loads raw grounding content — kernel, navmap, branch, identity — with no cadence gating."""
@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 
 from aipass.cli import err_console
+from aipass.hooks.apps.handlers.config.loader import seat_at_root
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
@@ -65,7 +66,7 @@ def _truncate_block(text: str, limit: int, source: Path | str) -> str:
     if boundary > keep // 2:
         window = window[:boundary]
     logger.warning(
-        "[HOOKS] grounding_content: %s renders %d chars, over the %d budget — cut, marker names the file",
+        "[hooks] grounding_content: %s renders %d chars, over the %d budget — cut, marker names the file",
         source,
         len(text),
         limit,
@@ -139,7 +140,7 @@ def load_navmap(hook_data: dict) -> str:
 
 
 def find_branch_root(cwd: str) -> Path | None:
-    """Walk up from CWD looking for .trinity/ or apps/ — stop at repo root."""
+    """Walk up from CWD looking for .trinity/ or apps/ — stop at repo root, where $AIPASS_SEAT may name one."""
     search = Path(cwd).resolve()
     while search.parent != search:
         if (search / ".trinity").is_dir() or (search / "apps").is_dir():
@@ -147,9 +148,9 @@ def find_branch_root(cwd: str) -> Path | None:
         if (search / "pyproject.toml").exists() or (
             (git := search / ".git").is_file() or (git.is_dir() and any(git.iterdir()))
         ):
-            return None
+            return seat_at_root(cwd)
         search = search.parent
-    return None
+    return seat_at_root(cwd)
 
 
 def load_branch(hook_data: dict) -> str:
@@ -164,7 +165,7 @@ def load_branch(hook_data: dict) -> str:
     prompt_file = branch_root / ".aipass" / "aipass_local_prompt.md"
     if prompt_file.exists():
         content = prompt_file.read_text(encoding="utf-8").strip()
-        branch_name = branch_root.name.upper()
+        branch_name = branch_root.name
         block = f"# Branch Context: {branch_name}\n<!-- Source: {prompt_file} -->\n{content}"
         parts.append(_truncate_block(block, BRANCH_CHAR_BUDGET, prompt_file))
 
@@ -178,7 +179,7 @@ def load_branch(hook_data: dict) -> str:
 
 
 def _find_passport(cwd: str) -> Path | None:
-    """Walk up from CWD looking for .trinity/passport.json."""
+    """Walk up from CWD looking for .trinity/passport.json; at a repo root, $AIPASS_SEAT's passport."""
     search = Path(cwd).resolve()
     home = Path.home().resolve()  # both sides resolved, or a symlinked home never stops the walk
     while search != home and search.parent != search:
@@ -186,7 +187,8 @@ def _find_passport(cwd: str) -> Path | None:
         if passport.exists():
             return passport
         search = search.parent
-    return None
+    seat = seat_at_root(cwd)
+    return seat / ".trinity" / "passport.json" if seat and (seat / ".trinity" / "passport.json").is_file() else None
 
 
 #: Injected every cadence beat: a passport that grows without bound taxes the whole session.

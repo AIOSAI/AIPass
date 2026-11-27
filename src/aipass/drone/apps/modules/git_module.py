@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.19.0
+# Version: 1.21.2
 # Created: 2026-03-17
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -34,6 +34,7 @@ from aipass.drone.apps.handlers.git import (
     uncommit_handler,
     label_handler,
     alerts_handler,
+    pr_read_handler,
     ci_cure_handler,
     export_handler,
     show_handler,
@@ -55,7 +56,7 @@ from aipass.drone.apps.handlers.git import (
 )
 from aipass.drone.apps.handlers.deletion_log import UNKNOWN_CALLER
 from aipass.drone.apps.handlers.help_flags import help_topic, wants_help
-from aipass.drone.apps.handlers.router_handler import caller_cwd
+from aipass.drone.apps.handlers.router_handler import caller_cwd, caller_seat
 from aipass.drone.apps.handlers.json_flags import strip_json_flag, wants_json
 
 DRONE_MODULE = {
@@ -100,6 +101,7 @@ _COMMANDS = (
     "prune-temp",
     "tag",
     "tag-list",
+    "pr-read",
     "issue-contribute",
     "issue-write",
     "run-write",
@@ -138,7 +140,7 @@ def _detect_branch_dir() -> tuple[str, Path] | None:
     Returns None when the process has no CWD. Raises ValueError on an unreadable
     passport: corrupt is a failure to report, never "not inside a branch".
     """
-    cwd = caller_cwd()
+    cwd = caller_seat()
     if cwd is None:
         return None
     current = cwd.resolve()
@@ -195,29 +197,18 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     cmd: str = command
     if cmd == "tag" and (not args or args[0] == "--list"):
         cmd = "tag-list"
-    from aipass.drone.apps.plugins.devpulse_ops.auth import (
-        GH_SUBCOMMANDS,
-        ISSUE_CONTRIBUTE,
-        NoPassportError,
-        gh_access_key,
-        verify_git_access,
-    )
+    from aipass.drone.apps.plugins.devpulse_ops.auth import ISSUE_CONTRIBUTE, NoPassportError, verify_git_access
 
-    if command in _GH_PASSTHROUGH_COMMANDS:
-        # An unknown subcommand is refused here, before the gate and before gh.
-        gh_key = gh_access_key(command, args)
+    if command in (*_GH_PASSTHROUGH_COMMANDS, *_CHORE_COMMANDS):
+        # A subcommand in no row of the table is refused here, for every seat, before the gate and gh.
+        gh_key, refusal = _table_key(command, args)
         if gh_key is None:
-            table = GH_SUBCOMMANDS[command]
-            message = (
-                f"Unknown subcommand for '{command}': '{args[0]}'. "
-                f"Reads: {', '.join(table['read'])}. Owner only: {', '.join(table['write'])}."
-            )
-            return {"stdout": "", "stderr": message, "exit_code": 1}
+            return {"stdout": "", "stderr": refusal, "exit_code": 1}
         cmd = gh_key
     elif command == "remote" and args[:1] == ["set"]:
         cmd = "remote-write"
-    elif command in _CHORE_COMMANDS:
-        cmd = gh_access_key(command, args) or command
+    elif command == "pr" and args[:1] in (["list"], ["view"]):
+        cmd = "pr-read"
     try:
         caller = verify_git_access(cmd)
     except PermissionError as exc:
@@ -339,6 +330,18 @@ def _refuse_repo_door(verdict: repo_door.AdminVerdict, flag: repo_door.RepoFlag,
     return {"stdout": "", "stderr": reason, "exit_code": 1}
 
 
+def _table_key(command: str, args: list[str]) -> tuple[str | None, str]:
+    """The tier key a gh or chore subcommand asks the gate for, or (None, its refusal) when no row names it.
+
+    The chore handlers strip --json from any slot before reading the subcommand, so the key does too.
+    """
+    from aipass.drone.apps.plugins.devpulse_ops.auth import gh_access_key, no_row_refusal
+
+    keyed = args if command in _GH_PASSTHROUGH_COMMANDS else strip_json_flag(args)
+    key = gh_access_key(command, keyed)
+    return (key, "") if key is not None else (None, no_row_refusal(command, keyed[0]))
+
+
 def _handle_repo_door(command: str, flag: repo_door.RepoFlag) -> dict:
     """Run one verb in another repo through the admin seat's door.
 
@@ -355,6 +358,10 @@ def _handle_repo_door(command: str, flag: repo_door.RepoFlag) -> dict:
         return init_handler.init_repo(verdict.caller, flag, lock_handler.find_repo_root())
     if command not in repo_door.DOOR_VERBS:
         return _refuse_repo_door(verdict, flag, verb, repo_door.REFUSE_VERB.format(verb=command))
+    if command in _CHORE_COMMANDS:
+        key, refusal = _table_key(command, flag.args)
+        if key is None:
+            return _refuse_repo_door(verdict, flag, verb, refusal)
     target = repo_door.resolve_repo(flag.path, lock_handler.find_repo_root())
     if target.root is None:
         return _refuse_repo_door(verdict, flag, verb, target.refusal)
@@ -587,13 +594,11 @@ def _handle_prune_temp() -> dict:
 
 
 def _handle_pr(args: list[str], repo_root: Path | None = None) -> dict:
-    """Push the current branch and open its PR: to main at home, to the default branch through the door."""
+    """Push the branch and open its PR (main at home, the default via the door); ``pr list|view`` read instead."""
+    if args[:1] in (["list"], ["view"]):
+        return pr_read_handler.pr_read(args, repo_root or lock_handler.find_repo_root())
     if not args:
-        return {
-            "stdout": "",
-            "stderr": "Usage: drone @git pr <description>",
-            "exit_code": 1,
-        }
+        return {"stdout": "", "stderr": "Usage: drone @git pr <description>", "exit_code": 1}
     description = " ".join(args)
     if repo_root is not None:
         result = external_pr_handler.open_branch_pr(repo_root, description)
@@ -607,11 +612,7 @@ def _handle_pr(args: list[str], repo_root: Path | None = None) -> dict:
 def _handle_dev_pr(args: list[str]) -> dict:
     """Handle the dev-pr subcommand (owner tier)."""
     if not args:
-        return {
-            "stdout": "",
-            "stderr": "Usage: drone @git dev-pr <description>",
-            "exit_code": 1,
-        }
+        return {"stdout": "", "stderr": "Usage: drone @git dev-pr <description>", "exit_code": 1}
     description = " ".join(args)
     result = dev_pr_handler.create_dev_pr(description)
     if result["success"]:
@@ -940,6 +941,14 @@ def _handle_log(args: list[str], repo_root: Path | None = None) -> dict:
     # Stripped BEFORE the count scan below: left in, `--json` reaches int(),
     # fails, and logs a bogus "Invalid log count argument" on every call.
     args = strip_json_flag(args)
+    if args[:1] == ["--remote"]:
+        root = repo_root if repo_root is not None else lock_handler.find_repo_root()
+        head = log_handler.get_remote_head(args[1] if len(args) == 2 else "", root)
+        if as_json:
+            return _json_document({"sha": head.get("sha", ""), "message": head["message"]}, ok=head["success"])
+        if head["success"]:
+            return {"stdout": head["message"], "stderr": "", "exit_code": 0}
+        return {"stdout": "", "stderr": head["message"], "exit_code": 1}
     count: int | None = None
     path_tokens: list[tuple[str, bool]] = []
     after_separator = False
@@ -1454,11 +1463,32 @@ def print_introspection() -> None:
         f" [dim]({','.join(_tier_commands('ci-cure'))})[/dim]"
     )
     c.print()
+    c.print("Run [green]'drone @git --help'[/green] for usage information")
+    c.print()
 
 
 def print_help(command: str | None = None) -> None:
-    """Print help (sentry compliance).
+    """Print help: the page escaped so ``[count]``/``[path]`` placeholders print, its section headings styled."""
+    from aipass.cli import console, escape
 
-    ``markup=False``: Rich would read ``[count]``/``[path]`` placeholders as style tags and delete them.
-    """
-    _get_console().print(get_help(command), markup=False)
+    text = get_help(command)
+    if command is not None:
+        console.print(escape(text), highlight=False, soft_wrap=True)
+        return
+    title, _, body = text.partition("\n")
+    console.print(f"[bold cyan]{escape(title)}[/bold cyan]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print(escape("  drone @git <verb> [args]      drone @git <verb> --help for one verb's page"))
+    console.print()
+    for line in body.splitlines():
+        # A section heading sits at column 0 and ends with ':' (Global (all branches):, Owner ...:).
+        if line and not line[0].isspace() and line.rstrip().endswith(":"):
+            console.print(f"[bold cyan]{escape(line)}[/bold cyan]", highlight=False, soft_wrap=True)
+        else:
+            console.print(escape(line), highlight=False, soft_wrap=True)
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [green]drone @git status[/green]")
+    console.print("  [green]drone @git log 5[/green]")
+    console.print("  [green]drone @git diff --stat[/green]")

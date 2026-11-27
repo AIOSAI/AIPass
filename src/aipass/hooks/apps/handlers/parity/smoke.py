@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: smoke.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Smoke: one isolated live turn per provider; pass only when a hook's own nonce ack is read back
 # Branch: hooks
 # Layer: apps/handlers/parity
 # Created: 2026-10-28
-# Modified: 2026-10-28
+# Modified: 2026-11-22
 # =============================================
 
 """One isolated live turn per provider: did a hook's own output reach the provider in that session.
@@ -72,7 +72,7 @@ def _claude_ack(session_id: str, ack: str) -> bool | None:
         try:
             record = json.loads(line)
         except json.JSONDecodeError as exc:
-            logger.debug("[HOOKS] smoke: torn transcript line: %s", exc)
+            logger.debug("[hooks] smoke: torn transcript line: %s", exc)
             continue
         attachment = record.get("attachment") if isinstance(record, dict) else None
         if record.get("type") == "attachment" and isinstance(attachment, dict):
@@ -90,7 +90,7 @@ def _codex_ack(session_id: str, ack: str) -> bool | None:
         try:
             record = json.loads(line)
         except json.JSONDecodeError as exc:
-            logger.debug("[HOOKS] smoke: torn rollout line: %s", exc)
+            logger.debug("[hooks] smoke: torn rollout line: %s", exc)
             continue
         payload = record.get("payload") if isinstance(record, dict) else None
         if record.get("type") == "response_item" and isinstance(payload, dict) and payload.get("role") == "developer":
@@ -124,7 +124,7 @@ def _snapshot(branch: Path) -> dict[Path, bytes | None]:
         try:
             state[branch / rel] = (branch / rel).read_bytes()
         except FileNotFoundError:
-            logger.debug("[HOOKS] smoke: %s absent before the turn", rel)
+            logger.debug("[hooks] smoke: %s absent before the turn", rel)
             state[branch / rel] = None
     return state
 
@@ -137,7 +137,7 @@ def _restore(state: dict[Path, bytes | None]) -> None:
             elif not path.is_file() or path.read_bytes() != before:
                 path.write_bytes(before)
         except OSError as exc:
-            logger.error("[HOOKS] smoke: host state %s not restored: %s", path, exc)
+            logger.error("[hooks] smoke: host state %s not restored: %s", path, exc)
 
 
 def _turn(provider: str, branch: Path, model: str, prompt: str) -> tuple[SmokeResult | None, str, int]:
@@ -159,14 +159,14 @@ def _turn(provider: str, branch: Path, model: str, prompt: str) -> tuple[SmokeRe
                 timeout=TIMEOUT,
             )
         except subprocess.TimeoutExpired as exc:
-            logger.warning("[HOOKS] smoke: %s timed out: %s", provider, exc)
+            logger.warning("[hooks] smoke: %s timed out: %s", provider, exc)
             return SmokeResult(provider, FAIL, f"the launch did not finish in {TIMEOUT} s"), "", 0
         except OSError as exc:
-            logger.warning("[HOOKS] smoke: %s did not launch: %s", provider, exc)
+            logger.warning("[hooks] smoke: %s did not launch: %s", provider, exc)
             return SmokeResult(provider, FAIL, "the launch did not start"), "", 0
         if not (provider == "opencode" and runner.free_limited(done.stdout)):
             break
-        logger.warning("[HOOKS] smoke: %s answered the free limit (429)", name)
+        logger.warning("[hooks] smoke: %s answered the free limit (429)", name)
     else:
         return SmokeResult(provider, SKIP, "free limit reached on every free model"), "", 0
     elapsed = int((time.monotonic() - start) * 1000)
@@ -203,7 +203,7 @@ def smoke(provider: str, branch: Path, model: str = "") -> SmokeResult:
         try:
             seen = ACK_READERS[provider](session_id, f"smoke-ack:{nonce}")
         except (OSError, UnicodeDecodeError, sqlite3.Error) as exc:
-            logger.warning("[HOOKS] smoke: %s record unreadable: %s", provider, exc)
+            logger.warning("[hooks] smoke: %s record unreadable: %s", provider, exc)
             seen = None
         if seen is None:
             result = SmokeResult(provider, SKIP, "no readback: the provider's record of the session is not found")
@@ -213,5 +213,5 @@ def smoke(provider: str, branch: Path, model: str = "") -> SmokeResult:
             result = SmokeResult(provider, FAIL, "the session ran but its record carries no hook nonce ack")
         result = SmokeResult(provider, result.status, result.why, session_id, elapsed)
     json_handler.log_operation("smoke", {**result.__dict__, "model": model})
-    logger.info("[HOOKS] smoke: %s %s (%s)", provider, result.status, result.why)
+    logger.info("[hooks] smoke: %s %s (%s)", provider, result.status, result.why)
     return result

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: Dashboard Status Calculation Handler
-# Version: 0.6.0
+# Version: 0.8.0
 # Created: 2026-02-25
-# Modified: 2026-11-08
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -30,6 +30,8 @@ def _find_repo_root() -> Path:
 
 
 AIPASS_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
+#: A count or dashboard that could not be read; callers test ``is None`` and say so, never read it as 0 or {}.
+UNREADABLE = None
 
 
 def _read_todo_count(branch_path: Path) -> Optional[int]:
@@ -43,7 +45,7 @@ def _read_todo_count(branch_path: Path) -> Optional[int]:
         return len(data.get("todos", []))
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Failed to read todos from %s: %s", local_path, exc)
-        return None
+        return UNREADABLE
 
 
 def _read_mail_counts(branch_path: Path) -> "Tuple[int, int] | None":
@@ -64,7 +66,7 @@ def _read_mail_counts(branch_path: Path) -> "Tuple[int, int] | None":
         return (new_mail, opened_mail)
     except (json.JSONDecodeError, OSError, AttributeError) as exc:
         logger.warning("Failed to read inbox from %s: %s", inbox_path, exc)
-        return None
+        return UNREADABLE
 
 
 def count_active_plans(flow_section: Dict) -> int:
@@ -161,12 +163,12 @@ def get_branch_paths() -> List[Path]:
 
 def resolve_branch_path(branch_ref: str) -> Path:
     """Resolve @branch reference to filesystem path; the first row by that name wins (core rows come first)."""
-    name = branch_ref.lstrip("@").upper()
+    name = branch_ref.lstrip("@").lower()
 
     if not AIPASS_REGISTRY.exists():
         raise FileNotFoundError("AIPASS_REGISTRY.json not found")
 
-    rows = [row for row in fleet_rows(AIPASS_REGISTRY.parent) if row["name"].upper() == name]
+    rows = [row for row in fleet_rows(AIPASS_REGISTRY.parent) if row["name"].lower() == name]
     if not rows:
         raise FileNotFoundError(f"Branch '{name}' not found in registry (memory's fleet: core, residents, roots)")
     path = rows[0]["path"]

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.13.1
+# Version: 1.15.2
 # Created: 2026-10-04
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git import (
+    pr_read_handler,
     alerts_handler,
     ci_cure_handler,
     commit_handler,
@@ -60,6 +61,15 @@ def page(command: str | None = None) -> str:
         return (
             "git pr <description> — Push current branch and create PR to main [owner]\n"
             "  On main: creates temp branch from slug. Otherwise: pushes branch directly. No -u flag.\n"
+            "git pr list [--base B] [--head PREFIX] [--marker TEXT] [--state open|all] [--json] [all seats]\n"
+            "  The repo's PRs: number, head -> base, state, the CI conclusion of the head commit\n"
+            "  (success, failure, pending or none), title, created. --base is exact, --head a\n"
+            "  prefix, --marker a text the body must hold; state defaults to open. --json prints\n"
+            "  the same rows as a JSON list, plus head_sha (the head commit) and url.\n"
+            f"  Filters read the newest {pr_read_handler.LIST_LIMIT} PRs gh returns.\n"
+            "git pr view <#> [--json] — One PR: head -> base, state, mergeable, CI, head sha, url, body [all seats]\n"
+            "  issue view <#> shows a PR's body too, but not its head, base, mergeable or CI.\n"
+            "  A description whose first word is list or view reads; it never becomes a PR title.\n"
             "git pr <title> --repo <path> — Open an external repo's PR to its default branch [admin door]\n"
             "  Pushes the checked-out branch to origin under its own name, never forced, then opens\n"
             "  <branch> -> <default> on origin's GitHub repo, the default branch as GitHub reports\n"
@@ -100,6 +110,9 @@ def page(command: str | None = None) -> str:
             "  A range a..b (or a...b) lists every commit in it, read-only; a count caps it.\n"
             "  Example: drone @git log 5 src/aipass/drone\n"
             "  Example: drone @git log origin/dev..HEAD\n"
+            "  log --remote <branch>: origin's live head of a branch (`<sha>  refs/heads/<branch>`),\n"
+            "  asked of origin now; origin/<branch> is only as fresh as the last fetch.\n"
+            "  Example: drone @git log --remote dev\n"
         )
     if command == "tracked":
         return (
@@ -261,24 +274,33 @@ def page(command: str | None = None) -> str:
         )
     if command == "alerts":
         return (
-            "git alerts list [--state open|dismissed|all] [--json] — Code-scanning alerts [global]\n"
+            "git alerts list [--state open|dismissed|all] [--pr <n>] [--json] — Code-scanning alerts [global]\n"
             "  One row each: number, rule id, severity, state, file:line. Default state: open.\n"
+            "  --pr <n> reads pull request n's alerts (its merge ref), which the default branch never shows.\n"
             "git alerts dismiss <number> --reason false_positive|wont_fix|used_in_tests\n"
             "    --comment 'text' — Dismiss an open alert [owner]\n"
             "  The comment is required and goes to GitHub with the reason; the ledger row\n"
             f"  carries number, reason and comment. GitHub takes {alerts_handler.COMMENT_CAP} comment characters.\n"
+            "git alerts reopen <number> — Put a dismissed alert back to open [owner]\n"
+            "  Only a dismissed alert reopens; the ledger row carries number and rule.\n"
             "  Through gh api /repos/OWNER/NAME/code-scanning/alerts; the repo is the one you\n"
             "  stand in, --repo <path> the admin door. Refused, exactly as printed:\n"
             + _printed(
                 alerts_handler.REFUSE_SUB.format(sub="<sub>"),
                 alerts_handler.REFUSE_STATE.format(state="<state>"),
                 alerts_handler.REFUSE_LIST_ARGS,
+                alerts_handler.REFUSE_PR.format(pr="<n>"),
                 alerts_handler.REFUSE_NUMBER,
                 alerts_handler.REFUSE_REASON.format(reason="<reason>"),
                 alerts_handler.REFUSE_NO_COMMENT,
                 alerts_handler.REFUSE_LONG_COMMENT.format(length="<n>", cap=alerts_handler.COMMENT_CAP),
                 alerts_handler.REFUSE_NO_ALERT.format(slug="<owner/name>", number="<n>"),
                 alerts_handler.REFUSE_NOT_OPEN.format(number="<n>", slug="<owner/name>", state="<state>"),
+                alerts_handler.REFUSE_NO_STATE.format(number="<n>", slug="<owner/name>"),
+                alerts_handler.REFUSE_REOPEN_NUMBER,
+                alerts_handler.REFUSE_REOPEN_NO_ALERT.format(slug="<owner/name>", number="<n>"),
+                alerts_handler.REFUSE_NOT_DISMISSED.format(number="<n>", slug="<owner/name>", state="<state>"),
+                alerts_handler.REFUSE_REOPEN_NO_STATE.format(number="<n>", slug="<owner/name>"),
             )
             + _CHORE_REFUSALS
             + "  Example: drone @git alerts dismiss 12 --reason false_positive --comment 'why'\n"
@@ -323,7 +345,8 @@ def page(command: str | None = None) -> str:
             "git commit <message> [--all | file1 file2 ...] — Commit changes [owner]\n"
             "  Options:\n"
             "    --all          Stage all repo changes (git add -A) before committing.\n"
-            "    file1 file2    Stage only these files before committing.\n"
+            "    file1 file2    Commit only these paths. A tracked one goes as it is,\n"
+            "                   even under an ignored folder; a new one is staged first.\n"
             "  With no flag or files, commits whatever is already staged.\n"
             f"  The subject (line 1) is refused over {commit_handler.SUBJECT_CAP} chars: keep it under\n"
             "  about 80 in type(scope): what form, blank line, then the why in the body.\n"
@@ -345,9 +368,16 @@ def page(command: str | None = None) -> str:
     if command == "unlock":
         return "git unlock --force — Force-release the PR lock [owner]\n"
     if command == "merge":
+        from aipass.drone.apps.plugins.devpulse_ops import merge_plugin
+
         return (
-            "git merge <PR#> [--confirm] — Merge a PR and sync local main [owner]\n"
-            "  Runs gh pr merge --merge --delete-branch, then git pull --rebase.\n"
+            "git merge <PR#> [--confirm] — Merge a PR into dev or main and sync [owner]\n"
+            "  Reads the PR's base from gh first. Base main: gh pr merge --merge --delete-branch,\n"
+            "  then git pull --rebase and back to dev. Base dev (a cloud session's PR): the same\n"
+            "  merge, then checks out dev, git pull --rebase origin dev, and stays on dev; main is\n"
+            "  untouched. Local changes are stashed around the pull either way. Any other base,\n"
+            "  or one gh cannot read, is refused before the merge, exactly as printed:\n"
+            "  " + merge_plugin.REFUSE_BASE.format(pr="<n>", base="<base>") + "\n"
             "  Joint-decision gate: terminal sessions get a y/N prompt; headless\n"
             "  callers must pass --confirm or the merge is refused.\n"
             "  External project, its manager's seat: merges on origin's GitHub repo, then\n"
@@ -412,6 +442,7 @@ def page(command: str | None = None) -> str:
         "                         Show recent git log (default: 10); with paths, only the\n"
         "                         commits touching them. count: N, -n N or -N\n"
         "  log [count] <a>..<b>   Every commit in a range (a count caps it)\n"
+        "  log --remote <branch>  Origin's live head of a branch (not the last fetch)\n"
         "  show <ref> [path] [--stat]  Show a commit, or a file's contents at it\n"
         "  blame <file> [-L START,END]  Who last changed each line (optionally a range)\n"
         "  tracked <path ...>     Tracked, ignored, untracked, missing or outside, per path\n"
@@ -421,11 +452,12 @@ def page(command: str | None = None) -> str:
         "  branches               List remote branches\n"
         "  tag --list             List all tags (newest first)\n"
         "  issue list|view|status gh issue reads (view <#> [--comments])\n"
+        "  pr list|view           PRs with base, head, CI (--base --head --marker --state --json)\n"
         "  run list|view|watch    gh run reads (view <id> --log | --log-failed)\n"
         "  workflow list|view     gh workflow reads\n"
         "  release list           Published releases and their notes (release --help)\n"
         "  label list             The repo's GitHub labels (label --help)\n"
-        "  alerts list [--state S]  The repo's code-scanning alerts (alerts --help)\n"
+        "  alerts list [--state S] [--pr N]  The repo's code-scanning alerts (alerts --help)\n"
         "  issue create|comment --repo AIOSAI/AIPass --body 'text'\n"
         "                         File upstream from any seat; the body is signed\n"
         "                         with your seat and project\n"
@@ -440,7 +472,7 @@ def page(command: str | None = None) -> str:
         "  delete-branch <name>   Delete a remote branch\n"
         "  prune-temp             Delete merged citizen/* temp branches\n"
         "  close-pr <number>      Close a PR\n"
-        "  merge <PR#> [--confirm]  Merge a PR (gated: y/N prompt or --confirm; --repo: the door)\n"
+        "  merge <PR#> [--confirm]  Merge a PR into dev or main (gated: y/N or --confirm; --repo: the door)\n"
         "  sync [--autostash]     Sync with origin/main (FF on dev)\n"
         "  merge-main             Merge origin/main into dev, no rewrite, no push\n"
         "  smart-sync             Fetch + rebase if behind\n"
@@ -455,8 +487,9 @@ def page(command: str | None = None) -> str:
         "  release edit <tag>     Rewrite a release's notes with its CHANGELOG.md block\n"
         "  label create <name>    Create a repo label; one already there is reported present\n"
         "  alerts dismiss <n> --reason R --comment 'text'  Dismiss a code-scanning alert\n"
+        "  alerts reopen <n>      Put a dismissed code-scanning alert back to open\n"
         "  remote set <name> <url>  Add or re-point a remote at a github.com repo (https or ssh)\n"
-        "  A gh subcommand in neither list is refused, never passed to gh.\n"
+        "  A gh or chore subcommand in neither list is refused before its handler and gh.\n"
         "CI cure (the one citizen whose registry entry carries ci_cure: true):\n"
         "  ci-cure <run_id> @<owner> <msg> <path ...>  Commit a CI cure on dev, push dev\n"
         "                         (paths under src/aipass/<owner>/ or CHANGELOG.md; ci-cure --help)\n"
@@ -479,6 +512,7 @@ def page(command: str | None = None) -> str:
         "  git diff [--stat] -- <path>      drone @git diff [--staged] [--stat] <path ...>\n"
         "  git rev-list --count a...b       drone @git status --all  (ahead/behind origin)\n"
         "  git log origin/dev..HEAD         drone @git log origin/dev..HEAD\n"
+        "  git ls-remote origin <branch>    drone @git log --remote <branch>\n"
         "  git archive <ref> | tar -x       drone @git export <ref> <dir>\n"
         "  git restore -s <ref> -- <p>      drone @git restore --source <ref> <p>\n"
         "  git reset --soft HEAD~<n>        drone @git uncommit <n>  (unpushed only)\n"
@@ -488,9 +522,11 @@ def page(command: str | None = None) -> str:
         "  gh release list|view       drone @git release list [--repo O/N] [--since TAG]\n"
         "  gh release edit <tag>      drone @git release edit <tag>  (notes from CHANGELOG.md)\n"
         "  gh label list|create       drone @git label list | label create <name>\n"
+        "  gh pr list --base B --json ...  drone @git pr list [--base B] [--head P] [--marker T] [--json]\n"
+        "  gh pr view <n>               drone @git pr view <n>\n"
         "  gh pr create (another repo)  drone @git pr <title> --repo <path>\n"
         "  gh pr merge <n> --merge      drone @git merge <n> --repo <path> --confirm\n"
-        "  gh api .../code-scanning/alerts  drone @git alerts list | alerts dismiss <n>\n"
+        "  gh api .../code-scanning/alerts  drone @git alerts list | dismiss <n> | reopen <n>\n"
         "  Paths are read against your directory first, then the repo root.\n"
         "  No twin yet: git diff <range> -- <path> (use show <sha>). Ask @drone.\n"
         "\n" + repo_door.help_block() + "\n"

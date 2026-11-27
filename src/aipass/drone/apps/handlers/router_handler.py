@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_handler.py
 # Description: Handler for command routing implementation; the caller stamp for routed children and in-process modules
-# Version: 1.6.0
+# Version: 1.6.2
 # Created: 2026-03-09
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Handler for command routing implementation."""
@@ -117,6 +117,21 @@ def caller_cwd() -> Path | None:
     except OSError as exc:
         logger.info("No current directory — it was deleted out from under this process (%s)", exc)
         return None
+
+
+def caller_seat() -> Path | None:
+    """For identity readers: the src/aipass/<AIPASS_SEAT> branch at a passportless repo root, else the cwd.
+
+    Twin of hooks loader.seat_at_root. Path readers keep caller_cwd: a path typed at the root means the root."""
+    cwd = caller_cwd()
+    name = os.environ.get("AIPASS_SEAT", "")
+    if cwd is None or not name or name != Path(name).name or name.startswith("."):
+        return cwd
+    fleet = cwd.resolve() / "src" / "aipass"
+    if not fleet.is_dir() or any((p / ".trinity" / "passport.json").exists() for p in [cwd, *cwd.parents]):
+        return cwd
+    seat = fleet / name
+    return seat if (seat / ".trinity").is_dir() else cwd
 
 
 def find_project_root() -> Path | None:
@@ -236,7 +251,7 @@ CALLER_STAMP_KEYS = ("AIPASS_CALLER_CWD", "AIPASS_CALLER_BRANCH", "AIPASS_CALLER
 def caller_stamp_values() -> dict[str, str]:
     """The AIPASS_CALLER_* a routed command receives; a key is omitted when its answer is absent."""
     # Omitted when absent: a target must get no answer, not a sentinel it might resolve.
-    cwd = caller_cwd()
+    cwd = caller_seat()
     stamp: dict[str, str] = {}
     if cwd is not None:
         stamp["AIPASS_CALLER_CWD"] = str(cwd)
@@ -309,7 +324,7 @@ def execute_branch_command(
         extend_on_output=extend_on_output,
     )
 
-    caller_tag = f" [CALLER:{caller_branch.upper()}]" if caller_branch else ""
+    caller_tag = f" [CALLER:{caller_branch}]" if caller_branch else ""
     logger.info("Executed @%s%s %s → exit %d", branch_name, caller_tag, command or "(introspection)", result.exit_code)
     json_handler.log_operation(
         "execute_branch_command", {"branch": branch_name, "command": command or "", "exit_code": result.exit_code}

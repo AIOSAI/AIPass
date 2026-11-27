@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: init_flow.py
 # Description: aipass init — project scaffold, scaffold update, first agent
-# Version: 2.2.0
+# Version: 2.2.1
 # Created: 2026-04-16
-# Modified: 2026-11-20
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -55,6 +55,10 @@ def print_help() -> None:
     console.print()
     console.print("[bold cyan]aipass init[/bold cyan] — project scaffold and update")
     console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]aipass init[/green]")
+    console.print("  [green]aipass init agent <name>[/green]")
+    console.print()
     console.print("[yellow]USAGE:[/yellow]")
     console.print(
         "  [green]aipass init \\[target] \\[name][/green]        "
@@ -101,12 +105,14 @@ def _handle_init_scaffold(args: list[str]) -> int:
                 break
 
         console.print("[bold]Project structure:[/bold]")
+        console.print("[dim]What the scaffold created.[/dim]")
         console.print(f"  {target}/")
         if package_dir:
             rel_pkg = package_dir.relative_to(target)
             console.print(f"  └── {rel_pkg}/    [dim]← agents live here[/dim]")
         console.print()
         console.print("[bold]Next steps:[/bold]")
+        console.print("[dim]What to do after the scaffold.[/dim]")
         if str(target) != str(Path.cwd()):
             console.print(f"  [cyan]cd {target}[/cyan]")
         console.print("  [cyan]aipass init agent <name>[/cyan]    [dim]# create your first agent[/dim]")
@@ -185,7 +191,7 @@ def _print_scaffold_plan(result: dict, *, dry_run: bool) -> None:
             success("All files already current.")
         current = result.get("already_current", [])
         if current:
-            console.print(f"  ({len(current)} already up to date)")
+            console.print(f"  ({len(current)} already up to date)", highlight=False)
         return
 
     verb = "would change" if dry_run else "changed"
@@ -234,7 +240,8 @@ def _print_scaffold_plan(result: dict, *, dry_run: bool) -> None:
     # Count writes, not non-current labels: a kept file whose sidecar exists changes nothing.
     changed = [e for e in files if e.get("writes")]
     console.print(
-        f"\n  {len(changed)} of {len(files)} file(s) {verb}, {len(files) - len(changed) - len(protected)} unchanged."
+        f"\n  {len(changed)} of {len(files)} file(s) {verb}, {len(files) - len(changed) - len(protected)} unchanged.",
+        highlight=False,
     )
 
     kept = [e for e in files if e["action"] == "kept-local"]
@@ -252,6 +259,11 @@ def _handle_init_update(args: list[str]) -> int:
     """
     from aipass.aipass.apps.handlers.init.bootstrap import update_project
 
+    unknown = [a for a in args if a.startswith("-") and a not in ("--dry-run", "--json")]
+    if unknown:
+        cli_error(f"Unknown flag(s) for aipass init update: {' '.join(unknown)}")
+        print_help()
+        return 1
     dry_run = "--dry-run" in args
     as_json = "--json" in args
     positional = [a for a in args if not a.startswith("--")]
@@ -325,6 +337,7 @@ def _handle_init_agent(args: list[str]) -> int:
         agent_path = f"{package_dir}/{agent_name}"
     else:
         agent_path = f"src/{agent_name}"
+        console.print(f"[dim]No src package found, using {agent_path}[/dim]")
 
     cmd = ["drone", "@spawn", "create", agent_path]
     console.print(f"[dim]Running: {' '.join(cmd)}[/dim]")
@@ -337,9 +350,9 @@ def handle_command(command: str, args: list[str]) -> bool:
     if command != COMMAND:
         return False
 
+    # No target means cwd, the default the usage line and the scaffold handler both name.
     if not args:
-        print_help()
-        return True
+        sys.exit(_handle_init_scaffold(args))
 
     if wants_help(args):
         print_help()

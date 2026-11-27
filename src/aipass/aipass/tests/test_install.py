@@ -3,7 +3,7 @@
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
 # Version: 1.8.0
 # Created: 2026-07-05
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -17,6 +17,7 @@ import os
 import shlex
 import subprocess as _sp
 import sys
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
@@ -26,7 +27,7 @@ import pytest
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 from aipass.aipass.apps.modules import doctor, install as _install
 from aipass.aipass.apps.modules.doctor import CheckResult
-from aipass.aipass.apps.modules._doctor_wire import DECLINED_WARNING, NOT_APPLIED_NON_INTERACTIVE
+from aipass.aipass.apps.modules._doctor_wire import DECLINED_WARNING, NOT_APPLIED_NO_TTY
 from aipass.aipass.tests.support_doctor import _home_at
 from aipass.aipass.apps.modules.install import (
     DEFAULT_HOME,
@@ -49,7 +50,6 @@ from aipass.aipass.apps.modules.install import (
     print_introspection,
     run_finish,
     run_install,
-    wake_command,
 )
 
 _MOD = "aipass.aipass.apps.modules.install"
@@ -97,7 +97,9 @@ _REAL_RUN = _sp.run
 def _the_homes_aipass(argv, **_kw) -> _sp.CompletedProcess:
     """The home's `aipass doctor ...` answered in this process: doctor's own handle_command reads the argv."""
     try:
-        doctor.handle_command("doctor", argv[1:])
+        # The real child has no terminal under stdin=DEVNULL: the in-process doctor reads one that says so.
+        with patch("sys.stdin", _Stdin("", tty=False)) if _kw.get("stdin") is _sp.DEVNULL else nullcontext():
+            doctor.handle_command("doctor", argv[1:])
     except SystemExit as exc:
         return _sp.CompletedProcess(argv, int(exc.code or 0))
     return _sp.CompletedProcess(argv, 0)
@@ -157,6 +159,14 @@ class TestLooksLikeAipassTree:
 class TestResolveHome:
     """Resolving the install home from flags, env, and defaults."""
 
+    def test_here_in_a_folder_with_a_space_is_refused_like_path(self, tmp_path: Path, monkeypatch) -> None:
+        """Mutant: --here returns cwd unchecked -> the spaced home installs -> red."""
+        spaced = tmp_path / "My Projects"
+        spaced.mkdir()
+        monkeypatch.chdir(spaced)
+        with pytest.raises(ValueError):
+            _resolve_home(None, here=True, non_interactive=True)
+
     def test_here_returns_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """--here resolves to the current working directory, the real one (monkeypatch.chdir)."""
         monkeypatch.chdir(tmp_path)
@@ -166,6 +176,28 @@ class TestResolveHome:
         """An explicit --path is expanded and resolved."""
         target = tmp_path / "tools" / "aipass"
         assert _resolve_home(str(target), here=False, non_interactive=False) == target.resolve()
+
+    def test_tilde_path_expands_to_the_user_home(self, tmp_path: Path) -> None:
+        """--path ~/name lands under $HOME, never a literal '~' directory."""
+        with patch.dict("os.environ", {"HOME": str(tmp_path)}):
+            assert _resolve_home("~/aipass", here=False, non_interactive=True) == (tmp_path / "aipass").resolve()
+
+    @pytest.mark.parametrize("raw", ["/srv/aipass source ~/.bashrc", "/opt/a$b", "relative/dir", "/opt/it's"])
+    def test_a_home_that_splits_in_the_shell_or_is_relative_is_refused(self, raw: str) -> None:
+        """Pins the container: a home with a space split every hook command ('not found').
+
+        Mutant: no character check -> red.
+        """
+        with pytest.raises(ValueError):
+            _resolve_home(raw, here=False, non_interactive=True)
+
+    def test_the_prompt_asks_again_after_a_refused_home(self, tmp_path: Path) -> None:
+        """On a terminal a refused answer re-asks; the next plain path is taken."""
+        good = str(tmp_path / "aipass")
+        with patch("aipass.aipass.apps.modules.install._prompt", side_effect=["/srv/aipass source", good]) as ask:
+            with patch.dict("os.environ", {"AIPASS_HOME": ""}, clear=False):
+                assert _resolve_home(None, here=False, non_interactive=False) == Path(good).resolve()
+        assert ask.call_count == 2
 
     def test_non_interactive_defaults(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """From an ordinary directory, non-interactive still falls back to DEFAULT_HOME.
@@ -318,6 +350,7 @@ class TestInstallLock:
         """Mutant: the no-drone guard dropped -> the run fails on the missing file, another warning -> red."""
         home = tmp_path / "AIPass"
         lock = acquire_install_lock(home)
+        assert lock is not None
         with patch(_BUS) as bus, patch(f"{_MOD}.subprocess.run", wraps=_sp.run) as run:
             release_install_lock(lock)
         bus.fire.assert_not_called()
@@ -447,7 +480,7 @@ class TestSource:
         home = tmp_path / "home"
         uri = _checkout(tmp_path).resolve().as_uri()
         tools_on_path("git")
-        with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run:
+        with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0, stdout="")) as run:
             assert _clone_repo(home, dry_run=False, source=uri) is True
         clone_calls = [c for c in run.call_args_list if "clone" in c.args[0]]
         assert clone_calls[0].args[0] == ["git", "clone", "--depth", "1", uri, str(home)]
@@ -874,6 +907,22 @@ class TestHandleCommand:
         setup_calls = [c.args[0] for c in run.call_args_list if c.args[0][:1] == ["bash"]]
         assert setup_calls == [["bash", str(home / "setup.sh"), "--no-finish", "--no-symlink", "--force-symlink"]]
 
+    @pytest.mark.parametrize(
+        ("given", "unknown"),
+        [(["--dry-run", "--bogus"], "--bogus"), (["run", "--dry-run"], "run"), (["--yes", "x"], "x")],
+    )
+    def test_an_unknown_arg_is_refused_with_2_and_the_help_and_nothing_runs(self, given, unknown, capsys) -> None:
+        """X17, A19: an unknown flag, or the retired `run` alias. Mutant: unknown args ignored -> run_install -> red."""
+        with patch(f"{_MOD}.run_install") as run, patch(f"{_MOD}.run_finish") as finish:
+            with pytest.raises(SystemExit) as exc:
+                handle_command("install", given)
+        out, err = capsys.readouterr()
+        assert exc.value.code == 2
+        run.assert_not_called()
+        finish.assert_not_called()
+        assert f"unknown argument(s): {unknown}" in err
+        assert "USAGE:" in out
+
     def test_finish_routes_to_run_finish(self) -> None:
         """--finish routes to run_finish instead of run_install."""
         with (
@@ -887,6 +936,15 @@ class TestHandleCommand:
         assert finish.call_args.kwargs == {
             "non_interactive": False, "path": None, "here": True, "dry_run": False, "yes": False
         }  # fmt: skip
+
+    def test_finish_with_a_provider_is_refused_not_dropped(self, capsys) -> None:
+        """--finish asks no provider question, so --provider there would vanish. Mutant: no refusal -> exit 0 -> red."""
+        with patch(f"{_MOD}.run_finish", return_value=0) as finish, patch(f"{_MOD}.run_install"):
+            with pytest.raises(SystemExit) as exc:
+                handle_command("install", ["--finish", "--provider", "codex"])
+        assert exc.value.code == 2
+        finish.assert_not_called()
+        assert "aipass provider codex" in " ".join(capsys.readouterr().err.split())
 
 
 class TestInstallPhoneFaceStep:
@@ -946,7 +1004,7 @@ def _doctor_world(tmp_path: Path, monkeypatch) -> Path:
     """The real doctor --fix with every group but the provider wire stubbed. Returns the settings file."""
     for name in ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold"):
         monkeypatch.setattr(doctor, name, lambda: [])
-    for name in ("_check_sandbox", "check_wire_verify", "_fix_owner_seating", "_fix_shared_skills"):
+    for name in ("check_wire_verify", "_fix_owner_seating", "_fix_shared_skills"):
         monkeypatch.setattr(doctor, name, lambda: [])
     monkeypatch.setattr(doctor, "_fix_instruction_shadow", lambda: [])
     monkeypatch.setattr(doctor, "_check_services", lambda **_kw: [])
@@ -1043,27 +1101,22 @@ class TestInstallReport:
         assert row["detail"].startswith(f"setup.sh's action items unreadable at {items}: ")
         assert "utf-8" in row["detail"]
 
-    def test_the_final_screen_lists_each_row_then_the_report_then_one_quoted_wake_line(
+    def test_the_final_screen_lists_each_row_then_the_report_and_names_no_cli(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
-        """Mutant: the path not shlex-quoted -> a home with a space breaks the cd -> red."""
-        home = tmp_path / "my home"
+        """No provider is chosen yet when this screen prints: the ending opens the pick, so no
+        wake line names claude here. Mutant: the old claude wake line restored -> red."""
+        home = tmp_path / "my-home"
         home.mkdir()
         rc, out, _err = _finish(home, monkeypatch, capsys)
 
         lines = out.splitlines()
-        devpulse = shlex.quote(str(home / "src" / "aipass" / "devpulse"))
-        wake = (
-            f'cd {devpulse} && claude "Read dropbox/install_report.json: a fresh AIPass install. '
-            'Greet me by name, then walk me through each attention item."'
-        )
         assert rc == 0
-        assert wake_command(home) == wake
         assert "".join(f"AIPass installed at {home}".split()) in "".join(out.split())
         assert "  error: wire verify: 2 orphan entries -> drone @hooks verify" in lines
         assert "  warning: hooks: 2 hook(s) missing -> aipass doctor --fix" in lines
-        assert lines.count(wake) == 1
-        assert lines.index(f"Report: {install_report_path(home)}") < lines.index(wake)
+        assert f"Report: {install_report_path(home)}" in lines
+        assert "&& claude" not in out
 
     def test_a_clean_doctor_is_installed_exit_0_with_the_success_line_and_nothing_needs_attention(
         self, tmp_path: Path, monkeypatch, capsys
@@ -1091,10 +1144,10 @@ class TestInstallReport:
         assert [argv for argv in argvs if "claude" in " ".join(map(str, argv))] == []
         assert install_report_path(home).is_file()
 
-    def test_a_non_interactive_install_writes_no_settings_and_shows_the_warn_row(
+    def test_a_non_interactive_install_writes_no_settings_and_has_no_settings_row(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
-        """Mutant: the install door's old auto-consent -> the settings file is rewritten -> red."""
+        """The provider is wired at the install's end, never by its health check. Mutant: settings written -> red."""
         settings = _doctor_world(tmp_path, monkeypatch)
         original = settings.read_bytes()
         home = tmp_path / "AIPass"
@@ -1106,17 +1159,13 @@ class TestInstallReport:
         attention = json.loads(install_report_path(home).read_text(encoding="utf-8"))["attention"]
         assert exc.value.code == 0
         assert settings.read_bytes() == original
-        assert (
-            f"  warning: settings fix: {NOT_APPLIED_NON_INTERACTIVE} -> aipass doctor --fix --yes" in out.splitlines()
-        )
-        assert {"label": "settings fix", "detail": NOT_APPLIED_NON_INTERACTIVE} in [
-            {"label": a["label"], "detail": a["detail"]} for a in attention
-        ]
+        assert NOT_APPLIED_NO_TTY not in out
+        assert "settings fix" not in [a["label"] for a in attention]
 
-    def test_a_declined_install_warns_what_will_not_work_and_names_the_fix(
+    def test_the_install_health_check_never_asks_the_settings_question(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
-        """Mutant: the old header-only warning on decline -> the what-will-not-work line is missing -> red."""
+        """No question, no write, no declined warning: the pick at the end wires. Mutant: the preflight asks -> red."""
         settings = _doctor_world(tmp_path, monkeypatch)
         original = settings.read_bytes()
         home = tmp_path / "AIPass"
@@ -1127,8 +1176,7 @@ class TestInstallReport:
         err = " ".join(capsys.readouterr().err.split())
         assert rc == 0
         assert settings.read_bytes() == original
-        assert " ".join(DECLINED_WARNING.split()) in err
-        assert "Wire them later: aipass doctor --fix" in err
+        assert " ".join(DECLINED_WARNING.split()) not in err
 
     def test_an_unwritable_dropbox_is_a_loud_error_exit_1_and_no_wake_line(
         self, tmp_path: Path, monkeypatch, capsys
@@ -1177,7 +1225,7 @@ class TestInstallReport:
         home = tmp_path / "AIPass"
         _rc, ran = _full_install(home, monkeypatch, "--no-baud", "--yes", *door)
 
-        assert doctor_stays_stubbed == [{"non_interactive": True, "yes": True}]
+        assert [c["yes"] for c in doctor_stays_stubbed] == [True]
         setup_envs = [env for argv, env in ran if argv[:1] == ["bash"]]
         assert [env["AIPASS_YES"] for env in setup_envs] == ([] if door else ["1"])
 
@@ -1201,7 +1249,8 @@ class TestHealthCheck:
     def test_the_homes_doctor_runs_in_the_home_with_its_argv_env_and_no_terminal_under_non_interactive(
         self, tmp_path: Path, monkeypatch, capsys, homes_doctor
     ) -> None:
-        """Mutants: cwd dropped; no AIPASS_HOME; os.environ dropped; stdin always None; --yes dropped -> each red."""
+        """Mutants: cwd dropped; no AIPASS_HOME; os.environ dropped; stdin always None; --yes dropped;
+        B07: --non-interactive passed again -> each red."""
         home = tmp_path / "AIPass"
         home.mkdir()
         monkeypatch.setenv("AIPASS_PROBE", "kept")
@@ -1212,7 +1261,6 @@ class TestHealthCheck:
         rows_file = home / ".aipass" / "install_doctor_rows.json"
         assert argv == [
             str(home / ".venv" / "bin" / "aipass"), "doctor", "--fix", "--rows-json", str(rows_file), "--yes",
-            "--non-interactive",
         ]  # fmt: skip
         assert kw["cwd"] == str(home)
         assert (kw["env"]["AIPASS_HOME"], kw["env"]["AIPASS_PROBE"]) == (str(home), "kept")
@@ -1239,7 +1287,7 @@ class TestHealthCheck:
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
         """Mutant: the returncode check dropped -> the missing rows file is the detail, not the exit -> red."""
-        home = tmp_path / "my home"
+        home = tmp_path / "my-home"
         home.mkdir()
         monkeypatch.setattr(_sp, "run", lambda argv, **_kw: _sp.CompletedProcess(argv, 3))
         rc = run_finish(non_interactive=True, path=str(home))
@@ -1513,3 +1561,45 @@ class TestClonedBranchIsNamed:
         ok, _printed, _calls = self._clone(tmp_path, rc=1)
 
         assert ok is False
+
+    @staticmethod
+    def _checkout(tmp_path, origin: str | None):
+        """A real one-commit checkout, with *origin* as its remote when given."""
+        checkout = tmp_path / "AIPass-src"
+        checkout.mkdir()
+        git = ["git", "-C", str(checkout), "-c", "user.name=t", "-c", "user.email=t@t"]
+        _sp.run([*git, "init", "-q", "-b", "dev"], check=True)
+        (checkout / "README.md").write_text("x\n", encoding="utf-8")
+        _sp.run([*git, "add", "README.md"], check=True)
+        _sp.run([*git, "commit", "-q", "-m", "one"], check=True)
+        if origin:
+            _sp.run([*git, "remote", "add", "origin", origin], check=True)
+        return checkout
+
+    def test_a_home_cloned_from_a_checkout_takes_its_origin_and_every_branch(self, tmp_path) -> None:
+        """Pins the box: origin was file:///home/aipass/AIPass-src, fetching dev only. Mutant: no repoint -> red."""
+        checkout = self._checkout(tmp_path, "https://github.com/AIOSAI/AIPass.git")
+        home = tmp_path / "AIPass"
+        with patch.object(_install.console, "print"):
+            assert _install._clone_repo(home, dry_run=False, source=checkout.as_uri()) is True
+        config = (home / ".git" / "config").read_text(encoding="utf-8")
+        assert "url = https://github.com/AIOSAI/AIPass.git" in config
+        assert "fetch = +refs/heads/*:refs/remotes/origin/*" in config
+        assert "file://" not in config
+
+    def test_a_checkout_with_no_origin_leaves_the_clone_as_it_is(self, tmp_path) -> None:
+        checkout = self._checkout(tmp_path, None)
+        home = tmp_path / "AIPass"
+        with patch.object(_install.console, "print"):
+            assert _install._clone_repo(home, dry_run=False, source=checkout.as_uri()) is True
+        assert f"url = {checkout.as_uri()}" in (home / ".git" / "config").read_text(encoding="utf-8")
+
+
+def test_a_repair_install_keeps_the_provider_already_chosen(tmp_path, monkeypatch, capsys) -> None:
+    """The report is rewritten whole; the pick must survive it. Mutant: not carried -> provider gone -> red."""
+    home = tmp_path / "AIPass"
+    report = install_report_path(home)
+    report.parent.mkdir(parents=True)
+    report.write_text(json.dumps({"provider": "codex"}), encoding="utf-8")
+    _finish(home, monkeypatch, capsys)
+    assert json.loads(report.read_text(encoding="utf-8"))["provider"] == "codex"

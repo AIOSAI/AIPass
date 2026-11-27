@@ -70,13 +70,28 @@ name instead of silently making a branch called WIZARD in `./wizard`.
    `{{BRANCH}}` in directory and file names is rendered as it copies.
 5. **Replace** — Substitute all `{{PLACEHOLDER}}` patterns in file contents, including
    `{{CITIZEN_CLASS}}` (sourced from the create call, not a baked literal).
+   **Package imports.** The template imports a citizen as `aipass.<branch>`. On `create`, a target
+   laid out as `<project>/src/<package>/<branch>` (any package but `aipass`) is re-rooted to
+   `<package>.<branch>`. `placeholders.localize_package_imports` does four things:
+   - rewrites the citizen's own imports in its `.py` and `.md` files, including the names the
+     fence probe builds at runtime (`f"aipass.{BRANCH}..."`);
+   - writes an empty `src/<package>/__init__.py` when there is none;
+   - puts `src/` on the path in the entry point, because a project is not installed in the venv;
+   - adds the same path to the fence probe's environment.
+
+   Any other layout keeps `aipass.<branch>`. A missing rewrite anchor refuses the create before
+   it registers anything. The Python door does this only on `localize=True`: `aipass new` re-roots
+   its first citizen itself, and a second pass would duplicate those edits.
 6. **Identity ids** — Mint the citizen's own UUID ONCE and use it twice: stamped into the
    passport as `citizenship.citizen_id` (the citizen's unique id, rendered by faces as the
    passport number) and written as the `registry_id` of its `branches[]` registry entry.
    Minting it at registration time instead would be too late — the passport is written
    before the registry, so the two copies would be different UUIDs for one citizen. Distinct
    from `citizenship.registry_id`, which is the id of the REGISTRY holding the citizen and is
-   shared by every citizen in a project.
+   shared by every citizen in a project. `citizenship.cloud_environment_id` is the Claude Code
+   cloud environment the citizen's cloud dispatches run on; it ships empty, which the cloud
+   lane reads as absent, until the owner creates the environment and writes its id. It is
+   optional: a passport or passport vault without the key is valid.
 7. **Meta** — Generate `.spawn/.branch_meta.json`: the per-branch tracking file that maps
    each delivered file back to its **template file id** with a current SHA-256, matched by
    path first and content hash second. This is what lets `update` reason about a renamed or
@@ -230,7 +245,8 @@ result = spawn_agent(
     "/path/to/new/agent",
     role="Data Analyst",
     purpose="Process incoming reports",
-    traits="Precise, thorough"
+    traits="Precise, thorough",
+    localize=False,  # True re-roots imports to the src/<package> layout, as create does
 )
 # Returns on success: { success, branch_name, path, files_copied, dirs_created,
 #                       files_skipped, renamed, registry_updated, registry_path,

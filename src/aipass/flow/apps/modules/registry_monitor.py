@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_monitor.py
 # Description: Registry auto-healing module
-# Version: 3.8.0
+# Version: 3.8.1
 # Created: 2025-11-21
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -137,10 +137,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print()
         success("Scan complete")
         console.print(f"  • Total plans: {result['total_plans']}")
-        console.print(f"  • Added: {len(result['added'])}")
-        console.print(f"  • Updated: {len(result['updated'])}")
-        console.print(f"  • Removed: {len(result['removed'])}")
-        console.print(f"  • Duplicates (reported, not renamed): {len(result['duplicates'])}")
+        console.print(f"  • Added: {len(result['added'])}", highlight=False)
+        console.print(f"  • Updated: {len(result['updated'])}", highlight=False)
+        console.print(f"  • Removed: {len(result['removed'])}", highlight=False)
+        console.print(f"  • Duplicates (reported, not renamed): {len(result['duplicates'])}", highlight=False)
         for dup in result["duplicates"]:
             console.print(f"    - {dup['prefix']}-{dup['number']}: {', '.join(dup['paths'])}")
         console.print(f"  • Doctrine healed: {result.get('doctrine_healed', 0)}")
@@ -149,7 +149,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             for heal in result.get("doctrine_heals", []):
                 prefix = heal.get("prefix", "?")
                 number = heal.get("number", "?")
-                console.print(f"    - {prefix}-{number}: {heal.get('action', 'unknown')}")
+                console.print(f"    - {prefix}-{number}: {heal.get('action', 'unknown')}", highlight=False)
 
         unrecognised = result.get("unrecognised", [])
         if unrecognised:

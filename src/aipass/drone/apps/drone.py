@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.4.0
+# Version: 1.5.2
 # Created: 2026-03-05
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -14,13 +14,13 @@ import functools
 import importlib
 import sys
 from pathlib import Path
-from typing import Callable, List
+from typing import Callable, List, TextIO
 
 from rich.table import Table
 from rich.text import Text
 
 from aipass.prax import logger
-from aipass.cli import console, err_console
+from aipass.cli import console, err_console, escape, header_version
 from aipass.drone.apps.modules import (
     BranchNotFoundError,
     CommandExecutionError,
@@ -29,18 +29,19 @@ from aipass.drone.apps.modules import (
     RepoRootError,
 )
 from aipass.drone.apps.modules.resolver import branch_exists, get_all_branches
-from aipass.drone.apps.modules.router import caller_cwd, registry_named_entries, route_command
+from aipass.drone.apps.modules.router import caller_cwd, caller_seat, registry_named_entries, route_command
 from aipass.drone.apps.modules.module_registry import (
     is_module,
     list_modules,
-    get_module_info,
     get_module_introspective,
+    get_module_printer,
     route_module_command,
     get_module_help,
 )
 from aipass.drone.apps.modules.config import missing_home_tip, passport_fault, resolve_aipass_home
 
-VERSION = "1.1.0"
+# The commands main() answers itself, before any @target or module lane; systems lists them as routes.
+BUILT_INS = ("systems", "scan", "activate", "list", "remove", "rm", "docker")
 MODULES_DIR = Path(__file__).parent / "modules"
 
 # Interactive mode — commands/branches that bypass capture + timeout for live terminal output.
@@ -133,6 +134,10 @@ def print_help() -> None:
         "Moves in-tree targets to .archive; --stale sweeps old *_json temps (drone rm --help)",
     )
     table.add_row(
+        "docker <verb> [options]",
+        "Disposable test boxes: bare, local, dev, main; build, list, shell, rm (drone docker --help)",
+    )
+    table.add_row(
         "@target ... --drone-timeout <n>",
         "Override subprocess timeout, default 600s (must come AFTER @target)",
     )
@@ -140,7 +145,7 @@ def print_help() -> None:
     table.add_row("--version", "Show version")
 
     console.print()
-    console.print(f"[bold cyan]Drone[/bold cyan] [dim]v{VERSION}[/dim] — Command Router & Discovery")
+    console.print(f"[bold cyan]drone[/bold cyan] [dim]v{header_version(__file__)}[/dim] — Command Router & Discovery")
     console.print()
     console.print("[dim]Routes commands to registered AIPass branches and modules.[/dim]")
     console.print()
@@ -163,7 +168,7 @@ def print_help() -> None:
 def print_introspection() -> None:
     """Display branch overview — auto-discovers modules."""
     console.print()
-    console.print("[bold cyan]Drone - Command Router & Discovery[/bold cyan]")
+    console.print("[bold cyan]drone - Command Router & Discovery[/bold cyan]")
     console.print()
     console.print("[dim]Routes commands to AIPass branches and internal modules[/dim]")
     console.print()
@@ -232,32 +237,35 @@ def _handle_systems() -> int:
     services = [b for b in all_branches if b.get("profile") == "library"]
     project_branches = [b for b in all_branches if b.get("profile") != "library"]
 
-    console.print("Infrastructure:")
-    console.print(f"  @{'drone':<18} Command routing and module discovery (v{VERSION})")
+    console.print("[bold cyan]Infrastructure:[/bold cyan]")
+    console.print("[dim]  drone itself: the router every command walks through[/dim]")
+    console.print(
+        f"  [cyan]@{'drone':<18}[/cyan] [dim]Command routing and module discovery (v{header_version(__file__)})[/dim]",
+        highlight=False,
+    )
+    # Modules are routes, not citizens: named here so a reader learns where @git lives.
+    routes = ", ".join([f"@{name}" for name in modules] + list(BUILT_INS))
+    console.print(f"[dim]  routes: {escape(routes)}[/dim]", highlight=False)
     console.print()
 
-    exclude = set(modules) | {"drone"}
-    deduped_services = [s for s in services if s.get("name", "").lower() not in exclude]
-    service_count = len(modules) + len(deduped_services)
-    if service_count:
-        console.print(f"AIPass Services ({service_count}):")
-        for name in modules:
-            info = get_module_info(name)
-            if info:
-                console.print(f"  @{name:<18} {info.description}")
-            else:
-                console.print(f"  @{name:<18} (not available)")
-        for svc in sorted(deduped_services, key=lambda b: b.get("name", "").lower()):
+    services = sorted(
+        (s for s in services if s.get("name", "").lower() != "drone"), key=lambda b: b.get("name", "").lower()
+    )
+    if services:
+        console.print(f"[bold cyan]AIPass Services ({len(services)}):[/bold cyan]", highlight=False)
+        console.print("[dim]  citizens with profile library: the framework's own services[/dim]")
+        for svc in services:
             name = svc.get("name", "").lower()
             desc = svc.get("description", "")
-            console.print(f"  @{name:<18} {desc}")
+            console.print(f"  [cyan]{escape(f'@{name:<18}')}[/cyan] [dim]{escape(desc)}[/dim]", highlight=False)
         if project_branches:
             console.print()
 
     if project_branches:
-        console.print(f"Branches ({len(project_branches)}):")
+        console.print(f"[bold cyan]Branches ({len(project_branches)}):[/bold cyan]", highlight=False)
+        console.print("[dim]  every other citizen: registry, roots, hosted projects; test citizens included[/dim]")
         for branch in sorted(project_branches, key=lambda b: b.get("name", "").lower()):
-            console.print(f"  @{branch.get('name', '').lower()}")
+            console.print(f"  [cyan]{escape('@' + branch.get('name', '').lower())}[/cyan]", highlight=False)
 
     # No AIPass home and no local 'drone': an external project that cannot see the core branches.
     if resolve_aipass_home().path is None:
@@ -278,6 +286,11 @@ def _handle_systems() -> int:
     return 0
 
 
+def _write_line(stream: TextIO, text: str) -> None:
+    """Write a module's answer ending in a newline, so the next command's output starts on its own line."""
+    stream.write(text if text.endswith("\n") else text + "\n")
+
+
 def _module_unavailable(name: str, why: str) -> int:
     """Name a registered module that cannot run, on stderr; the exit code is 1."""
     err_console.print(f"drone: module @{name} is registered but not available: {why}")
@@ -287,6 +300,14 @@ def _module_unavailable(name: str, why: str) -> int:
 def _handle_module(name: str, args: List[str]) -> int:
     """Handle routing to an internal module."""
     if not args:
+        try:
+            printer = get_module_printer(name, "print_introspection")
+        except ImportError as exc:
+            logger.error("Module @%s could not load: %s", name, exc)
+            return _module_unavailable(name, "it could not load (see drone log)")
+        if printer is not None:
+            printer()
+            return 0
         intro_text = get_module_introspective(name)
         if intro_text is None:
             # None is the handler's "the adapter could not load"; "" is a quiet module.
@@ -298,6 +319,14 @@ def _handle_module(name: str, args: List[str]) -> int:
         return 0
 
     if args == ["--help"]:
+        try:
+            printer = get_module_printer(name, "print_help")
+        except ImportError as exc:
+            logger.error("Module @%s could not load: %s", name, exc)
+            return _module_unavailable(name, "it could not load (see drone log)")
+        if printer is not None:
+            printer()
+            return 0
         help_text = get_module_help(name)
         if help_text is None:
             return _module_unavailable(name, "it could not load (see drone log)")
@@ -320,9 +349,9 @@ def _handle_module(name: str, args: List[str]) -> int:
         return 1
 
     if result.get("stdout"):
-        sys.stdout.write(result["stdout"])
+        _write_line(sys.stdout, result["stdout"])
     if result.get("stderr"):
-        sys.stderr.write(result["stderr"])
+        _write_line(sys.stderr, result["stderr"])
     return result.get("exit_code", 0)
 
 
@@ -413,6 +442,13 @@ def _handle_rm(args: list[str]) -> int:
     return 0 if result else 1
 
 
+def _handle_docker(args: list[str]) -> int:
+    """Handle ``drone docker <verb> ...`` in-process, so a box's shell inherits this terminal."""
+    from aipass.drone.apps.modules.docker import run
+
+    return run(args[0] if args else None, args[1:])
+
+
 def _handle_custom_command(args: list[str]) -> int:
     """Handle a custom command shortcut by matching and routing."""
     from aipass.drone.apps.modules.commands import match
@@ -498,7 +534,7 @@ def _find_seat_inbox() -> Path | None:
     The first passport found is the only seat this caller may address, even if its inbox is absent.
     No CWD means no seat.
     """
-    cwd = caller_cwd()
+    cwd = caller_seat()
     if cwd is None:
         return None
     for parent in [cwd] + list(cwd.parents):
@@ -623,7 +659,7 @@ def main() -> int:
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print(f"drone v{VERSION}")
+        console.print(f"drone v{header_version(__file__)}", highlight=False)
         return 0
 
     if args[0] in ["--help", "-h", "help"]:
@@ -675,6 +711,9 @@ def main() -> int:
     if command == "rm":
         return _handle_rm(args[1:])
 
+    if command == "docker":
+        return _handle_docker(args[1:])
+
     # aipass is a user-facing CLI, not a drone-routable branch
     if command.lstrip("@") == "aipass":
         err_console.print(
@@ -712,9 +751,9 @@ def main() -> int:
             return 1
         if isinstance(result, dict):
             if result.get("stdout"):
-                sys.stdout.write(result["stdout"])
+                _write_line(sys.stdout, result["stdout"])
             if result.get("stderr"):
-                sys.stderr.write(result["stderr"])
+                _write_line(sys.stderr, result["stderr"])
             return result.get("exit_code", 0)
         return 0 if result else 1
 

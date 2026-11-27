@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: injection_ledger.py
-# Version: 1.1.2
+# Version: 1.1.4
 # Description: Per-turn record of what the engine injected into a session, keyed on cadence's turn token (warn-only)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-16
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """What a seat was told, and when — one JSONL record per injecting dispatch.
@@ -36,7 +36,7 @@ def _turn_token_and_number(payload: dict) -> tuple[int | None, int | None]:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         return cadence.turn_token(payload), cadence.current_turn()
     except Exception as exc:  # a ledger line without a turn is still a record
-        logger.warning("[HOOKS] injection_ledger: turn unreadable, recorded without it: %s", exc)
+        logger.warning("[hooks] injection_ledger: turn unreadable, recorded without it: %s", exc)
         return None, None
 
 
@@ -48,7 +48,7 @@ def _automated(event_type: str, payload: dict) -> bool | None:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         return bool(cadence.is_automated(payload))
     except Exception as exc:  # a ledger line without the flag is still a record
-        logger.warning("[HOOKS] injection_ledger: automated flag unreadable, recorded without it: %s", exc)
+        logger.warning("[hooks] injection_ledger: automated flag unreadable, recorded without it: %s", exc)
         return None
 
 
@@ -62,7 +62,7 @@ def record(event_type: str, outputs: list[tuple[str, str, str]], merged: str, pa
     session_id = str(payload.get("session_id", "") or "")
     if not ledger_store.is_session_id(session_id):
         logger.info(
-            "[HOOKS] injection_ledger: no usable session_id in the payload, %s injection unrecorded", event_type
+            "[hooks] injection_ledger: no usable session_id in the payload, %s injection unrecorded", event_type
         )
         return None
     token, turn = _turn_token_and_number(payload)
@@ -87,6 +87,24 @@ def print_introspection() -> None:
     """Print module structure for drone routing."""
     console.print("[bold cyan]injection_ledger[/bold cyan] — What each session was told, keyed on the turn token")
     console.print("  Connected Handlers: handlers/config/ - ledger_store.py")
+    console.print("[dim]Shows what each session was told by the hooks, one line per turn.[/dim]")
+    console.print("[dim]Run drone @hooks ledger --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print usage for ``drone @hooks ledger``."""
+    console.print("[bold cyan]ledger[/bold cyan] — what a session was told, one line per turn")
+    console.print()
+    console.print("[bold]Usage:[/bold]")
+    console.print("  drone @hooks [cyan]ledger[/cyan]                    this session (else the most recently written)")
+    console.print("  drone @hooks [cyan]ledger --session <id>[/cyan]     a named session")
+    console.print(
+        "  drone @hooks [cyan]ledger --last N[/cyan]           only the last N rows (default 20)", highlight=False
+    )
+    console.print()
+    console.print("[bold]Examples:[/bold]")
+    console.print("  drone @hooks ledger")
+    console.print("  drone @hooks ledger --last 5", highlight=False)
 
 
 def _positive(value: str) -> int:
@@ -104,10 +122,7 @@ def handle_command(command: str, args: list) -> bool:
     if not args:
         print_introspection()
     if wants_help(args):
-        console.print("[bold cyan]ledger[/bold cyan] — what a session was told, one line per turn")
-        console.print("  drone @hooks ledger                    this session (else the most recently written)")
-        console.print("  drone @hooks ledger --session <id>     a named session")
-        console.print("  drone @hooks ledger --last N           only the last N rows (default 20)")
+        print_help()
         return True
 
     parser = argparse.ArgumentParser(prog="drone @hooks ledger", add_help=False)

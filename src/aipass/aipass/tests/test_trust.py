@@ -3,7 +3,7 @@
 # Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
 # Version: 1.3.0
 # Created: 2026-07-15
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/trust.py and the handlers it drives."""
@@ -13,6 +13,7 @@
 
 import os
 import shutil
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -508,6 +509,34 @@ def test_setup_sh_enroll_block_fails_honestly(tmp_path):
     assert "REACHED_END action_needed=1" in proc.stdout
     assert "WARN: could not enroll" in proc.stdout
     assert f"trusted -> {repo}" not in proc.stdout
+
+
+def _run_bootstrap_calls(script_dir: Path) -> subprocess.CompletedProcess:
+    """setup.sh's bootstrap calls (after bootstrap_branch's body, up to the count line), each call echoed by a stub."""
+    lines = SETUP_SH.read_text(encoding="utf-8").splitlines()
+    start = lines.index("bootstrap_branch() {")
+    start = next(i for i in range(start, len(lines)) if lines[i] == "}") + 1
+    end = lines.index('echo "  $BRANCH_COUNT branches bootstrapped"')
+    stub = 'bootstrap_branch() { echo "SEAT $1|$2|$3|$4"; }'
+    head = ["set -euo pipefail", f'SCRIPT_DIR="{script_dir}"', f'VENV_PYTHON="{sys.executable}"', stub]
+    script = "\n".join([*head, *lines[start:end]])
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, encoding="utf-8", timeout=60)
+
+
+@_NEEDS_POSIX_BASH
+def test_setup_sh_seats_every_citizen_with_a_vault_and_no_other(tmp_path):
+    """A citizen born after setup.sh was last edited still gets its .trinity in a fresh clone.
+
+    Mutant: the typed name list restored -> the new vault never bootstrapped -> red.
+    """
+    seat = tmp_path / "src" / "aipass" / "newcomer"
+    (seat / ".aipass").mkdir(parents=True)
+    vault = {"identity": {"citizen_class": "specialist", "role": "night shift helper"}}
+    (seat / ".aipass" / "passport.vault.json").write_text(json.dumps(vault), encoding="utf-8")
+    (tmp_path / "src" / "aipass" / "no_vault_here").mkdir()
+    proc = _run_bootstrap_calls(tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.splitlines() == [f"SEAT newcomer|{seat}|specialist|night shift helper"]
 
 
 def test_prune_no_stale_entries(tmp_path):

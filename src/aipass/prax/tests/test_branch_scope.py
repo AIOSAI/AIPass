@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_branch_scope.py
 # Description: Tests for launch-time branch scoping of Mission Control
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-11
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_scope.py."""
@@ -50,20 +50,22 @@ class TestParseScope:
         """The documented `sentry,cli,flow` form."""
         scope = parse_scope(["sentry,cli,flow"])
         assert scope.is_scoped is True
-        assert scope.names == ("SENTRY", "CLI", "FLOW")
+        assert scope.names == ("sentry", "cli", "flow")
 
     def test_separate_words_are_accepted(self):
         """A shell-split list (`run sentry cli`) works like the comma form."""
-        assert parse_scope(["sentry", "cli"]).names == ("SENTRY", "CLI")
+        assert parse_scope(["sentry", "cli"]).names == ("sentry", "cli")
+        # Typed case is folded to the lowercase labels: `run FLOW` and `run flow` match the same.
+        assert parse_scope(["SENTRY", "Cli"]).names == ("sentry", "cli")
 
     def test_trailing_comma_and_spaces_ignored(self):
         """`run sentry, cli` arrives as ['sentry,', 'cli'] — no empty names."""
-        assert parse_scope(["sentry,", "cli"]).names == ("SENTRY", "CLI")
+        assert parse_scope(["sentry,", "cli"]).names == ("sentry", "cli")
 
     def test_flags_are_not_branch_names(self):
         """--relay/--logs must never become a scope entry."""
         scope = parse_scope(["--relay", "sentry", "--logs"])
-        assert scope.names == ("SENTRY",)
+        assert scope.names == ("sentry",)
 
     def test_flags_only_is_unscoped(self):
         """`run --relay` is still an all-branches run."""
@@ -75,25 +77,25 @@ class TestParseScope:
 
     def test_duplicates_deduped_order_preserved(self):
         """Requested order drives the banner text; repeats collapse."""
-        assert parse_scope(["flow,sentry,flow"]).names == ("FLOW", "SENTRY")
+        assert parse_scope(["flow,sentry,flow"]).names == ("flow", "sentry")
 
 
 class TestLabelTokens:
     """Display labels carry more than a branch name — tokens strip the extras."""
 
     def test_plain_branch(self):
-        assert label_tokens("PRAX") == {"PRAX"}
+        assert label_tokens("prax") == {"prax"}
 
     def test_project_prefix_and_model_tag(self):
         """filesystem_handler appends /model to session labels."""
-        assert label_tokens("AIPASS/DEVPULSE/opus") == {"AIPASS", "DEVPULSE", "OPUS"}
+        assert label_tokens("aipass/devpulse/opus") == {"aipass", "devpulse", "opus"}
 
     def test_subagent_decorators_dropped(self):
         """'SUB' and ' agent' are decorations, not part of the name."""
-        assert label_tokens("AIPASS/DEVPULSE SUB agent") == {"AIPASS", "DEVPULSE"}
+        assert label_tokens("aipass/devpulse SUB agent") == {"aipass", "devpulse"}
 
     def test_external_project_tests_suffix(self):
-        assert label_tokens("AIPL/POLYGLOT TESTS") == {"AIPL", "POLYGLOT"}
+        assert label_tokens("aipl/polyglot TESTS") == {"aipl", "polyglot"}
 
     def test_empty_label(self):
         assert label_tokens("") == set()
@@ -175,12 +177,12 @@ class TestDescribeAndUnknown:
         assert BranchScope([]).describe() == "all branches"
 
     def test_describe_scoped_keeps_order(self):
-        assert BranchScope(["DEVPULSE", "SENTRY"]).describe() == "DEVPULSE, SENTRY"
+        assert BranchScope(["devpulse", "sentry"]).describe() == "devpulse, sentry"
 
     def test_unknown_names_flags_typos(self):
         """A misspelled branch would otherwise show an empty screen with no reason."""
-        scope = BranchScope(["DEVPULES", "SENTRY"])
-        assert scope.unknown_names({"DEVPULSE", "SENTRY", "PRAX"}) == ["DEVPULES"]
+        scope = BranchScope(["devpules", "sentry"])
+        assert scope.unknown_names({"devpulse", "sentry", "prax"}) == ["devpules"]
 
     def test_unknown_names_empty_when_all_known(self):
         assert BranchScope(["SENTRY"]).unknown_names({"SENTRY"}) == []

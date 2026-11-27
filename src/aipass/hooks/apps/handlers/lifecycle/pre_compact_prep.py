@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: pre_compact_prep.py
-# Version: 1.7.0
+# Version: 1.7.1
 # Description: Stamps a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-20
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Mechanical /prep AT compact time (DPLAN-0253).
@@ -65,7 +65,7 @@ def _count_active_dispatch_locks(repo_root: Path | None) -> int | None:
     try:
         rows = fleet_rows(repo_root)
     except Exception as exc:
-        logger.warning("[HOOKS] pre_compact_prep: registry read failed: %s", exc)
+        logger.warning("[hooks] pre_compact_prep: registry read failed: %s", exc)
         return None
     return sum(1 for row in rows if (Path(row["path"]) / ".ai_mail.local" / ".dispatch.lock").is_file())
 
@@ -77,7 +77,7 @@ def _count_open_plans(branch_dir: Path) -> int | None:
         target = str(branch_dir.resolve())
         return sum(1 for _num, info in get_open_plans() if info.get("location") == target)
     except Exception as exc:
-        logger.warning("[HOOKS] pre_compact_prep: open plans read failed: %s", exc)
+        logger.warning("[hooks] pre_compact_prep: open plans read failed: %s", exc)
         return None
 
 
@@ -105,7 +105,7 @@ def _git_snapshot(branch_dir: Path) -> str | None:
             cwd=str(branch_dir),
         )
     except Exception as exc:
-        logger.warning("[HOOKS] pre_compact_prep: git snapshot failed: %s", exc)
+        logger.warning("[hooks] pre_compact_prep: git snapshot failed: %s", exc)
         return None
 
     bits: list[str] = []
@@ -128,7 +128,7 @@ def _inbox_unread(branch_dir: Path) -> int | None:
         unread = data.get("unread_count")
         return unread if isinstance(unread, int) else None
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("[HOOKS] pre_compact_prep: inbox read failed: %s", exc)
+        logger.warning("[hooks] pre_compact_prep: inbox read failed: %s", exc)
         return None
 
 
@@ -152,7 +152,7 @@ def _summary_cap(branch: str) -> int:
         if isinstance(cap, int) and cap > 0:
             return cap
     except (ImportError, KeyError, TypeError) as exc:
-        logger.warning("[HOOKS] pre_compact_prep: entry_limits read failed, using default: %s", exc)
+        logger.warning("[hooks] pre_compact_prep: entry_limits read failed, using default: %s", exc)
     return _DEFAULT_SUMMARY_CAP
 
 
@@ -187,7 +187,7 @@ def _build_snapshot(hook_data: dict, branch_dir: Path, repo_root: Path | None) -
 def _stamp_session_entry(branch_dir: Path, summary: str, cap: int) -> bool:
     local_path = branch_dir / ".trinity" / "local.json"
     if not local_path.is_file():
-        logger.info("[HOOKS] pre_compact_prep: no local.json at %s — skipping stamp", local_path)
+        logger.info("[hooks] pre_compact_prep: no local.json at %s — skipping stamp", local_path)
         return False
     import fcntl
 
@@ -195,7 +195,7 @@ def _stamp_session_entry(branch_dir: Path, summary: str, cap: int) -> bool:
     try:
         folder = os.open(local_path.parent, os.O_RDONLY)
     except OSError as exc:
-        logger.warning("[HOOKS] pre_compact_prep: .trinity lock unavailable, skipping stamp: %s", exc)
+        logger.warning("[hooks] pre_compact_prep: .trinity lock unavailable, skipping stamp: %s", exc)
         return False
     try:
         fcntl.flock(folder, fcntl.LOCK_EX)
@@ -209,16 +209,16 @@ def _stamp_locked(local_path: Path, summary: str, cap: int) -> bool:
     try:
         data = json.loads(local_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("[HOOKS] pre_compact_prep: local.json unreadable, skipping stamp: %s", exc)
+        logger.warning("[hooks] pre_compact_prep: local.json unreadable, skipping stamp: %s", exc)
         return False
 
     if not isinstance(data, dict):
-        logger.warning("[HOOKS] pre_compact_prep: local.json malformed (not a dict), skipping stamp")
+        logger.warning("[hooks] pre_compact_prep: local.json malformed (not a dict), skipping stamp")
         return False
 
     sessions = data.get("sessions")
     if not isinstance(sessions, list):
-        logger.warning("[HOOKS] pre_compact_prep: sessions container malformed, skipping stamp")
+        logger.warning("[hooks] pre_compact_prep: sessions container malformed, skipping stamp")
         return False
 
     truncated = summary if len(summary) <= cap else summary[: cap - 1].rstrip() + "…"
@@ -242,7 +242,7 @@ def _stamp_locked(local_path: Path, summary: str, cap: int) -> bool:
     try:
         json_files.write_json_file(local_path, data)
     except OSError as exc:
-        logger.warning("[HOOKS] pre_compact_prep: local.json write failed: %s", exc)
+        logger.warning("[hooks] pre_compact_prep: local.json write failed: %s", exc)
         return False
 
     return True
@@ -262,7 +262,7 @@ def _handle(hook_data: dict) -> dict:
     context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
     branch_dir = context_window.find_branch_dir(cwd)
     if branch_dir is None:
-        logger.info("[HOOKS] pre_compact_prep: no branch dir resolved from cwd=%s", cwd)
+        logger.info("[hooks] pre_compact_prep: no branch dir resolved from cwd=%s", cwd)
         return {"stdout": "", "exit_code": 0}
 
     repo_root = _find_repo_root(branch_dir)
@@ -274,7 +274,7 @@ def _handle(hook_data: dict) -> dict:
     # throwaway skeleton named after the real branch, so "branch=hooks"
     # alone cannot tell a probe stamp from a real one.
     logger.info(
-        "[HOOKS] pre_compact_prep: snapshot stamped=%s branch=%s at=%s",
+        "[hooks] pre_compact_prep: snapshot stamped=%s branch=%s at=%s",
         stamped,
         branch_dir.name,
         branch_dir,

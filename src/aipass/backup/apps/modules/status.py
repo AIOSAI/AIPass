@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: Status module — show backup status for a project, as a page or one JSON object
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-04-23
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Status Module — display backup info and recent history for a project.
@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from aipass.prax import logger
-from aipass.cli import console, error
+from aipass.cli import console, error, escape
 
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.drive.tracker import load_tracker
@@ -44,18 +44,23 @@ FLAGS = ("--json", "--sizes")
 def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
+    console.print("  [dim]Backup info and recent history for a project, as a page or one JSON object[/dim]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: Phase 3 — implemented")
     console.print("  Handlers: path, project/config, state/changelog, state/progress, drive/tracker")
+    console.print("  [dim]Run[/dim] [green]drone @backup status --help[/green] [dim]for usage[/dim]")
 
 
 def print_help():
     """Display help for this module."""
     print_introspection()
     console.print()
-    console.print("Usage: status <project_root|@name> [--json [--sizes]]")
-    console.print("  --json   one JSON object on stdout, nothing else (the backup door)")
-    console.print("  --sizes  with --json: add the snapshot store size (walks the store)")
+    console.print(f"[yellow]Usage:[/yellow] {escape('status <project_root|@name> [--json [--sizes]]')}")
+    console.print("  [cyan]--json[/cyan]   one JSON object on stdout, nothing else (the backup door)")
+    console.print("  [cyan]--sizes[/cyan]  with --json: add the snapshot store size (walks the store)")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @backup status @myapp[/green]")
+    console.print("  [green]drone @backup status @myapp --json --sizes[/green]")
 
 
 def _raise_walk_error(err: OSError) -> None:
@@ -190,7 +195,7 @@ def handle_command(command: str, args: list) -> bool:
     console.print(f"[bold]Backup Status:[/bold] {config.get('project_name', Path(project_root).name)}")
     console.print(f"  Path:         {project_root}")
     console.print(f"  Drive sync:   {config.get('drive_sync', False)}")
-    console.print(f"  Total runs:   {len(changelog)}")
+    console.print(f"  Total runs:   {len(changelog)}", highlight=False)
     for entry in read_running(project_root):
         console.print(f"  Running:      {_running_line(entry)}", markup=False, highlight=False)
 

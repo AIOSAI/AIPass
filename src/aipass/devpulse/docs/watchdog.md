@@ -71,7 +71,7 @@ Every dispatch is registered at send time with an `expected_by` taken from dispa
 
 ## The completion mail
 
-The feed's completion event arrives before the mail that reports it. A one-shot wire that sees a completion holds until that mail is unread in the seat's inbox (the agent's own reply, or @ai_mail's "Dispatch complete" notice naming it), then exits with state `completed`. If no mail lands within 120 seconds (`COMPLETION_MAIL_GRACE_SECONDS`) it exits anyway with state `completed_no_mail` and a `COMPLETED_NO_MAIL @agent` line: the agent stopped without reporting, and the seat asks it for the report and the reason. A dead monitor exits at once, since no mail is owed. A completion replayed at sign-in (`MISSED`) exits at once too: its mail was due before the wire existed.
+The feed's completion event arrives before the mail that reports it. A one-shot wire that sees a completion holds until that mail is unread in the seat's inbox (the agent's own reply, or @ai_mail's "Dispatch complete" notice naming it), then exits with state `completed`. If no mail lands within 120 seconds (`COMPLETION_MAIL_GRACE_SECONDS`) it exits anyway with state `completed_no_mail` and a `COMPLETED_NO_MAIL @agent` line: the agent stopped without reporting, and the seat asks it for the report and the reason. A dead monitor exits at once, since no mail is owed. A completion replayed at sign-in (`MISSED`) exits at once too: its mail was due before the wire existed. The inbox read is the seat's own, at the `path` of its sealed owner row in the registry of the project it stands in, so a seat of another project is read in that project.
 
 ## No detection daemon
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adopt.py
 # Description: aipass adopt — bring an existing directory anywhere on disk into AIPass
-# Version: 2.3.0
+# Version: 2.3.1
 # Created: 2026-07-20
-# Modified: 2026-11-20
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -146,7 +146,7 @@ def _spawn_adopt_citizen(citizen: str, target: Path, *, apply: bool) -> dict:
     try:
         proc = _run_drone(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        logger.warning("[AIPASS] adopt: %s failed: %s", " ".join(args), exc)
+        logger.warning("[aipass] adopt: %s failed: %s", " ".join(args), exc)
         return {"name": citizen, "ok": False, "output": "", "reason": f"could not run @spawn adopt-citizen: {exc}"}
     output = (proc.stdout or "").rstrip()
     ok = proc.returncode == 0

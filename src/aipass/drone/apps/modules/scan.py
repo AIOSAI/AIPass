@@ -77,20 +77,22 @@ def print_introspection() -> None:
     console.print("  [cyan]modules/[/cyan]")
     console.print("    - [cyan]resolver.py[/cyan] [dim](resolve_branch -- branch name resolution)[/dim]")
     console.print()
+    console.print("Run [green]'drone scan --help'[/green] for usage information")
+    console.print()
 
 
 def print_help() -> None:
     """Print help for the scan module."""
     from aipass.cli import console
 
-    console.print("scan -- Branch command scanning")
+    console.print("[bold cyan]scan[/bold cyan] — Branch command scanning")
     console.print()
-    console.print("Usage:")
-    console.print("  drone scan @target     Scan a branch for available commands")
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone scan @target[/cyan]     Scan a branch for available commands")
     console.print()
-    console.print("Examples:")
-    console.print("  drone scan @sentry     Scan sentry for commands")
-    console.print("  drone scan @flow       Scan flow for commands")
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [green]drone scan @sentry[/green]     Scan sentry for commands")
+    console.print("  [green]drone scan @flow[/green]       Scan flow for commands")
 
 
 def scan(target: str) -> list[dict] | None:

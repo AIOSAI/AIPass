@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_ci_cure.py
 # Description: Tests for the ci-cure tier and its verb — own file, as test_git_module.py nears the size cap
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-22
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/git/ci_cure_handler.py through apps/modules/git_module.py, and its tier in auth.py."""
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 from pathlib import Path
 
@@ -22,6 +23,7 @@ import pytest
 
 from aipass.drone.apps.handlers.git import ci_cure_handler
 from aipass.drone.apps.modules.git_module import get_help, handle_command
+from aipass.drone.apps.plugins.devpulse_ops import auth
 from aipass.drone.apps.plugins.devpulse_ops.auth import GIT_ACCESS_TIERS, verify_git_access
 
 from .conftest import OWNER_REGISTRY_ID
@@ -95,6 +97,18 @@ class TestCiCureTier:
         assert "ci-cure" not in GIT_ACCESS_TIERS["global"]["commands"]
 
     def test_the_holder_of_the_fact_is_granted(self, cure_repo: Path) -> None:
+        assert verify_git_access("ci-cure") == "trigger"
+
+    def test_a_seat_naming_the_holder_at_the_root_is_refused_and_the_cwd_inside_it_passes(
+        self, cure_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: drop the cwd check, and one variable at the clone root commits and pushes dev."""
+        monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
+        monkeypatch.setenv("AIPASS_SEAT", "trigger")
+        monkeypatch.chdir(cure_repo)
+        with pytest.raises(PermissionError, match=re.escape(auth.REFUSE_SEAT.format(tier="ci-cure"))):
+            verify_git_access("ci-cure")
+        monkeypatch.chdir(cure_repo / "src" / "aipass" / "trigger")
         assert verify_git_access("ci-cure") == "trigger"
 
     def test_the_owner_without_the_fact_is_refused_at_error(

@@ -1,20 +1,26 @@
 # =================== AIPass ====================
 # Name: test_wake_blocklist.py
-# Description: Tests for FPLAN-0190 Task B — manual wake blocklist
-# Version: 1.0.3
+# Description: Tests for FPLAN-0190 Task B — manual wake blocklist, and the cloud dispatch pre-send refusals
+# Version: 1.1.1
 # Created: 2026-04-20
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
-"""Tests for apps/handlers/dispatch/wake.py -- manual wake blocklist (FPLAN-0190 Task B)."""
+"""Tests for apps/handlers/dispatch/wake.py -- manual wake blocklist (FPLAN-0190 Task B), and dispatch --cloud's gate."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(constant) — DAEMON_SESSION_PREFIX, unrelated to the blocklist
 
+import json
+import subprocess
 from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
-from aipass.ai_mail.apps.handlers.dispatch.wake import WAKE_BLOCKLIST, is_wake_blocked
+import pytest
+
+import aipass.ai_mail.apps.handlers.dispatch.cloud as cloud_mod
+import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
+from aipass.ai_mail.apps.handlers.dispatch.wake import WAKE_BLOCKLIST, DispatchStatus, is_wake_blocked
 from aipass.ai_mail.apps.modules import dispatch as dispatch_mod
 
 _H = "aipass.ai_mail.apps.handlers"
@@ -138,3 +144,92 @@ class TestOrchestrateWakeBlocklist:
             assert dispatch_mod.handle_command("dispatch", ["@devpulse", "Subject", "Body"]) is True
         blocked.assert_not_called()
         assert wake.call_args.args == ("@devpulse",)
+
+
+class TestCloudDispatch:
+    """`dispatch @x "S" "B" --cloud`: refused before any mail when the target cannot work in the cloud."""
+
+    def _send_cloud(self, monkeypatch, tmp_path, passport, git_status, extra=()):
+        branch = tmp_path / "hooks"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "resolve_branch", lambda target, admin=False: (branch, "@hooks"))
+        reads: list = []
+
+        def drone(cmd, cwd=None, env=None, timeout=60):
+            reads.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(git_status), "")
+
+        monkeypatch.setattr(cloud_mod, "run_cli", drone)
+        send = MagicMock(return_value=(True, None))
+        wake = MagicMock(return_value=(DispatchStatus(), True))
+        overrides = {f"{_ES}.send_to_single": send, f"{_H}.dispatch.wake.wake_branch": wake}
+        with ExitStack() as stack:
+            for target, mock_obj in {**_send_defaults(), **overrides}.items():
+                stack.enter_context(patch(target, mock_obj))
+            assert dispatch_mod.handle_command("dispatch", ["@hooks", "Subject", "Body $HOME", "--cloud", *extra])
+        return send, wake, reads
+
+    def test_the_flag_wakes_the_cloud_lane_with_the_body_and_dash_c_is_read_as_fresh(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        passport = {"citizenship": {"cloud_environment_id": "env_01X"}}
+        clean = {"upstream": "origin/dev", "ahead": 0, "behind": 3}
+        send, wake, reads = self._send_cloud(monkeypatch, tmp_path, passport, clean, ["-c"])
+
+        send.assert_called_once()
+        assert wake.call_args.kwargs["cloud"] == {"body": "Body $HOME"}
+        assert reads == [["drone", "@git", "status", "--all", "--json"]]
+        assert wake.call_args.kwargs["fresh"] is True
+        assert capsys.readouterr().err == ""
+
+    @pytest.mark.parametrize(
+        "passport, git_status, why",
+        [
+            ({"citizenship": {}}, {"upstream": "origin/dev", "ahead": 0}, "has no citizenship.cloud_environment_id"),
+            (
+                {"citizenship": {"cloud_environment_id": "env_01X"}},
+                {"upstream": "origin/dev", "ahead": 2},
+                "local dev is 2 commit(s) ahead of origin/dev",
+            ),
+        ],
+        ids=["no-environment-id", "dev-ahead"],
+    )
+    def test_a_target_that_cannot_work_in_the_cloud_is_refused_before_any_mail(
+        self, monkeypatch, tmp_path, capsys, passport, git_status, why
+    ):
+        send, wake, _ = self._send_cloud(monkeypatch, tmp_path, passport, git_status)
+
+        send.assert_not_called()
+        wake.assert_not_called()
+        err = capsys.readouterr().err
+        assert "Dispatch to @hooks not sent: @hooks cannot work in the cloud" in err and why in err
+
+    def test_a_local_only_flag_with_cloud_is_refused_before_any_mail(self, monkeypatch, tmp_path, capsys):
+        passport = {"citizenship": {"cloud_environment_id": "env_01X"}}
+        send, wake, _ = self._send_cloud(monkeypatch, tmp_path, passport, {}, ["--model", "sonnet"])
+
+        send.assert_not_called()
+        assert "not sent: --model apply to local wakes, not --cloud" in capsys.readouterr().err
+
+    def test_a_body_over_64_kb_is_refused_before_any_start(self, monkeypatch, tmp_path):
+        """One argv string under script -c: the kernel caps it at 128 KiB, so a pasted log never starts."""
+        branch = tmp_path / "hooks"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"citizenship": {"cloud_environment_id": "env_01X"}}), encoding="utf-8"
+        )
+        monkeypatch.setattr(wake_mod, "resolve_branch", lambda target, admin=False: (branch, "@hooks"))
+        clean = json.dumps({"upstream": "origin/dev", "ahead": 0})
+        monkeypatch.setattr(cloud_mod, "run_cli", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, clean, ""))
+
+        assert cloud_mod.dispatch_refusal("@hooks", False, [], body="x" * 64_000) == (True, "")
+        assert cloud_mod.dispatch_refusal("@hooks", False, [], body="é" * 32_001) == (
+            False,
+            "cloud briefs are limited to 64 KB; put the log in the repo and name the path",
+        )
+
+    def test_dispatch_help_names_the_cloud_flag(self, capsys):
+        assert dispatch_mod.handle_command("dispatch", ["--help"]) is True
+
+        assert '"Subject" "Body" --cloud' in capsys.readouterr().out

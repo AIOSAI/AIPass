@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: release_notify.py
 # Description: Release Notify Module — release mail fan-out to project managers
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-09-09
-# Modified: 2026-10-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -26,6 +26,7 @@ from aipass.devpulse.apps.handlers.release_notify.compose import (
 from aipass.devpulse.apps.handlers.release_notify.deliver import (
     COMMONS_ROOM,
     already_notified,
+    is_no_mailbox,
     load_state,
     post_commons,
     record_notified,
@@ -43,9 +44,6 @@ console = err_console
 COMMAND_NAMES = ("release-notify", "release_notify")
 
 HELP_TEXT = """\
-[bold cyan]release-notify[/bold cyan] — tell every project manager a release shipped
-
-[bold]Usage:[/bold]
   release-notify v<version>              Mail every manager + post one commons thread
   release-notify v<version> --dry-run    Show recipients and the body, send nothing
   release-notify v<version> --force      Send again for a version already stamped
@@ -80,6 +78,19 @@ def print_introspection() -> None:
     console.print()
     console.print("[yellow]Usage:[/yellow] [cyan]release-notify v<version> \\[--dry-run] \\[--force][/cyan]")
     console.print()
+    console.print("[dim]Run 'drone @devpulse release-notify --help' for usage information[/dim]")
+
+
+def print_help() -> None:
+    """Print CLI help — usage, who gets the mail, and examples. Help is the product: stdout."""
+    stdout_console.print("[bold cyan]release-notify[/bold cyan] — tell every project manager a release shipped")
+    stdout_console.print()
+    stdout_console.print("[bold]USAGE:[/bold]")
+    stdout_console.print(HELP_TEXT)
+    stdout_console.print("[bold]EXAMPLES:[/bold]")
+    stdout_console.print("  drone @devpulse release-notify v2.8.4 --dry-run   Preview the mail", highlight=False)
+    stdout_console.print("  drone @devpulse release-notify v2.8.4             Send the mail", highlight=False)
+    stdout_console.print("  drone @devpulse release-notify v2.8.4 --force     Send it again", highlight=False)
 
 
 def _wants_help(args: list[str]) -> bool:
@@ -176,6 +187,9 @@ def _fan_out(subject: str, body: str, managers: list[dict]) -> tuple[list[str], 
         if ok:
             sent.append(address)
             rows.append((address, entry["name"], "sent"))
+        elif is_no_mailbox(reason):
+            # No mailbox here is not a failure: it must not fail the run (a runtime agent's address, @seed).
+            rows.append((address, entry["name"], "skipped, no mailbox"))
         else:
             failed.append(address)
             rows.append((address, entry["name"], f"FAILED — {reason}"))
@@ -242,7 +256,7 @@ def handle_command(command: str, args: list[str]) -> bool:
         return False
 
     if _wants_help(args):
-        stdout_console.print(HELP_TEXT)
+        print_help()
         return True
 
     if not args:

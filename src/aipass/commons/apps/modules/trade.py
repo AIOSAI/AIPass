@@ -3,7 +3,7 @@
 # Description: Trade Orchestration Module
 # Version: 1.1.2
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -36,18 +36,45 @@ from aipass.commons.apps.modules.artifact import RARITY_COLORS
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("trade")
+    console.print("[bold cyan]trade - Trading[/bold cyan]")
     console.print(
-        "Router and display layer for trading workflows — gifting, trading, dropping, finding, and minting artifacts."
+        "[dim]Router and display layer for trading workflows — gifting, trading, dropping, finding, and minting artifacts.[/dim]"
     )
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/artifacts/")
-    console.print("    - trade_ops.py (gift_artifact — gift an artifact to another branch)")
-    console.print("    - trade_ops.py (trade_artifact — swap artifacts between two branches)")
-    console.print("    - trade_ops.py (drop_item — drop an artifact in a room for others to find)")
-    console.print("    - trade_ops.py (find_item — pick up a dropped artifact)")
-    console.print("    - trade_ops.py (mint_event_artifact — mint event badge artifacts for participants)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/artifacts/[/cyan]")
+    console.print("    [cyan]-[/cyan] trade_ops.py [dim](gift_artifact — gift an artifact to another branch)[/dim]")
+    console.print("    [cyan]-[/cyan] trade_ops.py [dim](trade_artifact — swap artifacts between two branches)[/dim]")
+    console.print(
+        "    [cyan]-[/cyan] trade_ops.py [dim](drop_item — drop an artifact in a room for others to find)[/dim]"
+    )
+    console.print("    [cyan]-[/cyan] trade_ops.py [dim](find_item — pick up a dropped artifact)[/dim]")
+    console.print(
+        "    [cyan]-[/cyan] trade_ops.py [dim](mint_event_artifact — mint event badge artifacts for participants)[/dim]"
+    )
+    console.print()
+    console.print("[dim]Run 'drone @commons gift --help' for usage[/dim]")
+
+
+def print_help():
+    """Display usage help for the trade module."""
+    console.print()
+    console.print("[bold cyan]trade - Trading[/bold cyan]")
+    console.print("[dim]Gift, trade, drop, find and mint artifacts.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone @commons gift[/cyan] <artifact_id> @branch")
+    console.print("  [cyan]drone @commons trade[/cyan] <your_artifact_id> <their_artifact_id> @branch")
+    console.print('  [cyan]drone @commons drop[/cyan] "name" "description" <room> \\[--expires 5]')
+    console.print("  [cyan]drone @commons find[/cyan] <artifact_id>")
+    console.print('  [cyan]drone @commons mint[/cyan] "Event Name" @branch1 @branch2 ...')
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [cyan]drone @commons gift 12 @seedgo[/cyan]")
+    console.print("  [cyan]drone @commons trade 12 34 @seedgo[/cyan]")
+    console.print('  [cyan]drone @commons drop "Lucky Coin" "A shiny coin" general --expires 10[/cyan]')
+    console.print("  [cyan]drone @commons find 56[/cyan]")
+    console.print('  [cyan]drone @commons mint "Launch Party" @seedgo @prax[/cyan]')
     console.print()
 
 
@@ -62,6 +89,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     """Handle trade-related commands."""
     if command not in TRADE_COMMANDS:
         return False
+
+    if "--help" in args or "-h" in args:
+        print_help()
+        return True
 
     if command == "gift":
         result = _handle_gift(args)

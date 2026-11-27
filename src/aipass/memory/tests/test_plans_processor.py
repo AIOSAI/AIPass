@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_plans_processor.py
 # Description: Tests for the plans_processor handler — chunking, manifest, memory python and process_plans
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-04-26
-# Modified: 2026-11-18
+# Modified: 2026-11-23
 # =============================================
 
 """Tests for apps/handlers/intake/plans_processor.py."""
@@ -18,6 +18,7 @@ import subprocess
 from unittest.mock import MagicMock, patch
 
 from aipass.memory.apps.handlers.intake import plans_processor
+from aipass.memory.apps.handlers.monitor import detector
 from aipass.prax import branch_state_root
 
 
@@ -654,6 +655,27 @@ class TestProcessPlans:
         assert result["files_processed"] == 0
         assert "already processed" in result.get("reason", "")
 
+    def test_the_stored_branch_label_is_lowercase(self, monkeypatch, tmp_path):
+        """The label becomes the id prefix and the collection's metadata: new rows carry the lowercase name."""
+        mod = plans_processor
+        plans_dir = tmp_path / "plans"
+        plans_dir.mkdir()
+        (plans_dir / "p.md").write_text("## Objective\n" + "An objective long enough to be one chunk.\n", "utf-8")
+        self._mock_config(monkeypatch, mod, {"enabled": True, "path": str(plans_dir), "supported_extensions": [".md"]})
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
+        monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", tmp_path / "manifest.json")
+        monkeypatch.setattr(mod, "json_handler", MagicMock())
+        sent = []
+
+        def lane(script, payload, **kwargs):
+            sent.append(payload)
+            return {"success": True, "embeddings": [[0.1]] * len(payload.get("texts", [])), "stored": 1}
+
+        monkeypatch.setattr(mod, "run_json", lane)
+
+        assert mod.process_plans()["files_processed"] == 1
+        assert [p["branch"] for p in sent if "branch" in p] == ["flow"]
+
     def test_process_plans_success(self, monkeypatch, tmp_path):
         mod = plans_processor
 
@@ -898,3 +920,106 @@ class TestEveryDeclaredProjectsArchiveIsRead:
             "FPLAN-0001_host.md",
             "Vera-Studio/FPLAN-0002_vera.md",
         }
+
+
+class TestAPlanAlsoLandsInItsOwnersLocalStore:
+    """The global flow_plans write stands as it was; the plan's own Branch line, inside its project, names a local copy."""
+
+    _BODY = "\n## Objective\nThis objective section has more than enough content to pass the chunk threshold.\n"
+
+    def _world(self, monkeypatch, tmp_path, fail_local=False):
+        """Host AIPass with @canary; a declared root Other with @wren and its own @canary; every store call recorded."""
+        mod = plans_processor
+        home, other = tmp_path / "AIPass", tmp_path / "Other"
+        core = {"branches": [{"name": "canary", "path": "src/aipass/canary", "status": "active"}]}
+        (home / "src/aipass/canary").mkdir(parents=True)
+        (home / "AIPASS_REGISTRY.json").write_text(json.dumps(core), encoding="utf-8")
+        roots = {"roots": [{"path": str(other), "status": "active"}]}
+        (home / "AIPASS_ROOTS.json").write_text(json.dumps(roots), encoding="utf-8")
+        rows = [{"name": n, "path": f"src/{n}", "status": "active"} for n in ("wren", "canary")]
+        other.mkdir()
+        (other / "OTHER_REGISTRY.json").write_text(json.dumps({"branches": rows}), encoding="utf-8")
+        for name in ("wren", "canary"):
+            (other / "src" / name / ".trinity").mkdir(parents=True)
+            (other / "src" / name / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        for project in (home, other):
+            (project / ".backup" / "processed_plans").mkdir(parents=True)
+        monkeypatch.setattr(detector, "_REPO_ROOT", home)
+        monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: home)
+        monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", tmp_path / "manifest.json")
+        monkeypatch.setattr(mod, "json_handler", MagicMock())
+        monkeypatch.setattr(mod, "logger", MagicMock())
+        config = MagicMock()
+        config.section.return_value = {"enabled": True, "path": ".backup/processed_plans"}
+        monkeypatch.setattr(mod, "config_loader", config)
+        stored = []
+
+        def lane(script, payload, **kwargs):
+            if "texts" in payload:
+                return {"success": True, "embeddings": [[0.1]] * len(payload["texts"])}
+            stored.append(payload)
+            if fail_local and payload["db_path"]:
+                return {"success": False, "error": "disk full"}
+            return {"success": True}
+
+        monkeypatch.setattr(mod, "run_json", lane)
+        return home, other, stored
+
+    def _plan(self, project, name, branch):
+        (project / ".backup" / "processed_plans" / name).write_text(f"**Branch**: {branch}\n{self._BODY}", "utf-8")
+
+    def test_the_global_write_is_unchanged_and_the_owner_gets_the_same_chunks(self, monkeypatch, tmp_path):
+        home, _other, stored = self._world(monkeypatch, tmp_path)
+        self._plan(home, "FPLAN-0001_host.md", "canary")
+
+        assert plans_processor.process_plans()["files_processed"] == 1
+        assert [(p["branch"], p["memory_type"], p["db_path"]) for p in stored] == [
+            ("flow", "plans", None),
+            ("flow", "plans", str(home / "src/aipass/canary/.chroma")),
+        ]
+        assert stored[0]["documents"] == stored[1]["documents"]
+        assert {m["branch"] for m in stored[0]["metadatas"] + stored[1]["metadatas"]} == {"canary"}
+
+    def test_an_external_plan_naming_its_branch_by_path_lands_in_that_branch(self, monkeypatch, tmp_path):
+        _home, other, stored = self._world(monkeypatch, tmp_path)
+        self._plan(other, "FPLAN-0002_wren.md", str(other / "src" / "wren"))
+
+        plans_processor.process_plans()
+
+        assert [p["db_path"] for p in stored] == [None, str(other / "src/wren/.chroma")]
+        assert stored[1]["metadatas"][0]["project"] == "Other"
+
+    def test_a_name_shared_across_two_projects_does_not_cross(self, monkeypatch, tmp_path):
+        """Other's @canary is not in the write scope (the name is the host's): its plan stays global, never host's."""
+        home, other, stored = self._world(monkeypatch, tmp_path)
+        self._plan(home, "FPLAN-0003_host.md", "canary")
+        self._plan(other, "FPLAN-0004_other.md", "canary")
+
+        assert plans_processor.process_plans()["files_processed"] == 2
+        local = [(p["metadatas"][0]["source_file"], p["db_path"]) for p in stored if p["db_path"]]
+        assert local == [("FPLAN-0003_host.md", str(home / "src/aipass/canary/.chroma"))]
+        other_global = [p for p in stored if p["metadatas"][0]["source_file"] == "FPLAN-0004_other.md"]
+        assert [p["db_path"] for p in other_global] == [None]
+        assert "branch" not in other_global[0]["metadatas"][0]
+
+    def test_an_unresolvable_branch_is_stored_globally_only_and_logged_by_name(self, monkeypatch, tmp_path):
+        home, _other, stored = self._world(monkeypatch, tmp_path)
+        self._plan(home, "FPLAN-0005_nobody.md", "nobody")
+
+        assert plans_processor.process_plans()["files_processed"] == 1
+        assert [p["db_path"] for p in stored] == [None]
+        logged = " ".join(str(c) for c in plans_processor.logger.info.call_args_list)
+        assert "FPLAN-0005_nobody.md" in logged and "global only" in logged
+        assert "FPLAN-0005_nobody.md" in json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+
+    def test_a_failed_local_store_keeps_the_global_write_and_leaves_the_plan_unprocessed(self, monkeypatch, tmp_path):
+        home, _other, stored = self._world(monkeypatch, tmp_path, fail_local=True)
+        self._plan(home, "FPLAN-0006_host.md", "canary")
+
+        result = plans_processor.process_plans()
+
+        assert [p["db_path"] is None for p in stored] == [True, False]
+        assert result["files_processed"] == 0
+        assert any("local store error (@canary): disk full" in e for e in result["errors"])
+        assert not (tmp_path / "manifest.json").exists()

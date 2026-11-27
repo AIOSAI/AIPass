@@ -3,7 +3,7 @@
 # Description: aipass read — render a branch README in the terminal
 # Version: 1.2.0
 # Created: 2026-08-07
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -47,7 +47,9 @@ def print_introspection() -> None:
     console.print(f"[bold cyan]Command:[/bold cyan] {COMMAND}")
     console.print(f"[bold cyan]Description:[/bold cyan] {_DESCRIPTION}")
     console.print(f"[bold cyan]Version:[/bold cyan] {_VERSION}")
+    console.print("[dim]Renders a branch README in the terminal.[/dim]")
     _print_branch_list()
+    console.print("[dim]Run 'aipass read --help' for usage and examples.[/dim]")
 
 
 def _print_branch_list() -> None:

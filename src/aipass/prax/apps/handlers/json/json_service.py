@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_service.py
 # Description: The fleet's one JSON handler service (prax-owned)
-# Version: 2.5.0
+# Version: 2.7.0
 # Created: 2026-09-03
-# Modified: 2026-11-18
+# Modified: 2026-11-26
 # =============================================
 
 """The fleet's one JSON handler implementation (DPLAN-0325).
@@ -27,6 +27,8 @@ from aipass.prax.apps.handlers.state_root import StateRootUnwritable, branch_roo
 
 # The trail, never door one: every branch's logger build reaches this service.
 logger = PraxTrail("json_service")
+# read_json's answer for a document it could not read; callers test it with `is None`, like a missing one.
+UNREADABLE = None
 
 JSON_TYPES = ("config", "data", "log")
 DEFAULT_MAX_LOG_ENTRIES = 100
@@ -77,7 +79,7 @@ def _default_document(json_type: str, module_name: str) -> Any:
 def _current_mode(file_path: Path) -> Optional[int]:
     """The document's own permission bits, or None when there is no document yet."""
     try:
-        return stat.S_IMODE(os.stat(file_path).st_mode)
+        mode = os.stat(file_path).st_mode
     except FileNotFoundError:
         return None
     except OSError as exc:
@@ -87,6 +89,7 @@ def _current_mode(file_path: Path) -> Optional[int]:
             error=str(exc),
         )
         return None
+    return stat.S_IMODE(mode)
 
 
 def _stage(directory: Path, content: str, mode: Optional[int] = None) -> str:
@@ -130,7 +133,7 @@ def _stage(directory: Path, content: str, mode: Optional[int] = None) -> str:
 
 
 def _sweep_orphans(directory: Path) -> None:
-    """Best effort: remove staged files a killed writer left behind over an hour ago."""
+    """Remove staged files a killed writer left behind over an hour ago; a failure is logged, not raised."""
     # datetime, not time: callers stub this module's `time`.
     cutoff = datetime.now().timestamp() - _ORPHAN_AGE_SECONDS
     try:
@@ -139,9 +142,9 @@ def _sweep_orphans(directory: Path) -> None:
                 if orphan.stat().st_mtime < cutoff:
                     orphan.unlink()
             except OSError as exc:
-                logger.info("json_service: orphan sweep skipped a file", path=str(orphan), error=str(exc))
+                logger.warning("json_service: orphan sweep skipped a file", path=str(orphan), error=str(exc))
     except OSError as exc:
-        logger.info("json_service: orphan sweep failed", path=str(directory), error=str(exc))
+        logger.warning("json_service: orphan sweep failed", path=str(directory), error=str(exc))
 
 
 def _discard(temp_path: str) -> None:
@@ -268,7 +271,7 @@ class JsonHandle:
         return state_root_of(self.branch_root) / f"{self.branch_root.name}_json"
 
     def read_json(self, file_path: Path) -> Optional[Any]:
-        """Read any json document by path; None when missing or unreadable, never raises."""
+        """Read any json document by path; None when missing, UNREADABLE (also None) when unreadable, never raises."""
         try:
             with open(file_path, "r", encoding="utf-8") as handle:
                 return json.load(handle)
@@ -276,7 +279,7 @@ class JsonHandle:
             return None
         except (OSError, ValueError) as exc:
             logger.warning("json_service: unreadable document", path=str(file_path), error=str(exc))
-            return None
+            return UNREADABLE
 
     def write_json(self, file_path: Path, data: Any, indent: int = 2) -> bool:
         """Write any json document by path, atomically; False on any OSError.

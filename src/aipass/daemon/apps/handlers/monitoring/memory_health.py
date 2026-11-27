@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_health.py
 # Description: Branch Memory Health Checker
-# Version: 0.2.1
+# Version: 0.2.2
 # Created: 2026-01-30
-# Modified: 2026-10-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -279,33 +279,3 @@ def get_memory_health_status(branch_path: str, branch_name: str) -> Dict[str, An
         "issues": issues,
         "check_time": datetime.now().isoformat(),
     }
-
-
-if __name__ == "__main__":
-    print("Testing memory_health...")
-
-    test_path = "."
-    test_name = "EXAMPLE"
-
-    print(f"\nChecking {test_name} at {test_path}")
-
-    existence = check_memory_files_exist(test_path)
-    print(f"  Required files present: {existence['all_required_present']}")
-    print(f"  Missing required: {existence['missing_required']}")
-    print(f"  Missing optional: {existence['missing_optional']}")
-
-    local_path = f"{test_path}/.trinity/local.json"
-    structure = validate_memory_structure(local_path)
-    print(f"  Structure valid: {structure['valid']}")
-    print(f"  Has metadata: {structure['has_metadata']}")
-    print(f"  Schema version: {structure['schema_version']}")
-    print(f"  Missing containers: {structure['missing_containers']}")
-
-    freshness = check_freshness(local_path)
-    print(f"  Freshness: {freshness['status']} ({freshness['message']})")
-
-    health = get_memory_health_status(test_path, test_name)
-    print(f"\n  Overall status: {health['overall_status']}")
-    print(f"  Issues: {len(health['issues'])}")
-    for issue in health["issues"][:5]:
-        print(f"    - {issue}")

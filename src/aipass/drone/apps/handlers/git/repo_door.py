@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.13.0
+# Version: 1.13.1
 # Created: 2026-09-13
-# Modified: 2026-11-10
+# Modified: 2026-11-26
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -29,7 +29,7 @@ from aipass.drone.apps.handlers.deletion_log import NO_CURRENT_DIRECTORY, append
 from aipass.drone.apps.handlers.git import session_home
 from aipass.drone.apps.handlers.git.repo_context import is_aipass_repo
 from aipass.drone.apps.handlers.registry_handler import resolve_aipass_home
-from aipass.drone.apps.handlers.router_handler import caller_cwd, caller_stamp
+from aipass.drone.apps.handlers.router_handler import caller_seat, caller_stamp
 
 REPO_FLAG = "--repo"
 
@@ -741,7 +741,7 @@ def record_use(
     Prax first, so the event is logged even if the store cannot be written.
     Never raises: losing the record must not turn into losing the result.
     """
-    cwd = caller_cwd()
+    cwd = caller_seat()
     record = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "outcome": outcome,

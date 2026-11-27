@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor.py
 # Description: Tests for dispatch monitor lifecycle handler
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-04-02
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's main(): the attempts, the bounce, the completion fire."""
@@ -26,6 +26,7 @@ import subprocess
 import time
 import pytest
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
@@ -323,6 +324,19 @@ def test_a_bounce_that_cannot_be_sent_is_written_beside_the_lock(monkeypatch, ma
     assert data["reason"].startswith("All 3 attempts failed")
 
 
+def test_a_bounce_record_that_cannot_be_written_is_warned(monkeypatch, main_argv, tmp_path):
+    argv, lock_file, _ = main_argv
+    record = lock_file.parent / "last_bounce.json"
+    record.mkdir()
+    monkeypatch.setattr(mod.subprocess, "run", MagicMock(side_effect=subprocess.SubprocessError("drone failed")))
+
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [lambda stdout_log: 1] * 3)
+
+    assert code == 1
+    warnings = [c.args[0] % c.args[1:] for c in cast(MagicMock, mod.logger).warning.call_args_list]
+    assert any(w.startswith(f"[monitor] Failed to write bounce record {record}") for w in warnings)
+
+
 def test_a_bounce_with_no_stderr_log_says_none_was_captured(monkeypatch, main_argv, tmp_path):
     argv, _, _ = main_argv
     argv = argv[:4] + [str(tmp_path / "absent" / "dispatch_stderr.out")] + argv[5:]
@@ -391,7 +405,7 @@ def _bounce_outcome(monkeypatch, argv, tmp_path, attempt, bounce_exit):
 
     _run_main(monkeypatch, argv, tmp_path, [attempt] * 3)
 
-    warnings = [c.args[0] % c.args[1:] for c in mod.logger.warning.call_args_list]
+    warnings = [c.args[0] % c.args[1:] for c in cast(MagicMock, mod.logger).warning.call_args_list]
     feed = [json.loads(line) for line in notify_mod.FEED_PATH.read_text(encoding="utf-8").splitlines()]
     [title] = [e["title"] for e in feed if e["kind"] == "dispatch"]
     [report] = reports
@@ -438,6 +452,18 @@ def test_a_delivered_bounce_leaves_the_status_and_the_log_as_they_were(monkeypat
     assert warnings == []
     assert status == "FAILED (code 1)"
     assert title == "@test_branch FAILED (code 1)"
+
+
+def test_a_report_that_cannot_be_assembled_is_recorded_in_the_status(monkeypatch, main_argv, tmp_path):
+    argv, _, _ = main_argv
+    monkeypatch.setattr(mod.report_mod, "build_report", MagicMock(side_effect=KeyError("attempts")))
+
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [lambda stdout_log: 0])
+
+    assert code == 0
+    feed = [json.loads(line) for line in notify_mod.FEED_PATH.read_text(encoding="utf-8").splitlines()]
+    [title] = [e["title"] for e in feed if e["kind"] == "dispatch"]
+    assert title == "@test_branch completed, report NOT written (KeyError)"
 
 
 # --- Notification naming test ------------------------------------------

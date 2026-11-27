@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: hooks.py
-# Version: 1.3.1
+# Version: 1.3.2
 # Description: Hook infrastructure — drone entry point
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-18
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
-HOOKS Branch - Main Orchestrator
+hooks Branch - Main Orchestrator
 """
 
 import os
@@ -21,7 +21,7 @@ from typing import Any
 os.environ.setdefault("AIPASS_BRANCH_NAME", "hooks")
 
 from aipass.prax import logger
-from aipass.cli import console, err_console
+from aipass.cli import console, err_console, header_version
 
 MODULES_DIR = Path(__file__).parent / "modules"
 _DISABLED_MARK = "(disabled)"
@@ -40,14 +40,14 @@ def discover_modules() -> list[Any]:
 
         # import_module matches the FILE, so "x(disabled).py" would import as happily as "x.py".
         if _DISABLED_MARK in file_path.name:
-            logger.info("[HOOKS] Skipping retired module %s", file_path.name)
+            logger.info("[hooks] Skipping retired module %s", file_path.name)
             continue
 
         module_name = f"aipass.hooks.apps.modules.{file_path.stem}"
         try:
             module = importlib.import_module(module_name)
         except Exception as e:  # one broken module costs its own verbs, never the rest of the menu
-            logger.error("[HOOKS] Failed to load module %s: %s", module_name, e)
+            logger.error("[hooks] Failed to load module %s: %s", module_name, e)
             continue
         if hasattr(module, "handle_command"):
             modules.append(module)
@@ -60,7 +60,7 @@ def print_introspection():
     modules = discover_modules()
     importlib.import_module("aipass.hooks.apps.modules.hookstatus").print_config_break()
     console.print()
-    console.print("[bold cyan]HOOKS — Hook Infrastructure for AIPass[/bold cyan]")
+    console.print("[bold cyan]hooks — Hook Infrastructure for AIPass[/bold cyan]")
     console.print()
     console.print("[dim]Dispatches hooks across platforms with per-project config, logging, and crash isolation.[/dim]")
     console.print()
@@ -81,7 +81,9 @@ def print_help():
     """Print CLI help — usage instructions and available commands."""
     modules = discover_modules()
     console.print()
-    console.print("[bold cyan]HOOKS[/bold cyan] [dim]v1.3.1[/dim] — Hook Infrastructure for AIPass")
+    console.print(
+        f"[bold cyan]hooks[/bold cyan] [dim]v{header_version(__file__)}[/dim] — Hook Infrastructure for AIPass"
+    )
     console.print()
     console.print("[dim]Dispatches hooks across platforms with per-project config, logging, and crash isolation.[/dim]")
     console.print()
@@ -148,7 +150,7 @@ def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
             if module.handle_command(command, args):
                 return True
         except Exception as e:
-            logger.error("[HOOKS] Module %s error: %s", module.__name__, e)
+            logger.error("[hooks] Module %s error: %s", module.__name__, e)
             err_console.print(f"Module {module.__name__} error: {e}", markup=False)
     return False
 
@@ -162,7 +164,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command in ["--version", "-V"]:
-        console.print("hooks 1.3.1")
+        console.print(f"hooks v{header_version(__file__)}", highlight=False)
         return True
 
     return route_command(command, args, modules)

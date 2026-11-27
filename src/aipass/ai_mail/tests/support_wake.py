@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_wake.py
 # Description: Shared helpers for test_wake.py and its split siblings - the wake fixtures and spawn recorder
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Helpers for the tests of apps/handlers/dispatch/wake.py (no test_ prefix: never collected)."""
@@ -116,6 +116,13 @@ def _record_spawn_routes(monkeypatch):
         raising=False,
     )
     return calls
+
+
+def _step(status, name):
+    """The named step of a wake status; a missing step fails here, with its name."""
+    step = status.find_step(name)
+    assert step is not None, f"no {name!r} step in the wake status"
+    return step
 
 
 def _claude_args(popen_cmd: list) -> list:

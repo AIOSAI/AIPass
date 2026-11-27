@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: test_errors.py
 # Description: Unit tests for the errors module (error registry management CLI)
-# Version: 1.2.2
+# Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/errors.py: the errors command routing and its report_error re-export."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(covered_elsewhere) — registry storage and reads, in tests/test_error_registry.py
-# sentry: no-test-needed(covered_elsewhere) — how report_error fingerprints and dispatches, in tests/test_error_reporter.py
+# sentry: no-test-needed(covered_elsewhere) — report_error fingerprinting and dispatch, in tests/test_error_reporter.py
 
 import time
 from typing import Any
@@ -151,7 +151,7 @@ class TestHandleCommandList:
         cells = _row_cells(out, "e001")
         assert cells[1] == "abc123de"  # fingerprint[:8]
         assert cells[2] == "ImportError"  # error_type
-        assert cells[3] == "FLOW"  # component
+        assert cells[3] == "flow"  # the stored FLOW prints lowercase
         assert cells[4] == "3"  # count (as string)
 
         assert "1 error(s)" in out, "Expected '1 error(s)' in list summary output"
@@ -316,7 +316,7 @@ class TestHandleCommandHelp:
 
         assert _has_line(out, "─", "USAGE"), "Expected USAGE rule section"
         assert _has_line(out, "─", "COMMANDS"), "Expected COMMANDS rule section"
-        assert _has_line(out, "─", "EXAMPLES"), "Expected EXAMPLES rule section"
+        assert "EXAMPLES:" in out, "Expected EXAMPLES heading"
 
         assert _has_line(out, "list", "List tracked errors"), "Expected 'list' command in help"
         assert _has_line(out, "resolve", "Mark error as resolved"), "Expected 'resolve' command in help"
@@ -475,6 +475,17 @@ class TestHandleCommandDetail:
         assert _has_line(out, "help text printed [/dim] <id> [red]")
         assert _has_line(out, "noise [bold] by design")
         assert _has_line(out, "logs/[x].log")
+
+    def test_detail_prints_the_stored_component_lowercase(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A row minted as FLOW reads as flow, the name drone addresses; the row itself is untouched."""
+        entry = {"id": "e043", "fingerprint": "beef" * 10, "status": "new", "component": "FLOW"}
+        _mocks()["get_entry"].return_value = entry
+
+        assert errors.handle_command("errors", ["detail", "e043"]) is True
+        out = capsys.readouterr().out
+        assert _has_line(out, "Component:", "flow")
+        assert not _has_line(out, "Component:", "FLOW")
+        assert entry["component"] == "FLOW"
 
 
 class TestHandleCommandUnsuppress:
@@ -683,7 +694,7 @@ class TestQueryResultStructure:
 
         assert row_cells[1] == "deadbeef"  # fingerprint[:8]
         assert row_cells[2] == "ValueError"  # error_type
-        assert row_cells[3] == "API"  # component
+        assert row_cells[3] == "api"  # the stored API prints lowercase
         assert row_cells[4] == "7"  # count as string
 
 

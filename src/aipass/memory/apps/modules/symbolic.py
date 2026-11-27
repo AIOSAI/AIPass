@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: symbolic.py
 # Description: Symbolic Memory Module — PARKED 2026-08-14
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-17
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -77,11 +77,20 @@ def print_introspection() -> None:
     console.print("  [green]drone @devpulse compass[/green]   [dim]# the curated-truth store that is live[/dim]")
     console.print(f"  [dim]{_ARCHIVE_HINT}[/dim]")
     console.print()
+    console.print("[dim]Run drone @memory symbolic --help for more info[/dim]")
+    console.print()
 
 
 def print_help() -> None:
     """Explain the park. A help flag never executes anything — there is nothing to execute."""
     print_introspection()
+    console.print("[bold]USAGE:[/bold]")
+    console.print("  drone @memory symbolic \\[--help]")
+    console.print()
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  # See the park notice and the live lane")
+    console.print("  [dim]drone @memory symbolic[/dim]")
+    console.print()
     console.print("[yellow]The park:[/yellow]")
     console.print("  [dim]Nothing was deleted — revival is a file move, see the README above.[/dim]")
     console.print("  [dim]Fix the Atlas finding before it runs again: a Delete verdict must[/dim]")

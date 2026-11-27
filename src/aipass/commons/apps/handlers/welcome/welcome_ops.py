@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: welcome_ops.py
 # Description: Welcome Operations Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -45,7 +45,7 @@ def run_welcome(args: List[str]) -> dict:
             result = _welcome_specific(conn, branch_name)
         else:
             if dry_run:
-                rows = conn.execute("SELECT branch_name FROM agents WHERE branch_name != 'SYSTEM'").fetchall()
+                rows = conn.execute("SELECT branch_name FROM agents WHERE LOWER(branch_name) != 'system'").fetchall()
                 unwelcomed = [r["branch_name"] for r in rows if not has_been_welcomed(conn, r["branch_name"])]
                 close_db(conn)
                 return {"success": True, "dry_run": True, "would_welcome": unwelcomed}

@@ -1,6 +1,6 @@
 {
   "_warning": "AUTO-GENERATED FILE - DO NOT MANUALLY EDIT. This file is 100% automated and will be overwritten. Services update their own sections.",
-  "branch": "{{BRANCHNAME}}",
+  "branch": "{{BRANCH}}",
   "last_updated": "",
   "quick_status": {
     "new_mail": 0,

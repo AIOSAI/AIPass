@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: artifact.py
 # Description: audit-tests artifact assembly, provenance and write
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-08-29
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -44,7 +44,7 @@ def load_previous(target: target_module.Target) -> Optional[dict]:
 
     A damaged file reads as None, which records a missing baseline, not "nothing vanished".
     """
-    path = artifact_path(target)
+    path = _carried_over(artifact_path(target))
     if not path.exists():
         return None
     try:
@@ -179,7 +179,7 @@ def publish(document: dict, target: target_module.Target, previous: Optional[dic
     laws.enforce(document, previous_group_list(previous))
 
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    path = artifact_path(target)
+    path = _carried_over(artifact_path(target))
     scratch = path.with_suffix(f".{os.getpid()}.tmp")
 
     with open(scratch, "w", encoding="utf-8") as handle:
@@ -231,3 +231,21 @@ def unproven_reasons(document: dict) -> List[str]:
     if (document.get("m10_proof") or {}).get("real_tree_unchanged") is False:
         reasons.append("the real tree changed during the run")
     return reasons
+
+
+def _carried_over(path: Path) -> Path:
+    """``path``, after moving onto it the one artifact stored under another spelling of the same name.
+
+    Registry names became lowercase, and an artifact written under the old capital name holds the
+    baseline. It is renamed once, never copied, and never over an artifact already at ``path``.
+    """
+    if path.exists() or not path.parent.is_dir():
+        return path
+    others = [p for p in path.parent.glob("audit_tests_*.json") if p.name.lower() == path.name.lower()]
+    if len(others) == 1:
+        os.replace(others[0], path)
+        logger.info(f"[AUDIT-TESTS] carried {others[0].name} over to {path.name}")
+        json_handler.log_operation("artifact_carried_over", {"from": str(others[0]), "to": str(path)})
+    elif others:
+        logger.warning(f"[AUDIT-TESTS] {len(others)} spellings of {path.name} on disk, none carried over")
+    return path

@@ -24,7 +24,7 @@ branch needs beyond the service belongs in a module of its own, never in this fi
 ## Rollover pipeline
 
 ```
-detector.check_all_branches()        # scan AIPASS_REGISTRY.json + external registries
+detector.check_all_branches()        # walk detector.write_scope(): core, residents, callers, declared externals
 → _should_rollover(file)             # ENTRY COUNTS ONLY — no line-count trigger, no 600 fallback
                                      # regular sessions > count (default 15), auto-compact lane
                                      # against auto_compact_cap (3), key_learnings, observations
@@ -39,7 +39,9 @@ detector.check_all_branches()        # scan AIPASS_REGISTRY.json + external regi
 ```
 
 A refused embed or store leaves the live file untouched; the next run upserts the same content-hash
-IDs, so a retry never duplicates. The watcher skips the rollover outright when the store's
+IDs, so a retry never duplicates. An ID is `<branch>_<type>_<hash>` with the branch label in
+lowercase; rows stored before that carry a capitalised label and stay as they are, so a text stored
+under both labels holds two rows. The watcher skips the rollover outright when the store's
 dependencies are missing.
 
 `commit_trimmed()` re-reads the file before it writes. Storage takes seconds, and the owner may edit
@@ -95,8 +97,9 @@ in-file note.
 
 It is **scoped to the branches this run actually rolled**, like the tab refresh beside it:
 `normalize_branch()` takes one branch and touches one branch, and there is no fleet entry point in
-that handler on purpose. A rolled branch the fleet scope cannot see is logged by name, never silently
-skipped.
+that handler on purpose. The rolled names are matched against `detector.write_scope()`, the scope
+that rolled them, so a declared external heals like a core branch. A rolled branch that scope cannot
+see is logged by name, never silently skipped.
 
 ---
 
@@ -141,9 +144,78 @@ overwrite an existing anchor (unreadable is not absent), and `heal` is a verb yo
 something that happens to you: it preserves the original bytes to `AIPASS_ROOTS.json.corrupt`,
 reports the path-shaped strings it can see, and writes none of them back.
 
-**One consumer subtracts a tier on purpose.** `trinity_push.resolve_scope()` drops `external`, because
-every other consumer of `fleet_branches()` reads and the push WRITES. Nothing in this branch writes
-into another repository, and the push is not the exception.
+**One consumer subtracts a tier.** `trinity_push.resolve_scope()` drops `external`: the template push
+(`templates bump`, the prune and re-frame) stops at the repo edge. Every other write lane serves the
+declared externals, below.
+
+---
+
+## The write fence: services write where they serve
+
+`handlers/write_fence.py` is the one gate every memory writer passes: `fence_write(path, lane=...)`.
+A write is admitted when its **resolved** path is the AIPass root or under it, or is a branch
+directory of a declared root or under one (`registry_scope.external_branches()`: a row in that
+root's registry with a passport on disk). Nothing else. Containment is judged on resolved paths,
+never `startswith`, so `/x/aipass_other` is not inside `/x/aipass` and a symlink cannot carry a write
+out. The one admitted path outside a branch directory is that branch's own todo backlog directory in
+its project, `<declared root>/.backup/todo/<branch>/`. A declared root's other files and directories
+stay refused, and so does a listed branch with no passport.
+
+A refusal is an ERROR naming the lane, the path and the root, and a `write_fence_refused` line in
+the operation log. A root that resolves to the filesystem root fences nothing, so it admits nothing,
+external or not.
+
+## Which scope each lane reads
+
+| scope | holds | read by |
+|---|---|---|
+| `detector.write_scope()` | core, accepted residents, caller registries inside the root, declared externals | the rollover walk, the local `.chroma` lookup, a plan's owner, `rollover backfill-local`, the frame re-render, the tab refresh, the watcher |
+| `detector.read_scope()` | the write scope, plus any declared external it left out by name | `health`, `lint`, `rollover config` |
+| `todo_roll.in_scope_branches()` | `fleet_branches()`, all three tiers | the todo roll, `rollover run/check --branch`, `todo restore` |
+| `trinity_push.resolve_scope()` | `fleet_branches()` less `external` | the template push |
+
+Every write lane matches a branch by **name**, so the write scope never holds two branches under one
+name: a declared external whose name a core or resident branch already holds is left out of it and
+named in a WARNING. The read scope still names it. The todo lane refuses a shared directory name
+outright, since two pads would merge into one backlog.
+
+A declared external rolls like a core branch: its files are trimmed in place, its entries are stored
+in its own `<branch>/.chroma` and in the global store, its todo pad rolls to
+`.backup/todo/<branch>/backlog.json` under its own project root (the declared root holding its
+registry), never the AIPass root, and its frame, tabs and template receipt are written in its own
+`.trinity/`.
+
+## Plans land in both stores
+
+`process-plans` stores each archived plan's chunks in the global `flow_plans` collection (label
+`flow`) and in its owner's local `<branch>/.chroma`, collection `flow_plans`, with the same
+content-hash IDs through the same chroma lane. The owner is the plan file's own `**Branch**:` line,
+a name or a path, resolved inside the archive's project (`project` tag) against the write scope. A
+resident project nested in the host is its own project, so a name shared across projects never
+crosses. The local write goes through `local_store_lookup`, so it passes the write fence, and it
+must land on that same citizen's store. Each chunk carries a `branch` tag naming its owner.
+
+A plan whose Branch line resolves to no one citizen is logged by name and stored globally only, and
+its manifest row is written. A local store that fails keeps the global write, and the plan gets no
+manifest row, so the error is reported and the next run retries both. The global upsert is
+idempotent.
+
+## Backfilling the local stores
+
+`drone @memory rollover backfill-local [--branch @name] [--apply]` copies rows from the global store
+into each write-scope branch's local store: `<branch>_local`, `<branch>_observations` and the
+`flow_plans` chunks it owns. A chunk's owner is its `branch` tag. An untagged chunk uses its
+`project` with the Branch line in any chunk of the same file, or in the archived file itself. A
+chunk with no `project` tag whose `source_file` is in the AIPass archive is project AIPass; any other
+untagged chunk has no owner, stays global only and is logged once per file. Rows are copied as stored (ids,
+embeddings, documents, metadatas), with no re-embedding and no renaming, so a capitalised
+`FLOW_plans_...` id stays as it is. `add_missing` never touches an id the local store already holds,
+so a re-run adds nothing.
+
+It is a dry run by default and prints, per branch and collection, how many rows it would copy and
+how many are already present. `--apply` writes. @memory's own store is the global store, so it is
+skipped. Only @memory's seat or the verified admin may run it (`caller_gate`, the rail `rollover run
+--branch` uses). Any other seat gets the mail-@devpulse sentence and exit 2.
 
 ---
 

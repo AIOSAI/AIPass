@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: checklist.py
 # Description: Per-File Standards Checklist Module
-# Version: 1.5.0
+# Version: 1.5.2
 # Created: 2026-03-15
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Per-File Standards Checklist Module
@@ -23,6 +23,7 @@ from aipass.cli import error
 from aipass.sentry.apps.handlers.audit.branch_audit import discover_checkers
 
 from aipass.sentry.apps.handlers.bypass.bypass_handler import (
+    bypass_file_problem,
     get_branch_from_path,
     load_bypass_rules,
     registry_notes,
@@ -118,6 +119,10 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
     if not checkers:
         return [{"standard": "(error)", "passed": False, "detail": "No checkers discovered"}]
 
+    if branch_path is not None:
+        problem = bypass_file_problem(str(branch_path))
+        if problem:
+            return [{"standard": "(error)", "passed": False, "detail": f"{problem}, so no waiver was applied"}]
     bypass_rules = load_bypass_rules(str(branch_path)) if branch_path is not None else []
 
     results = []
@@ -193,12 +198,12 @@ def _audit_ignore_pattern(file_path: str, branch_path: Optional[Path]) -> Option
     """The audit ignore pattern that keeps this file out of the audit, or None (no branch, or not ignored)."""
     if branch_path is None:
         return None
-    try:
-        rel = Path(file_path).resolve().relative_to(branch_path.resolve())
-    except ValueError:
+    resolved, root = Path(file_path).resolve(), branch_path.resolve()
+    if not resolved.is_relative_to(root):
+        # Outside its branch root it cannot be on that branch's ignore list: not ignored is the true answer.
         logger.info("[checklist] %s is not under its branch root %s", file_path, branch_path)
         return None
-    return audit_ignore_match(rel.as_posix())
+    return audit_ignore_match(resolved.relative_to(root).as_posix())
 
 
 # The token scripts count findings by: plain ASCII, one per finding, never on a pass.

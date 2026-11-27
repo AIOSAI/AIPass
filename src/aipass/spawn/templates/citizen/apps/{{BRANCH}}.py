@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: {{BRANCH}}.py
 # Description: Entry point CLI for drone @{{BRANCH}}
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: {{DATE}}
 # Modified: {{DATE}}
 # =============================================
 
 """
-{{BRANCHNAME}} Branch - Main Orchestrator
+{{BRANCH}} Branch - Main Orchestrator
 """
 
 import importlib
@@ -20,10 +20,8 @@ from typing import Any, List, Tuple
 # so a later setdefault would name the wrong branch in every log line.
 os.environ.setdefault("AIPASS_BRANCH_NAME", "{{BRANCH}}")
 
-from aipass.cli import console, error
+from aipass.cli import console, error, header_version
 from aipass.prax import logger
-
-__version__ = "1.0.0"
 
 
 MODULES_DIR = Path(__file__).parent / "modules"
@@ -47,7 +45,7 @@ def discover_modules() -> List[Any]:
             if hasattr(module, "handle_command"):
                 modules.append(module)
         except Exception as e:
-            logger.error("[{{BRANCHNAME}}] Failed to load module %s: %s", module_name, e)
+            logger.error("[{{BRANCH}}] Failed to load module %s: %s", module_name, e)
 
     return modules
 
@@ -66,7 +64,7 @@ def print_introspection() -> None:
     modules = discover_modules()
 
     console.print()
-    console.print("[bold cyan]{{BRANCHNAME}}[/bold cyan]")
+    console.print("[bold cyan]{{BRANCH}}[/bold cyan]")
     console.print()
     console.print("[dim]{{PURPOSE_BRIEF}}[/dim]")
     console.print()
@@ -87,11 +85,11 @@ def print_introspection() -> None:
 
 
 def print_help() -> None:
-    """Rich-formatted top-level help for {{BRANCHNAME}}."""
+    """Rich-formatted top-level help for {{BRANCH}}."""
     modules = discover_modules()
 
     console.print()
-    console.print("[bold cyan]{{BRANCHNAME}}[/bold cyan]")
+    console.print("[bold cyan]{{BRANCH}}[/bold cyan]")
     console.print()
     console.print("[dim]{{PURPOSE_BRIEF}}[/dim]")
     console.print()
@@ -129,7 +127,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
             if module.handle_command(command, args):
                 return True
         except Exception as e:
-            logger.error("[{{BRANCHNAME}}] Module %s error: %s", module.__name__, e)
+            logger.error("[{{BRANCH}}] Module %s error: %s", module.__name__, e)
     return False
 
 
@@ -157,7 +155,7 @@ def main() -> int:
         return 0
 
     if args[0] in ("--version", "-V"):
-        console.print(f"{{BRANCHNAME}} v{__version__}")
+        console.print(f"{{BRANCH}} v{header_version(__file__)}", highlight=False)
         return 0
 
     command = args[0]
@@ -180,8 +178,8 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
-        logger.warning("[{{BRANCHNAME}}] Interrupted by user (KeyboardInterrupt)")
+        logger.warning("[{{BRANCH}}] Interrupted by user (KeyboardInterrupt)")
         sys.exit(130)
     except Exception as exc:
-        logger.error("[{{BRANCHNAME}}] Unhandled error in main: %s", exc)
+        logger.error("[{{BRANCH}}] Unhandled error in main: %s", exc)
         sys.exit(1)

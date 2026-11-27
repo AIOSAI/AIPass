@@ -88,7 +88,7 @@
     {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "cli",
-      "reason": "Display handler is an exception to the handler-no-console rule \u2014 its entire purpose is Rich console formatting. Known debt tracked in DPLAN-0047."
+      "reason": "Display handler is an exception to the handler-no-console rule — its entire purpose is Rich console formatting. Known debt tracked in DPLAN-0047."
     },
     {
       "file": "apps/handlers/diagnostics/diagnostics_check.py",
@@ -103,12 +103,12 @@
     {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/bypass/bypass_handler.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "sentry_json/audit_cache",
@@ -123,38 +123,40 @@
     {
       "file": "apps/handlers/bypass/bypass_handler.py",
       "standard": "logged_fallback",
-      "lines": [77],
+      "lines": [
+        77
+      ],
       "reason": "Devpulse's ruling (c), fleet green leg 15: no raise here, the verdict path stays as it is. The failure is made loud instead: it is recorded in UNREADABLE_REGISTRIES, and the checklist and the audit each print one note naming the unreadable registry (registry_notes; pinned in test_checklist and test_standards_audit)."
     },
     {
       "file": "apps/handlers/diagnostics/diagnostics_check.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/readme/readme_generator.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/readme/readme_ops.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/aipass_proof/triplet.py",
       "standard": "deep_nesting",
-      "reason": "scan() depth 6 \u2014 state machine tracking file types across standards with nested conditionals, inherent to triplet completeness detection"
+      "reason": "scan() depth 6 — state machine tracking file types across standards with nested conditionals, inherent to triplet completeness detection"
     },
     {
       "file": "apps/handlers/aipass_standards/introspection_check.py",
       "standard": "deep_nesting",
-      "reason": "3 functions (_find_name_main_block depth 5, _is_no_args_check depth 7, check_content_references depth 5) \u2014 deep AST traversal with isinstance chains inherent to pattern detection"
+      "reason": "3 functions (_find_name_main_block depth 5, _is_no_args_check depth 7, check_content_references depth 5) — deep AST traversal with isinstance chains inherent to pattern detection"
     },
     {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "deep_nesting",
-      "reason": "print_branch_summary() depth 6 \u2014 full rewrite planned in DPLAN-0047, refactoring now would be throwaway work"
+      "reason": "print_branch_summary() depth 6 — full rewrite planned in DPLAN-0047, refactoring now would be throwaway work"
     },
     {
       "file": "_content.py",
@@ -174,19 +176,91 @@
     {
       "file": "tests/test_checkers_batch10.py",
       "standard": "hardcoded_path",
-      "lines": [64, 69, 79, 84, 89, 94, 99, 109, 114, 119, 137, 144, 152, 161, 173, 179, 199, 204, 209, 214, 219, 621, 623, 691, 705, 706, 707, 1282, 1284, 1285, 1287, 1317, 1330, 1331, 1332, 1338, 1342, 1351, 1361, 1368, 1389, 1408, 1443, 1454, 1474, 1507, 1511],
+      "lines": [
+        64,
+        69,
+        79,
+        84,
+        89,
+        94,
+        99,
+        109,
+        114,
+        119,
+        137,
+        144,
+        152,
+        161,
+        173,
+        179,
+        199,
+        204,
+        209,
+        214,
+        219,
+        621,
+        623,
+        691,
+        705,
+        706,
+        707,
+        1282,
+        1284,
+        1285,
+        1287,
+        1317,
+        1330,
+        1331,
+        1332,
+        1338,
+        1342,
+        1351,
+        1361,
+        1368,
+        1389,
+        1408,
+        1443,
+        1454,
+        1474,
+        1507,
+        1511
+      ],
       "reason": "Test input, not paths the tests use: the hardcoded_path and literal-path cases hold home-path strings (/home/<user>/, /Users/carol/, C:\\Users\\...) as checker input. Line-level; replaces the no-standard rule removed 2026-09-25 (survey row #12). Lines re-pinned in fleet green leg 15 and again 2026-10-04 (one import added above them): the list is _scan_file's own answer for the file, every hit a fixture. Extended 2026-10-04 (dispatch 79b012ed item 4) with _scan_file's answer for the appended developer_home classes (L1601 on): that standard's own inputs. Extended leg 19 (L1838, L1842): the docstring-table pins' inputs."
     },
     {
       "file": "tests/test_checkers_batch10.py",
       "standard": "developer_home",
-      "lines": [1282, 1283, 1284, 1285, 1287, 1288, 1317, 1321, 1351, 1361, 1363, 1368, 1389, 1394, 1408, 1412, 1443, 1448, 1454, 1474, 1481],
+      "lines": [
+        1282,
+        1283,
+        1284,
+        1285,
+        1287,
+        1288,
+        1317,
+        1321,
+        1351,
+        1361,
+        1363,
+        1368,
+        1389,
+        1394,
+        1408,
+        1412,
+        1443,
+        1448,
+        1454,
+        1474,
+        1481
+      ],
       "reason": "The standard's own inputs, not anybody's home: the developer_home classes (L1601 on) write each home spelling with an invented login into tmp_path files for the checker, the tree runner, the checklist and the verb to convict. The list is developer_home's own scan_text answer for the file, computed by calling it (2026-10-04, dispatch 79b012ed item 4)."
     },
     {
       "file": "tests/test_audit_tests_lane_gate.py",
       "standard": "literal_path",
-      "lines": [117],
+      "lines": [
+        117
+      ],
       "reason": "Data, not a host path (fleet green leg 15): plugin._split_path splits a STRING on separators and never touches disk; '/weird/back\\\\slash.txt' is the input whose backslash must survive on POSIX."
     },
     {
@@ -207,51 +281,70 @@
     {
       "file": "tests/test_aipass_standards.py",
       "standard": "through_the_command",
-      "lines": [696],
+      "lines": [
+        696
+      ],
       "reason": "No public route (fleet green leg 15; re-pinned +3 leg 16, +1 2026-10-26, -1 2026-11-01): json_handler_check._is_canonical_shim is the sha256 gate itself; check_branch reaches it only through a whole branch tree. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_audit_tests_core.py",
       "standard": "through_the_command",
-      "lines": [630, 650, 664, 676, 689, 700, 710, 718, 725],
+      "lines": [
+        630,
+        650,
+        664,
+        676,
+        689,
+        700,
+        710,
+        718,
+        725
+      ],
       "reason": "No public route (fleet green leg 15): runner._m10_proof is reached by the lane only after a full suite run under the gate. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_audit_tests_lane_statement_deletion.py",
       "standard": "through_the_command",
-      "lines": [426],
+      "lines": [
+        426
+      ],
       "reason": "No public route (fleet green leg 15; moved with its test by the 10-08 split): statement_deletion._mutant_text, the unparseable-mutant answer, is reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_coverage_audit.py",
       "standard": "through_the_command",
-      "lines": [401, 413, 432, 449],
+      "lines": [
+        401,
+        413,
+        432,
+        449
+      ],
       "reason": "No public route (fleet green leg 15): branch_audit._load_diagnostics_checker is reached by audit_branch only with pyright on PATH. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "apps/handlers/aipass_standards/skip_dirs.py",
       "standard": "json_structure",
-      "reason": "Pure constants module \u2014 defines SOURCE_SKIP_DIRS frozenset only, no operations to log."
+      "reason": "Pure constants module — defines SOURCE_SKIP_DIRS frozenset only, no operations to log."
     },
     {
       "file": "apps/handlers/cli/help_flags.py",
       "standard": "json_structure",
-      "reason": "Pure predicate \u2014 wants_help() answers a question about a list of strings and returns a bool: no state, no I/O, no operation to log. Measured 2026-08-13: checklist reports 'Missing json_handler import \u2014 add: from aipass.<branch>.apps.handlers.json import json_handler (+1 more)', i.e. the standard wants an import AND a log_operation() call. This predicate runs before EVERY sentry command, so satisfying it would write 'a help flag was looked for' on every invocation and bury the operation log the standard exists to serve. Same shape as skip_dirs.py above."
+      "reason": "Pure predicate — wants_help() answers a question about a list of strings and returns a bool: no state, no I/O, no operation to log. Measured 2026-08-13: checklist reports 'Missing json_handler import — add: from aipass.<branch>.apps.handlers.json import json_handler (+1 more)', i.e. the standard wants an import AND a log_operation() call. This predicate runs before EVERY sentry command, so satisfying it would write 'a help flag was looked for' on every invocation and bury the operation log the standard exists to serve. Same shape as skip_dirs.py above."
     },
     {
       "file": "handlers/aipass_proof/",
       "standard": "dead_code",
-      "reason": "Proof handlers are discovered via iterdir() + importlib in sentry_proof.py \u2014 dead_code checker only recognizes glob() patterns. [branch-level standard: dead_code reports through checks[].message prose, not a *_violations list, so a raw re-audit that scans violation keys shows this rule as dead \u2014 it is not. Canary branch-level standards with check_branch(), not with the audit's violation lists.]"
+      "reason": "Proof handlers are discovered via iterdir() + importlib in sentry_proof.py — dead_code checker only recognizes glob() patterns. [branch-level standard: dead_code reports through checks[].message prose, not a *_violations list, so a raw re-audit that scans violation keys shows this rule as dead — it is not. Canary branch-level standards with check_branch(), not with the audit's violation lists.]"
     },
     {
       "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
       "standard": "json_structure",
-      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** \u2014 granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import \u2014 so this exemption cannot widen without a machine refusing the pack. json_handler is an aipass import. CONFIRMED by @devpulse 2026-08-29: the grant was PATH-scoped BY DESIGN, so any standard that fails purely as a consequence of M10's no-aipass-import property, inside payload/**, is within the grant's intent. Recorded in the terms table at design \u00a77 C9a (rev 4a), which now names all THREE applied standards (log_visibility, json_structure, unused_function) and STRIKES trigger \u2014 a checker the terms named that never fires on this file. It was flagged for a ruling rather than self-granted."
+      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** — granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import — so this exemption cannot widen without a machine refusing the pack. json_handler is an aipass import. CONFIRMED by @devpulse 2026-08-29: the grant was PATH-scoped BY DESIGN, so any standard that fails purely as a consequence of M10's no-aipass-import property, inside payload/**, is within the grant's intent. Recorded in the terms table at design §7 C9a (rev 4a), which now names all THREE applied standards (log_visibility, json_structure, unused_function) and STRIKES trigger — a checker the terms named that never fires on this file. It was flagged for a ruling rather than self-granted."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
       "standard": "unused_function",
-      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** \u2014 granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import \u2014 so this exemption cannot widen without a machine refusing the pack. every function flagged is a pytest hook called BY NAME by pytest inside the copy, so no aipass call site can exist by construction. CONFIRMED by @devpulse 2026-08-29: the grant was PATH-scoped BY DESIGN, so any standard that fails purely as a consequence of M10's no-aipass-import property, inside payload/**, is within the grant's intent. Recorded in the terms table at design \u00a77 C9a (rev 4a), which now names all THREE applied standards (log_visibility, json_structure, unused_function) and STRIKES trigger \u2014 a checker the terms named that never fires on this file. It was flagged for a ruling rather than self-granted."
+      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** — granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import — so this exemption cannot widen without a machine refusing the pack. every function flagged is a pytest hook called BY NAME by pytest inside the copy, so no aipass call site can exist by construction. CONFIRMED by @devpulse 2026-08-29: the grant was PATH-scoped BY DESIGN, so any standard that fails purely as a consequence of M10's no-aipass-import property, inside payload/**, is within the grant's intent. Recorded in the terms table at design §7 C9a (rev 4a), which now names all THREE applied standards (log_visibility, json_structure, unused_function) and STRIKES trigger — a checker the terms named that never fires on this file. It was flagged for a ruling rather than self-granted."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/",
@@ -316,38 +409,43 @@
     {
       "file": "apps/handlers/pytest_quality_standards/corpus.py",
       "standard": "silent_catch",
-      "lines": [134, 233],
+      "lines": [
+        134,
+        233
+      ],
       "reason": "Stdlib-only generic pack: no prax logger to import. 134: _relpath's ValueError means the path is outside root, and the absolute path is the documented answer. 233: an unparseable production file goes in Corpus.production_unparseable, and the report names it as not measured. One broken file must not abort a project's score."
     },
     {
       "file": "apps/handlers/bypass/dead_rules.py",
       "standard": "fallback",
-      "functions": ["_line_count"],
+      "functions": [
+        "_line_count"
+      ],
       "reason": "None is 'line count unknown' and the caller never convicts a rule on it (the docstring says so). The warning names the file, so a dead rule is kept, never deleted on a guess."
     },
     {
       "file": "apps/handlers/bypass/dead_rules.py",
       "standard": "fallback",
-      "functions": ["bypass_markers"],
+      "functions": [
+        "bypass_markers"
+      ],
       "reason": "A file outside the branch root is named by its whole path, which is the documented answer, not a stand-in. The marker is still reported."
     },
     {
       "file": "apps/handlers/audit/branch_audit.py",
       "standard": "fallback",
-      "functions": ["_rel_path"],
+      "functions": [
+        "_rel_path"
+      ],
       "reason": "Docstring contract: a path outside root is shown as its absolute path. The finding is still reported, only its label changes."
     },
     {
       "file": "apps/handlers/aipass_standards/imports_check.py",
       "standard": "fallback",
-      "functions": ["filter_docstrings"],
+      "functions": [
+        "filter_docstrings"
+      ],
       "reason": "Unparseable source is returned unblanked (docstring contract) and check_prax_logger fails it as 'Unparseable source', so nothing reads as passed."
-    },
-    {
-      "file": "apps/modules/checklist.py",
-      "standard": "logged_fallback",
-      "lines": [200],
-      "reason": "A file outside its branch root cannot be on that branch's audit ignore list, so None (not ignored) is the true answer, not a stand-in. The info line names both paths."
     },
     {
       "file": "apps/handlers/context_standards/startup_budget_check.py",
@@ -365,127 +463,174 @@
     {
       "file": "apps/handlers/audit/incremental_cache.py",
       "standard": "logged_fallback",
-      "lines": [229, 240],
+      "lines": [
+        229,
+        240
+      ],
       "reason": "A cache, and the checker is wrong on these lines (fleet green leg 14). An unreadable or a corrupt entry is a cache miss (load_branch_entry, two lines). Every caller needs the same answer to both: run the full audit and write the entry fresh, which is the documented fail-open. The corrupt entry is renamed aside to .corrupt and each failure is logged, so nothing is lost and nothing is silent."
     },
     {
       "file": "apps/handlers/audit_tests/artifact.py",
       "standard": "logged_fallback",
-      "lines": [56],
+      "lines": [
+        56
+      ],
       "reason": "The checker is wrong on this line (fleet green leg 14). An unreadable previous artifact is no baseline, the same as an absent one, and load_previous's docstring says so: the caller records a missing baseline and skips the S3 diff, never 'nothing vanished'. The failure is logged as a warning and as the json op previous_artifact_unreadable."
     },
     {
       "file": "apps/handlers/bypass/ignore_handler.py",
       "standard": "logged_fallback",
-      "lines": [165],
+      "lines": [
+        165
+      ],
       "reason": "The checker is wrong on this line (fleet green leg 14). relative_to raises ValueError only when the file is not under the branch root, and such a file is truly not ignored: a branch's .sentryignore governs its own tree only. False here is the answer, not a failure, and the case is logged."
     },
     {
       "file": "apps/handlers/aipass_standards/cli_check.py",
       "standard": "logged_fallback",
-      "lines": [52, 190],
+      "lines": [
+        52,
+        190
+      ],
       "reason": "The checker is wrong on these lines (fleet green leg 14): each failure answer is the STRICT answer. An unparseable file gets no console-import window (86) and no stderr-directed print lines (317), so it keeps every finding; ignorance never buys an exemption, as the comment at 86 says."
     },
     {
       "file": "apps/handlers/aipass_standards/ruff_check.py",
       "standard": "logged_fallback",
-      "lines": [61, 113],
+      "lines": [
+        61,
+        113
+      ],
       "reason": "The checker is wrong on these lines (fleet green leg 14): an unreadable ruff_bypass.json answers 'no ruff bypass', the STRICT answer. Every ruff finding is reported and none is waived on a file nothing could read, and the failure is logged as a warning naming the file."
     },
     {
       "file": "apps/handlers/aipass_proof/plugin_integrity.py",
       "standard": "logged_fallback",
-      "lines": [210],
+      "lines": [
+        210
+      ],
       "reason": "The checker is wrong on this line (fleet green leg 15): an unparseable file gives the AST lane no findings, but scan() runs _scan_file_regex on the same file beside it, so the file is still judged; the AST lane only filters docstrings and display strings more precisely. The parse failure is logged."
     },
     {
       "file": "apps/handlers/aipass_standards/architecture_check.py",
       "standard": "logged_fallback",
-      "lines": [325],
+      "lines": [
+        325
+      ],
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. The caller sees the passport still exists and fails Template baseline ('No citizen_class in ...passport.json'); only an absent passport skips, and that path never reaches this except."
     },
     {
       "file": "apps/handlers/audit/discovery.py",
       "standard": "logged_fallback",
-      "lines": [237],
+      "lines": [
+        237
+      ],
       "reason": "No verdict reads this value (fleet green leg 15): measure_pack_corpus feeds the corpus banner only, its docstring says a raising measurer answers None so the caller keeps its own count rather than print a fabricated 0, and the failure is logged as a warning naming the measurer."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/envdiff.py",
       "standard": "logged_fallback",
-      "lines": [652],
+      "lines": [
+        652
+      ],
       "reason": "The checker is wrong on these lines (fleet green leg 15): the failure answer is the strict one. read_records' docstring names both: an unreadable log is an empty list and its emptiness produces the refusal; an undecodable line is dropped with a warning naming the file and line, and the missing session record it leaves is refused upstream."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
       "standard": "logged_fallback",
-      "lines": [236],
+      "lines": [
+        236
+      ],
       "reason": "Named, not silent (fleet green leg 15): the hook must never raise inside the suite it measures, and _note_error carries the realpath failure to the artifact, where Law M10 reports it. Only reachable in symlink-sibling mode, off by default."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/statement_deletion.py",
       "standard": "logged_fallback",
-      "lines": [602],
+      "lines": [
+        602
+      ],
       "reason": "No verdict reads this value (fleet green leg 15): _outermost_callee only picks the callee NAME a conviction line prints, and its caller keeps the regex reading (`or fields['callee']`) for a line that will not parse, as the docstring says. The conviction itself is unchanged either way."
     },
     {
       "file": "apps/modules/proof_query.py",
       "standard": "logged_fallback",
-      "lines": [79],
+      "lines": [
+        79
+      ],
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. None is only ever a failure here; error() prints why and the caller raises CommandRefused(EXIT_UNPROVEN)."
     },
     {
       "file": "apps/modules/standards_query.py",
       "standard": "logged_fallback",
-      "lines": [100],
+      "lines": [
+        100
+      ],
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. None is only ever a failure here; error() prints why and _display_content raises CommandRefused(EXIT_UNPROVEN)."
     },
     {
       "file": "apps/handlers/aipass_standards/trinity_check.py",
       "standard": "logged_fallback",
-      "lines": [204],
+      "lines": [
+        203
+      ],
       "reason": "The checker is wrong on this line (fleet green leg 14): an unlistable fleet dir answers 'not a clean checkout', the STRICT answer, which keeps a missing .trinity a violation. The comment above it gives the reason, and the case is logged as a warning."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/trinity_groups.py",
-      "standard": "logged_fallback",
-      "lines": [992],
-      "reason": "The checker is wrong on this line (fleet green leg 14): an impossible date is no date, and both callers make None a violation. _newest_entry_date lists the entry as bad, and the last_updated check fails by name with the value found. The value is logged as a warning."
     },
     {
       "file": "tests/test_checkers_batch3.py",
       "standard": "hardcoded_path",
-      "lines": [111],
+      "lines": [
+        111
+      ],
       "reason": "Test input (2026-10-18): '/home/user/myapp.log' sits in a textwrap.dedent fixture string written to a tmp file as the log_structure checker's own input; read as code since the prose-lines helper. The file never opens it."
     },
     {
       "file": "tests/test_checkers_batch2.py",
       "standard": "hardcoded_key",
-      "lines": [227, 242, 260, 265, 270],
+      "lines": [
+        227,
+        242,
+        260,
+        265,
+        270
+      ],
       "reason": "Test input (2026-10-18): the FAKE patterned sk-or-v1-... key is the hardcoded_key checker's own fixture, written to tmp files; lines 227 and 242 sit in triple-quoted fixture strings, code since the prose-lines helper, and 260/265/270 are that helper's pins. Not a credential."
     },
     {
       "file": "apps/handlers/aipass_standards/permission_flags_content.py",
       "standard": "permission_flags",
-      "lines": [35, 36, 37, 38, 45, 47, 56],
+      "lines": [
+        35,
+        36,
+        37,
+        38,
+        45,
+        47,
+        56
+      ],
       "reason": "Documentation, not code (2026-10-18): a standard's page is one triple-quoted string, and these lines quote the prohibited flags as the anti-pattern the standard names. The old docstring toggle hid the page body; a string literal in code is code since the prose-lines helper."
     },
     {
       "file": "tests/test_trinity_check_file_shape.py",
       "standard": "through_the_command",
-      "lines": [633],
+      "lines": [
+        629
+      ],
       "reason": "No public route (2026-10-24): trinity_groups._top_level_items pads an unmeasurable file to the same nine items a measured one yields; all_groups reaches it only with a whole branch context of both trinity files, config and templates."
     },
     {
       "file": "tests/test_audit_tests_lane_statement_deletion.py",
       "standard": "through_the_command",
-      "lines": [314],
+      "lines": [
+        314
+      ],
       "reason": "No public route (2026-10-24): adapter._campaign_outcome turns a budget-cut campaign into a refused group; the lane reaches it only after a full gated suite run."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/gatelog.py",
       "standard": "logged_fallback",
-      "lines": [74],
+      "lines": [
+        74
+      ],
       "reason": "The checker is wrong on this line (2026-10-24): decode_line answers None only for a line that holds no record (blank, not JSON, not an object), as its docstring says; the success path returns a dict, never None. The broken line is logged as a warning naming the file and line, and read_gate_log counts it as malformed."
     },
     {
@@ -502,6 +647,1142 @@
       "file": "tests/test_audit_tests_lane.py",
       "standard": "stdlib_patch",
       "reason": "One patch, line 347 (2026-10-24): tempfile.TemporaryDirectory is replaced by a context manager whose cleanup raises, to prove a cleanup failure after publish keeps the artifact; no portable way makes the real cleanup fail. File-wide because stdlib_patch passes no line to is_bypassed."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/architecture_check.py",
+      "standard": "unused_function",
+      "functions": [
+        "absent_targets"
+      ],
+      "reason": "Pack contract: dead_rules asks every checker for absent_targets by name (getattr), so no call site names it; pinned by tests/test_coverage_arch_checklist.py."
+    },
+    {
+      "file": "apps/sentry.py",
+      "standard": "fallback",
+      "functions": [
+        "discover_modules"
+      ],
+      "reason": "One module that fails to import is logged at error and left off the command list so every other sentry command still runs; the caller relies on a partial list, not a crashed CLI."
+    },
+    {
+      "file": "apps/handlers/test_inventory/exclusions.py",
+      "standard": "fallback",
+      "functions": [
+        "_parse"
+      ],
+      "reason": "None means 'this file declares no readable exclusions' (logged at warning); the inventory still counts the file, so nothing is hidden, only its opt-outs go unread."
+    },
+    {
+      "file": "apps/handlers/audit/branch_audit.py",
+      "standard": "fallback",
+      "functions": [
+        "_collect_branch_info"
+      ],
+      "reason": "Info lines are advisory and never merged into scores (docstring); a failing info probe drops only its own informational lines so the scored audit still completes."
+    },
+    {
+      "file": "apps/handlers/audit_tests/m10.py",
+      "standard": "fallback",
+      "functions": [
+        "_fingerprint"
+      ],
+      "reason": "None means the file vanished between listing and stat (docstring); the caller treats it as no longer present, which is the true state."
+    },
+    {
+      "file": "apps/handlers/test_map/function_scanner.py",
+      "standard": "fallback",
+      "functions": [
+        "_read_file_safe"
+      ],
+      "reason": "Empty text means the file contributes no functions to the test map; the map is a coverage aid and a file it cannot read is simply unmapped, never marked covered."
+    },
+    {
+      "file": "apps/handlers/test_map/function_scanner.py",
+      "standard": "fallback",
+      "functions": [
+        "_extract_public_functions"
+      ],
+      "reason": "None means 'unparseable, skipped'; ruff convicts the syntax error, and the test map only omits the file rather than claiming its functions are tested."
+    },
+    {
+      "file": "apps/handlers/test_map/function_scanner.py",
+      "standard": "fallback",
+      "functions": [
+        "_get_relative_path"
+      ],
+      "reason": "Docstring contract: a file outside the branch is labeled by its absolute path; only the label changes, the entry is still reported."
+    },
+    {
+      "file": "apps/handlers/diagnostics/discovery.py",
+      "standard": "fallback",
+      "functions": [
+        "discover_branches"
+      ],
+      "reason": "Diagnostics lists the branches it could read, logged at warning when the registry is unreadable; the caller is a best-effort diagnostic display, not a gate."
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/envdiff.py",
+      "standard": "fallback",
+      "functions": [
+        "read_records"
+      ],
+      "reason": "An unreadable verdict log reads as no prior records (logged at warning), same as an absent log; envdiff only compares history and convicts nothing on an empty one."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/permission_flags_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_get_non_code_lines"
+      ],
+      "reason": "Docstring contract: an unparseable source treats only # lines as prose, so more lines are scanned, never fewer; the check can only get stricter."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/output_routing_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_scan_file"
+      ],
+      "reason": "An unparseable source skips only # lines, so more lines are scanned, never fewer; the check can only get stricter, never pass a hit."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/log_handler_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_prose"
+      ],
+      "reason": "Docstring contract: an unparseable source treats only # lines as prose, so more lines are scanned, never fewer; the check can only get stricter."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/dead_code_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_collect_source_text"
+      ],
+      "reason": "An unreadable file contributes no usage text, which can only make other files look MORE dead, never hide a dead one; the check stays conservative."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/dead_code_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_project_config_text"
+      ],
+      "reason": "An unreadable project config contributes no usage text, which can only make files look MORE dead, never hide a dead one."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/dead_code_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_build_import_path"
+      ],
+      "reason": "A file outside the branch is named by its stem; the stem is still searched for usage, so the verdict is still computed, only via a coarser key."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/dead_code_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_check_file_used"
+      ],
+      "reason": "A file outside apps/ skips only the apps-relative heuristics; every other usage heuristic still runs and the file is still judged, not passed."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/dead_code_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_branch_relative"
+      ],
+      "reason": "Docstring contract: a target outside the branch is matched on its full path; the finding is still reported, only its spelling changes."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/dead_code_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_branch"
+      ],
+      "reason": "A dead file outside apps/ is reported under its full path; the finding is still raised, only its label changes."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/debug_print_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_scan_file"
+      ],
+      "reason": "An unparseable source skips only # lines, so more lines are scanned, never fewer; the check can only get stricter, never pass a hit."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/named_encoding_check.py",
+      "standard": "fallback",
+      "functions": [
+        "scan"
+      ],
+      "reason": "Docstring contract: an unparseable test file yields nothing here because ruff already convicts the syntax error; a second verdict would misdirect."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/named_encoding_check.py",
+      "standard": "fallback",
+      "functions": [
+        "named_other_encodings"
+      ],
+      "reason": "Counted, never convicted (docstring): an unparseable file adds zero to an informational count; ruff convicts the syntax error."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/documentation_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_module_docstring"
+      ],
+      "reason": "An unparseable file is still judged by a line scan for its docstring; the check runs, by a coarser method, and is never passed by default."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/documentation_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_public_functions_by_ast"
+      ],
+      "reason": "None tells the caller to use its line-scan judge instead; the file is still checked, never passed by default."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/encapsulation_check.py",
+      "standard": "fallback",
+      "functions": [
+        "get_branch_from_path"
+      ],
+      "reason": "An unreadable registry falls to path inference for the branch name; the file is still judged under the inferred branch."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/encapsulation_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_calls_the_guard"
+      ],
+      "reason": "An unparseable handlers/__init__.py is read as not carrying the v2 guard, which keeps the stricter rule; it can only add findings, never hide one."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/encapsulation_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_not_import_lines"
+      ],
+      "reason": "An unparseable source skips only # lines, so more lines are scanned for imports, never fewer; the check can only get stricter."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/encapsulation_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_infrastructure_handlers"
+      ],
+      "reason": "An unreadable handler is left out of the infrastructure exemption set, so the branch keeps the ordinary (stricter) rule; unreadable is not evidence."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/subcommand_help_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_parse"
+      ],
+      "reason": "None means the file is not scanned for subcommands; ruff convicts a syntax error and an unreadable file has no subcommands to judge."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/flag_never_passed_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_parse"
+      ],
+      "reason": "Docstring contract: ruff already convicts the syntax error; None means nothing to scan and a verdict invented here would misdirect its author."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/accepted_and_never_used_parameter_check.py",
+      "standard": "fallback",
+      "functions": [
+        "code_only"
+      ],
+      "reason": "A source the tokenizer rejects is kept as raw text corpus; that only adds mentions, so at worst a parameter is spared, and the file is still scanned."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/accepted_and_never_used_parameter_check.py",
+      "standard": "fallback",
+      "functions": [
+        "branch_facts"
+      ],
+      "reason": "An unreadable file adds no corpus text; files it would judge are skipped by the same read, so no verdict is passed on a guess."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/import_site_check.py",
+      "standard": "fallback",
+      "functions": [
+        "scan"
+      ],
+      "reason": "Docstring contract: an unparseable test file yields nothing because ruff already convicts the syntax error; a second verdict would misdirect."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/import_site_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_scan_path"
+      ],
+      "reason": "Docstring contract: [] for a file that cannot be read; the test file is not judgeable here and the read error is logged."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/through_the_command_check.py",
+      "standard": "fallback",
+      "functions": [
+        "scan"
+      ],
+      "reason": "Docstring contract: an unparseable test file yields nothing because ruff already convicts the syntax error; a second verdict would misdirect."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/through_the_command_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_scan_path"
+      ],
+      "reason": "Docstring contract: [] for a file that cannot be read; the test file is not judgeable here and the read error is logged."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/rich_markup_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_is_eaten"
+      ],
+      "reason": "StyleSyntaxError IS Rich's answer that the tag is eaten (True); the exception is the oracle's verdict, not a failure stood in for."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/declared_pass_symbol_resolves_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_read_module"
+      ],
+      "reason": "None means the top-level module is not installed on this host, which _module reads as 'cannot resolve' and reports; absence is the probe's answer."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/declared_pass_symbol_resolves_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_stand_in_class"
+      ],
+      "reason": "A class whose same-file bases cannot form a type is stood in without bases; its own members are still bound, so resolution is still judged."
+    },
+    {
+      "file": "apps/handlers/registry_scan.py",
+      "standard": "fallback",
+      "functions": [
+        "registry_files_in"
+      ],
+      "reason": "A directory that cannot be listed holds no registry the caller can read; the upward registry search moves on to the next directory and reports not-found itself."
+    },
+    {
+      "file": "apps/handlers/test_inventory/collection.py",
+      "standard": "fallback",
+      "functions": [
+        "_load_pytest_table"
+      ],
+      "reason": "With no TOML parser or an unparseable pyproject, the inventory uses pytest's defaults and carries the caveat as config_note, which the inventory banner prints."
+    },
+    {
+      "file": "apps/handlers/test_inventory/collection.py",
+      "standard": "fallback",
+      "functions": [
+        "_parse"
+      ],
+      "reason": "An unparseable test file is warned and left out of the inventory; None tells callers 'could not read', never 'read and found nothing'."
+    },
+    {
+      "file": "apps/handlers/audit/discovery.py",
+      "standard": "fallback",
+      "functions": [
+        "pack_corpus"
+      ],
+      "reason": "An unreadable pack.json leaves the audit banner on the engine's default corpus label; it only words the banner and never changes a score."
+    },
+    {
+      "file": "apps/handlers/audit/discovery.py",
+      "standard": "fallback",
+      "functions": [
+        "measure_pack_corpus"
+      ],
+      "reason": "A pack's corpus measurer that fails returns None, and the banner keeps the engine's own file count; it is display-only and never changes a score."
+    },
+    {
+      "file": "apps/handlers/context_standards/startup_budget_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_strings_over_cap"
+      ],
+      "reason": "Unparseable JSON yields no per-string hits on purpose: the file's size is still measured here, and the trinity check fails the parse itself."
+    },
+    {
+      "file": "apps/handlers/bypass/inert.py",
+      "standard": "fallback",
+      "functions": [
+        "scope_support"
+      ],
+      "reason": "A handler source that will not parse is skipped while mapping which scope kinds each checker supports; this only labels bypass rows inert and the broken source is convicted by ruff."
+    },
+    {
+      "file": "apps/handlers/bypass/inert.py",
+      "standard": "fallback",
+      "functions": [
+        "standard_constants"
+      ],
+      "reason": "A checker source that will not parse is skipped while reading its string constants for the inert-bypass report; ruff convicts the broken source itself."
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/corpus.py",
+      "standard": "fallback",
+      "functions": [
+        "_parse_production"
+      ],
+      "reason": "An unparseable production module is recorded in corpus.production_unparseable and warned, so the corpus reports what it could not read."
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/corpus.py",
+      "standard": "fallback",
+      "functions": [
+        "_parse"
+      ],
+      "reason": "An unparseable test file returns None so one bad file cannot take a fleet sweep down; it is warned and no nominator clears it."
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/statement_deletion.py",
+      "standard": "fallback",
+      "functions": [
+        "_outermost_callee"
+      ],
+      "reason": "A source line that is not a parseable expression has no call to name; None means 'not a call statement', which is the answer the caller asked."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/gateway_boundary_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_scan"
+      ],
+      "reason": "None means the source does not parse; check_module renders that as NOT_JUDGED, and ruff convicts the syntax error."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/clear_text_secret_logging_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_module"
+      ],
+      "reason": "A file that does not parse is reported 'Not judged' by this checker by design: ruff convicts the syntax error, and secrets cannot be scanned in unparseable code."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/unused_function_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_strip_non_code"
+      ],
+      "reason": "When the tokenizer fails (a mid-save IndentationError), raw source minus __main__ blocks is the reference corpus; it can only over-count references, never invent an unused function."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/unused_function_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_field_names"
+      ],
+      "reason": "None means the f-string literal does not parse, and the caller blanks it whole; it only narrows the reference corpus text."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/unused_function_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_module_file"
+      ],
+      "reason": "A module find_spec cannot locate has no source to read base-class methods from; None means 'no inherited methods known', which only makes the check stricter."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/unused_function_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_base_methods"
+      ],
+      "reason": "A base-class source that will not parse contributes no inherited method names; that only makes the check stricter, never a pass."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/unused_function_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_extract_functions"
+      ],
+      "reason": "None is not 'no functions': check_branch names the file under 'unparsed' in its result."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/unused_function_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_branch"
+      ],
+      "reason": "An unreadable file contributes no references to the corpus; that can only flag more functions unused, never hide one, and ruff convicts the file itself. Also: a file outside the branch is named by its absolute path, a display choice only."
+    },
+    {
+      "file": "apps/handlers/pytest_quality_standards/coverage_slot_check.py",
+      "standard": "fallback",
+      "functions": [
+        "comments_in"
+      ],
+      "reason": "None means the file could not be re-read and the caller treats unread comments as unknown, never as no comments; the docstring pins that distinction."
+    },
+    {
+      "file": "apps/handlers/audit/artifact.py",
+      "standard": "fallback",
+      "functions": [
+        "_sentry_version"
+      ],
+      "reason": "None is the artifact's 'version unknown' field: the audit artifact still writes, and a reader sees a null sentry_version rather than a wrong one."
+    },
+    {
+      "file": "apps/handlers/audit/artifact.py",
+      "standard": "fallback",
+      "functions": [
+        "_branch_relative"
+      ],
+      "reason": "A path outside the branch root is reported as its own posix path; the violation keeps a real, locatable path, only not shortened."
+    },
+    {
+      "file": "apps/handlers/aipass_proof/plugin_integrity.py",
+      "standard": "fallback",
+      "functions": [
+        "_scan_file_ast"
+      ],
+      "reason": "A file that does not parse has no AST string literals to match; the regex scan of the same file still runs, and ruff convicts the syntax error."
+    },
+    {
+      "file": "apps/handlers/aipass_proof/plugin_integrity.py",
+      "standard": "fallback",
+      "functions": [
+        "_scan_file_regex"
+      ],
+      "reason": "Unparseable source falls to hash_lines, the stricter reading: only # lines count as prose, so more lines are scanned, never fewer."
+    },
+    {
+      "file": "apps/handlers/tests_lane/pinning.py",
+      "standard": "fallback",
+      "functions": [
+        "_walks"
+      ],
+      "reason": "A test that does not parse has no imports to follow; the empty module answers 'walks nothing', and the test's raw source is still judged by the caller."
+    },
+    {
+      "file": "apps/handlers/bypass/bypass_handler.py",
+      "standard": "fallback",
+      "functions": [
+        "load_bypass_rules"
+      ],
+      "reason": "A corrupt or unloadable bypass.json yields no waivers, the strict answer: every finding stays reported, logged at warning/error, nothing is hidden."
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/gutting.py",
+      "standard": "fallback",
+      "functions": [
+        "_sites_in_file"
+      ],
+      "reason": "An unreadable or unparsable file becomes one unparsable-site record, so its hole in the denominator is visible in the report (warning-logged)."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/trinity_check.py",
+      "standard": "fallback",
+      "functions": [
+        "is_clean_checkout"
+      ],
+      "reason": "An unlistable fleet dir answers False ('live installation'), the strict answer that keeps the trinity standard enforced; warning-logged."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/commented_logger_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_module"
+      ],
+      "reason": "Unparseable source skips nothing: every line is read for commented loggers, the stricter reading; ruff convicts the syntax error."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/skip_dirs.py",
+      "standard": "fallback",
+      "functions": [
+        "_get_temp_roots"
+      ],
+      "reason": "The temp roots are a skip-list accelerator; a failed gettempdir leaves /tmp still listed, and a missing root only means fewer dirs skipped (stricter)."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/skip_dirs.py",
+      "standard": "fallback",
+      "functions": [
+        "is_prototype_file"
+      ],
+      "reason": "An unreadable file is not a prototype, so it is scanned, not skipped: the stricter answer for every checker that asks."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/naming_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_constant_naming"
+      ],
+      "reason": "Unparseable source falls to hash_lines, the stricter reading: only # lines are prose, so more lines are checked; ruff convicts the syntax error."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/weak_oracle_check.py",
+      "standard": "fallback",
+      "functions": [
+        "none_returning_functions"
+      ],
+      "reason": "An unreadable product module yields no known -> None functions, so no assert is excused as a None-return oracle: the stricter answer."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/log_level_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_get_non_code_lines"
+      ],
+      "reason": "Unparseable source falls to hash_lines, the stricter reading: only # lines are prose, so more lines are checked."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/handlers_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_iter_import_modules"
+      ],
+      "reason": "A file that does not parse has no import nodes to yield; ruff convicts the syntax error, and the generator is a probe, not a verdict."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/handlers_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_module_name_is_optional"
+      ],
+      "reason": "None is the declared 'cannot tell' answer (Optional[bool]), distinct from False, and the caller handles it as unknown."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/handlers_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_walks_the_caller_frame"
+      ],
+      "reason": "None is the declared 'cannot tell' answer (Optional[bool]), distinct from False, and the caller handles it as unknown."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/help_flag_safety_check.py",
+      "standard": "fallback",
+      "functions": [
+        "router_normalises"
+      ],
+      "reason": "An unreadable entry point is not a normalising router, so it never excuses a finding; the loop tries the next entry point."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/self_set_assert_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_literal"
+      ],
+      "reason": "None is the declared 'not a literal' answer: literal_eval raising is the probe's negative result, not a failure."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/retired_token_docstring_check.py",
+      "standard": "fallback",
+      "functions": [
+        "scan"
+      ],
+      "reason": "None means nothing was judged, distinct from the [] of a clean file; the docstring pins it and callers report it as not judged."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/calendar_bound_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_parse_uncached"
+      ],
+      "reason": "None is the declared unreadable/unparsable answer the call-graph walk treats as 'no module to follow'; ruff owns the syntax error."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/calendar_bound_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_parse"
+      ],
+      "reason": "A file that vanished between listing and stat has nothing to parse; None is the same 'no module' answer _parse_uncached gives."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/calendar_bound_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_relative_to_root"
+      ],
+      "reason": "A path outside the package root is labelled by its file name; only the display label changes, never a verdict."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/calendar_bound_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_relative"
+      ],
+      "reason": "A path outside the branch root is reported as its absolute posix path; only the display label changes, never a verdict."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/subprocess_text_true_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_module"
+      ],
+      "reason": "An unparseable test file is declined (stands down, out of the average): ruff owns the syntax error and fails it in its own row."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/check_support.py",
+      "standard": "fallback",
+      "functions": [
+        "read_text"
+      ],
+      "reason": "Shared helper whose None is the declared 'cannot read' answer; each caller turns it into a FAILED 'Error reading file' check."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/log_visibility_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_find_pattern_lines"
+      ],
+      "reason": "Unparseable source falls to hash_lines, the stricter reading: every non-# line is read as code, so more lines are checked."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/deep_nesting_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_scan_file"
+      ],
+      "reason": "A file that does not parse has no functions to measure; ruff convicts the syntax error, and OSError still propagates."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/file_top_check.py",
+      "standard": "fallback",
+      "functions": [
+        "sites"
+      ],
+      "reason": "A source that does not parse has no file top to read; ruff convicts the syntax error, which this checker does not own."
+    },
+    {
+      "file": "apps/handlers/pytest_quality_standards/corpus.py",
+      "standard": "fallback",
+      "functions": [
+        "_relpath"
+      ],
+      "reason": "a path outside the root has no relative form, so its absolute posix string is the display label the corpus keys on; nothing is lost"
+    },
+    {
+      "file": "apps/handlers/pytest_quality_standards/corpus.py",
+      "standard": "fallback",
+      "functions": [
+        "_parse_production"
+      ],
+      "reason": "an unparseable production file is not dropped silently: its relpath is recorded in corpus.production_unparseable, which the corpus reports by name"
+    },
+    {
+      "file": "apps/handlers/audit/incremental_cache.py",
+      "standard": "fallback",
+      "functions": [
+        "fingerprint_file"
+      ],
+      "reason": "the cache is only an accelerator: [-1,-1] never matches a stored fingerprint, so an unstat-able file is re-audited in full"
+    },
+    {
+      "file": "apps/handlers/audit/incremental_cache.py",
+      "standard": "fallback",
+      "functions": [
+        "load_branch_entry"
+      ],
+      "reason": "the cache is only an accelerator: an unreadable or corrupt entry reads as {} so the audit runs in full (fail open to full), and a corrupt entry is renamed aside with a warning"
+    },
+    {
+      "file": "apps/handlers/aipass_proof/triplet.py",
+      "standard": "fallback",
+      "functions": [
+        "_imported_names"
+      ],
+      "reason": "an unparseable pack file contributes no import names, so its siblings are judged as unshared (the stricter reading); the file's own parse failure is convicted by ruff"
+    },
+    {
+      "file": "apps/handlers/tests_lane/retire_ops.py",
+      "standard": "fallback",
+      "functions": [
+        "_move_without_overwrite"
+      ],
+      "reason": "not a stand-in: when a hard link is impossible (cross-device) the move still completes by exclusive-create copy, so the result is the same file and FileExistsError still raises"
+    },
+    {
+      "file": "apps/handlers/bypass/ignore_handler.py",
+      "standard": "fallback",
+      "functions": [
+        "load_ignore_entries"
+      ],
+      "reason": "an unreadable .sentryignore contributes no ignore patterns, so its files are checked rather than skipped (the stricter reading)"
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/gatelog.py",
+      "standard": "fallback",
+      "functions": [
+        "decode_line"
+      ],
+      "reason": "a gate log is append-only JSONL: one corrupt line is skipped with a warning naming file and line, and the remaining lines still count"
+    },
+    {
+      "file": "apps/handlers/readme/readme_generator.py",
+      "standard": "fallback",
+      "functions": [
+        "_build_tree"
+      ],
+      "reason": "the README tree is display only: an unlistable directory renders without children; no check reads it"
+    },
+    {
+      "file": "apps/handlers/readme/readme_generator.py",
+      "standard": "fallback",
+      "functions": [
+        "_get_file_comment"
+      ],
+      "reason": "None is the documented 'unreadable' marker the tree renders by name; display only"
+    },
+    {
+      "file": "apps/handlers/readme/readme_generator.py",
+      "standard": "fallback",
+      "functions": [
+        "_extract_module_description"
+      ],
+      "reason": "a module description is README display text: an unreadable module gets an empty description, and no check reads it"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/declared_pass_contradiction_check.py",
+      "standard": "fallback",
+      "functions": [
+        "product_facts"
+      ],
+      "reason": "an unreadable apps file contributes no product facts; the file's own read failure is convicted by every per-file checker, and fewer facts can only find fewer contradictions to cite"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/cli_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_console_import_line"
+      ],
+      "reason": "an unparseable source is not judged by this helper's rule (ruff convicts syntax errors), so the caller reads None as 'no bootstrap window' and keeps every finding (the stricter reading)"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/cli_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_cli_imports"
+      ],
+      "reason": "an unparseable source is not judged by this helper's rule (ruff convicts syntax errors), so the caller reads cli imports from line starts instead of the tree; still a reading of the file, not a pass"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/cli_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_prose"
+      ],
+      "reason": "an unparseable source is not judged by this helper's rule (ruff convicts syntax errors), so the caller reads only # lines as prose, so every other line is still judged (the stricter reading)"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/cli_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_stderr_directed_print_lines"
+      ],
+      "reason": "an unparseable source is not judged by this helper's rule (ruff convicts syntax errors), so the caller reads None as 'no stderr prints known', keeping every print finding"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/cli_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_print_call_lines"
+      ],
+      "reason": "an unparseable source is not judged by this helper's rule (ruff convicts syntax errors), so the caller reads None and falls back to the line regex, still judging the file"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/cli_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_module_level_function_names"
+      ],
+      "reason": "an unparseable source is not judged by this helper's rule (ruff convicts syntax errors), so the caller reads no display helpers, so no print is excused (the stricter reading)"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/module_constants.py",
+      "standard": "fallback",
+      "functions": [
+        "_support_constants"
+      ],
+      "reason": "an unreadable support module resolves no names, so the names that cite it stay unresolved and are reported as such"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/readme_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_count_test_functions"
+      ],
+      "reason": "the test count is an informational figure in the README check; an unreadable test file is left out of the count"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/readme_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_docs_index_lines"
+      ],
+      "reason": "a README link that cannot be resolved adds no target, so the docs entries it might cover are reported unlinked (the stricter reading)"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/todo_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_comments"
+      ],
+      "reason": "None is the documented 'cannot tokenize' answer the caller turns into a FAILED check naming the file, never a pass"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/modules_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_no_business_logic"
+      ],
+      "reason": "an unparseable source is not judged by this helper's rule (ruff convicts syntax errors), so the caller reads None and omits this one row; ruff and the file's other checks still run"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/modules_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_thin_orchestration"
+      ],
+      "reason": "an unparseable source is not judged by this helper's rule (ruff convicts syntax errors), so the caller reads None and omits this one row; ruff and the file's other checks still run"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/json_structure_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_aipass_imports"
+      ],
+      "reason": "an unparseable source is not judged by this helper's rule (ruff convicts syntax errors), so the caller reads no imports in the bootstrap walk; ruff convicts the file"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/json_structure_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_module_name"
+      ],
+      "reason": "None is the documented answer for a file outside the source tree: it has no dotted import name"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/json_structure_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_bootstrap_chain"
+      ],
+      "reason": "an unreadable module in the bootstrap walk adds no further modules; its own read failure is convicted by every per-file checker"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/json_structure_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_seam_files"
+      ],
+      "reason": "an unreadable file is not a log seam candidate; its own read failure is convicted by every per-file checker"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/ruff_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_load_ruff_bypass"
+      ],
+      "reason": "a corrupt ruff_bypass.json waives nothing (warning logged), so every ruff violation is reported (the stricter reading)"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/ruff_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_find_ruff_bypass_from_file"
+      ],
+      "reason": "a corrupt ruff_bypass.json waives nothing (warning logged), so every ruff violation is reported (the stricter reading)"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/os_walk_onerror_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_module"
+      ],
+      "reason": "the 'Not judged' row is the documented answer for an unparseable file: ruff convicts syntax errors, and the result says so instead of claiming clean"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/trigger_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_fires_trigger"
+      ],
+      "reason": "ast.unparse is total on parsed trees; an empty receiver only means this call is not a trigger fire"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/trigger_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_function_index"
+      ],
+      "reason": "None is the documented answer for an unparseable file: the caller judges it by the file-level flag instead"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/hardcoded_path_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_scan_file"
+      ],
+      "reason": "an unparseable source is not judged by this helper's rule (ruff convicts syntax errors), so the caller reads only # lines as prose, so every other line is still scanned (the stricter reading)"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/fallback_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_module"
+      ],
+      "reason": "the 'Not judged' row is the documented answer for an unparseable file: ruff convicts syntax errors, and the result says so instead of claiming clean"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/log_structure_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_module"
+      ],
+      "reason": "an unparseable source is not judged by this helper's rule (ruff convicts syntax errors), so the caller reads only # lines as prose, so every other line is still judged as code (the stricter reading)"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/architecture_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_handler_independence"
+      ],
+      "reason": "an unparseable source is not judged by this helper's rule (ruff convicts syntax errors), so the caller reads only # lines as prose, so every other line is still judged as code (the stricter reading)"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/architecture_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_load_ignore_patterns"
+      ],
+      "reason": "an unreadable ignore config ignores nothing, so every file is checked (the stricter reading)"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/architecture_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_get_citizen_class"
+      ],
+      "reason": "an unreadable passport yields no citizen class, so the branch is held to the default architecture rules"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/architecture_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_open_sites"
+      ],
+      "reason": "an unparseable file has no functions, so its sites are read at file level and only file-level rows waive them (the stricter reading)"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/hardcoded_key_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_scan_file"
+      ],
+      "reason": "None is the documented 'unread' answer the caller fails by name; an unparseable file has every line scanned (nothing skipped)"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/stdlib_patch_check.py",
+      "standard": "fallback",
+      "functions": [
+        "bound_to"
+      ],
+      "reason": "None means the module could not be read or parsed; _through_product passes that on as None ('unread'), kept distinct from '' (no stdlib reached), so an unread import list is never an acquittal."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/logged_fallback_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_module"
+      ],
+      "reason": "A file that does not parse is reported 'Not judged' by this checker by design: ruff convicts the syntax error, and the AST scan cannot run on it."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/help_text_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_module"
+      ],
+      "reason": "An unparseable module is still scanned, reading every non-comment line as code; only the docstring/prose exemption is lost, which can only convict more."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/oversize_test_file_check.py",
+      "standard": "fallback",
+      "functions": [
+        "measure"
+      ],
+      "reason": "An unparseable test file is measured at full length with no payload credit, so a syntax error can never slip a file past the cap."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/stderr_routing_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_module"
+      ],
+      "reason": "An unparseable module is still scanned with only comment lines skipped; the prose exemption is lost, which can only convict more."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/error_handling_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_silent_except_lines"
+      ],
+      "reason": "None means the file does not parse, and check_error_handling then emits no error-handling row for it; ruff convicts the syntax error."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/uncalled_public_function_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_parse"
+      ],
+      "reason": "None means Python cannot read the file; ruff convicts the syntax error, and a second verdict here would misdirect the author."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/router_assert_check.py",
+      "standard": "fallback",
+      "functions": [
+        "find_violations"
+      ],
+      "reason": "None means the source does not parse; check_module reports NOT_JUDGED, which is not the [] of a clean file, and ruff convicts the syntax error."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/unused_conftest_fixture_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_parse"
+      ],
+      "reason": "None means Python cannot read the conftest; ruff convicts the syntax error, and a second verdict here would misdirect the author."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/module_scope_side_effect_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_module"
+      ],
+      "reason": "A file that does not parse is reported 'Not judged' by this checker by design: ruff convicts the syntax error, and the AST scan cannot run on it."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/host_portability_check.py",
+      "standard": "fallback",
+      "functions": [
+        "_relative"
+      ],
+      "reason": "A path outside the branch root is named by its absolute path in the report; a display choice only, no verdict depends on it."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/host_portability_check.py",
+      "standard": "fallback",
+      "functions": [
+        "scan_file"
+      ],
+      "reason": "A file that cannot be read or parsed reports no findings by contract (docstring): ruff and the read-failing checkers convict it, and a portability verdict cannot be formed on it."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/ruff_check.py",
+      "standard": "fallback",
+      "functions": [
+        "check_module"
+      ],
+      "reason": "Not a stand-in: a ruff format --check that times out or cannot run is carried in fmt_failure and recorded as a FAILED Ruff format row (passed False, score 0); the checker does not follow the carried variable."
     }
   ],
   "notes": {

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: shadow_cycle.py
 # Description: the weekly shadow cycle - three fleet measurements, one document, one mail
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-02
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -57,7 +57,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     if wants_help(None, args):
-        _print_help()
+        print_help()
         return True
 
     try:
@@ -194,7 +194,7 @@ def _report(document: dict, body: str, published) -> None:
     console.print(f"[dim]document: {published}[/dim]")
 
 
-def _print_help() -> None:
+def print_help() -> None:
     """What the verb does, what it refuses to do, and how to call it."""
     console.print()
     console.print("[bold cyan]sentry shadow-cycle[/bold cyan] - the three weekly measurements, in one pass")
@@ -205,9 +205,9 @@ def _print_help() -> None:
     console.print("  drone @sentry shadow-cycle run --no-mail   run it, send nothing")
     console.print()
     console.print("[yellow]Passes[/yellow]")
-    console.print(f"  1. the {SHADOW_PACK} pack over every branch - SHADOW, it gates nothing")
-    console.print("  2. the ranked test inventory - one row per test function")
-    console.print("  3. cross-branch twins - identities sharing a name AND a shape")
+    console.print(f"  1. the {SHADOW_PACK} pack over every branch - SHADOW, it gates nothing", highlight=False)
+    console.print("  2. the ranked test inventory - one row per test function", highlight=False)
+    console.print("  3. cross-branch twins - identities sharing a name AND a shape", highlight=False)
     console.print()
     console.print("[yellow]Mails[/yellow]")
     console.print(f"  one screen to {RECIPIENT}: the headline counts and the artifact PATHS.")
@@ -215,7 +215,10 @@ def _print_help() -> None:
     console.print()
     console.print("[yellow]Refuses[/yellow]")
     console.print("  it deletes nothing, merges nothing and issues no verdict.")
-    console.print("  the score in pass 1 is a series to diff, not a threshold to pass.")
+    console.print("  the score in pass 1 is a series to diff, not a threshold to pass.", highlight=False)
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @sentry shadow-cycle run --no-mail[/green]")
     console.print()
 
 

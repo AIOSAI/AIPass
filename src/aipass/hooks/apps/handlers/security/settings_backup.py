@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: settings_backup.py
-# Version: 1.0.3
+# Version: 1.0.4
 # Description: Backs up ~/.claude/settings*.json and appends a receipt before any tool writes it (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-10-15
-# Modified: 2026-11-01
+# Modified: 2026-11-22
 # =============================================
 
 """The tool doors of the settings-backup contract (FPLAN-0645).
@@ -174,7 +174,7 @@ def _keep(target: Path, tool_name: str, tool_input: dict, cwd: str, claude_dir: 
             receipts.write(json.dumps(record) + "\n")
     except OSError as exc:
         _log_refusal(
-            "[HOOKS] settings_backup: refused %s on %s, backup failed at %s: %s", tool_name, target, where, exc
+            "[hooks] settings_backup: refused %s on %s, backup failed at %s: %s", tool_name, target, where, exc
         )
         return _block(UNBACKED.format(file=target, where=where, error=exc))
     return None
@@ -207,5 +207,5 @@ def handle(hook_data: dict) -> dict:
                 return refused
         return _BLOCK_ALLOW
     except Exception as exc:  # fail closed: a write this gate cannot check never goes through unbacked
-        _log_refusal("[HOOKS] settings_backup: crashed on %s, refusing it: %s", tool_name, exc)
+        _log_refusal("[hooks] settings_backup: crashed on %s, refusing it: %s", tool_name, exc)
         return _block(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))

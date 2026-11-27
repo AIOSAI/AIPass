@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: temporal.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Every-turn local date/time/weekday/part-of-day injection (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-21
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Tiny always-on temporal grounding line — no cadence gating, fires every
@@ -61,5 +61,5 @@ def _handle(hook_data: dict) -> dict:
             line += f" · smoke-ack:{nonce.group(1)}"
         return {"stdout": line, "exit_code": 0, "sound": "temporal"}
     except Exception as exc:
-        logger.error("[HOOKS] temporal: unexpected error: %s", exc)
+        logger.error("[hooks] temporal: unexpected error: %s", exc)
         return {"stdout": "", "exit_code": 0}

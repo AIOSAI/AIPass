@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.16.0
+# Version: 1.16.1
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -454,7 +454,7 @@ class TestScriptedLaneCatches:
         assert _blocked(result)
         assert "Cross-branch write blocked (sed -i): 'hooks' cannot write to 'memory'" in _reason(result)
         logged = [r.getMessage() for r in caplog.records if "scripted write refused, not the seat's" in r.getMessage()]
-        assert logged and logged[0].startswith("[HOOKS] edit_gate: scripted write refused, not the seat's: @hooks -> ")
+        assert logged and logged[0].startswith("[hooks] edit_gate: scripted write refused, not the seat's: @hooks -> ")
 
     def test_sed_w_into_another_branch(self, registered_projects: dict):
         target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
@@ -1376,7 +1376,7 @@ class TestAProviderSessionStartsOnlyInTheOwnBranch:
         assert 'drone @ai_mail dispatch @<branch> "Subject" "Body"' in reason
         logged = [r.getMessage() for r in caplog.records if "provider launch refused" in r.getMessage()]
         assert logged == [
-            f"[HOOKS] edit_gate: provider launch refused: @canary -> {fleet['other']} | cmd=cd ../other && claude"
+            f"[hooks] edit_gate: provider launch refused: @canary -> {fleet['other']} | cmd=cd ../other && claude"
         ]
 
 

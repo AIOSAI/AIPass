@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.12.0
+# Version: 1.12.1
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-09
-# Modified: 2026-11-18
+# Modified: 2026-11-26
 # =============================================
 
 """Wire verification — catches silent hook-wiring breaks.
@@ -461,6 +461,31 @@ def _codex_logged_in() -> bool:
 def print_introspection():
     """Print module structure for drone routing."""
     CONSOLE.print("[bold cyan]wire_verify[/bold cyan] — Provider ↔ project hook wiring checker")
+    CONSOLE.print("[dim]Checks every enabled hook handler is wired to a working provider bridge entry.[/dim]")
+    CONSOLE.print("[dim]Run drone @hooks verify --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print the verify command line, what it reads, and examples."""
+    CONSOLE.print("[bold cyan]wire_verify[/bold cyan] — Provider ↔ project hook wiring checker")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  drone @hooks [cyan]verify[/cyan]     Cross-check provider settings vs project config")
+    CONSOLE.print("  drone @hooks [cyan]seed[/cyan] install|remove   the AIPass rows in a Seed head's hooks.json")
+    CONSOLE.print()
+    CONSOLE.print("Reads ~/.claude/settings.json, .aipass/hooks.json and Codex's user-level hooks.json")
+    CONSOLE.print("($CODEX_HOME, else ~/.codex) and OpenCode's plugin with the manifest's cli.opencode rows;")
+    CONSOLE.print("a missing Codex file or OpenCode plugin is an ERROR when that CLI is installed (on PATH;")
+    CONSOLE.print("OpenCode also in ~/.opencode/bin); a CLI not installed is not checked. It also reads a Seed head's")
+    CONSOLE.print("hooks.json ($SEED_HOME, else ~/.config/seed) for one seed.py row per Seed event. It")
+    CONSOLE.print("verifies every enabled handler has a working provider bridge entry. A Codex row that Codex")
+    CONSOLE.print("will skip (changed since approval, never approved, or disabled, per the config.toml beside")
+    CONSOLE.print("its hooks.json) is an ERROR: approve it in /hooks in an interactive codex session.")
+    CONSOLE.print("Exits non-zero on any ERROR finding.")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  drone @hooks verify")
+    CONSOLE.print("  drone @hooks seed install")
 
 
 def _handle_seed(args) -> bool:
@@ -511,21 +536,7 @@ def handle_command(command, args) -> bool:
         return True
 
     if wants_help(args):
-        CONSOLE.print("[bold cyan]wire_verify[/bold cyan] — Provider ↔ project hook wiring checker")
-        CONSOLE.print()
-        CONSOLE.print("  drone @hooks verify     Cross-check provider settings vs project config")
-        CONSOLE.print()
-        CONSOLE.print("Reads ~/.claude/settings.json, .aipass/hooks.json and Codex's user-level hooks.json")
-        CONSOLE.print("($CODEX_HOME, else ~/.codex) and OpenCode's plugin with the manifest's cli.opencode rows;")
-        CONSOLE.print("a missing Codex file or OpenCode plugin is an ERROR when that CLI is installed (on PATH;")
-        CONSOLE.print(
-            "OpenCode also in ~/.opencode/bin); a CLI not installed is not checked. It also reads a Seed head's"
-        )
-        CONSOLE.print("hooks.json ($SEED_HOME, else ~/.config/seed) for one seed.py row per Seed event. It")
-        CONSOLE.print("verifies every enabled handler has a working provider bridge entry. A Codex row that Codex")
-        CONSOLE.print("will skip (changed since approval, never approved, or disabled, per the config.toml beside")
-        CONSOLE.print("its hooks.json) is an ERROR: approve it in /hooks in an interactive codex session.")
-        CONSOLE.print("Exits non-zero on any ERROR finding.")
+        print_help()
         return True
 
     return False

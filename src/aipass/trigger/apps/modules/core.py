@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Trigger event bus for AIPass system-wide event handling
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-02-03
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -30,6 +30,7 @@ def print_introspection():
         "    [cyan]•[/cyan] registry.py [dim](setup_handlers — auto-register all event handlers on first use)[/dim]"
     )
     console.print()
+    console.print("[dim]Run drone @trigger core --help for usage.[/dim]")
 
 
 # Renamed events, old name -> current name. An entry lives ONE release: both
@@ -76,7 +77,7 @@ class Trigger:
         if event not in cls._alias_warned:
             cls._alias_warned.add(event)
             logger.warning(
-                f"[TRIGGER] Event '{event}' is deprecated and will be removed next release; "
+                f"[trigger] Event '{event}' is deprecated and will be removed next release; "
                 f"delivered as '{replacement}'. Update the fire site and any Trigger.on() registration."
             )
         return replacement
@@ -193,7 +194,7 @@ def handle_command(command: str, args: list) -> bool:
             print_introspection()
             return True
         if wants_help(args):
-            _print_help(console)
+            print_help()
             return True
         return handle_command(args[0], args[1:])
 
@@ -202,7 +203,7 @@ def handle_command(command: str, args: list) -> bool:
 
     # After the ownership check, or this would hijack other modules' --help.
     if wants_help(args):
-        _print_help(console)
+        print_help()
         return True
 
     if command == "fire":
@@ -216,7 +217,7 @@ def handle_command(command: str, args: list) -> bool:
                 key, val_str = arg.split("=", 1)
                 data[key] = _coerce_value(val_str)
             else:
-                logger.warning(f"[TRIGGER] Ignoring unparseable arg: {arg}")
+                logger.warning(f"[trigger] Ignoring unparseable arg: {arg}")
         result = Trigger.fire(event_name, **data)
         ran, failed = result.get("ran", 0), result.get("failed", 0)
         if failed:
@@ -252,15 +253,21 @@ def handle_command(command: str, args: list) -> bool:
     return False
 
 
-def _print_help(console):
+def print_help():
     """Display help for core trigger commands."""
+    from aipass.cli import console
+
     console.print()
-    console.print("[bold cyan]TRIGGER CORE - Event Bus[/bold cyan]")
+    console.print("[bold cyan]trigger core - Event Bus[/bold cyan]")
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
     console.print("  fire <event> \\[key=value ...]  Fire an event with optional data")
     console.print("  status                        Show the branch log watcher (branch_log_events answers it)")
     console.print("  list                          Show registered event handlers")
+    console.print()
+    console.print("[bold]USAGE:[/bold]")
+    console.print("  drone @trigger <command> \\[args]")
+    console.print("  drone @trigger core --help")
     console.print()
     console.print("[bold]EXAMPLES:[/bold]")
     console.print("  drone @trigger fire deploy_complete branch=main")

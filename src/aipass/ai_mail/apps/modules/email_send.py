@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email_send.py
 # Description: Email Send Orchestration (extracted from email.py)
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-04-22
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -17,10 +17,11 @@ from pathlib import Path
 from typing import List
 
 from aipass.prax import logger
-from aipass.cli import console, error
+from aipass.cli import console, error, escape, warning
 from aipass.trigger import trigger
 
 from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
+from aipass.ai_mail.apps.handlers.dispatch import cloud as cloud_lane
 from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
 from aipass.ai_mail.apps.handlers.email.create import create_email_file, load_email_file
 from aipass.ai_mail.apps.handlers.email.header import prepend_dispatch_header
@@ -41,16 +42,11 @@ from aipass.ai_mail.apps.handlers.email.send import (
 from aipass.ai_mail.apps.handlers.email.error_dispatch import dispatch_send_error, on_email_delivered
 from aipass.ai_mail.apps.handlers.email.send_args import parse_send_args, resolve_dispatch_target
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
+from aipass.ai_mail.apps.handlers.central_writer import update_central
 
 
 _AI_MAIL_DIR = Path(__file__).resolve().parents[2]
 _REPO_ROOT = find_repo_root()
-
-try:
-    from aipass.ai_mail.apps.handlers.central_writer import update_central
-except ImportError as e:
-    logger.warning("[email_send] central_writer import unavailable: %s", e)
-    update_central = None
 
 
 def _delivery_callback(branch_path, new_count, opened_count, total):
@@ -59,14 +55,10 @@ def _delivery_callback(branch_path, new_count, opened_count, total):
 
 
 def _get_branch_info_fn():
-    """Return branch info lookup fn for dispatch target resolution, or None."""
-    try:
-        from aipass.ai_mail.apps.handlers.users.branch_detection import get_branch_info_from_registry
+    """Return the branch info lookup for dispatch target resolution; a failed import raises."""
+    from aipass.ai_mail.apps.handlers.users.branch_detection import get_branch_info_from_registry
 
-        return get_branch_info_from_registry
-    except ImportError as e:
-        logger.warning("[email_send] branch_detection import unavailable: %s", e)
-        return None
+    return get_branch_info_from_registry
 
 
 COMMAND = "send"
@@ -84,7 +76,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
     # Whole-sequence: a later --help must not reach handle_send and deliver the mail.
     if wants_help(args):
-        print_introspection()
+        print_help()
         return True
     return handle_send(args)
 
@@ -99,12 +91,16 @@ def handle_send(args: List[str]) -> bool:
 
     if parsed["mode"] == "error":
         error(parsed["error"])
-        console.print('   Multiple: send @branch1 @branch2 "Subject" "Message"')
+        console.print('   Multiple: send @branch1 @branch2 "Subject" "Message"', highlight=False)
         return True
 
     if parsed["mode"] == "interactive":
         # A cancelled or failed interactive send is still a handled command.
         _send_interactive()
+        return True
+
+    # Steered first: a refused steer sends no mail, so the record never claims a steer that did not happen.
+    if parsed.get("cloud") and not _steer_cloud(parsed["recipients"], parsed["message"]):
         return True
 
     recipients = parsed["recipients"]
@@ -142,7 +138,43 @@ def handle_send(args: List[str]) -> bool:
             kind=parsed.get("kind"),
         ):
             ok += 1
-    console.print(f"\nGroup send complete: {ok}/{len(recipients)} delivered")
+    console.print(f"\nGroup send complete: {ok}/{len(recipients)} delivered", highlight=False)
+    return True
+
+
+def _steer_cloud(recipients: List[str], text: str) -> bool:
+    """Queue text into the recipient's open cloud dispatch session; False (after error()) when refused."""
+    from aipass.ai_mail.apps.handlers.dispatch.wake import resolve_branch
+    from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+
+    if len(recipients) != 1:
+        error("Not steered: --cloud steers one recipient's cloud session")
+        return False
+    target = recipients[0]
+    try:
+        resolved = resolve_branch(target)
+    except RegistryUnreadable as e:
+        error(f"Not steered: the registry is unreadable ({e})")
+        return False
+    if resolved is None:
+        error(f"Not steered: unknown agent {target}")
+        return False
+    try:
+        mail = cloud_lane.find_open(resolved[0] / ".ai_mail.local" / "inbox.json")
+    except (OSError, ValueError) as e:
+        error(f"Not steered: {target}'s inbox is unreadable ({e})")
+        return False
+    if mail is None:
+        error(f'Not steered: {target} has no open cloud dispatch; start one with dispatch {target} "S" "B" --cloud')
+        return False
+    session = mail["cloud"]
+    steered, why = cloud_lane.steer(text, session["session_id"])
+    if not steered:
+        error(f"Not steered: {why}")
+        return False
+    console.print(f"Steered {target}'s cloud session {session['session_id']} (dispatch mail {mail.get('id')})")
+    if session.get("ended"):
+        warning(f"Its poll has ended ({session['ended']}): a new PR will not be mailed back")
     return True
 
 
@@ -243,7 +275,7 @@ def _send_direct(
             dispatch_send_error(to_branch, subject, error_msg or "", deliver_email_to_branch)
             return False
     except BrokenPipeError:
-        logger.info("[email_send] Send: broken pipe (stdout closed early)")
+        logger.warning("[email_send] Send: broken pipe (stdout closed early)")
         return True
     except Exception as e:
         logger.error(f"[email_send] Send failed: {e}")
@@ -288,7 +320,7 @@ def _send_broadcast(
 ) -> bool:
     """Broadcast send to all branches - display wrapper."""
     branches = resolve_broadcast_targets()
-    console.print(f"\nBroadcasting to {len(branches)} branches...")
+    console.print(f"\nBroadcasting to {len(branches)} branches...", highlight=False)
     ok, success_count, total, results = send_to_broadcast(
         subject,
         message,
@@ -313,7 +345,7 @@ def _send_broadcast(
             console.print(f"  [green]OK[/green] {name}")
         else:
             error(f"FAIL {name} ({err})")
-    console.print(f"\nBroadcast complete: {success_count}/{total} delivered")
+    console.print(f"\nBroadcast complete: {success_count}/{total} delivered", highlight=False)
     return ok
 
 
@@ -330,6 +362,32 @@ def print_introspection():
     console.print("  - [cyan]_send_broadcast[/cyan][dim](...) -> bool[/dim]")
     console.print("  - [cyan]_fire_dispatch_trigger[/cyan][dim](to_branch, subject) -> None[/dim]")
     console.print("  - [cyan]_delivery_callback[/cyan][dim](branch_path, new_count, opened_count, total)[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @ai_mail email --help' for usage[/dim]")
+
+
+def print_help():
+    """Print help for the send and email commands."""
+    console.print()
+    console.print("[bold cyan]email / send[/bold cyan] - deliver mail to one branch, several, or @all")
+    console.print()
+    console.print("[yellow]Usage:[/yellow]")
+    console.print(escape('  drone @ai_mail email @recipient [@more ...] "Subject" "Message" [flags]'))
+    console.print("  [dim]send is an alias for email[/dim]")
+    console.print(
+        "  [cyan]--dispatch[/cyan] [cyan]--from @branch[/cyan] [cyan]--reply-to @branch[/cyan] [cyan]--no-memory-save[/cyan]"
+    )
+    console.print(
+        "  [cyan]--upsert-key KEY[/cyan] [cyan]--kind KIND[/cyan]  [dim]explained in: drone @ai_mail inbox --help[/dim]"
+    )
+    console.print(
+        '  [cyan]--cloud[/cyan]  [dim]email @x "text" --cloud steers @x\'s open cloud dispatch, then mails[/dim]'
+    )
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print('  drone @ai_mail email @sentry "Subject" "Message"')
+    console.print('  drone @ai_mail email @devpulse @sentry "Subject" "Message"')
+    console.print('  drone @ai_mail email @all "Subject" "Message"')
     console.print()
 
 

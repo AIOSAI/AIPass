@@ -86,13 +86,19 @@ def print_help() -> None:
     """Print help for the resolver module."""
     from aipass.cli import console
 
-    console.print("resolver — Branch resolution logic")
+    console.print("[bold cyan]resolver[/bold cyan] — Branch resolution logic")
     console.print()
-    console.print("Commands:")
-    console.print("  resolve <branch>    Resolve branch name to path")
-    console.print("  exists <branch>     Check if branch exists")
-    console.print("  info <branch>       Get branch metadata")
-    console.print("  list                List all branches")
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [dim]drone @drone resolver <command> \\[branch][/dim]")
+    console.print()
+    console.print("[bold cyan]Commands:[/bold cyan]")
+    console.print("  [cyan]resolve[/cyan] <branch>    Resolve branch name to path")
+    console.print("  [cyan]exists[/cyan] <branch>     Check if branch exists")
+    console.print("  [cyan]info[/cyan] <branch>       Get branch metadata")
+    console.print("  [cyan]list[/cyan]                List all branches")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [green]drone @drone resolver exists drone[/green]")
 
 
 def print_introspection():
@@ -115,6 +121,8 @@ def print_introspection():
     console.print(
         "    - [cyan]exceptions.py[/cyan] [dim](BranchNotFoundError — raised when branch not in registry)[/dim]"
     )
+    console.print()
+    console.print("Run [green]'drone @drone resolver --help'[/green] for usage information")
     console.print()
 
 

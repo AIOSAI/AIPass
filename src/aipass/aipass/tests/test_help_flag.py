@@ -3,7 +3,7 @@
 # Description: Tests for the help_flag predicate + per-module help-gate canaries
 # Version: 1.3.0
 # Created: 2026-08-13
-# Modified: 2026-11-14
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/handlers/help_flag.py and every module's help gate."""
@@ -96,6 +96,7 @@ _GATE_CASES = [
     ("doctor", "doctor", ["--fix", "--help"]),
     ("read", "read", ["drone", "--help"]),
     ("baud", "baud", ["install", "--help"]),
+    ("provider", "provider", ["claude", "--help"]),
 ]
 
 

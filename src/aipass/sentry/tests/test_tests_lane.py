@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_tests_lane.py
 # Description: Template v1 — tests_lane module, retire_ops and template_ops
-# Version: 1.0.8
+# Version: 1.0.9
 # Created: 2026-09-21
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/tests_lane.py and the handlers it drives."""
@@ -228,6 +228,21 @@ class TestRestore:
 
         assert refused_receipts == [retired / ".backup" / "tests" / "alpha" / "retired.json"]
         assert "could not be removed" in capsys.readouterr().err
+
+    def test_a_corrupt_log_is_named_and_neither_the_file_nor_the_log_is_touched(self, capsys, retired):
+        """A corrupt log once read as empty; restore and the listing must name it, never act on nothing."""
+        folder = retired / ".backup" / "tests" / "alpha"
+        (folder / "retired.json").write_text("{not json", encoding="utf-8")
+
+        with pytest.raises(CommandRefused):
+            tests_lane.handle_command("tests", ["restore", "test_old.py"])
+        assert "corrupt" in capsys.readouterr().err
+        with pytest.raises(CommandRefused):
+            tests_lane.handle_command("tests", ["retired"])
+        assert "corrupt" in capsys.readouterr().err
+
+        assert (folder / "retired.json").read_text(encoding="utf-8") == "{not json"
+        assert (folder / "test_old.py").exists()
 
     def test_restore_with_no_name_prints_the_usage_line(self, capsys, retired):
         tests_lane.handle_command("tests", ["restore"])

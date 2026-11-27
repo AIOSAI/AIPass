@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: errors.py
 # Description: Error registry management module for Medic v2 commands
-# Version: 1.6.0
+# Version: 1.8.0
 # Created: 2026-02-13
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -14,7 +14,7 @@ error registry. Provides visibility into all tracked errors with
 fingerprinting, counts, and status tracking.
 
 Commands: list, detail, suppress, unsuppress, resolve, clear-resolved, stats, circuit-breaker
-Public API: report_error() for cross-branch push reporting (Drone calls this)
+Public API: report_error() for cross-branch push reporting (drone calls this)
 Phase 5: Suppress triggers source fix pipeline (email + fix status tracking)
 Suppress silences dispatch outright (compass #219) — unsuppress restores it
 Architecture: Module orchestrates, error_registry handler manages data
@@ -70,6 +70,7 @@ def print_introspection():
         "    [cyan]•[/cyan] error_reporter.py [dim](send_source_fix_email — notify branch to fix error)[/dim]"
     )
     console.print()
+    console.print("[dim]Run drone @trigger errors --help for usage.[/dim]")
 
 
 _STATUS_COLORS = {"new": "yellow", "investigating": "cyan", "suppressed": "dim", "resolved": "green"}
@@ -124,7 +125,7 @@ def print_help() -> None:
 
     console.print(Panel("Error Registry - Medic v2 Error Management", style="bold"))
     console.print()
-    console.print("View and manage tracked errors in the Medic v2 error registry.")
+    console.print("View and manage tracked errors in the Medic v2 error registry.", highlight=False)
     console.print()
     console.rule("USAGE")
     console.print()
@@ -133,7 +134,7 @@ def print_help() -> None:
     console.rule("COMMANDS")
     console.print()
     console.print("  [bold]list[/bold]               List tracked errors (default)")
-    console.print("                       [dim]--status=new --component=FLOW --severity=high --limit=20[/dim]")
+    console.print("                       [dim]--status=new --component=flow --severity=high --limit=20[/dim]")
     console.print("  [bold]detail[/bold] <id>         Show full details for an error entry")
     # \[reason] is escaped — Rich would otherwise eat the brackets as a style tag.
     console.print("  [bold]suppress[/bold] <id> \\[reason]  Silence it — no dispatch while suppressed")
@@ -146,14 +147,14 @@ def print_help() -> None:
     console.print("  [bold]circuit-breaker[/bold]      Show or reset circuit breaker [dim](reset)[/dim]")
     console.print("  [bold]help[/bold]               Show this help")
     console.print()
-    console.rule("EXAMPLES")
+    console.print("[bold cyan]EXAMPLES:[/bold cyan]")
     console.print()
-    console.print("  drone @trigger errors list --status=new --component=FLOW")
-    console.print("  drone @trigger errors detail a1b2c3d4")
-    console.print("  drone @trigger errors suppress a1b2c3d4 known startup issue")
-    console.print("  drone @trigger errors unsuppress a1b2c3d4")
-    console.print("  drone @trigger errors resolve a1b2c3d4")
-    console.print("  drone @trigger errors clear-resolved --days=14")
+    console.print("  drone @trigger errors list --status=new --component=flow")
+    console.print("  drone @trigger errors detail a1b2c3d4", highlight=False)
+    console.print("  drone @trigger errors suppress a1b2c3d4 known startup issue", highlight=False)
+    console.print("  drone @trigger errors unsuppress a1b2c3d4", highlight=False)
+    console.print("  drone @trigger errors resolve a1b2c3d4", highlight=False)
+    console.print("  drone @trigger errors clear-resolved --days=14", highlight=False)
     console.print("  drone @trigger errors circuit-breaker reset")
     console.print()
 
@@ -257,7 +258,7 @@ def _cmd_list(console, args: list) -> bool:
             e.get("id", "?"),
             e.get("fingerprint", "?")[:8],
             e.get("error_type", "?"),
-            e.get("component", "?"),
+            str(e.get("component", "?")).lower(),
             str(e.get("count", 0)),
             f"[{svc}]{sev}[/{svc}]",
             f"[{sc}]{st}[/{sc}]",
@@ -303,7 +304,7 @@ def _cmd_detail(console, args: list) -> bool:
         f"  [bold]ID:[/bold]              {entry.get('id', '?')}",
         f"  [bold]Fingerprint:[/bold]     {entry.get('fingerprint', '?')}",
         f"  [bold]Error Type:[/bold]      {entry.get('error_type', '?')}",
-        f"  [bold]Component:[/bold]       {entry.get('component', '?')}",
+        f"  [bold]Component:[/bold]       {str(entry.get('component', '?')).lower()}",
         f"  [bold]Severity:[/bold]        [{svc}]{sev}[/{svc}]",
         f"  [bold]Status:[/bold]          [{sc}]{st}[/{sc}]",
         f"  [bold]Count:[/bold]           {entry.get('count', 0)}",
@@ -483,7 +484,7 @@ def _cmd_stats(console, args: list) -> bool:
             console.print(f"  [bold]{label}:[/bold]")
             for key, count in sorted(data.items()):
                 c = color_fn(key)
-                console.print(f"    [{c}]{key:<15}[/{c}] {count}")
+                console.print(f"    [{c}]{key:<15}[/{c}] {count}", highlight=False)
             console.print()
 
     cb_st = cb.get("state", "unknown")

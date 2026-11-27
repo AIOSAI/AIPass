@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_handler.py
 # Description: Git log handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-11-25
 # =============================================
 
 """Git log handler."""
@@ -16,6 +16,10 @@ from pathlib import Path
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
+from aipass.drone.apps.handlers.git.repo_door import GIT_NETWORK_TIMEOUT
+
+REFUSE_REMOTE_USAGE = "Usage: drone @git log --remote <branch>"
+REFUSE_REMOTE_ABSENT = "log --remote: origin has no branch '{branch}'."
 
 
 def resolve_log_path(token: str, repo_root: Path, cwd: Path | None, must_exist: bool) -> str | None:
@@ -107,3 +111,29 @@ def get_git_log(
     logger.info("Retrieved %d log entries", len(entries))
 
     return {"success": True, "entries": entries, "count": len(entries), "message": f"{len(entries)} log entries"}
+
+
+def get_remote_head(branch: str, repo_root: Path) -> dict:
+    """Origin's live head of *branch*, asked of origin itself, where ``origin/<branch>`` is only the last fetch."""
+    if not branch or branch.startswith("-"):
+        return {"success": False, "message": REFUSE_REMOTE_USAGE}
+    ref = f"refs/heads/{branch}"
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "origin", ref],
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
+            timeout=GIT_NETWORK_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.error("git ls-remote origin %s failed: %s", ref, exc)
+        return {"success": False, "message": f"log --remote: could not ask origin: {exc}"}
+    if result.returncode != 0:
+        return {"success": False, "message": f"log --remote: {result.stderr.strip()}"}
+    # ls-remote matches by tail, so refs/heads/x/dev would answer for dev: keep only the exact ref.
+    sha = next((row.split("\t")[0] for row in result.stdout.splitlines() if row.endswith(f"\t{ref}")), "")
+    if not sha:
+        return {"success": False, "message": REFUSE_REMOTE_ABSENT.format(branch=branch)}
+    json_handler.log_operation("get_remote_head", {"branch": branch, "sha": sha})
+    return {"success": True, "sha": sha, "ref": ref, "message": f"{sha}  {ref}"}

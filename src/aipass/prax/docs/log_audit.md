@@ -15,8 +15,11 @@ drone @prax log-audit sweep              # Delete .log files older than 30 days
 drone @prax log-audit --help             # Audit usage
 ```
 
-`audit` reports problems but always exits 0 — it flags unbounded and critical
-files in its output, so a health gate must read the text, not `$?`.
+`audit` reports problems but exits 0 — it flags unbounded and critical
+files in its output, so a health gate must read the text, not `$?`. The one
+exception: a log file that exists but cannot be read stops the scan with that
+error, since a file it cannot read is not one it can call healthy. A file
+rotated away mid-scan counts as empty.
 
 Nothing here rewrites a log. A live file has other processes appending to it,
 so truncating it in place loses their lines; every writer rotates its own file

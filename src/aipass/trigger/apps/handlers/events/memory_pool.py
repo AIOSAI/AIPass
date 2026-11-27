@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_pool.py
 # Description: Memory pool auto-process event handler — observability for pool processing
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-06-06
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -60,6 +60,6 @@ def handle_memory_pool_auto_processed(
     report_error(
         error_type="MemoryPoolAutoProcessError",
         message=error_msg,
-        component=(branch or "memory").upper(),
+        component=(branch or "memory").lower(),
         fire_event=kwargs.get("fire_event") is not None,
     )

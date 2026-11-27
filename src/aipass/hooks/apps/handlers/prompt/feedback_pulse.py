@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: feedback_pulse.py
-# Version: 1.0.2
+# Version: 1.1.0
 # Description: Periodic feedback ask — one ignorable line every ~10 turns
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-18
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Periodic feedback pulse — surfaces a one-line feedback ask every ~10 turns.
@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 
 from aipass.prax import logger
+from aipass.hooks.apps.handlers.config.loader import seat_at_root
 from aipass.hooks.apps.handlers.json import json_handler
 
 _STATE_DIR = Path(tempfile.gettempdir())
@@ -48,13 +49,16 @@ def _load_and_increment(path: Path) -> int:
         path.write_text(json.dumps({"turn": turn}), encoding="utf-8")
         return turn
     except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("[HOOKS] feedback_pulse: state access failed: %s", exc)
+        logger.warning("[hooks] feedback_pulse: state access failed: %s", exc)
         return 0
 
 
 def _find_aipass_dir(cwd: str | None = None) -> Path | None:
-    """Walk up from CWD to find the nearest .aipass/ directory."""
+    """Walk up from CWD to find the nearest .aipass/ directory; at a repo root, $AIPASS_SEAT's own."""
     start = Path(cwd) if cwd else Path.cwd()
+    seat = seat_at_root(str(start))
+    if seat and (seat / ".aipass").is_dir():
+        return seat / ".aipass"
     for parent in [start, *start.parents]:
         candidate = parent / ".aipass"
         if candidate.is_dir():
@@ -87,12 +91,12 @@ def handle(hook_data: dict) -> dict:
 
         cwd = hook_data.get("cwd", "")
         if _is_disabled(cwd or None):
-            logger.info("[HOOKS] feedback_pulse: skipped (disabled via .aipass/feedback_off sentinel)")
+            logger.info("[hooks] feedback_pulse: skipped (disabled via .aipass/feedback_off sentinel)")
             return {"stdout": "", "exit_code": 0}
 
         json_handler.log_operation("feedback_pulse", {"turn": turn})
         return {"stdout": _FEEDBACK_LINE, "exit_code": 0}
 
     except Exception as exc:
-        logger.error("[HOOKS] feedback_pulse: unexpected error: %s", exc)
+        logger.error("[hooks] feedback_pulse: unexpected error: %s", exc)
         return {"stdout": "", "exit_code": 0}

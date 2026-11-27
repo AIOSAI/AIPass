@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_help_flag_safety.py
 # Description: Tests for whole-sequence help-flag detection across the three CLI modules
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-13
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py's wants_help() and the three CLI modules it gates."""
@@ -154,7 +154,7 @@ class TestEmailSendHelpSafety:
     def test_trailing_help_never_reaches_the_send_path(self):
         with (
             patch.object(email_send_module, "handle_send") as send,
-            patch.object(email_send_module, "print_introspection") as help_out,
+            patch.object(email_send_module, "print_help") as help_out,
         ):
             handled = email_send_module.handle_command("send", ["@devpulse", "Subject", "Body", "--help"])
 
@@ -165,7 +165,7 @@ class TestEmailSendHelpSafety:
     def test_short_flag_is_equally_safe(self):
         with (
             patch.object(email_send_module, "handle_send") as send,
-            patch.object(email_send_module, "print_introspection") as help_out,
+            patch.object(email_send_module, "print_help") as help_out,
         ):
             handled = email_send_module.handle_command("email", ["@devpulse", "-h", "Body"])
 
@@ -176,7 +176,7 @@ class TestEmailSendHelpSafety:
     def test_a_real_send_still_sends(self):
         with (
             patch.object(email_send_module, "handle_send", return_value=True) as send,
-            patch.object(email_send_module, "print_introspection") as help_out,
+            patch.object(email_send_module, "print_help") as help_out,
         ):
             handled = email_send_module.handle_command("email", ["@devpulse", "Subject", "please read --help first"])
 

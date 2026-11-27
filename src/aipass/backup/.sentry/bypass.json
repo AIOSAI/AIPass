@@ -34,6 +34,30 @@
       "standard": "logged_fallback",
       "lines": [120, 134],
       "reason": "needs_upload answers True on a path it cannot relativise or stat, on purpose and named in its docstring: the upload that follows reports the real failure, where False would skip the file silently on every run. Decision of @backup, fleet green leg 5."
+    },
+    {
+      "file": "apps/handlers/drive/tracker.py",
+      "standard": "fallback",
+      "lines": [118, 132],
+      "reason": "Same sites as the logged_fallback row: needs_upload answers True on a path it cannot relativise or stat, so the upload that follows reports the real failure; False would skip the file silently on every run. Decision of @backup, 2026-11-26."
+    },
+    {
+      "file": "apps/backup.py",
+      "standard": "fallback",
+      "lines": [146],
+      "reason": "One verb that fails to import must not take the others down: @daemon's nightly all @name --quiet still snapshots when share.py or a drive module is broken. The failure is logged at error and shown on stderr naming the module; its command then answers Unknown command, exit 1. Decision of @backup, 2026-11-26."
+    },
+    {
+      "file": "apps/handlers/drive/client.py",
+      "standard": "fallback",
+      "lines": [29],
+      "reason": "Drive is optional and off by default: local snapshots must import and run without the Google libraries. GOOGLE_API_AVAILABLE=False is never read as installed; authenticate refuses with DriveError naming GOOGLE_PACKAGES, so no Drive run proceeds without them. Decision of @backup, 2026-11-26."
+    },
+    {
+      "file": "apps/handlers/drive/upload.py",
+      "standard": "fallback",
+      "lines": [30],
+      "reason": "Drive is optional and off by default: local snapshots must import and run without the Google libraries. MEDIA_UPLOAD_AVAILABLE=False is never read as installed; upload_single_file raises DriveError naming GOOGLE_PACKAGES, logged at warning and trailed, and writes no tracker entry. Decision of @backup, 2026-11-26."
     }
   ],
   "notes": {

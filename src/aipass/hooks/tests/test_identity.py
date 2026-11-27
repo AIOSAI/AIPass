@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_identity.py
-# Version: 1.4.0
+# Version: 1.5.0
 # Description: Tests for identity prompt handler (cadence-gated 1.1.0, char budget enforced 1.2.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/prompt/identity.py."""
@@ -171,6 +171,16 @@ class TestIdentityHandler:
         result = handle({"cwd": str(nested)})
 
         assert "devpulse Identity" in result["stdout"]
+
+    def test_a_repo_root_injects_the_passport_aipass_seat_names(self, tmp_path, monkeypatch):
+        trinity = tmp_path / "src" / "aipass" / "devpulse" / ".trinity"
+        trinity.mkdir(parents=True)
+        (trinity / "passport.json").write_text(json.dumps(SAMPLE_PASSPORT), encoding="utf-8")
+
+        monkeypatch.delenv("AIPASS_SEAT", raising=False)
+        assert handle({"cwd": str(tmp_path)})["stdout"] == ""
+        monkeypatch.setenv("AIPASS_SEAT", "devpulse")
+        assert "devpulse Identity" in handle({"cwd": str(tmp_path)})["stdout"]
 
     def test_formats_all_fields(self, tmp_path):
 

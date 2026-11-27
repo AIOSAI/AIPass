@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_help_flag_safety.py
 # Description: Tests for apps/handlers/cli/help_flags.py -- whole-sequence help detection (DPLAN-0291 rule E)
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-13
-# Modified: 2026-11-14
+# Modified: 2026-11-23
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the flow command modules that call it."""
@@ -374,6 +374,39 @@ class TestUnflaggedModulesHelpSafety:
         assert logged[0].args[2] == lock
         assert isinstance(logged[0].args[3], OSError)
         assert lock.is_dir()
+
+    def test_closes_that_stack_on_a_held_lock_are_all_processed(self, tmp_path, mock_logger):
+        """Three closes back to back: runners two and three meet the first's lock mid-pass.
+
+        Each later close lands after the holder listed its files, so the holder must pass again for it.
+        Mutant: while rerun.exists() -> if rerun.exists() (one pass) reddens this: two plans dropped.
+        """
+        lock = tmp_path / ".post_close_runner.lock"
+        closed: list[str] = []
+        vectorized: list[list[str]] = []
+        stacked = iter(["FPLAN-0002", "FPLAN-0003"])
+
+        def a_pass():
+            # The holder's pass sees only what is closed now; another close and its runner land meanwhile.
+            vectorized.append(list(closed))
+            later = next(stacked, None)
+            if later:
+                closed.append(later)
+                assert post_close_runner.main(["post_close_runner.py"]) == 0
+            return {"success": True}
+
+        closed.append("FPLAN-0001")
+        with (
+            patch(f"{_POST}.LOCK_FILE", lock),
+            patch(f"{_POST}.process_closed_plans"),
+            patch("aipass.memory.process_plans", side_effect=a_pass),
+        ):
+            code = post_close_runner.main(["post_close_runner.py"])
+
+        assert code == 0
+        assert vectorized[-1] == ["FPLAN-0001", "FPLAN-0002", "FPLAN-0003"]
+        assert not lock.exists()
+        assert not lock.with_name(lock.name + ".rerun").exists()
 
     def test_normal_registry_status_still_works(self):
         with patch(f"{_REG}.print_help") as help_fn:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repair.py
 # Description: Project structure repair — thin CLI layer for move, cleanup, scan
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-05-15
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Repair orchestrator for project structure fixes."""
@@ -35,6 +35,7 @@ def print_introspection():
     console.print("  [cyan]handlers/[/cyan]")
     console.print("    [dim]- repair_ops.py (move_branch, rename_branch, cleanup_pollution, repair_project)[/dim]")
     console.print()
+    console.print("[dim]Run drone @spawn repair --help for usage[/dim]")
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -47,7 +48,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if "--help" in args:
-        _print_help()
+        print_help()
         return True
 
     return handle_repair(args) == 0
@@ -56,11 +57,11 @@ def handle_command(command: str, args: list) -> bool:
 def handle_repair(args: list[str]) -> int:
     """Parse args and execute repair; preview-only unless --apply. Returns exit code (0=success, 1=failure)."""
     if "--help" in args or "-h" in args:
-        _print_help()
+        print_help()
         return 0
 
     if not args:
-        _print_help()
+        print_help()
         return 1
 
     apply = "--apply" in args
@@ -207,7 +208,7 @@ def _handle_scan(args, dry_run):
     return 0
 
 
-def _print_help():
+def print_help():
     """Display repair command help."""
     console.print("[bold cyan]Usage:[/bold cyan] drone @spawn repair <project_path> \\[options]")
     console.print()
@@ -220,6 +221,11 @@ def _print_help():
         "  [green]--relocate-artifacts[/green]    Move .chroma/ into branch (with --relocate, single-branch only)"
     )
     console.print("  [green]--clean-pollution[/green]        Archive and remove duplicate dirs")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  drone @spawn repair .")
+    console.print("  drone @spawn repair . --clean-pollution --apply")
+    console.print("  drone @spawn repair --relocate @scout src/aipass/scout")
     console.print()
 
 
@@ -288,6 +294,7 @@ def _print_scan_result(result):
     if pollution:
         console.print()
         console.print(f"[bold]Pollution ({len(pollution)}):[/bold]")
+        console.print("  [dim]duplicate or misplaced dirs, each with its fix command[/dim]")
         for p in pollution:
             console.print(f"  - {p['description']}")
             console.print(f"    Fix: drone @spawn repair {result.get('project', '?')} --clean-pollution")
@@ -296,6 +303,7 @@ def _print_scan_result(result):
     if mismatches:
         console.print()
         console.print(f"[bold]Registry mismatches ({len(mismatches)}):[/bold]")
+        console.print("  [dim]branches whose registry row disagrees with the filesystem[/dim]")
         for m in mismatches:
             console.print(f"  - {m['branch']}: {m['issue']}")
             console.print(f"    Registered: {m['registered_path']}")

@@ -3,7 +3,7 @@
 # Description: Project structure validation for aipass doctor
 # Version: 1.7.0
 # Created: 2026-05-14
-# Modified: 2026-11-21
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -543,11 +543,11 @@ def _runtime_owner(rel: str) -> Optional[str]:
 def check_gitignore_coverage(project_root: Path) -> "List[tuple[str, str, str, str]]":
     """Doctor rows ``(label, glyph, detail, fix)``: runtime files on disk that git tracks, one FAIL per owner.
 
-    Read-only: lists the index with ``ls-files``, never changes it. The AIPass source tree is not measured,
-    since its .gitignore ships spawn's templates by negation on purpose."""
+    Read-only: lists the index with ``ls-files``, never changes it. The AIPass source tree gets no row:
+    its .gitignore ships spawn's templates by negation on purpose, and a tick over nothing measured misleads."""
     label = "gitignore coverage"
     if (project_root / "src" / "aipass").is_dir() and (project_root / "pyproject.toml").is_file():
-        return [(label, GLYPH_PASS, "not measured: the AIPass source tree ships its templates tracked", "")]
+        return []
     try:
         listed = subprocess.run(
             ["git", "-C", str(project_root), "ls-files", "-z"], capture_output=True, encoding="utf-8", check=False

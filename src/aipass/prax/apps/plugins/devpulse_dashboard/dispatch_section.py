@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_section.py
 # Description: Dispatch status section builder for devpulse dashboard
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-05-16
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Dispatch section builder for devpulse dashboard plugin."""
@@ -25,7 +25,8 @@ def _pid_alive(pid: object) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    except OSError:
+    except OSError as e:
+        logger.warning("Could not probe dispatch lock holder pid %s (%s); counting it as alive", pid, e)
         return True
     return True
 
@@ -37,7 +38,7 @@ def _read_lock(lock_path: Path) -> Dict:
     except (json.JSONDecodeError, OSError) as e:
         # ai_mail holds an unparseable lock as mid-write, so it still counts.
         logger.warning("Failed to read dispatch lock %s: %s", lock_path, e)
-        return {"pid": None, "timestamp": ""}
+        return {"pid": None, "timestamp": "", "error": f"unreadable lock: {e}"}
     if not isinstance(data, dict):
         return {"pid": None, "timestamp": ""}
     if not _pid_alive(data.get("pid")):

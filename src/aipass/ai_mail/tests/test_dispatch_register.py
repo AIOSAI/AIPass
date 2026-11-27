@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_dispatch_register.py
 # Description: Tests for the dispatch register append-only log
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-08-22
 # Modified: 2026-11-21
 # =============================================
@@ -193,6 +193,20 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
         register.record_monitor_pid(dispatch_id, os.getpid(), repo_root=repo)
         monkeypatch.setattr(pid_lock, "_is_zombie_linux", lambda pid: pid == os.getpid())
 
+        assert _only_open_row(repo)["monitor_alive"] is False
+
+    def test_a_dead_monitor_row_does_not_warn_on_every_read(self, repo, monkeypatch):
+        """A monitor read dead is the ordinary case; reading the register must not warn each time."""
+        dispatch_id = register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=repo)
+        assert dispatch_id
+        register.record_monitor_pid(dispatch_id, _a_pid_that_is_gone(), repo_root=repo)
+        warnings = []
+        monkeypatch.setattr(pid_lock.logger, "warning", lambda *a, **k: warnings.append(a))
+
+        register.outstanding(repo_root=repo)
+        register.outstanding(repo_root=repo)
+
+        assert warnings == [], warnings
         assert _only_open_row(repo)["monitor_alive"] is False
 
     def test_a_row_with_no_pid_is_unknown_not_dead(self, repo):
@@ -564,7 +578,7 @@ class TestTheSuiteCannotTouchProduction:
 
 
 def test_a_reply_closes_the_oldest_open_row_first(repo):
-    """Two open rows on one thread: the reply closes the first dispatch, so a re-sent one never leaves it open forever."""
+    """Two open rows on one thread: the reply closes the first dispatch, so a re-send never leaves it open forever."""
     first = register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)
     second = register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)
 
@@ -881,9 +895,11 @@ class TestTheGrantsWidenVerb:
     """Through the command, on the register the suite's conftest points at."""
 
     def _open_grant(self, seed):
-        return register.open_dispatch(
+        dispatch_id = register.open_dispatch(
             "@devpulse", "@hooks", "s", 600, grant={"root": str(seed), "files": ["src/loop.ts"], "dirs": []}
         )
+        assert dispatch_id
+        return dispatch_id
 
     def test_grants_widen_prints_the_widened_grant_for_the_admin(self, seed, admin, capsys):
         dispatch_id = self._open_grant(seed)

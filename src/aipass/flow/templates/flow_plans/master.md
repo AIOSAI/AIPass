@@ -131,7 +131,7 @@ drone @sentry checklist <file>           # 10-point check on file
 drone @sentry audit aipass @branch       # Full branch audit (before master close)
 drone @sentry --help                     # Full help
 
-# AI_Mail - Status updates
+# ai_mail - Status updates
 drone @ai_mail email @devpulse "Subject" "Message"
 drone @ai_mail inbox                   # Check your inbox
 drone @ai_mail --help                  # Full help
@@ -492,16 +492,17 @@ Track issues here as encountered. Don't fix during build - log + continue.
 - [ ] Issues Log reviewed - High/Med issues addressed
 - [ ] Full branch audit: `drone @sentry audit aipass @branch`
 - [ ] Branch memories updated:
-  - [ ] `BRANCH.local.json` - full session log
-  - [ ] `BRANCH.observations.json` - patterns learned
+  - [ ] `.trinity/local.json` - full session log
+  - [ ] `.trinity/observations.json` - patterns learned
 - [ ] README.md updated (status, architecture, API - if build changed capabilities)
+- [ ] `docs/` pages updated (every page that describes what this build changed, in present tense)
 - [ ] Artifacts reviewed (devpulse manages cleanup)
 - [ ] Final email > @devpulse:
   ```bash
   drone @ai_mail email @devpulse "{plan_number} MASTER COMPLETE" "Full build summary: phases completed, deliverables, remaining issues (if any)"
   ```
 
-**Completion Order:** Memories -> README -> Email (README before email - don't report complete stale docs)
+**Completion Order:** Memories -> README and docs -> Email (both before the email - don't report complete with stale docs)
 
 **Note:** Devpulse will perform its own Sentry audit for visibility into work.
 

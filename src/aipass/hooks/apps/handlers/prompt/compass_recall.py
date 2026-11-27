@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: compass_recall.py
-# Version: 1.2.2
+# Version: 1.3.0
 # Description: Ambient compass recall — surfaces rated decisions on relevant prompts
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-16
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Queries compass FTS against the user's prompt and injects matching decisions
@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 
 from aipass.prax import logger
-from aipass.hooks.apps.handlers.config.loader import find_project_config
+from aipass.hooks.apps.handlers.config.loader import find_project_config, seat_at_root
 from aipass.hooks.apps.handlers.json import json_handler
 
 _STATE_DIR = Path(tempfile.gettempdir())
@@ -67,7 +67,7 @@ def _save_state(state: dict, hook_data: dict | None = None) -> None:
     try:
         path.write_text(json.dumps(state), encoding="utf-8")
     except OSError as exc:
-        logger.warning("[HOOKS] compass_recall: state write failed: %s", exc)
+        logger.warning("[hooks] compass_recall: state write failed: %s", exc)
 
 
 def _governance_config() -> dict:
@@ -96,7 +96,7 @@ def _open_window(state: dict, hook_data: dict) -> dict:
         return state
     if state.get("surfaces_count"):
         logger.info(
-            "[HOOKS] compass_recall: new context window, budget reset (%d surfaced, %d ids kept)",
+            "[hooks] compass_recall: new context window, budget reset (%d surfaced, %d ids kept)",
             state["surfaces_count"],
             len(state.get("surfaced_ids", [])),
         )
@@ -106,7 +106,8 @@ def _open_window(state: dict, hook_data: dict) -> dict:
 def _manager_seat(hook_data: dict) -> bool:
     """True when the prompting seat's passport is a manager's: compass is for managers, never builders."""
     release_notice = importlib.import_module("aipass.hooks.apps.modules.release_notice")
-    return release_notice.is_manager_seat(Path(hook_data.get("cwd", "") or Path.cwd()))
+    cwd = hook_data.get("cwd", "") or str(Path.cwd())
+    return release_notice.is_manager_seat(seat_at_root(cwd) or Path(cwd))
 
 
 def handle(hook_data: dict) -> dict:
@@ -144,7 +145,7 @@ def handle(hook_data: dict) -> dict:
                 # Merge, not replace: a replaced state drops the window stamp and reads as a new window.
                 state = {**state, **new_st}
             elif reason.startswith(_LOGGED_REFUSALS):
-                logger.info("[HOOKS] compass_recall: refused #%s: %s", item_id, reason)
+                logger.info("[hooks] compass_recall: refused #%s: %s", item_id, reason)
 
         _save_state(state, hook_data)
 
@@ -162,5 +163,5 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": "\n".join(lines), "exit_code": 0, "sound": "compass recall"}
 
     except Exception as exc:
-        logger.error("[HOOKS] compass_recall_unreachable: %s", exc)
+        logger.error("[hooks] compass_recall_unreachable: %s", exc)
         return {"stdout": "", "exit_code": 0}

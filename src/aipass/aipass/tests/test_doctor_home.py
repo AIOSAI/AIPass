@@ -3,7 +3,7 @@
 # Description: Tests for doctor's home, seating, preflight, citizen-count, skills, shadow, smoke, registry, scope rows
 # Version: 1.13.0
 # Created: 2026-10-08
-# Modified: 2026-11-21
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/modules/doctor.py and _doctor_smoke.py: home, seating, preflight, drone, skills, shadows, smoke."""
@@ -268,7 +268,6 @@ class TestFixOwnerSeating:
         monkeypatch.chdir(tmp_path)
         for name in ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
-        monkeypatch.setattr(f"{mod}._check_sandbox", lambda: [])
         monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
         monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
         monkeypatch.setattr(f"{mod}.reconcile_stale_deny", lambda **_kw: [])
@@ -357,7 +356,7 @@ class TestFixRestoresALostPassport:
         mod = "aipass.aipass.apps.modules.doctor"
         monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
         monkeypatch.chdir(tmp_path)
-        for name in ("_check_system", "_check_community", "_check_scaffold", "_check_sandbox", "check_wire_verify"):
+        for name in ("_check_system", "_check_community", "_check_scaffold", "check_wire_verify"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
         monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
@@ -499,7 +498,7 @@ class TestRunDoctorPreflight:
     """run_doctor_preflight: the install's doctor --fix, returning the groups and their counts."""
 
     def test_returns_the_groups_after_the_fix_and_their_counts(self) -> None:
-        """Mutant: the counts dropped for (0, 0, 0) -> red. Mutant: non_interactive or yes not passed on -> red."""
+        """Mutant: the counts dropped for (0, 0, 0) -> red. Mutant: yes not passed on -> red."""
         groups = {
             "System": [CheckResult("python", GLYPH_PASS, "3.12", "")],
             "Services": [
@@ -508,8 +507,8 @@ class TestRunDoctorPreflight:
             ],
         }
         with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups) as compute:
-            assert run_doctor_preflight(non_interactive=True, yes=True) == (groups, (1, 1, 1))
-        compute.assert_called_once_with(fix=True, door="install", yes=True, non_interactive=True)
+            assert run_doctor_preflight(yes=True) == (groups, (1, 1, 1))
+        compute.assert_called_once_with(fix=True, door="install", yes=True, install=True, set_aside=[])
 
 
 class TestDroneCitizenCount:
@@ -546,7 +545,6 @@ class TestDroneCitizenCount:
             patch(f"{mod}._check_community", return_value=[]),
             patch(f"{mod}._check_structure", return_value=[]),
             patch(f"{mod}._check_scaffold", return_value=[]),
-            patch(f"{mod}._check_sandbox", return_value=[]),
             patch(f"{mod}.check_provider_manifest", return_value=[]),
             patch(f"{mod}.check_wire_verify", return_value=[]),
             patch(f"{mod}.reconcile_stale_deny", return_value=[]),
@@ -619,14 +617,13 @@ class TestDroneCitizenCount:
             patch(f"{mod}._check_community", return_value=[]),
             patch(f"{mod}._check_structure", return_value=[]),
             patch(f"{mod}._check_scaffold", return_value=[]),
-            patch(f"{mod}._check_sandbox", return_value=[]),
             patch(f"{mod}._print_doctor_groups", side_effect=_record),
         ):
             assert run_doctor() == 1
         assert printed["System"] == [
             CheckResult("system", GLYPH_FAIL, "could not run: RAM unreadable: psutil failed", "Repair what it names")
         ]
-        assert printed["Sandbox"] == []
+        assert printed["Scaffold"] == []
 
 
 class TestHomeAgreement:
@@ -794,7 +791,7 @@ class TestSharedSkillsRows:
     @pytest.fixture(autouse=True)
     def _every_other_edge(self, monkeypatch, tmp_path) -> None:
         mod = "aipass.aipass.apps.modules.doctor"
-        for name in ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_sandbox"):
+        for name in ("_check_system", "check_identity", "_check_community", "_check_structure"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
         monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
@@ -871,39 +868,15 @@ class TestSharedSkillsRows:
         assert row.glyph == GLYPH_WARN
         assert row.detail == ".claude/skills is a copy, not a link: it will not follow .agents/skills"
 
-    def test_fix_links_the_folder_and_retires_an_unedited_legacy_prep(self) -> None:
+    def test_fix_links_the_missing_skills_folder(self) -> None:
         self._skill("prep", "name: prep\ndescription: wrap up\n")
-        legacy = self.root / ".claude" / "commands" / "prep.md"
-        legacy.parent.mkdir(parents=True)
-        legacy.write_text(sc.prep_md(), encoding="utf-8")
 
-        before = self._rows()
         after = self._rows(fix=True)
 
-        assert before["legacy prep"].glyph == GLYPH_WARN
-        assert before["legacy prep"].remediation == "Run: aipass doctor --fix"
         assert (self.root / ".claude" / "skills").resolve() == (self.root / ".agents" / "skills").resolve()
-        assert not legacy.exists()
-        assert (legacy.parent / "prep(disabled).md").read_text(encoding="utf-8") == sc.prep_md()
         assert after["skills link"].glyph == GLYPH_PASS
-        assert "legacy prep" not in after
         fixes = [r.detail for r in self.printed["Scaffold"] if r.label == "skills fix"]
-        assert fixes == [
-            "Linked .claude/skills -> ../.agents/skills",
-            "Retired .claude/commands/prep.md -> prep(disabled).md: .agents/skills/prep/SKILL.md replaces it",
-        ]
-
-    def test_fix_leaves_an_edited_legacy_prep_and_says_whose_it_is(self) -> None:
-        self._skill("prep", "name: prep\ndescription: wrap up\n")
-        legacy = self.root / ".claude" / "commands" / "prep.md"
-        legacy.parent.mkdir(parents=True)
-        legacy.write_text("# my own prep\n", encoding="utf-8")
-
-        rows = self._rows(fix=True)
-
-        assert legacy.read_text(encoding="utf-8") == "# my own prep\n"
-        assert rows["legacy prep"].glyph == GLYPH_WARN
-        assert "is edited, so it is yours and kept" in rows["legacy prep"].detail
+        assert fixes == ["Linked .claude/skills -> ../.agents/skills"]
 
     def test_a_missing_switch_file_is_named_with_both_cures(self) -> None:
         command = self.root / ".claude" / "commands" / "codex.md"
@@ -944,7 +917,7 @@ class TestInstructionShadowRows:
     @pytest.fixture(autouse=True)
     def _every_other_edge(self, monkeypatch, tmp_path) -> None:
         mod = "aipass.aipass.apps.modules.doctor"
-        for name in ("_check_system", "check_identity", "_check_community", "_check_scaffold", "_check_sandbox"):
+        for name in ("_check_system", "check_identity", "_check_community", "_check_scaffold"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
         monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
@@ -1131,13 +1104,28 @@ class TestGitignoreCoverageRows:
             "no runtime file tracked",
         )
 
-    def test_the_aipass_source_tree_is_not_measured_its_templates_ship_tracked(self) -> None:
+    def test_the_aipass_source_tree_gets_no_row_its_templates_ship_tracked(self) -> None:
+        """A green tick reading 'not measured' misled a stranger. Mutant: the row back -> red."""
         self._track("src/aipass/spawn/templates/citizen/dropbox/README.md", "pyproject.toml")
 
-        rows = self._rows()
+        assert self._rows() == {}
 
-        assert list(rows) == ["gitignore coverage"]
-        assert rows["gitignore coverage"].detail.startswith("not measured: the AIPass source tree")
+    def test_a_project_nested_in_a_parent_repo_reads_the_index_of_the_repo_that_holds_it(self) -> None:
+        self._track("src/aipass/README.md")
+        (self.root / ".gitignore").write_text(".spawn/\n*_REGISTRY.json\n", encoding="utf-8")
+        nested = self.root / "projects" / "finch"
+        for rel in ("FINCH_REGISTRY.json", "src/finch/finch/.spawn/meta.json"):
+            (nested / rel).parent.mkdir(parents=True, exist_ok=True)
+            (nested / rel).write_text("state\n", encoding="utf-8")
+
+        assert check_gitignore_coverage(nested) == [("gitignore coverage", GLYPH_PASS, "no runtime file tracked", "")]
+
+        subprocess.run(["git", "init", "-q"], cwd=nested, check=True)
+        subprocess.run(["git", "add", "-f", "FINCH_REGISTRY.json"], cwd=nested, check=True)
+
+        assert [row[:3] for row in check_gitignore_coverage(nested)] == [
+            ("gitignore coverage: FINCH_REGISTRY.json", GLYPH_FAIL, "1 tracked file(s) one installation writes")
+        ]
 
     def test_a_folder_that_is_no_repository_passes_with_nothing_tracked(self) -> None:
         rows = self._rows()
@@ -1279,15 +1267,16 @@ class TestDoctorRowsJson:
         assert not rows_file.exists()
         assert "run it with --fix" in capsys.readouterr().err
 
-    def test_the_install_flags_reach_the_rows_writer(self, tmp_path, monkeypatch) -> None:
-        """Mutants: --non-interactive not read; --yes not read -> each red."""
+    @pytest.mark.parametrize("yes", [True, False])
+    def test_yes_alone_reaches_the_rows_writer(self, yes, tmp_path, monkeypatch) -> None:
+        """B07: --non-interactive is not this route's flag. Mutants: --yes not read; --non-interactive read -> red."""
         calls: list = []
         monkeypatch.setattr(f"{self.MOD}.write_preflight_rows", lambda *a, **kw: calls.append((a, kw)))
         rows_file = tmp_path / "rows.json"
 
-        handle_command("doctor", ["--fix", "--rows-json", str(rows_file), "--non-interactive", "--yes"])
+        handle_command("doctor", ["--fix", "--rows-json", str(rows_file), "--non-interactive", *(["--yes"] * yes)])
 
-        assert calls == [((rows_file,), {"non_interactive": True, "yes": True})]
+        assert calls == [((rows_file,), {"yes": yes})]
 
 
 _DOCTOR = "aipass.aipass.apps.modules.doctor"
@@ -1351,9 +1340,8 @@ class TestOneLinePerFact:
         printed: dict = {}
         for name in ("_check_system", "check_identity", "_check_community", "_check_structure"):
             monkeypatch.setattr(f"{_DOCTOR}.{name}", lambda: [])
-        for name in ("_check_scaffold", "_check_sandbox", "check_wire_verify", "check_admin_lane"):
+        for name in ("_check_scaffold", "check_wire_verify", "check_admin_lane"):
             monkeypatch.setattr(f"{_DOCTOR}.{name}", lambda: [])
-        monkeypatch.setattr(f"{_DOCTOR}._check_pytest_collect", lambda _verbose: [])
         monkeypatch.setattr(f"{_DOCTOR}.check_provider_manifest", lambda **_kw: [])
         monkeypatch.setattr(f"{_DOCTOR}.reconcile_stale_deny", lambda **_kw: [])
         monkeypatch.setattr(f"{_DOCTOR}._find_registry", lambda: registry)
@@ -1374,4 +1362,27 @@ class TestOneLinePerFact:
         if root:
             assert f"scope: project {tmp_path}" in out
         else:
-            assert f"scope: no project at {os.getcwd()}: Structure is not checked" in out
+            assert f"scope: no project at {os.getcwd()}: the project's registry, mailbox, hooks" in out
+
+    @pytest.mark.parametrize("root", [None, "project"])
+    def test_outside_a_project_the_project_rows_do_not_count_and_inside_they_do(
+        self, tmp_path, monkeypatch, capsys, root
+    ) -> None:
+        """A fresh install's first doctor from $HOME: no registry or ai_mail error, exit from machine rows only.
+
+        Mutant: the outside-a-project filter dropped -> 2 errors outside -> red.
+        """
+        groups = {
+            "System": [CheckResult("python", GLYPH_PASS, "3.12", "")],
+            "Identity": [CheckResult("registry", GLYPH_FAIL, "not found", "Run 'aipass init'")],
+            "Community": [CheckResult("ai_mail", GLYPH_FAIL, "not found", "Run 'aipass init'")],
+            "Structure": [CheckResult("project root", GLYPH_WARN, "not detected", "")],
+        }
+        monkeypatch.setattr(f"{_DOCTOR}.find_project_root", lambda _cwd: tmp_path if root else None)
+        monkeypatch.setattr(f"{_DOCTOR}._compute_doctor_groups", lambda **_kw: groups)
+
+        errors = run_doctor()
+        out = " ".join(capsys.readouterr().out.split())
+
+        assert errors == (2 if root else 0)
+        assert ("ai_mail" in out, "not detected" in out) == ((True, True) if root else (False, False))

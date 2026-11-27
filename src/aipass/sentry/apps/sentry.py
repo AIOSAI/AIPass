@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sentry.py
 # Description: SENTRY - Standards Platform for AIPass
-# Version: 2.0.5
+# Version: 2.0.9
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -17,15 +17,20 @@ from pathlib import Path
 from typing import List, Any
 
 from aipass.prax import logger
-from aipass.cli import console, header
+from aipass.cli import console, header, header_version
 from aipass.cli import error
 from aipass.sentry.apps.modules import CommandRefused
 from aipass.sentry.apps.modules import standards_audit
 
-# The header and this constant both carry the version; --version and the README read this one.
-VERSION = "2.0.5"
 SENTRY_ROOT = Path(__file__).parent
 MODULES_DIR = SENTRY_ROOT / "modules"
+
+
+def sentry_version() -> str:
+    """Sentry's one version, the # Version line of this file's header."""
+    return header_version(__file__)
+
+
 # refusal.EXIT_UNPROVEN, "the lane could not run"; spelled here because an entry point never imports handlers.
 EXIT_LANE_COULD_NOT_RUN = 2
 
@@ -50,7 +55,7 @@ def discover_modules() -> List[Any]:
             if hasattr(module, "handle_command"):
                 modules.append(module)
         except Exception as e:
-            logger.error(f"[SENTRY] Failed to load module {file_path.stem}: {e}")
+            logger.error(f"[sentry] Failed to load module {file_path.stem}: {e}")
 
     return modules
 
@@ -69,7 +74,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
             raise
         except Exception as e:
             name = getattr(module, "__name__", "unknown")
-            logger.error("[SENTRY] Module %s crashed on '%s': %s\n%s", name, command, e, traceback.format_exc())
+            logger.error("[sentry] Module %s crashed on '%s': %s\n%s", name, command, e, traceback.format_exc())
             error(
                 f"'{command}' crashed in module {name}: {type(e).__name__}: {e}", suggestion="Traceback in sentry's log"
             )
@@ -96,8 +101,8 @@ def print_introspection() -> None:
     packs = discover_handler_packs()
 
     console.print()
-    console.print("[bold cyan]SENTRY - Standards Platform for AIPass[/bold cyan]")
-    console.print(f"  Version: {VERSION}")
+    console.print("[bold cyan]sentry - Standards Platform for AIPass[/bold cyan]")
+    console.print(f"  Version: [cyan]{header_version(__file__)}[/cyan]")
     console.print()
 
     console.print(f"[yellow]Discovered Modules:[/yellow] {len(modules)}")
@@ -132,16 +137,16 @@ def print_help() -> None:
     packs = discover_handler_packs()
 
     console.print()
-    header("SENTRY - Standards Platform for AIPass")
+    header("sentry - Standards Platform for AIPass")
     console.print()
     console.print("[dim]Code standards reference and automated compliance for all AIPass branches[/dim]")
     console.print()
     console.print("─" * 70)
     console.print()
 
-    console.print("[bold cyan]WHAT IS SENTRY?[/bold cyan]")
+    console.print("[bold cyan]What is sentry?[/bold cyan]")
     console.print()
-    console.print("Sentry is the [bold]AIPass Standards Platform[/bold] — it:")
+    console.print("sentry is the [bold]AIPass Standards Platform[/bold] — it:")
     console.print("  [cyan]•[/cyan] Provides [green]queryable code standards[/green] via content modules")
     console.print("  [cyan]•[/cyan] Runs automated checkers that score files 0-100 per standard")
     console.print("  [cyan]•[/cyan] Audits all branches with a single command")
@@ -327,7 +332,7 @@ def main() -> int:
             return 0
 
         if args[0] in ["--version", "-V"]:
-            console.print(f"sentry v{VERSION}")
+            console.print(f"sentry v{header_version(__file__)}", highlight=False)
             return 0
 
         command = args[0]

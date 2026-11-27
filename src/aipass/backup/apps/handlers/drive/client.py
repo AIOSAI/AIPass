@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: client.py
 # Description: Google Drive client — auth, folders, file lookup via @api gateway
-# Version: 2.3.0
+# Version: 2.3.1
 # Created: 2026-04-16
-# Modified: 2026-11-18
+# Modified: 2026-11-26
 # =============================================
 
 """Google Drive client.
@@ -122,7 +122,7 @@ class DriveClient:
         try:
             return api_call_with_retry(request, max_retries=max_retries)  # type: ignore[misc]
         except Exception as first_exc:
-            logger.info(f"API call failed, rebuilding thread service: {first_exc}")
+            logger.warning(f"API call failed, rebuilding thread service: {first_exc}")
             try:
                 self._thread_local.service = self._build_thread_service()
                 return api_call_with_retry(request, max_retries=1)  # type: ignore[misc]
@@ -154,11 +154,13 @@ class DriveClient:
             if not self.drive_service:
                 raise DriveError("No Drive service")
             request = self.drive_service.files().get(fileId=folder_id, fields="id,trashed")
+            self._thread_local.failure = None
             result = self._api_call(request)
             if result is None:
-                raise DriveError("no answer")
+                raise DriveError(self._thread_local.failure or "no answer")
             return not result.get("trashed", True)
         except Exception as exc:
+            self.last_error = str(exc)
             logger.info(f"Failed to verify folder {folder_id}: {exc}")
             return None
 

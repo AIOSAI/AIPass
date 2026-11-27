@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Unit tests for skills discovery
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-07
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # Category: skills/tests
 # =============================================
 
@@ -37,7 +37,7 @@ class TestTheListCommand:
     def test_list_help_prints_the_usage_then_the_module_map(self, capsys):
         assert discovery.handle_command("list", ["--help"]) is True
         out = capsys.readouterr().out
-        assert "Skills List - Show every discovered skill" in out
+        assert "skills List - Show every discovered skill" in out
         assert "discovery Module" in out
 
 

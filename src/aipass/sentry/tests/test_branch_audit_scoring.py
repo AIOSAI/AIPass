@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_branch_audit_scoring.py
 # Description: audit_branch's all_files row — which files the average counts
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-09-25
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/audit/branch_audit.py, the all_files row's average."""
@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from aipass.sentry.apps.handlers.aipass_standards import applicability, os_walk_onerror_check, skip_dirs
-from aipass.sentry.apps.handlers.audit import artifact, audit_display, branch_audit
+from aipass.sentry.apps.handlers.audit import artifact, audit_display, branch_audit, grouping
 from aipass.sentry.apps.handlers.bypass import ignore_handler
 
 WALKER = "import os\n\n\ndef files(root):\n    return [d for d, _, _ in os.walk(root)]\n"
@@ -43,7 +43,7 @@ def audit(tmp_path, monkeypatch):
     monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
     monkeypatch.setattr(branch_audit, "scan_branch", lambda path: None)
 
-    def run(checkers, files):
+    def run(checkers, files, pack=None):
         apps = tmp_path / "mybranch" / "apps"
         apps.mkdir(parents=True)
         (apps / "main.py").write_text("pass\n", encoding="utf-8")
@@ -51,7 +51,7 @@ def audit(tmp_path, monkeypatch):
             (apps / name).write_text(body, encoding="utf-8")
         monkeypatch.setattr(branch_audit, "discover_checkers", lambda _pack=None: checkers)
         branch = {"name": "mybranch", "entry_file": str(apps / "main.py"), "path": str(apps.parent)}
-        return branch_audit.audit_branch(branch, [])
+        return branch_audit.audit_branch(branch, [], pack_path=pack)
 
     return run
 
@@ -323,3 +323,77 @@ class TestADiagnosticsCheckerThatCannotLoadIsACrash:
     def test_an_absent_checker_leaves_no_result(self, audit):
         """Control: no diagnostics checker to load (the fixture's None) is no result, not a crash."""
         assert "diagnostics" not in audit({}, {})["results"]
+
+
+def _rules(*verdicts):
+    """A result whose named checks pass or fail as given: ("one", True), ("two", False)."""
+    checks = [{"name": name, "passed": ok, "message": "m"} for name, ok in verdicts]
+    return {"passed": all(ok for _, ok in verdicts), "score": 50, "checks": checks}
+
+
+class TestEveryRuleIsAScoredRowByName:
+    def test_a_rule_failing_in_one_of_two_files_scores_50_beside_its_sibling(self, audit):
+        checker = _checker(
+            {"a.py": _rules(("one", True), ("two", False)), "b.py": _rules(("one", True), ("two", True))}
+        )
+        out = audit({"ux": checker}, {"a.py": "pass\n", "b.py": "pass\n"})
+        assert out["rule_scores"]["ux"]["one"] == 100
+        assert out["rule_scores"]["ux"]["two"] < 100
+
+    def test_a_single_rule_checker_has_no_rule_rows(self, audit):
+        out = audit({"solo": _checker({"a.py": _rules(("only", False))})}, {"a.py": "pass\n"})
+        assert "solo" not in out["rule_scores"]
+
+    def test_every_scored_row_sits_in_exactly_one_group(self, audit):
+        out = audit({"meta": _checker({}), "unlisted": _checker({})}, {})
+        placed = [row for rows in out["groups"].values() for row in rows]
+        assert sorted(placed) == sorted(out["scores"])
+        assert out["groups"]["header"] == ["meta"] and out["groups"][grouping.UNGROUPED] == ["unlisted"]
+
+    def test_a_branch_without_the_pack_consults_pack_registry_and_scores_nothing(self, audit):
+        out = audit({}, {})
+        assert out["results"][grouping.REGISTRY_ROW]["not_applicable"] is True
+        assert grouping.REGISTRY_ROW not in out["scores"]
+
+
+def _pack(tmp_path, groups, files, broken=()):
+    """A checker pack directory: groups.py registering ``groups``, one checker file per name in ``files``."""
+    pack = tmp_path / "demo_standards"
+    pack.mkdir(parents=True)
+    (pack / "groups.py").write_text(
+        f"GROUPS = {groups!r}\nAUDIT_ROWS = frozenset({{'diagnostics'}})\n", encoding="utf-8"
+    )
+    for name in files:
+        body = "X = 1\n" if name in broken else "def check_module(path, bypass_rules=None):\n    return {}\n"
+        (pack / f"{name}_check.py").write_text(body, encoding="utf-8")
+    return pack
+
+
+class TestThePackRegistryFailsAnUnregisteredChecker:
+    def test_sentrys_own_pack_registers_every_checker_once(self):
+        pack = branch_audit.DEFAULT_PACK_DIR
+        assert grouping.registry_problems(pack, set(branch_audit.discover_checkers(pack))) == []
+
+    @pytest.mark.parametrize(
+        "groups, files, broken, problem",
+        [
+            ({"a": ["one"]}, ["one", "two"], (), "two_check.py is registered in no group"),
+            ({"a": ["one", "ghost"]}, ["one"], (), "ghost is registered but no ghost_check.py exists"),
+            ({"a": ["one"], "b": ["one"]}, ["one"], (), "one registered in 2 groups"),
+            ({"Two words": ["one"]}, ["one"], (), "group 'Two words' is not one lowercase word"),
+            ({"a": ["one"]}, ["one"], ("one",), "one_check.py has no check_module or check_branch"),
+        ],
+    )
+    def test_each_disagreement_is_named(self, tmp_path, groups, files, broken, problem):
+        pack = _pack(tmp_path, groups, files, broken)
+        loaded = set(branch_audit.discover_checkers(pack))
+        assert problem in grouping.registry_problems(pack, loaded)
+
+    def test_the_branch_holding_the_pack_scores_the_row_0_and_names_the_file(self, audit, tmp_path):
+        pack = _pack(tmp_path / "mybranch", {"a": ["one"]}, ["one", "two"])
+        out = audit({"one": _checker({}), "two": _checker({})}, {}, pack=pack)
+        assert out["scores"][grouping.REGISTRY_ROW] == 0
+        assert out[f"{grouping.REGISTRY_ROW}_violations"][0]["issues"] == ["two_check.py is registered in no group"]
+
+    def test_an_unknown_group_name_is_known_before_the_audit_runs(self, tmp_path):
+        assert grouping.group_choices(_pack(tmp_path, {"b": [], "a": []}, [])) == ["a", "b", grouping.UNGROUPED]

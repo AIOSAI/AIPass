@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_compass_recall.py
-# Version: 1.6.0
+# Version: 1.7.0
 # Description: Tests for compass recall prompt handler
 # Branch: hooks
 # Created: 2026-07-16
-# Modified: 2026-11-19
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/prompt/compass_recall.py."""
@@ -536,6 +536,16 @@ class TestSeatGate:
         result, _ = self._recall_at(tmp_path, _seat_dir(tmp_path, "devpulse", "manager"))
         assert "[GOOD] #56:" in result["stdout"]
 
+    def test_a_repo_root_is_judged_by_the_seat_aipass_seat_names(self, tmp_path, monkeypatch):
+        fleet = tmp_path / "src" / "aipass"
+        _seat_dir(fleet, "devpulse", "manager")
+        sentry = _seat_dir(fleet, "sentry", "specialist")
+        monkeypatch.delenv("AIPASS_SEAT", raising=False)
+        assert self._recall_at(tmp_path, tmp_path)[0] == {"stdout": "", "exit_code": 0}
+        monkeypatch.setenv("AIPASS_SEAT", "devpulse")
+        assert "[GOOD] #56:" in self._recall_at(tmp_path, tmp_path)[0]["stdout"]
+        assert self._recall_at(tmp_path, sentry)[0] == {"stdout": "", "exit_code": 0}
+
     def test_a_future_manager_hears_recall_with_no_code_change(self, tmp_path):
         result, _ = self._recall_at(tmp_path, _seat_dir(tmp_path, "canary", "manager"))
         assert "[GOOD] #56:" in result["stdout"]
@@ -562,7 +572,7 @@ class TestGovernanceKnobsAndWindow:
 
         assert result["stdout"] == ""
         lines = [c.args[0] % c.args[1:] for c in mock_logger.info.call_args_list]
-        assert "[HOOKS] compass_recall: refused #400: Session budget exhausted (5/5)" in lines
+        assert "[hooks] compass_recall: refused #400: Session budget exhausted (5/5)" in lines
 
     def test_knobs_are_renamed_and_non_numbers_fall_to_defaults(self, tmp_path):
         """Read through handle() (fleet green leg 8), not _governance_config by name:
@@ -590,7 +600,7 @@ class TestGovernanceKnobsAndWindow:
         candidates = [_candidate(312), _candidate(400)]
         assert _recall(tmp_path, "window", candidates, {"max_per_session": 10})["stdout"] == ""
 
-        with patch("aipass.hooks.apps.handlers.lifecycle.compact._get_git_info", return_value=None):
+        with patch("aipass.hooks.apps.handlers.lifecycle.compact._work_still_out", return_value=("window", [])):
             pre_compact({"session_id": "window", "cwd": str(tmp_path)})
         result = _recall(tmp_path, "window", candidates, {"max_per_session": 10})
 

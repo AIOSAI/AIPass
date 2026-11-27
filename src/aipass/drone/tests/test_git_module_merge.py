@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_module_merge.py
 # Description: Tests for the merge, dev-pr and branches lanes — protected-branch merge, return to dev, external repos
-# Version: 1.3.0
+# Version: 1.3.2
 # Created: 2026-10-08
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/merge_plugin.py and the merge, dev-pr, pr and branches handlers it pairs with."""
@@ -27,9 +27,10 @@ from aipass.drone.apps.handlers.git.branches_handler import list_remote_branches
 from aipass.drone.apps.handlers.git.commit_handler import subject_refusal
 from aipass.drone.apps.handlers.git.dev_pr_handler import DEV_PR_OUTCOME
 from aipass.drone.apps.modules.git_module import handle_command
-from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
+from aipass.drone.apps.handlers.git import pr_read_handler
+from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import REFS_JQ, REFUSE_BASE, merge_pr
 
-from .conftest import make_owner_project
+from .conftest import GITHUB_SLUG, github_stand_in, make_owner_project
 
 
 # ===========================================================================
@@ -52,8 +53,8 @@ def merge_bus() -> Iterator[MagicMock]:
         yield bus
 
 
-def _merge_side_effect(head_ref: str, current_branch: str = "main"):
-    """Build a subprocess mock for merge_pr with configurable head ref."""
+def _merge_side_effect(head_ref: str, current_branch: str = "main", base_ref: str = "main"):
+    """Build a subprocess mock for merge_pr with configurable head and base refs."""
 
     def _run(cmd: list[str], **kwargs: object) -> MagicMock:
         r = MagicMock()
@@ -61,8 +62,8 @@ def _merge_side_effect(head_ref: str, current_branch: str = "main"):
         r.stderr = ""
         r.stdout = ""
         if cmd[0] == "gh" and "view" in cmd:
-            if ".headRefName" in cmd:
-                r.stdout = f"{head_ref}\n"
+            if REFS_JQ in cmd:
+                r.stdout = f"{base_ref} {head_ref}\n"
             else:
                 r.stdout = "PR Title\n"
         elif cmd[1:3] == ["rev-parse", "HEAD"]:
@@ -198,6 +199,156 @@ class TestMergeReturnToDev:
         checkout_calls = [c for c in calls if c[1:3] == ["checkout", "dev"]]
         assert len(checkout_calls) == 0
         merge_bus.fire.assert_called_once_with("pr_merged", pr_number="31", title="PR Title")
+
+
+def _merge_calls(base_ref: str, current_branch: str = "main") -> tuple[dict, list[list[str]]]:
+    calls: list[list[str]] = []
+
+    def _capture(cmd: list[str], **kw: object) -> MagicMock:
+        calls.append(list(cmd))
+        return _merge_side_effect("claude/cloud-x", current_branch, base_ref)(cmd, **kw)
+
+    with patch(f"{_MERGE_MOD}.subprocess.run", side_effect=_capture):
+        return merge_pr("830", "devpulse"), calls
+
+
+class TestMergeBranchesOnThePrBase:
+    """The PR's base is read before the merge: dev pulls dev and stays there, main keeps the train, others refuse."""
+
+    @pytest.fixture(autouse=True)
+    def _root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, merge_bus: MagicMock) -> None:
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+    def test_a_dev_base_pr_checks_out_dev_then_pulls_origin_dev_and_never_touches_main(self) -> None:
+        result, calls = _merge_calls("dev", current_branch="main")
+
+        assert result["success"] is True
+        pulls = [c for c in calls if c[1:2] == ["pull"]]
+        assert pulls == [["git", "pull", "--rebase", "origin", "dev"]]
+        assert calls.index(["git", "checkout", "dev"]) < calls.index(pulls[0])
+        assert not [c for c in calls if "main" in c[1:]]
+
+    def test_a_main_base_pr_pulls_the_checked_out_branch_then_returns_to_dev(self) -> None:
+        result, calls = _merge_calls("main", current_branch="main")
+
+        assert result["success"] is True
+        pulls = [c for c in calls if c[1:2] == ["pull"]]
+        assert pulls == [["git", "pull", "--rebase"]]
+        assert calls.index(pulls[0]) < calls.index(["git", "checkout", "dev"])
+
+    @pytest.mark.parametrize(("base", "named"), [("release", "release"), ("", "unreadable")])
+    def test_a_base_neither_dev_nor_main_is_refused_before_the_merge(self, base: str, named: str) -> None:
+        result, calls = _merge_calls(base)
+
+        assert result["success"] is False
+        assert result["message"] == REFUSE_BASE.format(pr="830", base=named)
+        assert [c for c in calls if c[:3] == ["gh", "pr", "merge"] or c[1:2] in (["pull"], ["stash"])] == []
+
+
+_PR_LIST = f"pr list --repo {GITHUB_SLUG} --state {{state}} --limit {pr_read_handler.LIST_LIMIT} --json {pr_read_handler.LIST_FIELDS}"
+_CLOUD = {
+    "number": 830,
+    "headRefName": "claude/cloud-probe-x",
+    "baseRefName": "dev",
+    "state": "OPEN",
+    "title": "docs: cloud probe",
+    "createdAt": "2026-11-26T23:38:19Z",
+    "headRefOid": "9f1c2ab0",
+    "url": "https://github.com/AIOSAI/AIPass/pull/830",
+    "body": "02cfce6b: one-word docstring change",
+    "statusCheckRollup": [{"conclusion": "SUCCESS"}, {"state": "SUCCESS"}],
+}
+_TRAIN = {
+    **_CLOUD,
+    "number": 831,
+    "headRefName": "dev",
+    "baseRefName": "main",
+    "body": "",
+    "statusCheckRollup": [{"conclusion": "SUCCESS"}, {"conclusion": "FAILURE"}],
+}
+_CITIZEN = {
+    **_CLOUD,
+    "number": 832,
+    "headRefName": "citizen/x",
+    "statusCheckRollup": [{"status": "IN_PROGRESS", "conclusion": ""}],
+}
+_QUIET = {**_CLOUD, "number": 833, "headRefName": "claude/quiet", "body": "nothing", "statusCheckRollup": []}
+_ALL = [_CLOUD, _TRAIN, _CITIZEN, _QUIET]
+
+
+def _pr(args: list[str], answers: dict[str, object], calls: list | None = None) -> dict:
+    with patch(
+        "aipass.drone.apps.modules.git_module.subprocess.run",
+        side_effect=github_stand_in(answers, [] if calls is None else calls),
+    ):
+        return handle_command("pr", args)
+
+
+def _numbers(result: dict) -> list[int]:
+    return [row["number"] for row in json.loads(result["stdout"])]
+
+
+class TestPrListAndView:
+    """pr list filters a repo's PRs by base, head prefix, body marker and state; pr view prints one with its body."""
+
+    def test_head_is_a_prefix_and_marker_a_text_the_body_holds_from_a_seat_that_owns_nothing(
+        self, builder_seat: Path
+    ) -> None:
+        answers = {_PR_LIST.format(state="open"): _ALL}
+
+        assert _numbers(_pr(["list", "--head", "claude/", "--json"], answers)) == [830, 833]
+        assert _numbers(_pr(["list", "--marker", "02cfce6b", "--json"], answers)) == [830, 832]
+        assert _numbers(_pr(["list", "--head", "claude/", "--marker", "02cfce6b", "--json"], answers)) == [830]
+        missing = _pr(["list", "--marker", "not-in-any-body"], answers)
+        assert missing["stdout"] == f"No open pull requests match on github.com/{GITHUB_SLUG}."
+
+    def test_base_is_handed_to_gh_and_held_exactly_on_what_comes_back(self, builder_seat: Path) -> None:
+        answers = {_PR_LIST.format(state="open") + " --base dev": _ALL}
+
+        assert _numbers(_pr(["list", "--base", "dev", "--json"], answers)) == [830, 832, 833]
+
+    def test_state_all_is_asked_of_gh_and_any_other_state_is_refused_before_gh(self, builder_seat: Path) -> None:
+        calls: list = []
+        closed = {**_CLOUD, "number": 700, "state": "MERGED"}
+
+        assert _numbers(_pr(["list", "--state", "all", "--json"], {_PR_LIST.format(state="all"): [closed]})) == [700]
+        refused = _pr(["list", "--state", "closed"], {}, calls)
+        assert refused["stderr"] == pr_read_handler.REFUSE_STATE.format(state="closed")
+        assert calls == []
+
+    def test_a_json_row_carries_the_head_commit_and_the_pr_url(self, builder_seat: Path) -> None:
+        """A push to an open PR moves head_sha while head stays: the poll needs the sha to see it."""
+        pushed = {**_CLOUD, "headRefOid": "77aa01de"}
+
+        [row] = json.loads(_pr(["list", "--json"], {_PR_LIST.format(state="open"): [pushed]})["stdout"])
+
+        assert (row["head_sha"], row["url"]) == ("77aa01de", "https://github.com/AIOSAI/AIPass/pull/830")
+
+    def test_each_row_carries_the_ci_conclusion_of_its_head_commit(self, builder_seat: Path) -> None:
+        result = _pr(["list"], {_PR_LIST.format(state="open"): _ALL})
+
+        assert [line.split("  ")[3] for line in result["stdout"].splitlines()] == [
+            "ci success",
+            "ci failure",
+            "ci pending",
+            "ci none",
+        ]
+        assert result["stdout"].splitlines()[0].startswith("#830  claude/cloud-probe-x -> dev  OPEN")
+
+    def test_view_prints_head_base_mergeable_ci_and_the_body(self, builder_seat: Path) -> None:
+        view = f"pr view 830 --repo {GITHUB_SLUG} --json {pr_read_handler.VIEW_FIELDS}"
+        answers = {view: {**_CLOUD, "mergeable": "MERGEABLE"}}
+
+        result = _pr(["view", "830"], answers)
+
+        assert result["stdout"] == (
+            "#830 docs: cloud probe\n"
+            "claude/cloud-probe-x -> dev · OPEN · mergeable MERGEABLE · ci success\n"
+            "head 9f1c2ab0 · https://github.com/AIOSAI/AIPass/pull/830\n\n"
+            "02cfce6b: one-word docstring change"
+        )
+        assert _pr(["view"], answers)["stderr"] == pr_read_handler.REFUSE_VIEW
 
 
 # ===========================================================================

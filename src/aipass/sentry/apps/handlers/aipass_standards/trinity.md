@@ -50,7 +50,7 @@ key_learnings_meta key_learnings[]
 sessions_meta     sessions[]
 ```
 
-**document_metadata** (machine-owned): `document_type`, `document_name` (`<branch>.LOCAL`), `version`, `schema_version`, `created`, `last_updated` (bumped on EVERY write), `managed_by` (exact branch name, one casing across all files), `tags`, `_usage` (the template text, verbatim). No `status` block — health is not stored, it is computed by the checker at run time (a stored copy of a derivable fact is a second source of truth waiting to go stale).
+**document_metadata** (machine-owned): `document_type`, `document_name` (`<branch>.LOCAL`), `version`, `schema_version`, `created`, `managed_by` (exact branch name, one casing across all files), `tags`, `_usage` (the template text, verbatim). No `status` block — health is not stored, it is computed by the checker at run time (a stored copy of a derivable fact is a second source of truth waiting to go stale). No `last_updated` either: every entry carries its own date, and a header stamp has no reader. A file still holding the key is not failed for it while @memory's push strips it fleet-wide.
 
 **Entry shapes** (all lists newest-first, `number` monotonic per type = max+1, never reused).
 
@@ -101,7 +101,7 @@ The pad size is `rollover.defaults.local.todos.count` through @memory's resolver
 **Where the full story goes** — the session entry is a headline, not a container:
 - `summary` holds the headline and nothing more. Extra fields bolted onto a session entry (`findings[]`, `verification`, …) are shape violations, however well-intentioned — the shape is closed.
 - A transferable lesson from the session → its own `key_learnings` entry.
-- The depth is already kept: rollover archives whole entries to @memory's vector store — recall with `drone @memory search "query"` (own branch first, global when needed). Nothing is lost by keeping the entry small.
+- The depth is already kept: rollover archives whole entries to @memory's vector store — recall with `drone @memory search "query"` (a citizen searches its own branch's store; the global store answers @memory and the admin only). Nothing is lost by keeping the entry small.
 - `tags` is the findability hook — tag the session with related files/topics so search lands on it later.
 
 **Forbidden:** any other top-level section; duplicate keys; renamed fields; text fields holding anything but a string; entries without `number` + `date`.
@@ -151,8 +151,7 @@ Read-only, per branch. Fails loud — a field it cannot measure is a VIOLATION, 
 4. **Ordering & numbering** — newest-first, numbers strictly descending, no reuse.
 5. **Char caps** — measured against the CONFIG (not the meta line), on the canonical field, with the band @memory's write gate allows: `entry_limits.tolerance_percent` (an int 0-100; missing or unusable reads as 10). An entry is a violation only when its length passes `max_chars * (100 + tolerance_percent) // 100` (300 -> 330, 205 -> 225); the message names the plain cap (`is 331 chars, cap 300`). An unmeasurable field is a violation.
 6. **Meta lines & `_usage`** — byte-match against what the renderer would produce from config + template (the todos tab's `next #N` slot is read by shape, see above).
-7. **Freshness** — `last_updated` ≥ newest entry date.
-8. **Receipt** — `.template_version.json` present, machine-shaped, `template_versions` matching the gold source.
+7. **Receipt** — `.template_version.json` present, machine-shaped, `template_versions` matching the gold source.
 
 **Retired 2026-09-15 — Todos hygiene** (was group 8, weight 5). It flagged a todo kept as `status: done`. Todos v2 (DPLAN-0345) has no `status` field, so that trophy can only be spelled as a key outside the closed shape, which Entry shapes flags by name; the 5 points moved there. A replacement was measured first and not built: a done-marker read of task text (`DONE`, `✅`, `[x]`, …) found 1 hit in 191 fleet todos, and it was not a trophy. Nor is a pad over its size a violation: the roll cures it, the same as sessions past their keep count.
 
@@ -176,7 +175,6 @@ naming the key. `passport.json` matters for existence only: nothing inside a pas
   the `guidelines` block of observations.json.
 - Receipt — six units: parses, `template_versions` shape, `template_versions` values, and the
   three timestamp/actor strings.
-- Freshness — two units, one per file.
 
 **A clean checkout is not measured.** `.trinity/` and `AIPASS_REGISTRY.json` are both
 gitignored, so a fresh clone (CI) carries no memories. When BOTH are absent — no registry
@@ -219,22 +217,21 @@ make a clone look live. An unreadable fleet directory answers "live installation
 ## Scoring
 
 - **Scope:** per-branch, the three in-scope `.trinity/` files
-- **Score 100:** all eight scan groups clean
+- **Score 100:** all seven scan groups clean
 - **Failure message:** names the file, the rule, and the offending entry numbers — up to 3 samples
 
 **Group weights** (set by @sentry at build time, per the contract's proposal — shape/type
-heaviest because it breaks the machinery, freshness lightest):
+heaviest because it breaks the machinery):
 
 | Group | Weight |
 |---|---|
-| Entry shapes | 30 |
+| Entry shapes | 33 |
 | Top-level keys | 15 |
 | Ordering & numbering | 12 |
 | Char caps | 12 |
 | File set | 10 |
 | Meta lines & `_usage` | 10 |
 | Receipt | 8 |
-| Freshness | 3 |
 
 Final score = weighted sum of each group's own 0-100 subscore, rounded, and never rounded up
 to 100 while any group is below 100. Subscores are proportional

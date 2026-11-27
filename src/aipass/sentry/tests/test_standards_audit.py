@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_standards_audit.py
 # Description: Unit tests for the standards_audit module and the sentry-audit CI gate
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-24
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/standards_audit.py and the sentry-audit CI gate."""
@@ -520,6 +520,60 @@ def test_every_valid_audit_invocation_still_runs(monkeypatch, argv):
     assert standards_audit.handle_command("audit", argv) is True
     assert not _refused_argv(), f"{argv} is documented usage and must not be refused"
     assert audit_mock.call_count == 1, f"{argv} must still audit the branch"
+
+
+def _wire_grouped(monkeypatch, *names):
+    """Fake branches whose results carry the cli and header groups."""
+    audit_mock = _wire_branches(monkeypatch, *names)
+    audit_mock.return_value = {
+        "branch": {"name": names[0]},
+        "scores": {"cli": 100, "meta": 100},
+        "average": 100,
+        "groups": {"cli": ["cli"], "header": ["meta"]},
+    }
+    return audit_mock
+
+
+def test_group_reaches_the_branch_summary(monkeypatch):
+    """Mutant: --group not passed to print_branch_summary in apps/modules/standards_audit.py — killed."""
+    _wire_grouped(monkeypatch, "FLOW")
+    assert standards_audit.handle_command("audit", ["aipass", "@flow", "--group", "cli", "--no-artifact"]) is True
+    summary = cast(MagicMock, standards_audit.print_branch_summary)
+    assert summary.call_args.kwargs["group"] == "cli"
+
+
+def test_group_reaches_the_fleet_summary(monkeypatch):
+    """Mutant: --group not passed to print_system_summary in apps/modules/standards_audit.py — killed."""
+    _wire_grouped(monkeypatch, "FLOW", "PRAX")
+    assert standards_audit.handle_command("audit", ["aipass", "--group=header", "--no-artifact"]) is True
+    summary = cast(MagicMock, standards_audit.print_system_summary)
+    assert summary.call_args.kwargs["group"] == "header"
+
+
+def test_an_unknown_group_refuses_with_the_group_list_and_code_7(monkeypatch):
+    """Mutant: the unknown-group check removed in apps/modules/standards_audit.py — killed."""
+    _wire_grouped(monkeypatch, "FLOW")
+    refused = _refuse(["aipass", "@flow", "--group", "nope", "--no-artifact"])
+    assert (refused.code, refused.token) == (refusal.EXIT_UNKNOWN_ARGUMENT, "nope")
+    call = cast(MagicMock, standards_audit.error).call_args
+    assert "Unknown group: 'nope'" in call.args[0]
+    assert "Available groups: cli, header." in call.kwargs["suggestion"]
+    assert cast(MagicMock, standards_audit.print_branch_summary).call_count == 0
+
+
+def test_group_with_no_name_refuses_and_audits_nothing(monkeypatch):
+    """Mutant: a trailing --group accepted in apps/handlers/audit/argv.py — killed."""
+    audit_mock = _wire_grouped(monkeypatch, "FLOW")
+    refused = _refuse(["aipass", "@flow", "--group"])
+    assert refused.code == refusal.EXIT_UNKNOWN_ARGUMENT
+    assert audit_mock.call_count == 0
+
+
+def test_help_documents_the_group_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    """Mutant: the --group line dropped from print_help in apps/modules/standards_audit.py — killed."""
+    capsys.readouterr()
+    standards_audit.print_help()
+    assert "--group <name>" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("argv", [[], ["--help"], ["-h"], ["help"]])

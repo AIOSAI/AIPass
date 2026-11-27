@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_passport_birth_schema.py
 # Description: The passport 2.0 contract AT BIRTH — block order, key order, new fields
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-28
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/core.py — the passport 2.0 contract at birth."""
@@ -34,7 +34,6 @@ EXPECTED_KEY_ORDER = {
         "version",
         "schema_version",
         "created",
-        "last_updated",
         "managed_by",
         "tags",
     ],
@@ -55,6 +54,7 @@ EXPECTED_KEY_ORDER = {
         "registry_path",
         "communications",
         "memory",
+        "cloud_environment_id",
     ],
     "identity": [
         "citizen_class",
@@ -71,6 +71,19 @@ EXPECTED_KEY_ORDER = {
 DROPPED_FIELDS = [
     ("citizenship", "owner"),
     ("document_metadata", "note"),
+    ("document_metadata", "last_updated"),
+]
+
+# local.json and observations.json share one header; last_updated is no part of it.
+MEMORY_HEADER_KEYS = [
+    "document_type",
+    "document_name",
+    "version",
+    "schema_version",
+    "created",
+    "managed_by",
+    "tags",
+    "_usage",
 ]
 
 
@@ -162,6 +175,12 @@ class TestNewbornPassportFields:
         The registry entry's sealed owner flag is the only place that answers ownership."""
         assert field not in _mint(tmp_path)[block]
 
+    @pytest.mark.parametrize("memory_file", ["local.json", "observations.json"])
+    def test_a_newborn_memory_file_carries_the_eight_header_fields(self, tmp_path, memory_file):
+        _mint(tmp_path)
+        document = json.loads((tmp_path / "newborn" / ".trinity" / memory_file).read_text(encoding="utf-8"))
+        assert list(document["document_metadata"]) == MEMORY_HEADER_KEYS
+
     def test_top_level_family_is_gone(self, tmp_path):
         """The third drop, checked separately because it was a whole block."""
         assert "family" not in _mint(tmp_path)
@@ -169,6 +188,10 @@ class TestNewbornPassportFields:
     def test_git_branch_is_the_literal_dev(self, tmp_path):
         """No more work/{{branchname}} fossils — one rule, one branch name."""
         assert _mint(tmp_path)["branch_info"]["git_branch"] == "dev"
+
+    def test_cloud_environment_id_ships_empty(self, tmp_path):
+        """The cloud lane reads "" as absent; the owner writes the id once the environment exists."""
+        assert _mint(tmp_path)["citizenship"]["cloud_environment_id"] == ""
 
     def test_names_render_lowercase(self, tmp_path):
         """Casing: branch_name / managed_by / document_name are lowercase now.

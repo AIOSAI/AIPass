@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ratchet.py
 # Description: the execution ratchet - pick one branch a week, probe it, record the point
-# Version: 1.2.2
+# Version: 1.3.1
 # Created: 2026-10-12
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -56,7 +56,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     if wants_help(None, args):
-        _print_help()
+        print_help()
         return True
 
     try:
@@ -102,8 +102,8 @@ def _parse_budget(rest: List[str]) -> int:
 
 
 def _branch_names() -> List[str]:
-    """Every citizen the audit-tests lane can resolve, as the registry spells it."""
-    return sorted(runner.branch_paths())
+    """Every citizen the audit-tests lane can resolve, by the lowercase name the series and archive store."""
+    return sorted(name.lower() for name in runner.branch_paths())
 
 
 def _pick() -> None:
@@ -229,7 +229,7 @@ def _print_failing(document: dict) -> None:
         console.print(f"    [dim]... {len(failing) - FAILING_SHOWN} more in the archive[/dim]")
 
 
-def _print_help() -> None:
+def print_help() -> None:
     """Usage, and what this phase does not do yet."""
     console.print()
     console.print("[bold cyan]sentry ratchet[/bold cyan] - one branch a week, probed and recorded")
@@ -237,7 +237,7 @@ def _print_help() -> None:
     console.print("[yellow]Usage:[/yellow]")
     console.print("  drone @sentry ratchet pick                the next branch and why; runs nothing")
     console.print("  drone @sentry ratchet run                 pick, probe (--pseudo-tested), record")
-    console.print("  drone @sentry ratchet run --budget <s>    campaign ceiling, default 1800")
+    console.print("  drone @sentry ratchet run --budget <s>    campaign ceiling, default 1800", highlight=False)
     console.print("  drone @sentry ratchet record @branch      record the probe already in its artifact")
     console.print()
     console.print("[yellow]Writes[/yellow]")
@@ -246,6 +246,10 @@ def _print_help() -> None:
     console.print()
     console.print("[yellow]Not yet[/yellow]")
     console.print("  hand-off, verify, trend and the Sunday mail")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @sentry ratchet pick[/green]")
+    console.print("  [green]drone @sentry ratchet run --budget 600[/green]")
     console.print()
 
 

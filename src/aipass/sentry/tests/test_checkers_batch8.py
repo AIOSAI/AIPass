@@ -1,18 +1,19 @@
 # =================== META ====================
 # Name: test_checkers_batch8.py
-# Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
-# Version: 1.2.3
+# Description: Tests: handlers, log_handler, log_level, log_structure, lowercase_name, meta, naming, permission_flags
+# Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
-"""Tests for apps/handlers/aipass_standards/handlers_check.py and six sibling checkers (batch 8)."""
+"""Tests for apps/handlers/aipass_standards/handlers_check.py and seven sibling checkers (batch 8)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that the seven checker modules under test parse and import
 # sentry: no-test-needed(shared) — is_bypassed's own matching rules; tests/test_bypass.py
 # sentry: no-test-needed(stdlib) — ast.parse's parsing; the checkers only walk the tree it returns
 
+import json
 from pathlib import Path
 from typing import List
 
@@ -32,7 +33,7 @@ from aipass.sentry.apps.handlers.aipass_standards.log_level_check import (
     check_command_routing_level,
     check_error_not_user_input,
 )
-from aipass.sentry.apps.handlers.aipass_standards import log_structure_check
+from aipass.sentry.apps.handlers.aipass_standards import log_structure_check, lowercase_name_check
 from aipass.sentry.apps.handlers.aipass_standards.log_structure_check import check_branch_info
 from aipass.sentry.apps.handlers.aipass_standards.meta_check import (
     check_meta_placement,
@@ -1175,3 +1176,147 @@ def test_constant_naming_reads_code_after_a_docstring_holding_the_other_delimite
     result = check_constant_naming("'''\n\"\"\"\n'''\nlower_x = 1\n")
     assert result is not None
     assert result["message"] == "Non-UPPER_CASE constants: lower_x (line 4)"
+
+
+# ---- lowercase_name: the system speaks lowercase -------------------------------------------
+
+
+def _citizen(tmp_path: Path, row_name: str = "alpha", row_path: str = "src/alpha", **fields: str) -> Path:
+    """A project holding one registered branch, every stored name lowercase unless a field says otherwise."""
+    project = tmp_path / "proj"
+    branch = project / "src" / "alpha"
+    for folder in ("apps", ".trinity", "artifacts"):
+        (branch / folder).mkdir(parents=True)
+    rows = [{"name": row_name, "path": row_path}, {"name": "cli", "path": "src/cli"}]
+    registry = {"metadata": {"name": "PROJ"}, "branches": rows}
+    (project / "PROJ_REGISTRY.json").write_text(json.dumps(registry, indent=2), encoding="utf-8")
+    passport = {"branch_info": {"branch_name": fields.get("passport", "alpha")}}
+    (branch / ".trinity" / "passport.json").write_text(json.dumps(passport, indent=2), encoding="utf-8")
+    certificate = {"name": "ALPHA Birth Certificate", "owner": fields.get("certificate", "alpha")}
+    (branch / "artifacts" / "birth_certificate.json").write_text(json.dumps(certificate, indent=2), encoding="utf-8")
+    dashboard = {"branch": fields.get("dashboard", "alpha")}
+    (branch / "DASHBOARD.local.json").write_text(json.dumps(dashboard, indent=2), encoding="utf-8")
+    (branch / "apps" / "alpha.py").write_text(fields.get("code", "VALUE = 1\n"), encoding="utf-8")
+    return branch
+
+
+def _messages(result: dict) -> str:
+    """Every failing check's message, one per line."""
+    return "\n".join(check["message"] for check in result["checks"] if not check["passed"])
+
+
+class TestLowercaseNameRegistryAndData:
+    def test_a_branch_storing_every_name_in_lowercase_passes_with_100(self, tmp_path):
+        result = lowercase_name_check.check_branch(str(_citizen(tmp_path)))
+        assert (result["passed"], result["score"], _messages(result)) == (True, 100, "")
+
+    def test_a_capital_registry_row_fails_naming_the_row_and_the_cure(self, tmp_path):
+        result = lowercase_name_check.check_branch(str(_citizen(tmp_path, row_name="ALPHA")))
+        assert (result["passed"], result["score"]) == (False, 0)
+        assert "PROJ_REGISTRY.json:7 row 'ALPHA': name is not lowercase" in _messages(result)
+        assert "sync-registry REGISTRY --lowercase" in _messages(result)
+
+    def test_an_absolute_registry_path_fails_and_the_project_name_is_never_read(self, tmp_path):
+        branch = tmp_path / "proj" / "src" / "alpha"
+        result = lowercase_name_check.check_branch(str(_citizen(tmp_path, row_path=str(branch))))
+        assert "path " + str(branch) + " is absolute" in _messages(result)
+        assert "PROJ" not in _messages(result).replace("PROJ_REGISTRY", "")
+
+    @pytest.mark.parametrize(
+        "field, where, cure",
+        [
+            ("passport", ".trinity/passport.json:3 branch_name 'Alpha'", "sync-registry"),
+            ("certificate", "artifacts/birth_certificate.json:3 owner 'Alpha'", "sync-registry"),
+            ("dashboard", "DASHBOARD.local.json:2 branch 'Alpha'", "dashboard refresh @alpha"),
+        ],
+    )
+    def test_a_capital_stored_name_field_fails_naming_its_file_line_and_cure(self, tmp_path, field, where, cure):
+        result = lowercase_name_check.check_branch(str(_citizen(tmp_path, **{field: "Alpha"})))
+        assert result["passed"] is False
+        assert where in _messages(result) and cure in _messages(result)
+
+    @pytest.mark.parametrize(
+        "rel, failing",
+        [
+            ("../../PROJ_REGISTRY.json", "PROJ_REGISTRY.json does not parse"),
+            ("DASHBOARD.local.json", "DASHBOARD.local.json: DASHBOARD.local.json does not parse"),
+        ],
+    )
+    def test_a_file_that_does_not_parse_fails_instead_of_reading_as_empty(self, tmp_path, rel, failing):
+        branch = _citizen(tmp_path, row_name="ALPHA", dashboard="ALPHA")
+        (branch / rel).write_text('{"name": "ALPHA"', encoding="utf-8")
+        result = lowercase_name_check.check_branch(str(branch))
+        assert result["passed"] is False and failing in _messages(result)
+
+    def test_markdown_is_never_opened_though_it_spells_every_name_in_capitals(self, tmp_path, monkeypatch):
+        branch = _citizen(tmp_path)
+        for rel in ("README.md", "templates/citizen/README.md", ".trinity/notes.md", "apps/notes.md"):
+            (branch / rel).parent.mkdir(parents=True, exist_ok=True)
+            (branch / rel).write_text("# ALPHA {{BRANCHNAME}}\n", encoding="utf-8")
+        opened: List[str] = []
+        real_read_text = lowercase_name_check.read_text
+        monkeypatch.setattr(
+            lowercase_name_check, "read_text", lambda path, **kw: opened.append(str(path)) or real_read_text(path, **kw)
+        )
+
+        result = lowercase_name_check.check_branch(str(branch))
+
+        assert result["passed"] is True
+        assert opened and not [path for path in opened if path.endswith(".md")]
+
+
+class TestLowercaseNameCode:
+    @pytest.mark.parametrize(
+        "code, line",
+        [
+            ("def f(caller, console):\n    console.print(f'[CALLER:{caller.upper()}]')\n", 2),
+            ("def f(branch):\n    name = branch.title()\n    return name\n", 2),
+            ("def f(logger):\n    logger.info('[ALPHA] command routed')\n", 2),
+            ("BANNER = '[bold cyan]ALPHA - Test Citizen[/bold cyan]'\n", 1),
+            ("HELP = 'drone @alpha status ALPHA'\n", 1),
+            ("MESSAGE = (\n    'the first line '\n    'then ALPHA speaks'\n)\n", 3),
+            ("def f(logger):\n    logger.error(f'[CLI] module error: {logger}')\n", 2),
+            ("VERSION_LINE = 'CLI v1.0.0'\n", 1),
+            ("EXAMPLE = 'errors list --component=CLI'\n", 1),
+            ("def f(branch, names):\n    wanted = branch.upper()\n    print(wanted)\n    return wanted in names\n", 2),
+            ("def f(branch):\n    label = branch.upper()\n    return None\n", 2),
+        ],
+    )
+    def test_an_agent_name_printed_logged_or_forced_to_capitals_fails_at_its_line(self, tmp_path, code, line):
+        module = _citizen(tmp_path, code=code) / "apps" / "alpha.py"
+        result = lowercase_name_check.check_module(str(module))
+        assert (result["passed"], result["score"]) == (False, 0)
+        assert f"apps/alpha.py:{line} " in _messages(result)
+        assert lowercase_name_check.check_branch(str(module.parents[1]))["passed"] is False
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            'def f():\n    """ALPHA documents itself here."""\n',
+            "# ALPHA in a comment\nVALUE = 1\n",
+            "_ALPHA_ROOT = 1\n",
+            "PATH = 'ALPHA_REGISTRY.json'\n",
+            "TEXT = 'a PUBLIC CLI where each CLI runs'\n",
+            "def f(branch, target):\n    return branch.upper() == target\n",
+            "def f(level):\n    return level.upper()\n",
+            "TITLE = 'Alpha - Test Citizen'\n",
+            "SQL = 'CREATE TRIGGER x AFTER INSERT'\n",
+            "def f(branch, names):\n    wanted = branch.upper()\n    return [n for n in names if n.upper() == wanted]\n",
+        ],
+    )
+    def test_prose_identifiers_comparisons_and_common_nouns_pass(self, tmp_path, code):
+        module = _citizen(tmp_path, code=code) / "apps" / "alpha.py"
+        assert _messages(lowercase_name_check.check_module(str(module))) == ""
+
+    def test_a_template_file_outside_the_code_is_not_judged(self, tmp_path):
+        branch = _citizen(tmp_path)
+        (branch / "templates" / "citizen").mkdir(parents=True)
+        (branch / "templates" / "citizen" / "passport.json").write_text('{"name": "{{BRANCHNAME}}"}', encoding="utf-8")
+        assert _messages(lowercase_name_check.check_branch(str(branch))) == ""
+
+    def test_a_lines_bypass_row_waives_that_one_site_and_no_other(self, tmp_path):
+        code = "def f(branch):\n    a = branch.upper()\n    return a, branch.upper()\n"
+        module = _citizen(tmp_path, code=code) / "apps" / "alpha.py"
+        rule = {"standard": "lowercase_name", "file": "src/alpha/apps/alpha.py", "lines": [2], "reason": "screen"}
+        messages = _messages(lowercase_name_check.check_module(str(module), bypass_rules=[rule]))
+        assert "alpha.py:3 " in messages and "alpha.py:2 " not in messages

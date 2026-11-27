@@ -4,7 +4,6 @@
 
 **Purpose:** The logging and monitoring backbone of AIPass. Every branch imports one logger and its lines route themselves; on top of that sit Mission Control, the branch dashboards, and the audits that catch a log growing out of control.
 **Module:** `aipass.prax`
-**Version:** 2.4.0
 
 ---
 
@@ -57,6 +56,9 @@ down here and cannot go stale:
 
 - `drone @prax` — the self-map: every discovered module, with the version.
 - `drone @prax --help` — the full command surface: every verb, its arguments and its flags.
+- `drone @prax --version` — `prax v<number>`, read from the `# Version` header of `apps/prax.py`; the header is the only version.
+
+A command module that fails to import stops `drone @prax` with the import error, so a broken module is seen rather than its commands quietly missing.
 
 Each module carries its own reference too, reached by adding `--help` to the verb.
 
@@ -131,8 +133,8 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 - `aipass.trigger` — event firing. The logging path never touches it; the monitor and
   log-health modules import it at call time.
 - Python stdlib: `pathlib`, `logging`, `threading`, `argparse`, `importlib`.
-- **@drone is not an import.** Prax never imports drone; it parses the `[CALLER:BRANCH]`
-  marker drone writes into its own log lines, and reads `AIPASS_CALLER_CWD` from the
+- **@drone is not an import.** Prax never imports drone; it parses the `[CALLER:<branch>]`
+  marker drone writes into its own log lines (in either case), and reads `AIPASS_CALLER_CWD` from the
   environment. The coupling is a text format, not a dependency.
 - The json service imports stdlib only, on purpose: a fresh interpreter can reach
   `json_handler` without loading a third-party package.

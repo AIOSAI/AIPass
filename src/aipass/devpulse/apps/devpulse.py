@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: devpulse.py
 # Description: Entry point for devpulse branch — auto-discovers modules
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-03-07
-# Modified: 2026-10-22
+# Modified: 2026-11-25
 # =============================================
 
 """
-DEVPULSE Branch - Main Orchestrator
+devpulse branch - main orchestrator
 """
 
 import difflib
@@ -17,12 +17,11 @@ from pathlib import Path
 from typing import Any
 
 from aipass.prax import logger
-from aipass.cli import console, err_console, error, resolve_exit, reset_command_state, warning
+from aipass.cli import console, err_console, error, header_version, resolve_exit, reset_command_state, warning
 
 # The self-map and --help go to stdout like every branch's; never alias console to err_console here.
 
 # The one version source in the branch: keep it in step with the header's Version line.
-VERSION = "1.0.4"
 
 MODULES_DIR = Path(__file__).parent / "modules"
 
@@ -43,7 +42,7 @@ def discover_modules() -> list[Any]:
             module = importlib.import_module(module_name)
         except Exception as e:
             # Said on stderr, not only logged: a swallowed import error read as "Unknown command" at the prompt.
-            logger.error(f"[DEVPULSE] Failed to load module {module_name}: {e}")
+            logger.error(f"[devpulse] Failed to load module {module_name}: {e}")
             warning(f"module {file_path.stem} failed to load: {type(e).__name__}: {e}")
             continue
         if hasattr(module, "handle_command"):
@@ -55,9 +54,9 @@ def discover_modules() -> list[Any]:
 def print_introspection():
     """Print branch introspection — discovered modules and capabilities."""
     modules = discover_modules()
-    console.print("[bold cyan]DEVPULSE[/bold cyan] — Orchestration Hub")
+    console.print("[bold cyan]devpulse[/bold cyan] — Orchestration Hub")
     console.print("[dim]The user's primary collaborator — design, plan, dispatch, track[/dim]")
-    console.print(f"  Modules discovered: {len(modules)}")
+    console.print(f"  Modules discovered: {len(modules)}", highlight=False)
     for module in modules:
         name = module.__name__.split(".")[-1]
         desc = (module.__doc__ or "").strip().split("\n")[0] if module.__doc__ else "No description"
@@ -69,7 +68,7 @@ def print_introspection():
 def print_help():
     """Print CLI help — usage instructions and available commands."""
     modules = discover_modules()
-    console.print("[bold cyan]DEVPULSE[/bold cyan] — Usage")
+    console.print("[bold cyan]devpulse[/bold cyan] — Usage")
     console.print()
     console.print("  drone @devpulse <command> \\[args...]")
     console.print()
@@ -87,7 +86,9 @@ def print_help():
     console.print('  drone @devpulse compass query "registry"     Search rated decisions')
     console.print("  drone @devpulse watchdog agent @flow         Watch a dispatched agent")
     console.print("  drone @devpulse feedback inbox               Check cross-project feedback")
-    console.print("  drone @devpulse release-notify v2.8.4        Mail every project manager a release")
+    console.print(
+        "  drone @devpulse release-notify <version>     Mail every project manager a release", highlight=False
+    )
 
 
 def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
@@ -99,7 +100,7 @@ def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
         except Exception as e:
             # A module that RAISED is a defect in that module, not an unknown command: say so, not "Unknown".
             name = module.__name__.split(".")[-1]
-            logger.error(f"[DEVPULSE] Module {name} error on '{command}': {e}")
+            logger.error(f"[devpulse] Module {name} error on '{command}': {e}")
             error(
                 f"{name} failed on '{command}': {type(e).__name__}: {e}",
                 suggestion=f"A defect in the {name} module, not an unknown command. Run: drone @devpulse {name} --help",
@@ -123,7 +124,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command in ["--version", "-V"]:
-        console.print(f"devpulse {VERSION}")
+        console.print(f"devpulse v{header_version(__file__)}", highlight=False)
         return True
 
     return route_command(command, args, modules)

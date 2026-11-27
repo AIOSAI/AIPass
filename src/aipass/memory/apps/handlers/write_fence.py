@@ -1,15 +1,12 @@
 # =================== AIPass ====================
 # Name: write_fence.py
-# Description: The one fence on memory's writes — @memory may read another project, never write one
-# Version: 1.0.1
+# Description: The one fence on memory's writes — services write where they serve: the AIPass root and declared external branches
+# Version: 1.1.1
 # Created: 2026-09-18
-# Modified: 2026-10-17
+# Modified: 2026-11-23
 # =============================================
 
-"""The write fence, defined once.
-
-Containment on resolved paths, never startswith: /x/aipass_other is not in /x/aipass.
-"""
+"""The write fence, defined once: containment on resolved paths, never startswith."""
 
 from pathlib import Path
 
@@ -29,16 +26,33 @@ def outside_root(target: Path, root: Path) -> str | None:
         return f"{target} refused: the AIPass root resolved to the filesystem root {root}, which fences nothing"
     if target == root or root in target.parents:
         return None
-    return f"{target} is outside the AIPass root {root} — @memory may read another project, never write one"
+    return f"{target} is outside the AIPass root {root}"
+
+
+def _in_declared_branch(target: Path, home: Path) -> bool:
+    """Is resolved *target* in a declared external branch, or in that branch's own todo backlog dir?"""
+    from aipass.memory.apps.handlers.monitor import registry_scope
+    from aipass.memory.apps.handlers.rollover import todo_roll
+
+    for item in registry_scope.external_branches(home):
+        backups = todo_roll.project_root_of(item["path"], home) / todo_roll.BACKUP_DIR
+        allowed = [Path(item["path"]).resolve(), (backups / todo_roll.TODO_DIR / item["name"]).resolve()]
+        if any(target == spot or spot in target.parents for spot in allowed):
+            return True
+    return False
 
 
 def fence_write(target: str | Path, *, lane: str) -> str | None:
-    """Refuse a write that would land outside the AIPass root, loudly."""
+    """Refuse, loudly, a write that lands outside the AIPass root and every declared external branch."""
     home = Path(ROOT)
     try:
         resolved = Path(target).resolve()
         home = home.resolve()
         refusal = outside_root(resolved, home)
+        if refusal is not None and home != home.parent:
+            if _in_declared_branch(resolved, home):
+                return None
+            refusal += " or any declared external branch — services write where they serve, nowhere else"
     except (OSError, RuntimeError) as exc:
         resolved = Path(target)
         refusal = f"{target} cannot be resolved against the AIPass root {home} ({type(exc).__name__}) — refused"

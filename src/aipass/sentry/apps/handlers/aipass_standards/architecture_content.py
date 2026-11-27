@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: architecture_content.py
 # Description: Architecture Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -52,10 +52,10 @@ def get_architecture_standards() -> str:
         "     [red]✗[/red] Handlers import modules (circular dependency)",
         "",
         "  2. [bold red]CRITICAL:[/bold red] [bold]Foundation services CANNOT import each other[/bold]",
-        "     CLI ↔ Prax = [red]SYSTEM-WIDE BREAKAGE[/red] (circular dependency)",
-        "     [green]✓[/green] Branches import CLI + Prax",
-        "     [red]✗[/red] CLI imports Prax",
-        "     [red]✗[/red] Prax imports CLI",
+        "     cli ↔ prax = [red]SYSTEM-WIDE BREAKAGE[/red] (circular dependency)",
+        "     [green]✓[/green] Branches import cli + prax",
+        "     [red]✗[/red] cli imports prax",
+        "     [red]✗[/red] prax imports cli",
         "",
         "  3. [bold]Command Routing: handle_command() pattern[/bold]",
         "     [yellow]Rule:[/yellow] Each module implements [dim]handle_command(command, args)[/dim]",

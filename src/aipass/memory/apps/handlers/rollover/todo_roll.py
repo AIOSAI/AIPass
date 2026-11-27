@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: todo_roll.py
 # Description: Todo pad roll-off to .backup/todo/<branch>/backlog.json, file only, verified before the pad is pruned
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-09-15
-# Modified: 2026-11-21
+# Modified: 2026-11-23
 # =============================================
 
 """Todo Roll Handler (DPLAN-0345 row 1, FPLAN-0590)
@@ -143,31 +143,51 @@ def _valid_dir_name(name: str) -> bool:
 
 
 def _display(path: Path) -> str:
-    """The path relative to the repo root when it sits inside it, else in full - posix separators either way."""
+    """The path relative to the root that holds its ``.backup`` (AIPass's or an external project's), else in full."""
+    path = Path(path)
     try:
-        return Path(path).relative_to(_find_repo_root()).as_posix()
+        return path.relative_to(_find_repo_root()).as_posix()
     except ValueError:
-        logger.debug(f"[todo_roll] {path} sits outside the repo root - shown in full")
-        return Path(path).as_posix()
+        if len(path.parents) > 3 and path.parents[2].name == BACKUP_DIR:
+            return path.relative_to(path.parents[3]).as_posix()
+        logger.debug(f"[todo_roll] {path} sits outside every backup root - shown in full")
+        return path.as_posix()
+
+
+def project_root_of(branch_path: Path, home: Path | None = None) -> Path:
+    """The declared root holding an external branch: the folder with its ``*_REGISTRY.json``."""
+    spot = _resolved(Path(branch_path))
+    for root in registry_scope.declared_roots(home if home is not None else _find_repo_root()):
+        if spot == root or root in spot.parents:
+            return root
+    raise registry_scope.RegistryUnreadable(f"{branch_path} sits in no declared root")
+
+
+def _own_backup_root(item: dict[str, Any]) -> Path | None:
+    """An external citizen's backups live in its own project; None for core and resident branches."""
+    if item.get("residency") == registry_scope.RESIDENCY_EXTERNAL:
+        return project_root_of(item["path"]) / BACKUP_DIR
+    return None
 
 
 def backlog_path_for(branch_dir: str, backup_root: Path | None = None) -> Path:
-    """The backlog file for one branch DIRECTORY name (not the registry name)."""
-    root = Path(backup_root) if backup_root is not None else _find_repo_root() / BACKUP_DIR
-    return root / TODO_DIR / branch_dir / BACKLOG_FILE
+    """The backlog file for one branch DIRECTORY name (not the registry name), in the project that holds it.
+
+    Raises RegistryUnreadable when no *backup_root* is given and the scope cannot be read.
+    """
+    if backup_root is None:
+        named = [item for item in in_scope_branches() if str(item.get("name", "")).lower() == branch_dir.lower()]
+        backup_root = (_own_backup_root(named[0]) if len(named) == 1 else None) or _find_repo_root() / BACKUP_DIR
+    return Path(backup_root) / TODO_DIR / branch_dir / BACKLOG_FILE
 
 
 def in_scope_branches(root: Path | None = None) -> list[dict[str, Any]]:
-    """Core citizens and passport-declared residents, named by directory; no external tier (this lane writes).
+    """Core citizens, passport-declared residents and declared externals, named by directory.
 
     strict: without the core rows a resident sharing a citizen's directory name would win the backlog path.
     """
     base = Path(root) if root is not None else _find_repo_root()
-    return [
-        item
-        for item in registry_scope.fleet_branches(base, name_from="path", strict=True)
-        if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL
-    ]
+    return registry_scope.fleet_branches(base, name_from="path", strict=True)
 
 
 def _no_target(error: str | None = None, reason: str | None = None) -> dict[str, Any]:
@@ -216,7 +236,8 @@ def _from_scope(item: dict[str, Any], scope: list[dict[str, Any]], backup_root: 
         return _no_target(error=collision)
     branch_path = Path(item["path"])
     local = branch_path / TRINITY_DIR / LOCAL_FILE
-    return _target(str(item["name"]), branch_path, local, backlog_path_for(str(item["name"]), backup_root))
+    root = backup_root if backup_root is not None else _own_backup_root(item) or _find_repo_root() / BACKUP_DIR
+    return _target(str(item["name"]), branch_path, local, backlog_path_for(str(item["name"]), root))
 
 
 def _resolved(path: Path) -> Path:
@@ -336,7 +357,7 @@ def _write_document(path: Path, document: dict[str, Any]) -> str | None:
 
 
 def _ensure_parent(path: Path) -> str | None:
-    """Create *path*'s directory; returns the failure, or None. Never outside the AIPass root."""
+    """Create *path*'s directory; returns the failure, or None. Fenced by ``write_fence``."""
     refusal = write_fence.fence_write(path, lane="todo_roll")
     if refusal is not None:
         return refusal

@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: update.py
-# Description: DAEMON Status Digest Module
-# Version: 1.1.0
+# Description: daemon Status Digest Module
+# Version: 1.1.2
 # Created: 2026-01-29
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """
-Returns digest of DAEMON activity for check-ins.
+Returns digest of daemon activity for check-ins.
 """
 
 import sys
@@ -15,7 +15,7 @@ from typing import Dict, Any, List
 
 from aipass.prax import logger
 
-from aipass.cli import console, error, warning
+from aipass.cli import console, error, escape, warning
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.update.data_loader import (
@@ -39,20 +39,21 @@ def print_introspection():
     console.print()
     console.print("[bold cyan]update Module[/bold cyan]")
     console.print()
-    console.print("[dim]Returns digest of DAEMON activity for check-ins[/dim]")
+    console.print("[dim]Returns digest of daemon activity for check-ins[/dim]")
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  handlers/update/")
     console.print(
         "  [cyan]*[/cyan] data_loader.py [dim](load_inbox, categorize_messages, get_escalations — inbox data)[/dim]"
     )
+    console.print("Run [green]drone @daemon update --help[/green] for usage information")
     console.print()
 
 
 def _print_digest(inbox_data: Dict[str, Any]) -> None:
     """Print formatted digest to console."""
     console.print()
-    _header("DAEMON Status Digest")
+    _header("daemon Status Digest")
     console.print()
 
     messages: List[Dict[str, Any]] = inbox_data.get("messages", [])
@@ -60,8 +61,8 @@ def _print_digest(inbox_data: Dict[str, Any]) -> None:
 
     console.print("[bold cyan]INBOX STATUS[/bold cyan]")
     console.print(f"  Total messages: {inbox_data.get('total_messages', 0)}")
-    console.print(f"  Unread (new):   {len(categories['new'])}")
-    console.print(f"  Opened:         {len(categories['opened'])}")
+    console.print(f"  Unread (new):   {len(categories['new'])}", highlight=False)
+    console.print(f"  Opened:         {len(categories['opened'])}", highlight=False)
     console.print()
 
     console.print("[bold yellow]ACTIONABLE ITEMS[/bold yellow]")
@@ -70,7 +71,7 @@ def _print_digest(inbox_data: Dict[str, Any]) -> None:
             from_addr = msg.get("from", "unknown")
             subject = str(msg.get("subject", "No subject"))[:50]
             status = msg.get("status", "new")
-            console.print(f"  [{status}] {from_addr}: {subject}")
+            console.print(f"  \\[{status}] {from_addr}: {escape(subject)}")
     else:
         console.print("  [dim]None pending[/dim]")
     console.print()
@@ -90,7 +91,7 @@ def _print_digest(inbox_data: Dict[str, Any]) -> None:
 def print_help() -> None:
     """Display help using Rich formatted output."""
     console.print()
-    _header("Update Module - DAEMON Status Digest")
+    _header("Update Module - daemon Status Digest")
     console.print()
 
     console.print("[yellow]USAGE:[/yellow]")
@@ -99,12 +100,14 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]DESCRIPTION:[/yellow]")
-    console.print("  Returns a digest of DAEMON activity for check-ins.")
+    console.print("  Returns a digest of daemon activity for check-ins.")
     console.print()
     console.print("  Gathers and displays:")
     console.print("    - Inbox status (total, unread, opened)")
     console.print("    - Actionable items (tasks, builds, requests)")
     console.print("    - Escalations needed (blocked, urgent)")
+    console.print("\n[yellow]EXAMPLES:[/yellow]")
+    console.print("  drone @daemon update")
     console.print()
 
 
@@ -126,11 +129,11 @@ def handle_command(command: str, args: list) -> bool:
         json_handler.log_operation("update_digest")
         _print_digest(load_inbox())
 
-        logger.info("[DAEMON] Update digest generated successfully")
+        logger.info("[daemon] Update digest generated successfully")
         return True
 
     except Exception as e:
-        logger.error(f"[DAEMON] Error generating update digest: {e}", exc_info=True)
+        logger.error(f"[daemon] Error generating update digest: {e}", exc_info=True)
         error(f"Error: {e}")
         # SystemExit, not a return: True is the success answer, and the router's
         # `except Exception` would turn a False or a re-raise into "Unknown command".

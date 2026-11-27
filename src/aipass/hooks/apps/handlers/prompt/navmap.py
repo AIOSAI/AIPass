@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: navmap.py
-# Version: 1.5.0
+# Version: 1.5.1
 # Description: Tier 1 navigation map — periodic prompt injection (UserPromptSubmit); edit-time cap warning (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-06-18
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Loads .aipass/tier1_navmap.md, injected periodically, and warns when an edit leaves it over its cap."""
@@ -79,7 +79,7 @@ def _handle_edit(hook_data: dict) -> dict:
     try:
         sizes = [(path, len(path.read_text(encoding="utf-8"))) for path in _edited_navmaps(hook_data)]
     except Exception as exc:
-        logger.warning("[HOOKS] navmap: cap check failed (allowing): %s", exc)
+        logger.warning("[hooks] navmap: cap check failed (allowing): %s", exc)
         return _SILENT
     overs = [(path, size) for path, size in sizes if size > NAVMAP_CHAR_CAP]
     if not overs:
@@ -89,6 +89,6 @@ def _handle_edit(hook_data: dict) -> dict:
         "injection cuts it near 10,000. Trim it in your next edit."
         for path, size in overs
     )
-    logger.info("[HOOKS] navmap: over cap after edit: %s", text)
+    logger.info("[hooks] navmap: over cap after edit: %s", text)
     result = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": text}}
     return {"stdout": json.dumps(result), "exit_code": 0}

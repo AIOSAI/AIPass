@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: db.py
 # Description: The Commons SQLite connection manager
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-07
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """The Commons - SQLite Connection Manager"""
@@ -241,16 +241,3 @@ def _register_branches(conn: sqlite3.Connection) -> None:
         )
 
     conn.commit()
-
-
-if __name__ == "__main__":
-    print("Initializing The Commons database...")
-    connection = init_db()
-    cursor = connection.execute("SELECT COUNT(*) FROM agents")
-    agent_count = cursor.fetchone()[0]
-    cursor = connection.execute("SELECT COUNT(*) FROM rooms")
-    room_count = cursor.fetchone()[0]
-    print(f"Database ready at: {DB_PATH}")
-    print(f"  Agents registered: {agent_count}")
-    print(f"  Rooms created: {room_count}")
-    close_db(connection)

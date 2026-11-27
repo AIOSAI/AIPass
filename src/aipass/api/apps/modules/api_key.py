@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: api_key.py
 # Description: API Key Management Module
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2025-11-15
-# Modified: 2026-11-20
+# Modified: 2026-11-26
 # =============================================
 
 """API Key Management Module"""
@@ -24,10 +24,10 @@ RUN_USAGE = "Usage: drone @api run <openai|anthropic|openrouter> -- <command> [a
 def print_introspection():
     """Show module introspection - connected handlers and capabilities"""
     console.print()
-    header("API Key Module Introspection")
+    console.print("[bold cyan]API Key Module Introspection[/bold cyan]")
     console.print()
 
-    console.print("[cyan]Purpose:[/cyan] API key management and validation")
+    console.print("[cyan]Purpose:[/cyan] [dim]API key management and validation[/dim]")
     console.print()
 
     console.print("[cyan]Connected Handlers:[/cyan]")
@@ -41,6 +41,8 @@ def print_introspection():
     console.print("  • validate_key() - Validate credentials")
     console.print("  • list_providers() - Show providers")
     console.print("  • init_env() - Initialize configuration")
+    console.print()
+    console.print("Run [green]'drone @api --help'[/green] for usage information")
     console.print()
 
 

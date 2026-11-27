@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.15.1
+# Version: 1.17.1
 # Created: 2026-03-30
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -21,7 +21,7 @@ from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.repo_context import AIPASS_REGISTRY_NAME
 from aipass.drone.apps.handlers.git import release_handler, repo_door, session_home
-from aipass.drone.apps.modules.router import caller_cwd
+from aipass.drone.apps.modules.router import caller_cwd, caller_seat
 from aipass.drone.apps.modules import RegistryMismatchError
 from aipass.drone.apps.modules.config import get_registry_path
 from aipass.drone.apps.modules.registry import load_registry
@@ -47,6 +47,7 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "branches",
             "tag-list",
             "issue-contribute",
+            "pr-read",
         ],
         # export reads the repo and writes only the empty directory it is handed
         "description": "Read-only — available to all branches",
@@ -111,11 +112,11 @@ GH_SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
     "workflow": {"read": ("list", "view"), "write": ("disable", "enable", "run")},
 }
 
-# drone's own GitHub chores, gated the same way; an unknown subcommand is the handler's to refuse.
+# drone's own GitHub chores, gated the same way: a subcommand in neither row is refused before its handler.
 CHORE_SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
     "release": {"read": ("list",), "write": ("edit",)},
     "label": {"read": ("list",), "write": ("create",)},
-    "alerts": {"read": ("list",), "write": ("dismiss",)},
+    "alerts": {"read": ("list",), "write": ("dismiss", "reopen")},
 }
 
 
@@ -123,6 +124,13 @@ CHORE_SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
 CONTRIBUTE_SUBCOMMANDS = ("create", "comment")
 ISSUE_CONTRIBUTE = "issue-contribute"
 _GH_REPO_FLAGS = ("-R", "--repo")
+
+# Printed exactly. The table is the only door, so the cure for a missing subcommand is its row.
+REFUSE_NO_ROW = (
+    "Unknown subcommand for '{command}': '{sub}'. It is in no row of drone's git permission table, "
+    "so no seat runs it. Reads: {reads}. Owner only: {writes}. A subcommand drone should serve needs "
+    "its row in apps/plugins/devpulse_ops/auth.py; no flag, env or seat opens it."
+)
 
 
 def gh_repo_value(args: list[str]) -> str | None:
@@ -154,6 +162,14 @@ def gh_access_key(command: str, args: list[str]) -> str | None:
     return None
 
 
+def no_row_refusal(command: str, sub: str) -> str:
+    """The refusal for *sub*, a subcommand of the gh passthrough or chore *command* that no row names."""
+    table = GH_SUBCOMMANDS.get(command) or CHORE_SUBCOMMANDS[command]
+    return REFUSE_NO_ROW.format(
+        command=command, sub=sub, reads=", ".join(table["read"]), writes=", ".join(table["write"])
+    )
+
+
 # The registry entry fields that grant a tier; ci_cure must sit on exactly one entry.
 _OWNER_FACT = "owner"
 _CI_CURE_FACT = "ci_cure"
@@ -171,6 +187,8 @@ _EXTERNAL_ONLY_VERBS = frozenset({"push"})
 # authority: not shown to be the owner, ERROR, "not authorized".
 # capability: proven owner, untranslated verb, WARNING, "cannot run here".
 _AUTHORITY = "authority"
+# AIPASS_SEAT is one environment variable, weaker than the cwd it stands in for: it names a seat, it earns no write.
+REFUSE_SEAT = "{tier} verbs need the cwd inside the seat; AIPASS_SEAT is not enough"
 _CAPABILITY = "capability"
 
 
@@ -225,7 +243,7 @@ def _resolve_caller() -> Caller:
 
     Raises PermissionError if no readable, named passport is found, or there is no cwd (fails closed).
     """
-    cwd = caller_cwd()
+    cwd = caller_seat()
     if cwd is None:
         msg = (
             "This process has no current directory — it was deleted out from under it. "
@@ -494,10 +512,16 @@ def _raise_refusal(command: str, caller_info: Caller, refusal: Refusal | None) -
         raise PermissionError(msg)
 
 
+def _seat_only(tier: str) -> Refusal | None:
+    """A write tier's refusal when the caller was named by AIPASS_SEAT rather than found at the cwd."""
+    return Refusal(REFUSE_SEAT.format(tier=tier), _AUTHORITY) if caller_seat() != caller_cwd() else None
+
+
 def _ci_cure_access(command: str) -> str:
-    """The ci-cure tier: the registry fact alone grants it."""
+    """The ci-cure tier: the registry fact grants it, from the cwd inside the seat only."""
     caller_info = _resolve_caller()
-    _raise_refusal(command, caller_info, _registry_fact_refusal(command, caller_info, _CI_CURE_FACT))
+    fact_refusal = _seat_only("ci-cure") or _registry_fact_refusal(command, caller_info, _CI_CURE_FACT)
+    _raise_refusal(command, caller_info, fact_refusal)
     json_handler.log_operation(
         "git_access_verify",
         {"caller": caller_info.name, "command": command, "tier": "ci-cure", "session": session_home.stamp()},
@@ -523,7 +547,7 @@ def verify_git_access(command: str) -> str:
 
     if command in owner_tier["commands"]:
         caller_info = _resolve_caller()
-        _raise_refusal(command, caller_info, _owner_tier_refusal(command, caller_info))
+        _raise_refusal(command, caller_info, _seat_only("owner-tier") or _owner_tier_refusal(command, caller_info))
         json_handler.log_operation(
             "git_access_verify",
             {

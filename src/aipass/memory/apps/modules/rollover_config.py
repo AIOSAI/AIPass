@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rollover_config.py
 # Description: The `config` verb surface over rollover limits - get / set / set-default
-# Version: 1.4.0
+# Version: 1.4.2
 # Created: 2026-09-15
-# Modified: 2026-11-20
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -225,7 +225,7 @@ def handle_config_get(args: List[str], ctx: _Json) -> None:
     if not ctx.on:
         console.print()
         console.print(
-            Panel.fit("[bold cyan]Memory - Rollover Limits[/bold cyan]", border_style="cyan", box=box.ROUNDED)
+            Panel.fit("[bold cyan]memory - Rollover Limits[/bold cyan]", border_style="cyan", box=box.ROUNDED)
         )
         console.print()
 
@@ -453,6 +453,21 @@ def print_config_help() -> None:
         console.print(line)
 
 
+def print_help() -> None:
+    """Display rollover_config help (sentry standard)."""
+    console.print()
+    console.print("[bold cyan]rollover_config[/bold cyan] - describes the config verb; run via drone @memory config")
+    console.print()
+    console.print("[bold]USAGE:[/bold]")
+    console.print("  drone @memory rollover_config   Show the config verb's introspection")
+    console.print("  drone @memory config --help     The config verb's full usage guide")
+    console.print()
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  [dim]drone @memory config get[/dim]")
+    console.print("  [dim]drone @memory config set @devpulse sessions 12[/dim]")
+    console.print()
+
+
 def handle_command(command: str, args: list) -> bool:
     """Entry point for drone module discovery — describes the `config` verb, never runs it.
 
@@ -469,7 +484,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if args[0] in ("--help", "-h", "help"):
-        print_introspection()
+        print_help()
         return True
 
     error(f"rollover_config: unknown subcommand '{args[0]}' — the verb is 'drone @memory config'")

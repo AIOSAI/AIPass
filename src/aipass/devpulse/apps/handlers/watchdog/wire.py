@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wire.py
 # Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
-# Version: 2.9.0
+# Version: 2.9.2
 # Created: 2026-08-19
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Watchdog Wire Handler — deliver this seat's dispatch completions into THIS session."""
@@ -53,12 +53,6 @@ _DEAD_CURSOR_CAP = 200
 _WIRE_KIND = "baseline_wire"
 
 _REGISTRY_FILENAME = "AIPASS_REGISTRY.json"
-
-
-def _stderr(msg: str) -> None:
-    """Arm-time/diagnostic channel — never a wake event."""
-    sys.stderr.write(msg + "\n")
-    sys.stderr.flush()
 
 
 def _stdout_event(msg: str) -> None:
@@ -155,22 +149,23 @@ def _sweep_wires(storage_path: Path | None, seat: str) -> None:
 
         if not isinstance(pid, int) or not _registry.is_pid_alive(pid):
             _registry.deregister(handle, storage_path=storage_path)
-            _stderr(f"watchdog wire: buried dead wire entry {handle} (pid {pid})")
+            logger.info("[watchdog.wire] buried dead wire entry handle=%s pid=%s", handle, pid)
             continue
 
         their_seat = (watch.get("metadata") or {}).get("seat")
         if their_seat and their_seat != seat:
-            _stderr(f"watchdog wire: {handle} (pid {pid}) is {their_seat}'s wire — left alone")
             logger.info("[watchdog.wire] left another seat's wire alone handle=%s seat=%s", handle, their_seat)
             continue
 
         their_session = session_dir_of(stdout_target(pid))
         result = _registry.kill_watch(handle, storage_path=storage_path)
-        _stderr(
-            f"watchdog wire: took over stale wire {handle} (pid {pid}, "
-            f"session={their_session.name if their_session else 'unknown'}) — {result.get('reason', '')}"
+        logger.info(
+            "[watchdog.wire] took over stale wire handle=%s pid=%s session=%s — %s",
+            handle,
+            pid,
+            their_session.name if their_session else "unknown",
+            result.get("reason", ""),
         )
-        logger.info("[watchdog.wire] took over stale wire handle=%s pid=%s", handle, pid)
 
 
 def _sweep_stale_daemons(storage_path: Path | None) -> int:
@@ -188,14 +183,15 @@ def _sweep_stale_daemons(storage_path: Path | None) -> int:
             continue
         if isinstance(pid, int) and _registry.is_pid_alive(pid):
             result = _registry.kill_watch(handle, storage_path=storage_path)
-            _stderr(
-                f"watchdog wire: retired pre-r4 detection daemon {handle} (pid {pid}) "
-                f"— it double-wakes this seat — {result.get('reason', '')}"
+            logger.info(
+                "[watchdog.wire] retired pre-r4 detection daemon handle=%s pid=%s — it double-wakes this seat — %s",
+                handle,
+                pid,
+                result.get("reason", ""),
             )
-            logger.info("[watchdog.wire] retired pre-r4 daemon handle=%s pid=%s", handle, pid)
         else:
             _registry.deregister(handle, storage_path=storage_path)
-            _stderr(f"watchdog wire: buried pre-r4 daemon entry {handle} (pid {pid})")
+            logger.info("[watchdog.wire] buried pre-r4 daemon entry handle=%s pid=%s", handle, pid)
         retired += 1
     return retired
 
@@ -219,26 +215,30 @@ def _result(state: str, **extra) -> dict:
     return base
 
 
-def _inbox_messages(repo_root: Path, seat: str) -> list[dict]:
-    """This seat's inbox messages, or [] when the store cannot be read (never raises)."""
-    path = repo_root / "src" / "aipass" / seat.lstrip("@") / ".ai_mail.local" / "inbox.json"
+def _inbox_messages(seat_home: Path | None) -> list[dict] | None:
+    """The inbox messages of the seat living at ``seat_home``. None, never [], when the store cannot
+    be read: an empty inbox is an answer, an unreadable one is not (never raises)."""
+    if seat_home is None:
+        logger.warning("[watchdog.wire] the seat's registry row names no folder: its inbox cannot be read")
+        return
+    path = seat_home / ".ai_mail.local" / "inbox.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         logger.warning("[watchdog.wire] inbox unreadable at %s: %s", path, exc)
-        return []
+        return None
     messages = data.get("messages") if isinstance(data, dict) else None
     return [m for m in messages if isinstance(m, dict)] if isinstance(messages, list) else []
 
 
-def _agents_without_mail(repo_root: Path, seat: str, agents: set[str]) -> set[str]:
+def _agents_without_mail(seat_home: Path | None, agents: set[str]) -> set[str]:
     """Of ``agents`` (bare names), those with no unread mail to read yet: the agent's own reply, or
     @ai_mail's 'Dispatch complete: @agent' notice. An unreadable inbox leaves every agent pending,
     so the wire waits out the grace and wakes flagged rather than hang."""
     if not agents:
         return set()
     pending = set(agents)
-    for message in _inbox_messages(repo_root, seat):
+    for message in _inbox_messages(seat_home) or []:
         if str(message.get("status")) != "new":
             continue
         sender = str(message.get("from") or "").lstrip("@").lower()
@@ -258,11 +258,11 @@ def _dispatch_sources(records: list[dict]) -> set[str]:
     }
 
 
-def _mail_gated_exit(root: Path, seat: str, agents: set[str], grace_started: float | None, now: float):
+def _mail_gated_exit(seat_home: Path | None, agents: set[str], grace_started: float | None, now: float):
     """Decide a completed dispatch's exit against its mail. Returns (result_or_None, grace_started):
     a result dict to exit (clean, or flagged completed_no_mail past the grace), else None to keep
     polling with the possibly-started grace clock. The caller fills session/counts into the result."""
-    pending = _agents_without_mail(root, seat, agents)
+    pending = _agents_without_mail(seat_home, agents)
     if not pending:
         return {"state": "completed"}, grace_started
     if grace_started is None:
@@ -389,6 +389,7 @@ def arm_wire(
     # A missing register is legitimate; an unknown seat never is.
     try:
         seat = _dispatches.seat_email(repo_root=root)
+        seat_home = _dispatches.seat_dir(repo_root=root)
     except RuntimeError as exc:
         _stdout_event(f"BASELINE DEAD: cannot tell whose dispatches to deliver — {exc}")
         logger.error("[watchdog.wire] seat unresolved: %s", exc)
@@ -414,7 +415,6 @@ def arm_wire(
             "so it cannot know anyone would hear a delivery. Arm the one-shot instead, under the Bash "
             "tool with run_in_background: drone @devpulse watchdog baseline --once"
         )
-        _stderr(f"watchdog wire: REFUSED — {reason}")
         _stdout_event(f"BASELINE DEAD: {reason}")
         logger.error("[watchdog.wire] refused continuous arm, stdout target unresolvable")
         raise SystemExit(1)
@@ -484,20 +484,24 @@ def arm_wire(
         dead = _announce_dead(root, seat, announced)
         last_dead_check = time.monotonic()
 
-        _stderr(
-            f"watchdog wire: armed handle={handle} session={session_name or 'NONE (fg)'} "
-            f"replayed={replayed} tick={wire_poll}s"
+        logger.info(
+            "[watchdog.wire] armed handle=%s session=%s replayed=%s tick=%ss",
+            handle,
+            session_name or "NONE (fg)",
+            replayed,
+            wire_poll,
         )
         if my_target is not None and str(my_target).startswith("pipe:"):
-            _stderr(
+            sys.stderr.write(
                 "watchdog wire: stdout is a pipe — this wire is recorded as foreground and the statusline "
-                "will not count it. Arm it bare, no pipe and no redirect: drone @devpulse watchdog baseline --once"
+                "will not count it. Arm it bare, no pipe and no redirect: drone @devpulse watchdog baseline --once\n"
             )
+            sys.stderr.flush()
             logger.warning("[watchdog.wire] armed behind a pipe handle=%s stdout=%s", handle, my_target)
         if not once:
-            _stderr(
-                "watchdog wire: continuous mode NOTIFIES PER STDOUT LINE ONLY UNDER THE MONITOR TOOL — "
-                "if this was armed with run_in_background, TaskStop it and re-arm via Monitor"
+            logger.info(
+                "[watchdog.wire] continuous mode notifies per stdout line only under the Monitor tool; "
+                "if armed with run_in_background, TaskStop it and re-arm via Monitor"
             )
 
         if once and (replayed or dead):
@@ -527,7 +531,7 @@ def arm_wire(
             if once and dead:
                 outcome = {"state": "completed"}
             elif once and delivered:
-                outcome, grace_started = _mail_gated_exit(root, seat, completed_agents, grace_started, now)
+                outcome, grace_started = _mail_gated_exit(seat_home, completed_agents, grace_started, now)
             if outcome is not None:
                 return _result(
                     session=session_name,
@@ -549,7 +553,6 @@ def arm_wire(
 
             _sleep(wire_poll)
     except KeyboardInterrupt:
-        _stderr("watchdog wire: interrupted — this session is unwired")
         logger.info("[watchdog.wire] interrupted handle=%s", handle)
         raise
     finally:

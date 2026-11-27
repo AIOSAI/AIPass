@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_help_flags.py
-# Version: 1.2.2
+# Version: 1.2.3
 # Description: Help-flag safety — a help flag anywhere means explain, never execute
 # Branch: hooks
 # Created: 2026-08-13
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the modules that route through it."""
@@ -21,7 +21,8 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.hooks.apps import hooks, sound
+from aipass.hooks.apps import hooks
+from aipass.hooks.apps.handlers.notification import sound
 from aipass.hooks.apps.handlers.cli.help_flags import HELP_FLAGS, is_help_flag, wants_help
 from aipass.hooks.apps.modules import (
     alert_dismiss,
@@ -241,7 +242,8 @@ class TestReadOnlyModulesStillAnswerHelp:
     @pytest.mark.parametrize("verb", ["cadence", "context_window", "diagnostics_state", "engine"])
     def test_verb_help_answers_help_not_unknown_command(self, verb, capsys):
         assert hooks.handle_command(verb, ["--help"]) is True
-        assert f"{verb} — " in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert f"{verb} — " in err and "Usage:" in err and "Examples:" in err
 
 
 class TestHelpListsWhatRuns:

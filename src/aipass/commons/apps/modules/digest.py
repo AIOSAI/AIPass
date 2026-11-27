@@ -3,7 +3,7 @@
 # Description: Digest Orchestration Module
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -24,14 +24,32 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("digest")
+    console.print("[bold cyan]digest - Community Digest[/bold cyan]")
     console.print(
-        "Thin router for community digest workflows. Queries digest data and renders activity summaries with Rich."
+        "[dim]Thin router for community digest workflows. "
+        "Queries digest data and renders activity summaries with Rich.[/dim]"
     )
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/digest/")
-    console.print("    - digest_ops.py (show_digest — query and compile community activity digest)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/digest/[/cyan]")
+    console.print(
+        "    [cyan]-[/cyan] digest_ops.py [dim](show_digest — query and compile community activity digest)[/dim]"
+    )
+    console.print()
+    console.print("[dim]Run 'drone @commons digest --help' for usage[/dim]")
+
+
+def print_help():
+    """Display usage help for the digest command."""
+    console.print()
+    console.print("[bold cyan]digest - Community Digest[/bold cyan]")
+    console.print("[dim]Summarize the last 24 hours: top posts, most active branches, new branches[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone @commons digest[/cyan]")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [cyan]drone @commons digest[/cyan]")
     console.print()
 
 
@@ -41,7 +59,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     if "--help" in args or "-h" in args:
-        print_introspection()
+        print_help()
         return True
 
     return _handle_digest()

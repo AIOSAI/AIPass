@@ -3,7 +3,7 @@
 # Description: Memory File Safe I/O Handler
 # Version: 1.6.0
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-11-23
 # =============================================
 
 """
@@ -212,7 +212,7 @@ def read_memory_file(file_path: Path) -> Dict[str, Any]:
 
 
 def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
-    """Atomic write (temp file + rename) of memory JSON; refused outside the AIPass root."""
+    """Atomic write (temp file + rename) of memory JSON; fenced by ``write_fence``."""
     refusal = fence_write(file_path, lane="write_memory_file")
     if refusal is not None:
         return {"success": False, "error": refusal}

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_check.py
 # Description: CLI Standards Checker Handler
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-05
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """CLI Standards Checker Handler"""
@@ -101,7 +101,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "passed": True,
             "checks": [{"name": "Bypassed", "passed": True, "message": "Standard bypassed via .sentry/bypass.json"}],
             "score": 100,
-            "standard": "CLI",
+            "standard": "cli",
         }
 
     if not path.exists():
@@ -109,7 +109,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "passed": False,
             "checks": [{"name": "File exists", "passed": False, "message": f"File not found: {module_path}"}],
             "score": 0,
-            "standard": "CLI",
+            "standard": "cli",
         }
 
     try:
@@ -122,7 +122,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "passed": False,
             "checks": [{"name": "File readable", "passed": False, "message": f"Error reading file: {e}"}],
             "score": 0,
-            "standard": "CLI",
+            "standard": "cli",
         }
 
     is_handler = "handlers/" in module_path
@@ -166,7 +166,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                 }
             ],
             "score": 100,
-            "standard": "CLI",
+            "standard": "cli",
         }
 
     passed_checks = sum(1 for check in checks if check["passed"])
@@ -176,7 +176,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     overall_passed = score >= 75
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "cli"})
-    return {"passed": overall_passed, "checks": checks, "score": score, "standard": "CLI"}
+    return {"passed": overall_passed, "checks": checks, "score": score, "standard": "cli"}
 
 
 def _prose(content: str) -> AbstractSet[int]:

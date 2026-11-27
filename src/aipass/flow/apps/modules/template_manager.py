@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_manager.py
 # Description: Template registry management module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-18
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -57,6 +57,8 @@ COMMAND_VERBS = TEMPLATE_COMMANDS
 def print_introspection():
     """Display module info, registered types, and connected handlers"""
     registry = load_registry()
+    console.print()
+    console.print("[bold cyan]template_manager Module[/bold cyan]")
     _display_registered_types(registry)
 
     console.print("[yellow]Connected Handlers:[/yellow]")
@@ -82,11 +84,11 @@ def print_help():
     console.print("  drone @flow scan                         Find unregistered template directories")
     console.print()
     console.print("[bold]HOW TO ADD A NEW PLAN TYPE / SOP TEMPLATE:[/bold]")
-    console.print("  1. Create a directory under templates/ (e.g. templates/playbook_plans/)")
-    console.print("  2. Add one or more .md template files (e.g. default.md, merge.md)")
-    console.print("  3. Register with your chosen prefix:")
+    console.print("  1. Create a directory under templates/ (e.g. templates/playbook_plans/)", highlight=False)
+    console.print("  2. Add one or more .md template files (e.g. default.md, merge.md)", highlight=False)
+    console.print("  3. Register with your chosen prefix:", highlight=False)
     console.print("     drone @flow register playbook_plans PBPLAN")
-    console.print("  4. Create plans:")
+    console.print("  4. Create plans:", highlight=False)
     console.print('     drone @flow create . "Subject" pbplan')
     console.print('     drone @flow create . "Subject" merge pplan')
     console.print()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router.py
 # Description: Command routing logic for the drone module
-# Version: 1.0.3
+# Version: 1.0.5
 # Created: 2026-03-09
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -19,8 +19,9 @@ from aipass.drone.apps.handlers.executor import CommandResult, resolve_timeout
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.router_handler import (
     execute_branch_command,
-    caller_cwd,
+    caller_seat,
     # Re-exported for apps/drone.py: the entry point keeps one seam into handlers.
+    caller_cwd,  # noqa: F401
     registry_named_entries,  # noqa: F401
     resolve_caller_identity,
 )
@@ -70,11 +71,17 @@ def print_help() -> None:
     """Print help for the router module."""
     from aipass.cli import console
 
-    console.print("router — Command routing logic")
+    console.print("[bold cyan]router[/bold cyan] — Command routing logic")
     console.print()
-    console.print("Commands:")
-    console.print("  route <target> <cmd> \\[args]   Route command to a branch")
-    console.print("  route_all <cmd> \\[args]        Route command to all branches")
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [dim]drone @drone router <command> <target> <cmd> \\[args][/dim]")
+    console.print()
+    console.print("[bold cyan]Commands:[/bold cyan]")
+    console.print("  [cyan]route[/cyan] <target> <cmd> \\[args]   Route command to a branch")
+    console.print("  [cyan]route_all[/cyan] <cmd> \\[args]        Route command to all branches")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [green]drone @drone router route flow --help[/green]")
 
 
 def route_command(
@@ -95,9 +102,9 @@ def route_command(
     extend_on_output = timeout is None
 
     # Same resolver execute_branch_command uses, so the tag names who is stamped on the work.
-    caller = resolve_caller_identity(caller_cwd())
+    caller = resolve_caller_identity(caller_seat())
     # UNKNOWN, not an empty tag: an omitted caller hides the gap.
-    caller_tag = f" [CALLER:{caller.upper()}]" if caller else " [CALLER:UNKNOWN]"
+    caller_tag = f" [CALLER:{caller}]" if caller else " [CALLER:UNKNOWN]"
     logger.info(
         "Routing @%s%s → %s %s (timeout=%ds, extend_on_output=%s)",
         branch_name,
@@ -137,6 +144,8 @@ def print_introspection():
     console.print("[yellow]Connected Modules:[/yellow]")
     console.print("  [cyan]modules/[/cyan]")
     console.print("    - [cyan]resolver.py[/cyan] [dim](resolve_branch, list_branches — branch name resolution)[/dim]")
+    console.print()
+    console.print("Run [green]'drone @drone router --help'[/green] for usage information")
     console.print()
 
 

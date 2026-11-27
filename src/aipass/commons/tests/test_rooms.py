@@ -5,7 +5,7 @@
 # Date: 2026-03-24
 # Version: 1.1.1
 # Created: 2026-03-24
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -235,7 +235,7 @@ def test_a_bare_room_help_flag_explains_instead_of_refusing(flag: str, capsys: p
     assert room_module.handle_command("room", [flag]) is True
 
     out = capsys.readouterr()
-    assert "Thin router for room management" in out.out
+    assert "drone @commons room" in out.out
     assert "Unknown room subcommand" not in out.out + out.err
 
 

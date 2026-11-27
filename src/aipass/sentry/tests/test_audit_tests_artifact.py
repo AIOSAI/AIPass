@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_audit_tests_artifact.py
 # Description: Target, artifact and adapter-seam pins for the audit-tests lane
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-08-29
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/audit_tests/target.py, artifact.py and adapters.py."""
@@ -374,6 +374,52 @@ class TestPublication:
 
         assert artifact.load_previous(this_target) is None
         assert artifact.previous_group_list(None) is None
+
+
+class TestTheStoredNameIsLowercase:
+    """The system speaks lowercase: a capital registry row still stores and finds its artifact by the lowercase name."""
+
+    @pytest.mark.parametrize("row", ["SENTRY", "sentry"], ids=["capital_row", "lowercase_row"])
+    @pytest.mark.parametrize("argument", ["@SENTRY", "@sentry"])
+    def test_a_branch_target_is_named_lowercase_whatever_the_row_spells(self, tmp_path, row, argument):
+        resolved = target.resolve(argument, {row: tmp_path})
+
+        assert (resolved.name, resolved.artifact_name(), resolved.path) == ("sentry", "audit_tests_sentry", tmp_path)
+        assert resolved.to_document()["name"] == "sentry"
+
+    def test_a_capital_named_artifact_is_carried_over_and_its_baseline_kept(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(artifact, "ARTIFACT_DIR", tmp_path / "out")
+        (tmp_path / "out").mkdir()
+        (tmp_path / "out" / "audit_tests_SENTRY.json").write_text('{"group_list": ["a"]}', encoding="utf-8")
+
+        previous = artifact.load_previous(target.resolve("@sentry", {"sentry": tmp_path}))
+
+        assert artifact.previous_group_list(previous) == ["a"]
+        assert sorted(p.name for p in (tmp_path / "out").iterdir()) == ["audit_tests_sentry.json"]
+
+    def test_a_lowercase_artifact_beside_a_capital_one_wins_and_neither_is_overwritten(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(artifact, "ARTIFACT_DIR", tmp_path / "out")
+        (tmp_path / "out").mkdir()
+        (tmp_path / "out" / "audit_tests_SENTRY.json").write_text('{"group_list": ["old"]}', encoding="utf-8")
+        (tmp_path / "out" / "audit_tests_sentry.json").write_text('{"group_list": ["new"]}', encoding="utf-8")
+
+        previous = artifact.load_previous(target.resolve("@SENTRY", {"SENTRY": tmp_path}))
+
+        assert artifact.previous_group_list(previous) == ["new"]
+        assert len(list((tmp_path / "out").iterdir())) == 2
+
+    def test_publish_carries_the_capital_file_over_rather_than_leaving_an_orphan(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(artifact, "ARTIFACT_DIR", tmp_path / "out")
+        (tmp_path / "out").mkdir()
+        (tmp_path / "out" / "audit_tests_SENTRY.json").write_text("{}", encoding="utf-8")
+        this_target = target.resolve("@sentry", {"SENTRY": tmp_path})
+        document = artifact.assemble(
+            this_target, _lawful_groups(), list(spine.CORE_SPINE), ecosystem="pytest", adapter="a", adapter_api=1
+        )
+
+        artifact.publish(document, this_target)
+
+        assert sorted(p.name for p in (tmp_path / "out").iterdir()) == ["audit_tests_sentry.json"]
 
 
 # =============================================================================

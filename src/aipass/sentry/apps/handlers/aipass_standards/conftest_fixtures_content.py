@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest_fixtures_content.py
 # Description: Conftest Fixtures Standards Content Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -82,7 +82,7 @@ def get_conftest_fixtures_standards() -> str:
         "[bold cyan]THE ONE OPEN TEMPLATE QUESTION:[/bold cyan]",
         "  48 other Console() builds exist in the fleet. 47 sit inside a",
         "  try/except ImportError fallback that fires only when aipass.cli cannot be",
-        "  imported — never in the suite. The 48th is real and it is SENTRY's own:",
+        "  imported — never in the suite. The 48th is real and it is sentry's own:",
         "  apps/handlers/diagnostics/diagnostics_check.py:33 binds a module-level",
         "  console = Console() that C1's two names do not reach. Whether C1 should",
         "  name every module-level console a branch builds is a question for the",

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap_render.py
 # Description: The install script's .trinity render for a core branch: seed first, then the template
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-11-17
-# Modified: 2026-11-20
+# Modified: 2026-11-22
 # =============================================
 
 """Render a core branch's missing .trinity files at install time, before drone exists.
@@ -102,11 +102,11 @@ def restore_citizen(branch_name: str, registry_path: Path) -> list[str]:
     """
     registry_path = Path(registry_path)
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    wanted = normalize_branch_name(branch_name, "lower")
+    wanted = normalize_branch_name(branch_name)
     rows = [
         row
         for row in branches_as_list(registry.get("branches", []))
-        if normalize_branch_name(row.get("name", ""), "lower") == wanted
+        if normalize_branch_name(row.get("name", "")) == wanted
     ]
     if not rows:
         logger.error("[spawn] restore: %s is not registered in %s", branch_name, registry_path)

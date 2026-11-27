@@ -15,6 +15,8 @@ to the handler layer.
 
 from __future__ import annotations
 
+from typing import Callable
+
 from aipass.prax import logger
 from aipass.cli import console
 from aipass.drone.apps.handlers.json import json_handler
@@ -30,6 +32,7 @@ __all__ = [
     "external_modules_error",
     "get_module_help",
     "get_module_introspective",
+    "get_module_printer",
     "handle_command",
     "route_module_command",
 ]
@@ -53,6 +56,11 @@ def get_module_help(name: str, command: str | None = None) -> str | None:
 def get_module_introspective(name: str) -> str | None:
     """A module's introspective view: "" for nothing, None when an internal adapter cannot be read."""
     return module_registry_handler.get_module_introspective(name)
+
+
+def get_module_printer(name: str, attr: str) -> Callable[[], None] | None:
+    """An internal module's own styled print_introspection / print_help, or None; ImportError if it cannot load."""
+    return module_registry_handler.get_module_printer(name, attr)
 
 
 def print_introspection():
@@ -85,6 +93,8 @@ def print_introspection():
         "    - [cyan]module_registry_handler.py[/cyan]"
         " [dim](get_module_introspective — introspect module adapter)[/dim]"
     )
+    console.print()
+    console.print("Run [green]'drone @drone module_registry --help'[/green] for usage information")
     console.print()
 
 
@@ -122,7 +132,9 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             return False
         info = get_module_info(args[0])
         if info:
-            console.print(f"Module: {info.name} v{info.version} — {info.description}")
+            console.print(
+                f"[bold]Module:[/bold] {info.name} [dim]v{info.version}[/dim] — {info.description}", highlight=False
+            )
         elif is_module(args[0]):
             # None for a REGISTERED name means its adapter could not import; an
             # unknown name is the other None. Only the second is "not found".
@@ -150,9 +162,15 @@ def print_help() -> None:
     """Print help for the module_registry module."""
     from aipass.cli import console
 
-    console.print("module_registry — Internal module registry for drone")
+    console.print("[bold cyan]module_registry[/bold cyan] — Internal module registry for drone")
     console.print()
-    console.print("Commands:")
-    console.print("  list                List registered modules")
-    console.print("  info <name>         Show module metadata")
-    console.print("  check <name>        Check if module is registered")
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [dim]drone @drone module_registry <command> \\[name][/dim]")
+    console.print()
+    console.print("[bold cyan]Commands:[/bold cyan]")
+    console.print("  [cyan]list[/cyan]                List registered modules")
+    console.print("  [cyan]info[/cyan] <name>         Show module metadata")
+    console.print("  [cyan]check[/cyan] <name>        Check if module is registered")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [green]drone @drone module_registry list[/green]")

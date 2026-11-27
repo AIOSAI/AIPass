@@ -1,11 +1,11 @@
 {
   "id": "{{CITIZEN_NUMBER}}",
-  "name": "{{BRANCHNAME}} Birth Certificate",
+  "name": "{{BRANCH}} Birth Certificate",
   "type": "birth_certificate",
   "creator": "SYSTEM",
-  "owner": "{{BRANCHNAME}}",
+  "owner": "{{BRANCH}}",
   "rarity": "unique",
-  "description": "Official birth certificate for {{BRANCHNAME}}. Citizen #{{CITIZEN_NUMBER}}, registered using '{{PROFILE}}' template. Purpose: {{PURPOSE_BRIEF}}",
+  "description": "Official birth certificate for {{BRANCH}}. Citizen #{{CITIZEN_NUMBER}}, registered using '{{PROFILE}}' template. Purpose: {{PURPOSE_BRIEF}}",
   "metadata": {
     "citizen_number": "{{CITIZEN_NUMBER}}",
     "template": "{{PROFILE}}",

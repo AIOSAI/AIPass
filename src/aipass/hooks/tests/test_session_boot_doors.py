@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_boot_doors.py
-# Version: 1.0.2
+# Version: 1.1.0
 # Description: Tests for session boot's resume doors: the session pointer and the dispatched-job guard
 # Branch: hooks
 # Created: 2026-10-08
-# Modified: 2026-11-16
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py: the session-pointer doors and the dispatch guard."""
@@ -24,7 +24,6 @@ from aipass import ai_mail as sp
 from aipass.hooks.apps.handlers.lifecycle import session_boot
 from aipass.hooks.apps.modules import cc_sessions
 from aipass.hooks.tests.support_session_boot import (
-    _MOD,
     _kept_redirect,
     home_env,
     make_transcript,
@@ -61,30 +60,32 @@ class TestSessionPointerDoors:
         assert "--resume" in cmd and "ptr-sid-1" in cmd
         assert "--continue" not in cmd
 
-    def test_no_live_enter_without_pointer_still_continues(self, tmp_path):
-        """No pointer → today's door, unchanged. A branch that predates the
-        pointer must still open."""
+    def test_no_live_enter_without_pointer_starts_a_new_chat(self, tmp_path):
+        """No pointer and no transcript for the cwd → no menu, a new chat. A branch that
+        predates the pointer still opens; --continue would fail with no chat to continue."""
         with (
             patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
             patch.object(session_boot, "_read_choice", return_value=""),
-            patch.object(
-                session_boot, "_exec_in_tmux", return_value={"exit_code": 0, "action": "started"}
-            ) as mock_exec,
+            patch.object(session_boot, "_execvp") as mock_exec,
         ):
             result = session_boot.boot(cwd=str(tmp_path))
         assert result["exit_code"] == 0
-        assert "--continue" in mock_exec.call_args[0][2]
+        assert result["action"] == "started"
+        argv = mock_exec.call_args[0][1]
+        assert "--session-id" in argv
+        assert "--continue" not in argv
 
-    def test_no_live_enter_with_stale_pointer_falls_back(self, tmp_path, monkeypatch):
-        """A pointer whose transcript is gone must degrade to --continue —
+    def test_no_live_enter_with_stale_pointer_falls_back(self, tmp_path, monkeypatch, fake_projects):
+        """A pointer whose transcript is gone must degrade to --continue while another chat exists —
         `--resume <missing id>` would fail the whole launch."""
         home = plant_pointer(tmp_path, monkeypatch, "ptr-gone")
         tdir = sp.transcript_dir(tmp_path)
         assert tdir is not None, "home redirect did not take: session_pointer cannot resolve a home"
         (tdir / "ptr-gone.jsonl").unlink()
+        make_transcript(fake_projects, tmp_path, "other-chat", "Earlier chat", 3)
         with (
             patch.dict("os.environ", home_env(home), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
@@ -101,6 +102,25 @@ class TestSessionPointerDoors:
         assert "--continue" in cmd
         assert "ptr-gone" not in cmd
 
+    def test_a_stale_pointer_and_no_chat_starts_a_new_chat(self, tmp_path, monkeypatch, fake_projects):
+        """Nothing to continue: the stale id is never resumed and no menu offers a dead continue."""
+        home = plant_pointer(tmp_path, monkeypatch, "ptr-gone")
+        tdir = sp.transcript_dir(tmp_path)
+        assert tdir is not None, "home redirect did not take: session_pointer cannot resolve a home"
+        (tdir / "ptr-gone.jsonl").unlink()
+        with (
+            patch.dict("os.environ", home_env(home), clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=[]),
+            patch.object(session_boot, "_read_choice") as mock_choice,
+            patch.object(session_boot, "_execvp") as mock_exec,
+        ):
+            result = session_boot.boot(cwd=str(tmp_path))
+        argv = mock_exec.call_args[0][1]
+        assert result["action"] == "started" and mock_choice.call_count == 0
+        assert "--session-id" in argv and "--continue" not in argv and "ptr-gone" not in argv
+
     def test_fresh_start_mints_and_records_the_seat(self, tmp_path, monkeypatch):
         """'n' mints the session id and writes the pointer BEFORE claude starts
         — a fresh seat the record never learned about is how the resume door
@@ -114,7 +134,7 @@ class TestSessionPointerDoors:
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
             patch.object(session_boot, "_read_choice", return_value="n"),
             patch.object(session_boot, "_tmux_session_exists", return_value=False),
-            patch(f"{_MOD}.os.execvp") as mock_exec,
+            patch.object(session_boot, "_execvp") as mock_exec,
         ):
             session_boot.boot(cwd=str(tmp_path))
         claude_cmd = mock_exec.call_args[0][1]
@@ -217,10 +237,12 @@ class TestSessionPointerDoors:
             patch.object(session_boot, "_read_choice", return_value="n"),
             patch.object(session_boot, "_stop_session", return_value="stopped"),
             patch.object(session_boot, "_tmux_session_exists", return_value=False),
-            patch(f"{_MOD}.os.execvp"),
+            patch.object(session_boot, "_execvp") as mock_exec,
         ):
             session_boot.boot(cwd=str(target))
-        assert sp.read_pointer(target) is not None
+        argv = mock_exec.call_args[0][1]
+        pointer = sp.read_pointer(target)
+        assert pointer is not None and pointer["session_id"] == argv[argv.index("--session-id") + 1]
         assert not (decoy / ".ai_mail.local").exists()
 
 
@@ -307,18 +329,19 @@ class TestDispatchedGuard:
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
             patch.object(session_boot, "_read_choice", return_value="n"),
             patch.object(session_boot, "_tmux_session_exists", return_value=False),
-            patch(f"{_MOD}.os.execvp") as mock_exec,
+            patch.object(session_boot, "_execvp") as mock_exec,
         ):
             session_boot.boot(cwd=str(tmp_path))
         claude_cmd = mock_exec.call_args[0][1]
         assert "--session-id" in claude_cmd
         assert "--resume" not in claude_cmd
 
-    def test_dead_lock_gates_nothing_and_stays(self, tmp_path):
+    def test_dead_lock_gates_nothing_and_stays(self, tmp_path, fake_projects):
         """A lock whose PID is dead means the job is over — the door opens as
         usual. And the probe is READ-ONLY: cleanup belongs to ai_mail's own
         lifecycle, so the file must still be there afterwards."""
         lock = plant_dispatch_lock(tmp_path)
+        make_transcript(fake_projects, tmp_path, "the-jobs-chat", "Night shift", 3)
         with (
             patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(cc_sessions, "_is_pid_alive", return_value=False),

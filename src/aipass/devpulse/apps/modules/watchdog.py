@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watchdog.py
 # Description: Watchdog Module — directed wake system for devpulse
-# Version: 2.3.0
+# Version: 2.3.2
 # Created: 2026-04-14
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Watchdog Module — devpulse's personal directed-wake system.
@@ -28,9 +28,6 @@ _DEFAULT_AGENT_TIMEOUT = 600
 _WIRED_SUBCOMMANDS = frozenset(_VALID_SUBCOMMANDS)
 
 HELP_TEXT = """\
-[bold cyan]watchdog[/bold cyan] — devpulse directed wake system
-
-[bold]Usage:[/bold]
   watchdog agent <branch> [--timeout SECONDS]   Wake when dispatched agent exits
   watchdog baseline                             Arm THIS session's wire: deliver my dispatch completions
   watchdog baseline --once                      Wire until the first delivered completion
@@ -45,8 +42,9 @@ HELP_TEXT = """\
   watchdog cancel --all                         Kill every active watch
   watchdog list                                 Alias for status
   watchdog --help                               Show this help
+"""
 
-[bold]Examples:[/bold]
+_EXAMPLES_TEXT = """\
   drone @devpulse watchdog agent @drone
   drone @devpulse watchdog agent @flow --timeout 600
   drone @devpulse watchdog baseline --once     (the sign-in: Bash run_in_background — silent until the first
@@ -59,8 +57,8 @@ HELP_TEXT = """\
   drone @devpulse watchdog schedule "02:00"
   drone @devpulse watchdog schedule "+30m" "drone @git status"
 
-Current design: DPLAN-0317 (r4 — completion is reported by the finishing agent,
-not discovered by polling). Earlier rounds: DPLAN-0130, DPLAN-0308.
+[dim]Current design: DPLAN-0317 (r4 — completion is reported by the finishing agent,
+not discovered by polling). Earlier rounds: DPLAN-0130, DPLAN-0308.[/dim]
 """
 
 _TIMER_HELP_TEXT = """\
@@ -119,6 +117,17 @@ def print_introspection() -> None:
     console.print("    [dim]- dispatches.py (the register — which dispatches are this seat's)[/dim]")
     console.print(f"    [dim]- stop_gate.py (the Stop hook door {STOP_DOOR})[/dim]")
     console.print()
+    console.print("[dim]Run 'drone @devpulse watchdog --help' for usage information[/dim]")
+
+
+def print_help() -> None:
+    """Print CLI help — usage and examples."""
+    console.print("[bold cyan]watchdog[/bold cyan] — devpulse directed wake system")
+    console.print()
+    console.print("[bold]USAGE:[/bold]")
+    console.print(HELP_TEXT)
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print(_EXAMPLES_TEXT)
 
 
 def _owner_address() -> str | None:
@@ -174,7 +183,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     if _wants_help(args):
-        console.print(HELP_TEXT)
+        print_help()
         return True
 
     if not _guard_caller():
@@ -217,7 +226,9 @@ def handle_command(command: str, args: List[str]) -> bool:
 def _handle_timer(sub_args: List[str]) -> bool:
     """Route ``watchdog timer`` subcommands through the timer handler.
 
-    False when the duration is refused; every served path returns True.
+    Every served path returns True; a refused duration is already handled, so
+    error() carries the non-zero exit — returning False would read as "not my
+    command" and add a spurious "Unknown command".
     """
     if not sub_args:
         console.print(_TIMER_HELP_TEXT)
@@ -261,8 +272,9 @@ def _handle_timer(sub_args: List[str]) -> bool:
     except ValueError as exc:
         logger.warning("[watchdog] invalid timer duration %r: %s", action, exc)
         error(f"Invalid duration: {action} ({exc})")
-        return False
-    presenter.print_timer_result(result)
+        result = None
+    if result is not None:
+        presenter.print_timer_result(result)
     return True
 
 
@@ -450,7 +462,7 @@ def _handle_status() -> bool:
     console.print("===============")
 
     if watches:
-        console.print(f"{len(watches)} active watch(es):")
+        console.print(f"{len(watches)} active watch(es):", highlight=False)
         console.print()
         for watch in watches:
             console.print(presenter.format_status_line(watch, timer_mod.format_human))
@@ -486,6 +498,7 @@ def _handle_cancel(sub_args: List[str]) -> bool:
             console.print("No active watches to cancel.")
             return True
         console.print(f"[bold]Cancelling {len(results)} watch(es):[/bold]")
+        console.print("[dim]Every active watch in the registry, each SIGTERMed and deregistered[/dim]")
         for result in results:
             presenter.print_kill_result(result)
         return True

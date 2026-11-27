@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: display.py
-# Description: CLI Display Module — public API for Rich terminal output formatting
-# Version: 0.5.4
+# Description: cli Display Module — public API for Rich terminal output formatting
+# Version: 0.6.1
 # Created: 2025-11-12
-# Modified: 2026-10-24
+# Modified: 2026-11-26
 # =============================================
 
 """
-CLI Display Module - PUBLIC API
+cli Display Module - PUBLIC API
 """
 
 import sys
@@ -23,6 +23,7 @@ from rich.markup import escape  # published, bound not wrapped: docs/rich_markup
 
 from aipass.cli.apps.handlers.json import json_handler
 from aipass.cli.apps.handlers.cli.help_flags import wants_help
+from aipass.cli.apps.handlers.cli.header_version import header_version as header_version  # published, not wrapped
 
 # No prax logger: circular import (prax depends on cli).
 
@@ -83,7 +84,7 @@ def resolve_exit(handled: bool) -> int:
 def print_introspection():
     """Display module info and connected handlers"""
     CONSOLE.print()
-    CONSOLE.print("[bold cyan]CLI Display Module[/bold cyan]")
+    CONSOLE.print("[bold cyan]cli Display Module[/bold cyan]")
     CONSOLE.print()
 
     CONSOLE.print("[yellow]Functions:[/yellow]")
@@ -102,11 +103,11 @@ def print_introspection():
 
 
 def print_help():
-    """Display Rich-formatted help - CLI Display Module showpiece!"""
+    """Display Rich-formatted help - cli Display Module showpiece!"""
 
     CONSOLE.print()
 
-    header("CLI Display Module")
+    header("cli Display Module")
 
     CONSOLE.print()
 
@@ -117,7 +118,7 @@ def print_help():
 
     CONSOLE.print("[bold cyan]WHAT IS DISPLAY?[/bold cyan]")
     CONSOLE.print()
-    CONSOLE.print("Display is the [bold]CLI's universal output service[/bold] that provides:")
+    CONSOLE.print("Display is the [bold]cli's universal output service[/bold] that provides:")
     CONSOLE.print("  [green]✓[/green] Consistent Rich-formatted output across all branches")
     CONSOLE.print(
         "  [green]✓[/green] Six core display functions ([green]header, success, error, warning, fatal, section[/green])"
@@ -159,7 +160,7 @@ def print_help():
     CONSOLE.print("─" * 70)
     CONSOLE.print()
 
-    CONSOLE.print("[bold cyan]CODE EXAMPLES:[/bold cyan]")
+    CONSOLE.print("[bold cyan]EXAMPLES:[/bold cyan]")
     CONSOLE.print()
 
     code_examples = """[bold]Import and use in your Python code:[/bold]
@@ -240,7 +241,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 def run_demo():
     """Run display function demonstrations"""
     CONSOLE.print()
-    header("CLI Display Module - Demo")
+    header("cli Display Module - Demo")
 
     CONSOLE.print("[bold]Display functions with Rich formatting:[/bold]")
     CONSOLE.print()
@@ -259,9 +260,9 @@ def run_demo():
     CONSOLE.print()
 
     section("Summary")
-    CONSOLE.print("  ✅ 3 operations succeeded")
-    CONSOLE.print("  ⚠️  1 warning")
-    CONSOLE.print("  ❌ 1 error")
+    CONSOLE.print("  ✅ 3 operations succeeded", highlight=False)
+    CONSOLE.print("  ⚠️  1 warning", highlight=False)
+    CONSOLE.print("  ❌ 1 error", highlight=False)
     CONSOLE.print()
 
     CONSOLE.print("[bold green]✨ Rich library integration complete![/bold green]")

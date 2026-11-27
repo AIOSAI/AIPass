@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_read.py
 # Description: Tests for registry read handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-24
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/registry/read.py."""
@@ -73,6 +73,7 @@ def test_derive_email_space(registry_file):
 def test_derive_email_aipass_hyphen(registry_file):
     """AIPASS-prefixed hyphen: 'AIPASS-HELP' takes second part."""
     assert _derived(registry_file, "AIPASS-HELP") == "@help"
+    assert _derived(registry_file, "aipass-help") == "@help"
 
 
 def test_derive_email_regular_hyphen(registry_file):

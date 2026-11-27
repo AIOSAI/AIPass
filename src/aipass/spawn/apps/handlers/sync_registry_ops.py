@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_registry_ops.py
 # Description: Registry sync handler — implementation logic for registry repair
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-07
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Registry synchronization handler for branch lifecycle management.
@@ -47,6 +47,7 @@ from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.passport_migration import backup_passport
 from aipass.spawn.apps.handlers.class_registry import (
     LEGACY_CLASSES,
+    get_available_classes,
     get_template_dir,
     refuse_retired_or_forbidden,
 )
@@ -114,7 +115,7 @@ def _scan_for_branches(project_root: Path) -> dict[str, Path]:
             if child.is_dir() and not child.name.startswith(".") and not child.name.startswith("__"):
                 passport = child / ".trinity" / "passport.json"
                 if passport.exists():
-                    found[normalize_branch_name(child.name, "lower")] = child
+                    found[normalize_branch_name(child.name)] = child
 
     _check_dir(project_root)
 
@@ -155,6 +156,10 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
         return {"error": "no registry found above the current directory", **empty}
     registry_path = Path(registry_path)
     project_root = registry_path.parent
+    if fix:
+        # Read every class's manifest before the registry save: a corrupt one raises with nothing written.
+        for citizen_class in get_available_classes():
+            load_template_registry(get_template_dir(citizen_class))
 
     with registry_lock(registry_path):
         # load_registry answers an unreadable file with an empty document; --fix would then re-register
@@ -169,7 +174,7 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
 
         registered: dict[str, dict] = {}
         for entry in branches:
-            name = normalize_branch_name(entry.get("name", ""), "lower")
+            name = normalize_branch_name(entry.get("name", ""))
             if name:
                 registered[name] = entry
 
@@ -191,7 +196,7 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
                     branch_dir.relative_to(resolved_root)
                 except ValueError:
                     stale.append(name)
-                    logger.info("[sync-registry] Entry '%s' path escapes project root: %s", name, rel_path)
+                    logger.warning("[sync-registry] Entry '%s' path escapes project root: %s", name, rel_path)
                     continue
 
                 passport = branch_dir / ".trinity" / "passport.json"
@@ -232,12 +237,10 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
                 if isinstance(raw_branches, dict):
                     for key in list(raw_branches.keys()):
                         entry_name = raw_branches[key].get("name", "") if isinstance(raw_branches[key], dict) else key
-                        if normalize_branch_name(entry_name, "lower") in removed:
+                        if normalize_branch_name(entry_name) in removed:
                             del raw_branches[key]
                 else:
-                    raw_branches = [
-                        b for b in raw_branches if normalize_branch_name(b.get("name", ""), "lower") not in removed
-                    ]
+                    raw_branches = [b for b in raw_branches if normalize_branch_name(b.get("name", "")) not in removed]
                 registry["branches"] = raw_branches
                 for s in removed:
                     logger.info(f"[sync-registry] Removed stale entry: {s}")
@@ -248,7 +251,7 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
                 rel_path = branch_path.relative_to(project_root).as_posix()
 
                 entry = {
-                    "name": name.upper(),
+                    "name": name,
                     "path": rel_path,
                     "profile": "library",
                     "description": _derive_description(branch_path),
@@ -259,7 +262,7 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
                 }
                 raw_branches = registry["branches"]
                 if isinstance(raw_branches, dict):
-                    raw_branches[name.upper()] = entry
+                    raw_branches[name] = entry
                 else:
                     raw_branches.append(entry)
                 logger.info(f"[sync-registry] Added unregistered branch: {name}")
@@ -271,7 +274,7 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
         if fix:
             for entry in branches_as_list(registry.get("branches", [])):
                 if entry.get("description") == "Auto-registered branch":
-                    name_lower = normalize_branch_name(entry.get("name", ""), "lower")
+                    name_lower = normalize_branch_name(entry.get("name", ""))
                     branch_path = filesystem_branches.get(name_lower)
                     if branch_path:
                         derived = _derive_description(branch_path)
@@ -436,7 +439,7 @@ def rebuild_registry(registry_path, confirm=False) -> dict:
                 return _refuse(f"{name}: passport {passport_path} unreadable ({exc}); restore it with: {RESTORE_CURE}")
             rows.append(
                 {
-                    "name": name.upper(),
+                    "name": name,
                     "path": branch_path.relative_to(project_root).as_posix(),
                     "profile": "library",
                     "description": _derive_description(branch_path),

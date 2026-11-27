@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: prax.py
 # Description: Entry point CLI for drone @prax — logging, monitoring, dashboard
-# Version: 1.1.1
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-24
+# Modified: 2026-11-26
 # =============================================
 
 """PRAX Branch - Main Orchestrator"""
@@ -17,7 +17,7 @@ from typing import Callable, List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-from aipass.cli import console, error, warning, reset_command_state, resolve_exit
+from aipass.cli import console, error, header_version, reset_command_state, resolve_exit
 
 from aipass.prax.apps.modules import (
     UnknownArgument,
@@ -41,16 +41,10 @@ def discover_command_modules() -> List[Callable]:
         if module_file.name.startswith("_") or module_file.name == "logger.py":
             continue
 
-        try:
-            module_name = f"aipass.prax.apps.modules.{module_file.stem}"
-            module = importlib.import_module(module_name)
-
-            if hasattr(module, "handle_command"):
-                command_handlers.append(module.handle_command)
-
-        except Exception as e:
-            logger.warning("Failed to load module %s: %s", module_file.name, e)
-            warning(f"Failed to load module {module_file.name}: {e}")
+        # A broken module raises: skipping it would silently drop its commands.
+        module = importlib.import_module(f"aipass.prax.apps.modules.{module_file.stem}")
+        if hasattr(module, "handle_command"):
+            command_handlers.append(module.handle_command)
 
     return command_handlers
 
@@ -58,7 +52,7 @@ def discover_command_modules() -> List[Callable]:
 def print_introspection():
     """Display discovered modules (main entry point - modules only, no handlers)"""
     console.print()
-    console.print("[bold cyan]PRAX - System-Wide Logging Infrastructure[/bold cyan]")
+    console.print("[bold cyan]prax - System-Wide Logging Infrastructure[/bold cyan]")
     console.print()
     console.print("[dim]Unified logging system for AIPass ecosystem[/dim]")
     console.print()
@@ -86,7 +80,7 @@ def print_introspection():
 def print_help():
     """Rich-formatted top-level help for PRAX"""
     console.print()
-    console.print("[bold cyan]PRAX - System-Wide Logging Infrastructure[/bold cyan]")
+    console.print("[bold cyan]prax - System-Wide Logging Infrastructure[/bold cyan]")
     console.print()
     console.print("[dim]Unified logging system for AIPass ecosystem[/dim]")
     console.print()
@@ -97,7 +91,7 @@ def print_help():
 
     console.print("[yellow]Commands:[/yellow]")
     console.print("  [cyan]monitor[/cyan]     Mission Control - unified real-time monitoring")
-    console.print("  [cyan]status[/cyan]      Show PRAX system status")
+    console.print("  [cyan]status[/cyan]      Show prax system status")
     console.print("  [cyan]log-audit[/cyan]   Audit log file sizes and health")
     console.print("  [cyan]log-health[/cyan]  Log growth rates (scan / snapshot)")
     console.print("  [cyan]dashboard[/cyan]   System dashboard")
@@ -154,8 +148,12 @@ def main() -> int:
 
 def _run() -> int:
     """Parse the command line and route it. Refusals are raised, never returned."""
+    if sys.argv[1:2] and sys.argv[1] in ("--version", "-V"):
+        console.print(f"prax v{header_version(__file__)}", highlight=False)
+        return 0
+
     parser = argparse.ArgumentParser(
-        description="PRAX - System-Wide Logging Infrastructure",
+        description="prax - System-Wide Logging Infrastructure",
         add_help=False,  # We route --help to modules when a command is given
     )
 
@@ -164,7 +162,6 @@ def _run() -> int:
     parser.add_argument("args", nargs="*", help="Arguments for the command")
 
     parser.add_argument("--help", "-h", action="store_true", dest="show_help", help="Show help information")
-    parser.add_argument("--version", "-V", action="version", version="PRAX v2.4.0")
 
     parsed_args, remaining = parser.parse_known_args()
 

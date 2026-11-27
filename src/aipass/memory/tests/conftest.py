@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for memory tests — write fence, infrastructure stand-ins, live-fleet guards
 # Version: 1.5.2
 # Created: 2026-03-07
-# Modified: 2026-11-18
+# Modified: 2026-11-23
 # Category: memory/tests
 # =============================================
 
@@ -30,7 +30,7 @@ from aipass.prax import branch_state_root as _prax_branch_state_root
 
 # Captured at collection so no test's sys.modules stand-in can shadow it.
 from aipass.memory.apps.handlers import write_fence as _write_fence
-from aipass.memory.apps.handlers.monitor import registry_scope
+from aipass.memory.apps.handlers.monitor import detector, registry_scope
 from aipass.memory.apps.handlers.templates import trinity_push
 from aipass.cli import display
 from aipass.memory.tests.support_config_verbs import _real_verbs
@@ -256,6 +256,32 @@ def clean_command_state() -> Generator[None, None, None]:
 def verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Real config_loader + rollover module wired to a MINTED config and registry (see :func:`_real_verbs`)."""
     return _real_verbs(tmp_path, monkeypatch)
+
+
+def _write_json(path: Path, data: dict) -> None:
+    """Create parents and write *data* as JSON."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+@pytest.fixture
+def declared_externals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """A tmp AIPass home declaring two external roots: @wren at its root's top, @grow nested at seed/src/grow/grow.
+
+    The write fence and the detector stand on home; both externals sit outside it. Nothing real is read.
+    """
+    home, wren_root, seed = tmp_path / "aipass", tmp_path / "wren_project", tmp_path / "seed"
+    _write_json(home / "AIPASS_REGISTRY.json", {"branches": []})
+    roots = [{"path": str(root), "label": root.name, "status": "active"} for root in (wren_root, seed)]
+    _write_json(home / "AIPASS_ROOTS.json", {"roots": roots})
+    for root, name, rel in ((wren_root, "wren", "wren"), (seed, "grow", "src/grow/grow")):
+        row = {"name": name.upper(), "path": rel, "email": f"@{name}", "status": "active"}
+        _write_json(root / f"{root.name.upper()}_REGISTRY.json", {"branches": [row]})
+        _write_json(root / rel / ".trinity" / "passport.json", {"citizenship": {"registered": True}})
+    monkeypatch.setattr(_write_fence, "ROOT", home)
+    monkeypatch.setattr(detector, "_REPO_ROOT", home)
+    monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
+    return SimpleNamespace(home=home, wren=wren_root / "wren", grow=seed / "src/grow/grow", seed=seed)
 
 
 @pytest.fixture(autouse=True)

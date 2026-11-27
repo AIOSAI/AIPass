@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitor_module.py
 # Description: Tests for the unified monitoring module
-# Version: 1.1.1
+# Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/monitor.py."""
@@ -314,7 +314,7 @@ class TestPrintIntrospection:
             mod.print_introspection()
         recorder.log_operation.assert_called_once_with("print_introspection", {"module": "monitor"})
         lines = capsys.readouterr().out.splitlines()
-        assert "PRAX Monitor Module" in lines
+        assert "prax Monitor Module" in lines
         assert len(lines) > 10
 
 
@@ -326,7 +326,7 @@ class TestPrintHelp:
         mod = _import_monitor()
         mod.print_help()
         lines = capsys.readouterr().out.splitlines()
-        assert "PRAX Monitor - Unified Branch Monitoring" in lines
+        assert "prax Monitor - Unified Branch Monitoring" in lines
         assert len(lines) > 10
 
 
@@ -519,8 +519,8 @@ class TestEmitWatcherEvent:
         call_kwargs = me_cls.call_args[1]
         assert call_kwargs["priority"] == 1
 
-    def test_emit_warning_level_has_priority_2(self, monkeypatch):
-        """Non-error level events get priority 2."""
+    def test_emit_warning_level_has_priority_2_under_the_prax_label(self, monkeypatch):
+        """Non-error level events get priority 2, labelled with prax's lowercase name."""
         mod = _import_monitor()
         mock_queue = MagicMock()
         monkeypatch.setattr(mod, "_event_queue", mock_queue)
@@ -531,6 +531,7 @@ class TestEmitWatcherEvent:
         me_cls.assert_called_once()
         call_kwargs = me_cls.call_args[1]
         assert call_kwargs["priority"] == 2
+        assert call_kwargs["branch"] == "prax"
 
 
 class TestInotifyFixMessage:
@@ -993,7 +994,9 @@ class TestInteractiveLoop:
             assert mod._interactive_loop() is None
 
         mock_input.assert_called_once()
-        _doubled("logger").info.assert_called_once_with("[monitor] EOF received, stopping interactive loop")
+        _doubled("logger").warning.assert_called_once_with(
+            "[monitor] stdin closed (EOF), stopping the interactive loop"
+        )
         # Unlike Ctrl+C, EOF is not announced: a piped-in stdin ending is not news.
         assert capsys.readouterr().out == ""
         assert mod._stop_event.is_set() is False
@@ -1167,7 +1170,7 @@ class TestBranchScopeWiring:
         queue = _run_scoped(mod, ["sentry,cli"])
         queue.set_scope.assert_called_once()
         scope = queue.set_scope.call_args.args[0]
-        assert scope.names == ("SENTRY", "CLI")
+        assert scope.names == ("sentry", "cli")
 
     def test_bare_run_installs_no_scope(self):
         """All-branches monitoring must not gain a filter."""
@@ -1192,7 +1195,7 @@ class TestBannerTruth:
     def test_scoped_banner_names_the_scope(self, capsys):
         mod = _import_monitor()
         _run_scoped(mod, ["devpulse,sentry"])
-        assert any("DEVPULSE, SENTRY" in line for line in _printed(capsys))
+        assert any("devpulse, sentry" in line for line in _printed(capsys))
 
     def test_scoped_banner_drops_the_all_branches_claim(self, capsys):
         mod = _import_monitor()
@@ -1200,7 +1203,7 @@ class TestBannerTruth:
         lines = _printed(capsys)
         # The floor: a banner that printed nothing would pass the loop below in silence.
         assert len(lines) >= 1, "the scoped run printed no banner at all - the loop below proves nothing"
-        assert any("DEVPULSE" in line for line in lines), "the scope must still be named somewhere"
+        assert any("devpulse" in line for line in lines), "the scope must still be named somewhere"
         for line in lines:
             assert "all branches" not in line, f"scoped run still claims all branches: {line}"
             assert "no filters" not in line, f"scoped run still claims no filters: {line}"
@@ -1223,7 +1226,7 @@ class TestBannerTruth:
 
         mod._print_status()
         lines = _printed(capsys)
-        assert any("SENTRY" in line for line in lines)
+        assert any("sentry" in line for line in lines)
         assert not any("no filters" in line for line in lines)
         assert any("41" in line for line in lines), "hidden-event count explains a quiet screen"
 

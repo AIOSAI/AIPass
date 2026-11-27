@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.4.1
+# Version: 1.6.0
 # Created: 2026-03-05
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -14,13 +14,14 @@ import sys
 import argparse
 
 from aipass.prax import logger
-from aipass.cli import console, header, error, warning, reset_command_state, resolve_exit
+from aipass.cli import console, header, header_version, error, warning, reset_command_state, resolve_exit
+from aipass.spawn.apps.modules.core import CorruptTemplateManifest
 
 
 def print_help():
     """Display Rich-formatted help."""
     console.print()
-    header("SPAWN - Branch Lifecycle Manager")
+    header("spawn - Branch Lifecycle Manager")
     console.print()
     console.print("[dim]Create, update, and manage AIPass branches with class-scoped templates[/dim]")
     console.print()
@@ -57,6 +58,10 @@ def print_help():
     )
     console.print(
         "  [green]sync-registry[/green] --rebuild       Rebuild a corrupt registry from passports "
+        "(preview; add --confirm)"
+    )
+    console.print(
+        "  [green]sync-registry[/green] --lowercase     Convert rows to lowercase names, relative paths "
         "(preview; add --confirm)"
     )
     console.print("  [green]regenerate-registry[/green] \\[class]   Regenerate template registry hashes (or --all)")
@@ -251,6 +256,7 @@ def handle_create(args):
         template_dir=template_dir,
         registry_path=parsed.registry,
         citizen_class=citizen_class,
+        localize=True,
     )
 
     if result["success"]:
@@ -287,12 +293,10 @@ def _dry_run_create(target_path, citizen_class, parsed, template_dir=None):
     template = Path(template_dir) if template_dir else get_template_dir(citizen_class or get_default_class())
     class_display = citizen_class or "decided at mint (manager if first citizen in the project, else specialist)"
     branch_name = get_branch_name(target)
-    branch_upper = normalize_branch_name(branch_name, "upper")
-
     console.print()
     header("DRY RUN — Create Preview")
     console.print()
-    console.print(f"  [bold]Branch:[/bold]  {branch_upper}")
+    console.print(f"  [bold]Branch:[/bold]  {normalize_branch_name(branch_name)}")
     console.print(f"  [bold]Class:[/bold]   {class_display}")
     console.print(f"  [bold]Path:[/bold]    {target}")
     console.print(f"  [bold]Template:[/bold] {template}")
@@ -321,8 +325,8 @@ def _dry_run_create(target_path, citizen_class, parsed, template_dir=None):
 
     console.print()
     console.print("  [bold cyan]Would create:[/bold cyan]")
-    console.print(f"    Files:       ~{file_count}")
-    console.print(f"    Directories: ~{dir_count}")
+    console.print(f"    Files:       ~{file_count}", highlight=False)
+    console.print(f"    Directories: ~{dir_count}", highlight=False)
     registry = Path(parsed.registry).resolve() if parsed.registry else find_registry(target.parent)
     if registry is None:
         error(f"No registry above {target}: create would refuse", suggestion="pass --registry <path>")
@@ -381,7 +385,16 @@ def _resolved(code: int) -> int:
 
 
 def main():
-    """Main entry point."""
+    """Main entry point: a corrupt template manifest stops any command here, in one line."""
+    try:
+        return _main()
+    except CorruptTemplateManifest as exc:
+        error(f"spawn {' '.join(sys.argv[1:])} stopped: {exc}. Nothing was written.")
+        return 1
+
+
+def _main():
+    """Route one command."""
     # The failure flag is process-level and drone routes in-process: a stale one would convict this command.
     reset_command_state()
     args = sys.argv[1:]
@@ -395,7 +408,7 @@ def main():
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print("SPAWN v1.0.0")
+        console.print(f"spawn v{header_version(__file__)}", highlight=False)
         return 0
 
     command = args[0]
@@ -480,10 +493,10 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
-        logger.warning("SPAWN interrupted by user (KeyboardInterrupt)")
+        logger.warning("spawn interrupted by user (KeyboardInterrupt)")
         console.print("\n\nOperation cancelled by user")
         sys.exit(0)
     except Exception as e:
-        logger.error(f"SPAWN entry point error: {e}", exc_info=True)
+        logger.error(f"spawn entry point error: {e}", exc_info=True)
         console.print(f"\nError: {e}")
         sys.exit(1)

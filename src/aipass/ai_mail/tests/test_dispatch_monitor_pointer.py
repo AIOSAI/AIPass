@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_pointer.py
 # Description: Tests for the dispatch monitor's session-pointer aware retry loop
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's session-pointer aware retry loop and reconciliation, Claude, Codex and OpenCode."""
@@ -16,6 +16,7 @@ import sqlite3
 import time
 import pytest
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
@@ -555,6 +556,19 @@ class TestTheCodexStream:
 
         assert parse_codex_stream(str(log))["succeeded"] is False
 
+    def test_an_unreadable_stream_is_a_failure_that_names_why(self, tmp_path):
+        parsed = parse_codex_stream(str(tmp_path))
+
+        assert parsed["succeeded"] is False
+        assert parsed["error"].startswith("codex stream unreadable:")
+
+    def test_a_line_that_is_not_json_is_skipped_with_a_warning(self, tmp_path):
+        log = tmp_path / "stdout.log"
+        _write_stream(log, ["not json", *CODEX_STREAM])
+
+        assert parse_codex_stream(str(log))["succeeded"] is True
+        assert any("not JSON" in c.args[0] for c in cast(MagicMock, mod.logger).warning.call_args_list)
+
 
 class TestTheCodexRetryLadder:
     def test_attempts_1_and_2_rerun_a_codex_resume_as_built(self, tmp_path):
@@ -796,6 +810,19 @@ class TestTheOpenCodeStream:
 
         assert parse_opencode_stream(str(log))["succeeded"] is False
 
+    def test_an_unreadable_stream_is_a_failure_that_names_why(self, tmp_path):
+        parsed = parse_opencode_stream(str(tmp_path))
+
+        assert parsed["succeeded"] is False
+        assert parsed["error"].startswith("opencode stream unreadable:")
+
+    def test_a_line_that_is_not_json_is_skipped_with_a_warning(self, tmp_path):
+        log = tmp_path / "stdout.log"
+        _write_stream(log, ["not json", *OPENCODE_STREAM])
+
+        assert parse_opencode_stream(str(log))["succeeded"] is True
+        assert any("not JSON" in c.args[0] for c in cast(MagicMock, mod.logger).warning.call_args_list)
+
 
 class TestTheOpenCodeRetryLadder:
     def test_attempts_1_and_2_rerun_a_resume_as_built(self, tmp_path):
@@ -1004,7 +1031,8 @@ class TestTheRunRecordAfterTheRun:
         (["codex", "exec", "-m", "gpt-6.1-sol", "--json", "Hi"], "codex", "", ("gpt-6.1-sol", "flag")),
         (["opencode", "run", "-m", "openai/x", "Hi"], "opencode", '{"model": "y"}', ("openai/x", "flag")),
         (["opencode", "run", "Hi"], "opencode", '{"model": "y"}', ("y", "inline_config")),
-        (["opencode", "run", "Hi"], "opencode", "not json", ("cli_default", "cli_default")),
+        (["opencode", "run", "Hi"], "opencode", "not json", ("cli_default", "unreadable_config")),
+        (["opencode", "run", "Hi"], "opencode", "[1]", ("cli_default", "unreadable_config")),
         (["codex", "exec", "-m"], "codex", "", ("cli_default", "cli_default")),
     ],
 )

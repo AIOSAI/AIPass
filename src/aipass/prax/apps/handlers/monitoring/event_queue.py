@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: event_queue.py
 # Description: Thread-Safe Event Queue
-# Version: 0.3.0
+# Version: 0.4.0
 # Created: 2025-11-23
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Thread-safe event coordination for monitoring system"""
@@ -44,6 +44,9 @@ class MonitoringEvent:
         if self.priority == 0:  # Not set
             priority_map = {"error": 1, "warning": 2, "info": 3, "debug": 4}
             self.priority = priority_map.get(self.level, 3)
+
+
+IDLE = None  # dequeue's answer when nothing arrived: idle, not a failure
 
 
 class MonitoringQueue:
@@ -128,11 +131,13 @@ class MonitoringQueue:
         )
 
     def dequeue(self, timeout: float = 0.1) -> Optional[MonitoringEvent]:
-        """Get next event from queue (thread-safe)"""
+        """Get the next event (thread-safe), or IDLE when none arrived within timeout.
+
+        IDLE is the display loop's normal poll result, never an event, so it is not logged."""
         try:
             return self.queue.get(timeout=timeout)
         except Empty:
-            return None
+            return IDLE
 
     def flush(self):
         """Clear all events from queue"""

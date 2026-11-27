@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitoring_handlers_display.py
 # Description: Unit tests for the monitor's command parsing and stream display
-# Version: 1.0.2
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/monitoring/interactive_filter.py and unified_stream.py, the command and display."""
@@ -18,6 +18,7 @@
 import io
 from unittest.mock import patch
 
+import pytest
 from rich.console import Console
 
 from aipass.prax.apps.handlers.monitoring import interactive_filter, unified_stream
@@ -175,6 +176,23 @@ class TestPrintEvent:
         buffer = _colour_console(monkeypatch)
         unified_stream.print_event("SENTRY", "test")
         assert "\x1b[32mSENTRY " in buffer.getvalue()  # SENTRY -> green
+
+    @pytest.mark.parametrize(
+        ("branch", "sgr"),
+        [
+            ("commons", "92"),
+            ("canary_test", "97"),
+            ("daemon", "34"),
+            ("hooks", "94"),
+            ("skills", "95"),
+            ("spawn", "32"),
+        ],
+    )
+    def test_every_fleet_branch_has_its_own_colour(self, monkeypatch, branch, sgr):
+        """Mutant: dropping a key (or keeping "the_commons") prints that branch white."""
+        buffer = _colour_console(monkeypatch)
+        unified_stream.print_event(branch, "test")
+        assert f"\x1b[{sgr}m{branch} " in buffer.getvalue()
 
     def test_unknown_branch_uses_white(self, monkeypatch):
         """Unknown branches should use white as default color."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic.py
 # Description: Medic toggle module for auto-healing error dispatch control
-# Version: 1.14.0
+# Version: 1.15.0
 # Created: 2026-02-12
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -78,6 +78,7 @@ def print_introspection():
     console.print("    [cyan]•[/cyan] medic_state.py [dim](get_suppression_stats — suppression statistics)[/dim]")
     console.print("    [cyan]•[/cyan] medic_state.py [dim](get_rate_limit_stats — rate limit statistics)[/dim]")
     console.print()
+    console.print("[dim]Run drone @trigger medic --help for usage.[/dim]")
 
 
 def _extract_branch_name(raw: str) -> str:
@@ -124,14 +125,14 @@ def print_help() -> None:
     console.rule("OFF vs MUTE")
     console.print()
     console.print("  [yellow]off[/yellow]       24h dispatch suppression (detection continues).")
-    console.print("            Auto-resumes after 24 hours. Use --forever for")
+    console.print("            Auto-resumes after 24 hours. Use --forever for", highlight=False)
     console.print("            permanent disable (stops log watcher too).")
     console.print()
     console.print("  [yellow]mute[/yellow]      Per-branch suppress for 4h (default).")
-    console.print("            --for 48h or --for 7d for custom duration.")
+    console.print("            --for 48h or --for 7d for custom duration.", highlight=False)
     console.print("            --forever for permanent. Auto-expires — no need to unmute.")
     console.print("            At expiry the branch gets a mail with the re-mute command;")
-    console.print("            a session still writing its transcript re-arms instead (2x max).")
+    console.print("            a session still writing its transcript re-arms instead (2x max).", highlight=False)
     console.print()
     console.rule("CONTENT MUTE vs VOLUME MUTE")
     console.print()
@@ -143,7 +144,7 @@ def print_help() -> None:
     console.print("  [dim]Separate on purpose: a content mute says nothing about log volume,[/dim]")
     console.print("  [dim]and build windows are exactly when floods happen.[/dim]")
     console.print()
-    console.rule("EXAMPLES")
+    console.print("[bold cyan]EXAMPLES:[/bold cyan]")
     console.print()
     console.print("  [dim]# Enable Medic (starts watching logs for errors)[/dim]")
     console.print("  drone @trigger medic on")
@@ -162,11 +163,11 @@ def print_help() -> None:
     console.print()
     console.rule("HOW IT WORKS")
     console.print()
-    console.print("  Trigger watches branch logs  ->  fires error_detected event")
+    console.print("  trigger watches branch logs  ->  fires error_detected event")
     console.print("  ->  handler checks medic_enabled  ->  checks branch mute list")
     console.print("  ->  dispatches fix-it email to affected branch (or suppresses)")
     console.print()
-    console.print("  Prax rate tracker  ->  fires runaway_log_detected event")
+    console.print("  prax rate tracker  ->  fires runaway_log_detected event")
     console.print("  ->  handler checks per-file cooldown  ->  checks VOLUME mute list")
     console.print("  ->  dispatches runaway alert (CRITICAL bypasses the mute)")
     console.print()
@@ -514,7 +515,7 @@ def _handle_units(console) -> None:
     sent = unit_watch.check(lambda subject, body: outbound.mail("@devpulse", subject, body))
     for subject in sent:
         console.print(f"  mailed @devpulse: {escape(subject)}")
-    console.print(f"Unit check done: {len(sent)} new incident(s) mailed")
+    console.print(f"Unit check done: {len(sent)} new incident(s) mailed", highlight=False)
 
 
 def _route_medic_module(args: list) -> bool:

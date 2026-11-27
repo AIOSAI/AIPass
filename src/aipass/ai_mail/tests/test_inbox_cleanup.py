@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_inbox_cleanup.py
 # Description: Tests for inbox cleanup handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-25
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/email/inbox_cleanup.py."""
@@ -533,3 +533,18 @@ def test_same_subject_same_second_archives_both(tmp_path: Path, monkeypatch):
     files = sorted((branch / ".ai_mail.local" / "deleted").glob("*.json"))
     assert len(files) == 2, [f.name for f in files]
     assert {json.loads(f.read_text(encoding="utf-8"))["message"] for f in files} == {"one", "two"}
+
+
+def test_close_refuses_while_an_old_deleted_json_cannot_be_migrated(tmp_path: Path):
+    """A corrupt deleted.json is named in the refusal, not left behind in silence while the close proceeds."""
+    branch_path = tmp_path / "branch"
+    inbox_file = _make_inbox(branch_path, [{"id": "m1", "status": "new", "subject": "Keep"}])
+    deleted_json = branch_path / ".ai_mail.local" / "deleted.json"
+    deleted_json.write_text("{not json", encoding="utf-8")
+
+    success, msg = mod.mark_as_closed_and_archive(branch_path, "m1")
+
+    assert success is False
+    assert "deleted.json" in msg
+    assert deleted_json.read_text(encoding="utf-8") == "{not json"
+    assert json.loads(inbox_file.read_text(encoding="utf-8"))["messages"][0]["id"] == "m1"

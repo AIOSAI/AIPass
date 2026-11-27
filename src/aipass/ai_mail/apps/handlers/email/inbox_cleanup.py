@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_cleanup.py
 # Description: Inbox Cleanup Handler
-# Version: 3.3.3
+# Version: 3.3.4
 # Created: 2025-11-27
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -70,35 +70,35 @@ def not_found_message(mailbox_path: Path, message_id: str) -> str:
     return f"Message not found: {message_id}"
 
 
-def _migrate_deleted_json_if_exists(mailbox_path: Path) -> Optional[int]:
+def _migrate_deleted_json_if_exists(mailbox_path: Path) -> int:
     """Migrate existing deleted.json to deleted/ directory on first access.
 
-    Returns the count moved, or None when the migration failed (the file is left in place).
+    Returns the count moved; raises when it cannot be read or moved (the file is left in place).
     """
     deleted_json = mailbox_path / "deleted.json"
 
     if not deleted_json.exists():
         return 0
 
+    with open(deleted_json, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    messages = data.get("messages", [])
+    for msg in messages:
+        _save_to_deleted_folder(mailbox_path, msg)
+
+    _archive_deleted_json(mailbox_path, deleted_json)
+    return len(messages)
+
+
+def _deleted_json_refusal(mailbox_path: Path) -> Optional[str]:
+    """Migrate an old deleted.json; the refusal text when it cannot be, None once migrated or absent."""
     try:
-        with open(deleted_json, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        messages = data.get("messages", [])
-        if not messages:
-            _archive_deleted_json(mailbox_path, deleted_json)
-            return 0
-
-        for msg in messages:
-            _save_to_deleted_folder(mailbox_path, msg)
-
-        _archive_deleted_json(mailbox_path, deleted_json)
-
-        return len(messages)
-
+        _migrate_deleted_json_if_exists(mailbox_path)
     except Exception as e:
-        logger.warning("[cleanup] _migrate_deleted_json() failed: %s", e)
-        return None
+        logger.warning("[cleanup] deleted.json migration failed in %s: %s", mailbox_path, e)
+        return f"Cannot migrate {mailbox_path / 'deleted.json'}: {e} - repair or move it aside, then retry"
+    return None
 
 
 def _archive_deleted_json(mailbox_path: Path, deleted_json: Path) -> None:
@@ -119,7 +119,9 @@ def mark_all_read_and_archive(branch_path: Path) -> Tuple[bool, str, int]:
     if not inbox_file.exists():
         return False, f"Inbox not found: {inbox_file}", 0
 
-    _migrate_deleted_json_if_exists(mailbox_path)
+    refusal = _deleted_json_refusal(mailbox_path)
+    if refusal is not None:
+        return False, refusal, 0
 
     try:
         with _get_inbox_lock()(inbox_file):
@@ -250,7 +252,9 @@ def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops
     if not inbox_file.exists():
         return False, f"Inbox not found: {inbox_file}"
 
-    _migrate_deleted_json_if_exists(mailbox_path)
+    refusal = _deleted_json_refusal(mailbox_path)
+    if refusal is not None:
+        return False, refusal
 
     try:
         with _get_inbox_lock()(inbox_file):

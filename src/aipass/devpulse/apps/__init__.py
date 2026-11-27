@@ -1,1 +1,1 @@
-# DEVPULSE apps package
+# devpulse apps package

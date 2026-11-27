@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_flow.py
 # Description: Tests for flow.py CLI entry point
-# Version: 1.1.1
+# Version: 1.1.3
 # Created: 2026-05-12
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/flow.py."""
@@ -131,9 +131,9 @@ class TestDiscoverModules:
         assert result == []
 
     def test_handles_import_error_gracefully(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_logger: MagicMock
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_logger: MagicMock, capsys: pytest.CaptureFixture
     ) -> None:
-        """Logs the import's own error and continues when a module fails to import."""
+        """Logs and shows the import's own error, then continues, when a module fails to import."""
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir()
         (modules_dir / "bad_mod.py").write_text("# broken", encoding="utf-8")
@@ -145,7 +145,8 @@ class TestDiscoverModules:
 
         assert result == []
         logged = [c.args[0] for c in mock_logger.error.call_args_list]
-        assert logged == [f"[FLOW] Failed to load module {name}: {refusal}"]
+        assert logged == [f"[flow] Failed to load module {name}: {refusal}"]
+        assert f"flow: module bad_mod failed to load: {refusal}" in capsys.readouterr().err
 
     def test_discovers_multiple_modules(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Discovers all valid modules in the directory, each under its own name."""
@@ -551,7 +552,7 @@ class TestPrintModuleHelp:
     def test_exact_match(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Finds module by exact name match, and the header names the module found.
 
-        Mutant: header(f"Flow - {module_name} Command") -> header("Flow - Command") reddens this.
+        Mutant: header(f"flow - {module_name} Command") -> header("flow - Command") reddens this.
         """
         mod = _make_module("create_plan", doc="Create plans\nMore details here")
         assert print_module_help("create_plan", [mod]) is True
@@ -559,7 +560,7 @@ class TestPrintModuleHelp:
         out, err = capsys.readouterr()
         assert "Create plans" in out
         assert "Unknown command" not in out + err
-        assert "Flow - create_plan Command" in out
+        assert "flow - create_plan Command" in out
 
     def test_no_match(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Shows error for unknown command.

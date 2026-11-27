@@ -3,7 +3,7 @@
 # Description: Auto-wire provider settings from manifest into user config
 # Version: 1.8.0
 # Created: 2026-05-08
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -13,7 +13,6 @@ doctor_wire — auto-wire provider settings
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -21,7 +20,6 @@ from pathlib import Path
 from typing import Any, List, NamedTuple, Optional
 
 from aipass.cli import console, success, warning
-from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.json import json_handler
@@ -58,6 +56,7 @@ from aipass.aipass.apps.handlers.provider_wire import (
 from aipass.aipass.apps.handlers.opencode_cli import check_opencode_cli, cli_proc, first_line, opencode_binary
 from aipass.aipass.apps.handlers.settings_backup import DOOR_DOCTOR_FIX, SettingsBackupError
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
+from aipass.aipass.apps.handlers.wire_verify import WireCheckResult, check_wire_verify  # noqa: F401
 
 
 # Re-exported: callers reach the stale-deny migration through this module.
@@ -492,12 +491,14 @@ def _print_manual_wire_warning(
     console.print("\n[bold]Provider settings not wired. Required for full AIPass functionality:[/bold]\n")
     if missing_hooks:
         console.print("[bold]Hooks (code quality enforcement):[/bold]")
+        console.print("[dim]Scripts Claude Code runs around tool calls.[/dim]")
         for hook in missing_hooks:
             desc = HOOK_DESCRIPTIONS.get(hook, hook)
             console.print(f"  [dim]•[/dim] {hook} — {desc}")
         console.print()
     if missing_env:
         console.print("[bold]Env vars:[/bold]")
+        console.print("[dim]Environment variables set in the provider settings.[/dim]")
         for var in missing_env:
             desc = ENV_DESCRIPTIONS.get(var, var)
             console.print(f"  [dim]•[/dim] {var} — {desc}")
@@ -505,92 +506,15 @@ def _print_manual_wire_warning(
     if missing_deny or missing_ask:
         console.print(
             f"{len(missing_deny)} deny rules + {len(missing_ask)} ask rules"
-            " (protect ~/.secrets/, block destructive git)"
+            " (protect ~/.secrets/, block destructive git)",
+            highlight=False,
         )
         console.print()
     if missing_settings:
         console.print("[bold]Settings (personal ~/.claude/settings.json):[/bold]")
+        console.print("[dim]Personal preferences AIPass expects in that file.[/dim]")
         for key in missing_settings:
             desc = SETTINGS_DESCRIPTIONS.get(key, key)
             console.print(f"  [dim]•[/dim] {key} — {desc}")
         console.print()
     console.print(f"[dim]Wire when ready: {WIRE_COMMAND} — see .claude/hooks/README.md[/dim]")
-
-
-def print_introspection() -> None:
-    """Display module info for doctor_wire."""
-    console.print()
-    console.print("[bold cyan]doctor_wire Module[/bold cyan]")
-    console.print("Auto-wire provider settings from manifest into user config")
-    console.print()
-    console.print("[yellow]Provides:[/yellow]")
-    console.print("  [dim]- HOOK_DESCRIPTIONS / ENV_DESCRIPTIONS[/dim]")
-    console.print("  [dim]- Bridge pattern — hooks wired as $AIPASS_HOME bridge commands[/dim]")
-    console.print("  [dim]- fix_provider_settings() — plan, show, ask once, write through the backed-up doors[/dim]")
-    console.print()
-
-
-def handle_command(command: str, args: list[str]) -> bool:
-    """Handle command routing. This is a helper module — no standalone commands."""
-    if command != "doctor_wire":
-        return False
-
-    if not args:
-        console.print("[dim]Helper module — use: aipass doctor (auto-wire runs when needed)[/dim]")
-        json_handler.log_operation("doctor_wire_usage", {"command": command})
-        return True
-
-    if wants_help(args):
-        console.print("[dim]Helper module — use: aipass doctor (auto-wire runs when needed)[/dim]")
-        json_handler.log_operation("doctor_wire_help", {"command": command})
-        return True
-
-    if args[0] in ("--info", "info"):
-        print_introspection()
-        json_handler.log_operation("doctor_wire_info", {"command": command})
-        return True
-
-    json_handler.log_operation("doctor_wire_noop", {"command": command})
-    return False
-
-
-class WireCheckResult(NamedTuple):
-    """Single doctor check result (mirrors doctor.CheckResult without importing it)."""
-
-    label: str
-    glyph: str
-    detail: str
-    remediation: str
-
-
-def check_wire_verify() -> list[WireCheckResult]:
-    """Run the hooks wire_verify guard — catch empty/orphaned/duplicate provider entries."""
-    try:
-        proc = subprocess.run(
-            ["drone", "@hooks", "verify"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            # hooks prints its report to stderr through Rich, which wraps a pipe at 80 columns.
-            env={**os.environ, "COLUMNS": "1000"},
-        )
-        if proc.returncode == 0:
-            return [WireCheckResult("wire verify", GLYPH_PASS, "provider hooks wired correctly", "")]
-        lines = [ln.strip() for ln in f"{proc.stdout}\n{proc.stderr}".splitlines() if ln.strip()]
-        found = [ln.removeprefix("ERROR").strip() for ln in lines if ln.startswith("ERROR")]
-        detail = "; ".join(found) or (lines[-1] if lines else f"drone @hooks verify exited {proc.returncode}")
-        return [
-            WireCheckResult(
-                "wire verify",
-                GLYPH_FAIL,
-                detail,
-                "'aipass doctor --fix' re-wires only the provider manifest's rows; "
-                "if this stays after it, the full report is 'drone @hooks verify' and the fix is @hooks'",
-            )
-        ]
-    except FileNotFoundError as exc:
-        logger.warning("[doctor] drone not found for wire_verify: %s", exc)
-        return [WireCheckResult("wire verify", GLYPH_WARN, "drone not found", "")]
-    except subprocess.TimeoutExpired as exc:
-        logger.warning("[doctor] wire_verify timed out: %s", exc)
-        return [WireCheckResult("wire verify", GLYPH_WARN, "timed out", "")]

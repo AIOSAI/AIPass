@@ -16,13 +16,18 @@ Auth is centralised in `verify_git_access()` and checked **once**, at the top of
 
 | Tier | Who | What it covers |
 |------|-----|----------------|
-| **Global** | All branches | the read doors and the passthroughs — status, diff, log, show, blame, tracked, export, remote, lock, branches, tag listing, release list, label list, alerts list, the `gh` reads, and `issue create` / `issue comment` aimed at AIOSAI/AIPass |
+| **Global** | All branches | the read doors and the passthroughs — status, diff, log, show, blame, tracked, export, remote, lock, branches, tag listing, release list, label list, alerts list, `pr list` and `pr view` (the key `pr-read`), the `gh` reads, and `issue create` / `issue comment` aimed at AIOSAI/AIPass |
 | **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | everything that writes: commit, uncommit, untrack, restore, checkout, push (outside AIPass), the PR verbs, branch deletion, prune-temp, sync, merge-main, merge, smart-sync, unlock, tag, fix, release edit, label create, alerts dismiss, remote set, and the `gh` writes |
 | **CI cure** | The one citizen whose registry entry carries `ci_cure: true` (@trigger in AIPass) | `ci-cure` alone: commit a CI cure on dev and push dev |
 
 Owner tier is **earned per repo** from four facts in the caller's own project registry:
 `citizen_class: manager`, registry tenancy, an entry carrying `owner: true`, and path-binding of
 the passport to the recorded home. There is no caller allowlist anywhere in the branch.
+
+The caller is found from the cwd. At a passportless repo root, `AIPASS_SEAT=<branch>` names the
+seat for the global tier, but both write tiers refuse it: `owner-tier verbs need the cwd inside the
+seat; AIPASS_SEAT is not enough`, and the same line naming `ci-cure` for that tier. See
+[caller_identity.md](caller_identity.md).
 
 The ci-cure tier is earned the same way, minus the manager class: registry tenancy, an entry
 carrying `ci_cure: true` (the JSON boolean), and path-binding. The fact must sit on exactly one
@@ -69,6 +74,16 @@ run id, owner, paths and sha. The refusal texts are `drone @git ci-cure --help`.
 anything it cannot find in a tier as `Unknown git command`, so registering a verb and wiring it to
 a handler does not make it callable. `test_every_registered_command_holds_a_tier` asserts that
 every registered verb holds a tier.
+
+**A subcommand in neither row is refused before its handler, for every seat.** The gh passthroughs
+(`issue`, `run`, `workflow`) and drone's GitHub chores (`release`, `label`, `alerts`) carry a read
+row and a write row in `auth.py` (`GH_SUBCOMMANDS`, `CHORE_SUBCOMMANDS`): a read asks the gate for
+the command, a write for `<command>-write`. A subcommand neither row names never reaches the gate,
+the handler or gh, and the admin seat's `--repo` door refuses it too. The refusal names the
+subcommand and both rows, and says the cure is a row in the table: no flag, env or seat opens it.
+A chore's subcommand is read with `--json` stripped from any slot, as its handler reads it.
+`test_every_subcommand_a_chore_handler_answers_holds_a_row` reads each chore handler's own dispatch
+and fails when it answers a subcommand no row names, so a forgotten row is caught at test time.
 
 ---
 
@@ -129,6 +144,11 @@ commits.
 
 **Flow:** work on dev → stack changes → `dev-pr` → merge the PR → `sync` realigns dev from main.
 
+**A PR into dev.** A cloud session opens its PR against dev from a `claude/<slug>-<id>` branch.
+`merge` reads the PR's base before acting: base dev is merged, then dev is pulled onto dev and main
+is left alone; base main is the train above; any other base is refused before the merge. The y/N or
+`--confirm` gate is the same for both. See [pull_requests.md](pull_requests.md).
+
 **`pr` vs `dev-pr`:** `pr` works from any branch — on main it auto-creates a temp branch from the
 description slug (`main:<slug>`), on other branches it pushes directly. It does not use `-u`, so
 main's upstream tracking stays on `origin/main`. `dev-pr` is specific to the dev→main workflow.
@@ -146,7 +166,7 @@ administration, not routing logic.
 
 | Plugin | Verb | Purpose |
 |--------|------|---------|
-| `merge_plugin` | `merge` | Straight-merge a PR and sync local main; an external repo takes `external_pr_handler` |
+| `merge_plugin` | `merge` | Straight-merge a PR into dev or main and sync the branch it lands on; an external repo takes `external_pr_handler` |
 | `sync_plugin` | `smart-sync` | Fetch, detect divergence, rebase; acts on `main` only and refuses any other HEAD |
 | `fix_plugin` | `fix` | Repair a stuck rebase or a detached HEAD; the divergence repair runs on `main` only and is skipped on any other branch |
 
@@ -158,5 +178,6 @@ its files carry a `.disabled` suffix, and hook sounds live in the hooks branch.
 ## Related
 
 - [git_interface.md](git_interface.md) — what the verbs themselves do
+- [pull_requests.md](pull_requests.md) — `pr list`, `pr view` and how `merge` reads a PR's base
 - [external_repo_door.md](external_repo_door.md) — git in a repo that is not AIPass
 - [caller_identity.md](caller_identity.md) — attribution, which is not authority

@@ -16,7 +16,7 @@ module answers the repo-root question, and every caller routes through it.
 
 A `Path.cwd()` fallback for the repo root is wrong twice: it crashes when the
 cwd is gone, and when it does not crash it is a *guess*. Writers that build
-`.ai_central/PLANS.central.json` and the `.backup/processed_plans` path would
+`.ai_central/plans.central.json` and the `.backup/processed_plans` path would
 resolve against whatever directory the caller's shell happened to be in.
 
 **Two `Path.cwd()` reads remain, and both are correct.**

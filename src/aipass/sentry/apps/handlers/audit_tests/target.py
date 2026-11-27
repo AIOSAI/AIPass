@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: target.py
 # Description: audit-tests target resolution - @branch or any directory
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-29
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Target resolution. The lane points at a registered branch OR at any directory."""
@@ -101,12 +101,13 @@ def resolve(argument: str, branch_paths: Optional[Dict[str, Path]] = None) -> Ta
     branch_paths = branch_paths or {}
 
     if argument.startswith("@"):
-        name = _canonical_branch(argument[1:], branch_paths)
+        row = _canonical_branch(argument[1:], branch_paths)
+        # The system speaks lowercase: what is stored is the lowercase name, whatever the row spells.
         return Target(
-            name=name,
-            path=Path(branch_paths[name]),
+            name=row.lower(),
+            path=Path(branch_paths[row]),
             kind="branch",
-            resolved_from=f"registry entry for '{name}'",
+            resolved_from=f"registry entry for '{row.lower()}'",
         )
 
     path = Path(argument).expanduser()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detection.py
 # Description: Branch Auto-Detection Handler
-# Version: 1.4.1
+# Version: 1.4.5
 # Created: 2025-11-18
-# Modified: 2026-11-18
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -66,7 +66,7 @@ def _get_contact_info(branch_name: str) -> Optional[Dict]:
             return None
 
     return {
-        "name": name_key.upper(),
+        "name": name_key,
         "email": "@" + name_key,
         "path": str(branch_path),
         "project": contact.get("project", ""),
@@ -242,32 +242,31 @@ def _rooted(branch: Dict, registry_path: Path) -> Dict:
     return rooted
 
 
+def _load_registry(registry_path: Path) -> dict:
+    """Parse one registry; RegistryUnreadable names it rather than letting it read as "no such branch"."""
+    try:
+        with open(registry_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError) as exc:
+        from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+
+        raise RegistryUnreadable(f"{registry_path.name} could not be read ({registry_path}): {exc}") from exc
+
+
 def _lookup_branch_by_name(branch_name: str) -> Optional[Dict]:
     """Look up branch in the registry by name (case-insensitive)."""
     name_lower = branch_name.lower()
 
     if BRANCH_REGISTRY_PATH.exists():
-        try:
-            with open(BRANCH_REGISTRY_PATH, "r", encoding="utf-8") as f:
-                registry = json.load(f)
-            for branch in _get_branches_list(registry):
-                if branch.get("name", "").lower() == name_lower:
-                    return _rooted(branch, BRANCH_REGISTRY_PATH)
-        except Exception as e:
-            logger.warning("[identity] _lookup_branch_by_name(%s) failed: %s", branch_name, e)
+        for branch in _get_branches_list(_load_registry(BRANCH_REGISTRY_PATH)):
+            if branch.get("name", "").lower() == name_lower:
+                return _rooted(branch, BRANCH_REGISTRY_PATH)
 
     caller_registry = _find_caller_registry()
     if caller_registry:
-        try:
-            with open(caller_registry, "r", encoding="utf-8") as f:
-                registry = json.load(f)
-            for branch in _get_branches_list(registry):
-                if branch.get("name", "").lower() == name_lower:
-                    return _rooted(branch, caller_registry)
-        except Exception as e:
-            logger.warning(
-                "[identity] _lookup_branch_by_name(%s) caller registry %s failed: %s", branch_name, caller_registry, e
-            )
+        for branch in _get_branches_list(_load_registry(caller_registry)):
+            if branch.get("name", "").lower() == name_lower:
+                return _rooted(branch, caller_registry)
 
     return None
 
@@ -276,7 +275,6 @@ def find_branch_root(start_path: Path) -> Optional[Path]:
     """Walk up directory tree to find branch root."""
     current = start_path.resolve()
 
-    # Walk up directory tree (max 10 levels to prevent infinite loop)
     for _ in range(10):
         if (current / ".trinity" / "passport.json").exists():
             return current
@@ -290,41 +288,17 @@ def find_branch_root(start_path: Path) -> Optional[Path]:
 
 
 def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict]:
-    """Look up branch information in AIPASS_REGISTRY.json by path."""
+    """Branch info by path from AIPASS_REGISTRY.json, then the caller's project registry; unreadable raises."""
     branch_path_resolved = branch_path.resolve()
 
-    if BRANCH_REGISTRY_PATH.exists():
-        try:
-            with open(BRANCH_REGISTRY_PATH, "r", encoding="utf-8") as f:
-                registry = json.load(f)
-            registry_dir = BRANCH_REGISTRY_PATH.parent
-            for branch in _get_branches_list(registry):
-                reg_path = Path(branch["path"])
-                if not reg_path.is_absolute():
-                    reg_path = (registry_dir / reg_path).resolve()
-                else:
-                    reg_path = reg_path.resolve()
-                if reg_path == branch_path_resolved:
-                    return _rooted(branch, BRANCH_REGISTRY_PATH)
-        except Exception as e:
-            logger.warning("[identity] get_branch_info_from_registry(%s) failed: %s", branch_path, e)
-
     caller_registry = _find_caller_registry()
-    if caller_registry:
-        try:
-            with open(caller_registry, "r", encoding="utf-8") as f:
-                registry = json.load(f)
-            registry_dir = caller_registry.parent
-            for branch in _get_branches_list(registry):
-                reg_path = Path(branch["path"])
-                if not reg_path.is_absolute():
-                    reg_path = (registry_dir / reg_path).resolve()
-                else:
-                    reg_path = reg_path.resolve()
-                if reg_path == branch_path_resolved:
-                    return _rooted(branch, caller_registry)
-        except Exception as e:
-            logger.warning("[identity] get_branch_info_from_registry(%s) caller registry failed: %s", branch_path, e)
+    for registry_path in [p for p in (BRANCH_REGISTRY_PATH, caller_registry) if p and p.exists()]:
+        for branch in _get_branches_list(_load_registry(registry_path)):
+            reg_path = Path(branch["path"])
+            if not reg_path.is_absolute():
+                reg_path = registry_path.parent / reg_path
+            if reg_path.resolve() == branch_path_resolved:
+                return _rooted(branch, registry_path)
 
     return None
 
@@ -336,24 +310,27 @@ if __name__ == "__main__":
     console.print("BRANCH AUTO-DETECTION HANDLER")
     console.print("=" * 70)
     console.print("\nPURPOSE:")
-    console.print("  Detects which branch is calling AI_MAIL based on PWD/CWD")
+    console.print("  Detects which branch is calling ai_mail based on PWD/CWD")
     console.print("  Walks up directory tree to find branch root")
     console.print()
-    console.print("FUNCTIONS PROVIDED:")
+    console.print("[yellow]FUNCTIONS PROVIDED:[/yellow]")
+    console.print("[dim]The public lookups other handlers call.[/dim]")
     console.print("  - detect_branch_from_pwd() -> Optional[Dict]")
     console.print("  - find_branch_root(start_path) -> Optional[Path]")
     console.print("  - get_branch_info_from_registry(branch_path) -> Optional[Dict]")
     console.print()
-    console.print("HANDLER CHARACTERISTICS:")
+    console.print("[yellow]HANDLER CHARACTERISTICS:[/yellow]")
+    console.print("[dim]What this handler may and may not depend on.[/dim]")
     console.print("  [green]+[/green] Independent - no module dependencies")
-    console.print("  [green]+[/green] Can import Prax (service provider)")
+    console.print("  [green]+[/green] Can import prax (service provider)")
     console.print("  [green]+[/green] Pure business logic")
     console.print("  [dim]-[/dim] CANNOT import parent modules")
     console.print()
-    console.print("DETECTION FLOW:")
-    console.print("  1. Get current working directory (PWD)")
-    console.print("  2. Walk up tree to find .trinity/passport.json")
-    console.print("  3. Look up branch path in AIPASS_REGISTRY.json")
-    console.print("  4. Return branch info (name, email, path, etc.)")
+    console.print("[yellow]DETECTION FLOW:[/yellow]")
+    console.print("[dim]How a caller's branch is found, in order.[/dim]")
+    console.print("  [cyan]1.[/cyan] Get current working directory (PWD)")
+    console.print("  [cyan]2.[/cyan] Walk up tree to find .trinity/passport.json")
+    console.print("  [cyan]3.[/cyan] Look up branch path in AIPASS_REGISTRY.json")
+    console.print("  [cyan]4.[/cyan] Return branch info (name, email, path, etc.)")
     console.print()
     console.print("=" * 70 + "\n")

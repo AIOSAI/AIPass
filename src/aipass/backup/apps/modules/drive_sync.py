@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drive_sync.py
 # Description: Drive sync module — uploads the snapshot store to Google Drive
-# Version: 2.6.4
+# Version: 2.6.5
 # Created: 2026-04-17
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Drive Sync Module — orchestrates file upload to Google Drive.
@@ -19,7 +19,7 @@ from pathlib import Path
 from rich.progress import Progress
 
 from aipass.prax import logger
-from aipass.cli import console, error, mark_command_failed
+from aipass.cli import console, error, escape, mark_command_failed
 
 from aipass.backup.apps.handlers.ignore.patterns import load_spec
 from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist
@@ -46,19 +46,24 @@ def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: Phase 4 -- snapshot store to Drive via @api gateway")
+    console.print("  [dim]Uploads the snapshot store to Drive via the @api gateway[/dim]")
     console.print("  Handlers: drive/client, drive/upload, drive/tracker")
+    console.print("  [dim]Run 'drone @backup drive_sync --help' for usage[/dim]")
 
 
 def print_help():
     """Display help for this module."""
     print_introspection()
     console.print()
-    console.print(f"Usage: {USAGE}", markup=False)
+    console.print(f"[yellow]Usage:[/yellow] {escape(USAGE)}")
     console.print("  Uploads the snapshot store, whatever the project's drive_sync setting says.")
-    console.print("  --force       Force re-upload of all files")
-    console.print("  --project     Override project name")
-    console.print("  --note        Add a note to uploaded files")
+    console.print("  [green]--force[/green]       Force re-upload of all files")
+    console.print("  [green]--project[/green]     Override project name")
+    console.print("  [green]--note[/green]        Add a note to uploaded files")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [cyan]drone @backup drive_sync @backup[/cyan]")
+    console.print("  [cyan]drone @backup drive_sync . --note 'before refactor'[/cyan]")
 
 
 def _planned_bytes(files: list[Path]) -> int:
@@ -68,7 +73,8 @@ def _planned_bytes(files: list[Path]) -> int:
         try:
             total += path.stat().st_size
         except OSError as exc:
-            logger.info(f"[backup] Drive sync: could not stat {path}: {exc}")
+            # The headroom check undercounts by this file; the upload itself reports the failure.
+            logger.warning(f"[backup] Drive sync: could not stat {path}: {exc}")
     return total
 
 

@@ -1,1 +1,1 @@
-# {{BRANCHNAME}} apps package
+# {{BRANCH}} apps package

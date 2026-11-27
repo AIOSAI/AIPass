@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations_template.py
 # Description: Unit tests for the dashboard template lane
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for the template lane: apps/handlers/dashboard/template_differ.py and template_pusher.py."""
@@ -45,7 +45,7 @@ class TestDiffDashboardTemplate:
         """Build a full dashboard template dict for diff tests."""
         return {
             "_warning": "AUTO-GENERATED",
-            "branch": "{{BRANCHNAME}}",
+            "branch": "{{BRANCH}}",
             "sections": {
                 "ai_mail": {
                     "managed_by": "ai_mail",
@@ -234,7 +234,7 @@ class TestDiffDashboardTemplate:
 
         result = mod.diff_dashboard_template(branch_name="FLOW")
         assert len(result["branches"]) == 1
-        assert result["branches"][0]["branch"] == "FLOW"
+        assert result["branches"][0]["branch"] == "flow"
 
 
 # =============================================
@@ -254,7 +254,7 @@ class TestPushDashboardTemplate:
         """Create template file, registry, and branch dirs for push tests."""
         template = {
             "_warning": "AUTO-GENERATED",
-            "branch": "{{BRANCHNAME}}",
+            "branch": "{{BRANCH}}",
             "sections": {
                 "ai_mail": {
                     "managed_by": "ai_mail",
@@ -309,19 +309,17 @@ class TestPushDashboardTemplate:
         assert (tmp_path / "flow" / "DASHBOARD.local.json").exists()
         assert (tmp_path / "ai_mail" / "DASHBOARD.local.json").exists()
 
-    def test_a_created_dashboard_carries_its_branch_name(self, tmp_path, monkeypatch):
-        """The {{BRANCHNAME}} placeholder is replaced by the branch the dashboard is for.
-
-        Green from its first run; its proof is its mutant (prax, leg 13): the
-        replace returning the raw value survived every other test in this file.
-        """
+    def test_a_created_dashboard_stores_its_branch_name_lowercase(self, tmp_path, monkeypatch):
+        """A capital registry row still stores lowercase: the dashboard and the push record are data files."""
         mod = _load_pusher()
         self._setup_template_and_registry(tmp_path, mod, monkeypatch, ["flow"])
 
         mod.push_dashboard_template(dry_run=False)
 
         created = json.loads((tmp_path / "flow" / "DASHBOARD.local.json").read_text(encoding="utf-8"))
-        assert created["branch"] == "FLOW"
+        version = json.loads((tmp_path / ".dashboard_version.json").read_text(encoding="utf-8"))
+        assert created["branch"] == "flow"
+        assert version["last_push_branches"] == ["flow"]
 
     def test_an_empty_dashboard_is_skipped_not_overwritten(self, tmp_path, monkeypatch):
         """An empty file is unreadable, not missing: a template over it would wipe every service's sections."""
@@ -334,6 +332,16 @@ class TestPushDashboardTemplate:
         assert result["branches_created"] == 0
         assert result["branches_skipped"] == 1
         assert (tmp_path / "flow" / "DASHBOARD.local.json").read_text(encoding="utf-8") == ""
+
+    def test_an_unreadable_dashboard_names_its_error(self, tmp_path, monkeypatch):
+        """The skip carries the parse error; mutant: a fixed message that drops why the read failed."""
+        mod = _load_pusher()
+        self._setup_template_and_registry(tmp_path, mod, monkeypatch, ["flow"])
+        (tmp_path / "flow" / "DASHBOARD.local.json").write_text("{", encoding="utf-8")
+
+        result = mod.push_dashboard_template(dry_run=False)
+
+        assert any("flow: unreadable dashboard (Expecting" in err for err in result["errors"])
 
     def test_dry_run_does_not_write_files(self, tmp_path, monkeypatch):
         """Dry run reports changes but does not create files on disk."""
@@ -387,6 +395,17 @@ class TestPushDashboardTemplate:
         assert "commons_mentions" not in data.get("quick_status", {})
         assert data["_warning"] == "AUTO-GENERATED"
         assert data["sections"]["ai_mail"]["new"] == 3
+
+    def test_an_updated_dashboard_is_recorded_lowercase_in_the_push_record(self, tmp_path, monkeypatch):
+        mod = _load_pusher()
+        self._setup_template_and_registry(tmp_path, mod, monkeypatch, ["flow"])
+        stale = {"_warning": "OLD WARNING", "branch": "FLOW", "sections": {"bulletin_board": {}}, "quick_status": {}}
+        (tmp_path / "flow" / "DASHBOARD.local.json").write_text(json.dumps(stale), encoding="utf-8")
+
+        mod.push_dashboard_template(dry_run=False)
+
+        version = json.loads((tmp_path / ".dashboard_version.json").read_text(encoding="utf-8"))
+        assert version["last_push_branches"] == ["flow"]
 
     def test_returns_error_when_template_missing(self, tmp_path, monkeypatch):
         """Missing template file returns success=False with error message."""

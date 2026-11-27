@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_update.py
 # Description: README Auto-Update Module
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -225,6 +225,8 @@ def print_help():
     console.print()
     header("README Auto-Update")
     console.print()
+    console.print("[yellow]Usage:[/yellow] drone @sentry readme <update|check> <@branch|@all>")
+    console.print()
     console.print("[yellow]COMMANDS:[/yellow]")
     console.print("  [green]drone @sentry readme update @branch[/green]    [dim]Update auto-generated sections[/dim]")
     console.print("  [green]drone @sentry readme update @all[/green]       [dim]Update all branch READMEs[/dim]")
@@ -236,6 +238,10 @@ def print_help():
     console.print("  COMMANDS      Commands from --help output")
     console.print("  HEADER        Branch info from .trinity/passport.json")
     console.print("  LAST_UPDATED  Timestamp")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]drone @sentry readme check @flow[/green]")
+    console.print("  [green]drone @sentry readme update @flow[/green]")
     console.print()
     console.print("[dim]Sections are marked with <!-- AUTO:NAME --> comments in README.md[/dim]")
     console.print("[dim]Commands: readme, --help[/dim]")

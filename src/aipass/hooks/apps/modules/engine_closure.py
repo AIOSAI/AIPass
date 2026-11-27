@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine_closure.py
-# Version: 1.3.0
+# Version: 1.3.2
 # Description: The hook engine's import closure, and the edit check that keeps a NameError out of it
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-04
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Which files the hook engine imports, and a refusal for an edit that would crash one of them.
@@ -57,9 +57,9 @@ RUFF_DARK = (
 )
 
 # One fixed text per fault, so medic fingerprints it once; the path and cause follow at INFO.
-RUFF_DARK_LOG = "[HOOKS] engine_closure: ruff did not answer, closure edits are refused until it does"
-CONFIG_HOLE_LOG = "[HOOKS] engine_closure: hooks.json unreadable, the closure is the engine's own roots only"
-PARSE_HOLE_LOG = "[HOOKS] engine_closure: a closure file did not parse, its imports are not followed"
+RUFF_DARK_LOG = "[hooks] engine_closure: ruff did not answer, closure edits are refused until it does"
+CONFIG_HOLE_LOG = "[hooks] engine_closure: hooks.json unreadable, the closure is the engine's own roots only"
+PARSE_HOLE_LOG = "[hooks] engine_closure: a closure file did not parse, its imports are not followed"
 
 
 class RuffDark(Exception):
@@ -73,7 +73,7 @@ def _wired_handlers(home: Path) -> list[str]:
         data = json.loads(config.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         logger.error(CONFIG_HOLE_LOG)
-        logger.info("[HOOKS] engine_closure: %s: %s", config, exc)
+        logger.info("[hooks] engine_closure: %s: %s", config, exc)
         data = {}
     found: list[str] = []
     stack: list[object] = [data]
@@ -116,7 +116,7 @@ def _imports(path: Path, package: str) -> list[str]:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except (OSError, SyntaxError, ValueError) as exc:
         logger.error(PARSE_HOLE_LOG)
-        logger.info("[HOOKS] engine_closure: %s not parsed: %s", path, exc)
+        logger.info("[hooks] engine_closure: %s not parsed: %s", path, exc)
         return []
     names: list[str] = []
     for node in _top_level(tree.body):
@@ -203,11 +203,11 @@ def crash_refusal(path: Path, tool_name: str, tool_input: dict, after_text, home
         hits = crash_hits(target, text)
     except RuffDark as exc:
         logger.error(RUFF_DARK_LOG)
-        logger.info("[HOOKS] engine_closure: ruff did not answer for %s: %s", target, exc)
+        logger.info("[hooks] engine_closure: ruff did not answer for %s: %s", target, exc)
         return RUFF_DARK.format(name=target.name, why=exc, python=sys.executable)
     if not hits:
         return None
-    logger.warning("[HOOKS] engine_closure: refused an edit leaving %s crashing at import", target)
+    logger.warning("[hooks] engine_closure: refused an edit leaving %s crashing at import", target)
     return REFUSED.format(name=target.name, hits="\n".join(hits))
 
 
@@ -217,6 +217,20 @@ def print_introspection() -> None:
     CONSOLE.print(f"  roots: {', '.join(ROOT_MODULES)} + every handler in .aipass/hooks.json")
     CONSOLE.print(f"  an edit to a closure file is checked for {CRASH_RULES} before it lands")
     CONSOLE.print("  [dim]drone @hooks closure list[/dim] — list the closure, computed from this install")
+    CONSOLE.print("[dim]Run drone @hooks closure --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print usage for ``drone @hooks closure``."""
+    CONSOLE.print("[bold cyan]closure[/bold cyan] — List the hook engine's import closure")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  drone @hooks [cyan]closure list[/cyan]")
+    CONSOLE.print()
+    CONSOLE.print("Prints every file the engine imports, computed now from this install, and the count.")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  drone @hooks closure list")
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -227,11 +241,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
     if wants_help(args):
-        CONSOLE.print("[bold cyan]closure[/bold cyan] — List the hook engine's import closure")
-        CONSOLE.print()
-        CONSOLE.print("  drone @hooks closure list")
-        CONSOLE.print()
-        CONSOLE.print("Prints every file the engine imports, computed now from this install, and the count.")
+        print_help()
         return True
     if args != ["list"]:
         return False

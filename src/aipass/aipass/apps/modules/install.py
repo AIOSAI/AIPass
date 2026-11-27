@@ -3,7 +3,7 @@
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + doctor + report)
 # Version: 1.9.0
 # Created: 2026-07-05
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -15,6 +15,7 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -22,10 +23,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 from aipass.cli import console, error, success, warning
 from aipass.aipass.apps.handlers.help_flag import wants_help
+from aipass.aipass.apps.handlers import provider_choice
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.baud import LATEST, FetchError, validate_tag
@@ -47,7 +49,7 @@ _DOCTOR_TIMEOUT = 600
 NON_INTERACTIVE_ENV = "AIPASS_NON_INTERACTIVE"
 # Exported under --yes: consent to setup.sh's machine changes, given up front.
 YES_ENV = "AIPASS_YES"
-_WAKE_PROMPT = (
+WAKE_PROMPT = (
     "Read dropbox/install_report.json: a fresh AIPass install. "
     "Greet me by name, then walk me through each attention item."
 )
@@ -67,7 +69,7 @@ _CLOSING_NOTE = (
 
 def _prompt(msg: str, default: str = "") -> str:
     """Simple input prompt with optional default (raises on Ctrl-C/EOF)."""
-    display = f"{msg} [{default}]: " if default else f"{msg}: "
+    display = f"{msg} [Enter for {default}]: " if default else f"{msg}: "
     try:
         val = input(display).strip()
         return val if val else default
@@ -88,12 +90,25 @@ def _redact_url(url: str) -> str:
     return urlunsplit(parts._replace(netloc=parts.netloc.rsplit("@", 1)[1]))
 
 
+#: A home lands in shell rc lines, hook commands and three providers' configs; only a plain path survives them all.
+_UNSAFE_HOME = re.compile(r"[\s\"'`$&;|<>()\\*?!{}\[\]#]")
+
+
+def _checked_home(raw: str) -> Path:
+    """*raw* as a home path, or ValueError naming why: absolute or ~/..., no whitespace, quote or shell character."""
+    if not (raw.startswith("/") or raw.startswith("~/")):
+        raise ValueError(f"{raw!r} is not an absolute path or ~/...")
+    if _UNSAFE_HOME.search(raw[1:] if raw.startswith("~/") else raw):
+        raise ValueError(f"{raw!r} holds whitespace, a quote or a shell character")
+    return Path(raw).expanduser().resolve()
+
+
 def _resolve_home(path: str | None, here: bool, non_interactive: bool) -> Path:
     """Decide where AIPass lives — --here / --path / $AIPASS_HOME / cwd / prompt / default."""
     if here:
-        return Path.cwd().resolve()
+        return _checked_home(str(Path.cwd().resolve()))
     if path:
-        return Path(path).expanduser().resolve()
+        return _checked_home(path)
     env_home = os.environ.get("AIPASS_HOME", "").strip()
     if env_home and _looks_like_aipass_tree(Path(env_home).expanduser()):
         return Path(env_home).expanduser().resolve()
@@ -105,8 +120,11 @@ def _resolve_home(path: str | None, here: bool, non_interactive: bool) -> Path:
             logger.info("[install] non-interactive: cwd is an AIPass tree, using %s", cwd)
             return cwd
         return DEFAULT_HOME.resolve()
-    raw = _prompt("Where should AIPass live?", str(DEFAULT_HOME))
-    return Path(raw).expanduser().resolve()
+    while True:
+        try:
+            return _checked_home(_prompt("Where should AIPass live?", str(DEFAULT_HOME)))
+        except ValueError as exc:
+            warning(f"Home refused: {exc}. Give an absolute path or ~/name.")
 
 
 def install_lock_path(home: Path) -> Path:
@@ -312,6 +330,8 @@ def _clone_repo(
         proc = subprocess.run(["git", "clone", "--depth", "1", source, str(home)], timeout=_CLONE_TIMEOUT)
         if proc.returncode == 0:
             _announce_cloned_branch(home)
+            if source.startswith("file://"):
+                _point_origin_upstream(home, Path(unquote(urlsplit(source).path)))
             return True
         # The user's line first: an unwritable log home must not swallow the last word.
         warning(f"git clone failed (exit {proc.returncode}) — git's own message is above. Check the network and retry.")
@@ -320,6 +340,27 @@ def _clone_repo(
         warning("git clone timed out.")
         logger.warning("[install] git clone timed out after %ss", exc.timeout)
     return False
+
+
+def _point_origin_upstream(home: Path, checkout: Path) -> None:
+    """A home cloned from a local checkout takes that checkout's origin, every branch fetched.
+
+    Left as cloned, origin is the checkout's directory and fetches one branch: the home
+    cannot sync or open a PR. A checkout with no origin keeps the clone as it is.
+    """
+    upstream = subprocess.run(
+        ["git", "-C", str(checkout), "remote", "get-url", "origin"], capture_output=True, text=True, timeout=30
+    )
+    url = upstream.stdout.strip()
+    if upstream.returncode != 0 or not url:
+        logger.info("[install] %s has no origin; the home's origin stays %s", checkout, checkout.as_uri())
+        return
+    for args in (
+        ["remote", "set-url", "origin", url],
+        ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"],
+    ):
+        subprocess.run(["git", "-C", str(home), *args], check=True, capture_output=True, text=True, timeout=30)
+    console.print(f"origin -> {_redact_url(url)} (the checkout's own), every branch fetched", markup=False)
 
 
 def _run_setup(
@@ -427,7 +468,7 @@ def _health_check(home: Path, dry_run: bool, non_interactive: bool, yes: bool = 
 
     In-process, a bootstrap from a wheel would judge its own cwd, environment and code, not the home.
     """
-    flags = [*(["--yes"] if yes else []), *(["--non-interactive"] if non_interactive else [])]
+    flags = ["--yes"] if yes else []
     if dry_run:
         console.print(f"[yellow]\\[dry-run][/yellow] would run: aipass doctor --fix {' '.join(flags)}".rstrip())
         return [], {"pass": 0, "warn": 0, "error": 0}
@@ -462,12 +503,6 @@ def install_report_path(home: Path) -> Path:
     return home / "src" / "aipass" / "devpulse" / "dropbox" / "install_report.json"
 
 
-def wake_command(home: Path) -> str:
-    """The one line that wakes devpulse on the report."""
-    devpulse = install_report_path(home).parent.parent
-    return f'cd {shlex.quote(str(devpulse))} && claude "{_WAKE_PROMPT}"'
-
-
 def _aipass_version() -> str:
     try:
         return importlib.metadata.version("aipass")
@@ -498,6 +533,7 @@ def _final_screen(
     console.print()
     if attention:
         console.print("[bold]Needs attention:[/bold]")
+        console.print("[dim]Checks that did not pass, each with its fix.[/dim]")
         for item in attention:
             fix = f" -> {item['remediation']}" if item["remediation"] else ""
             line = f"  {item['severity']}: {item['label']}: {item['detail']}{fix}"
@@ -511,6 +547,8 @@ def _final_screen(
         "written_at": datetime.now(timezone.utc).isoformat(),
         "home": str(home),
         "aipass_version": _aipass_version(),
+        # A repair install keeps the earlier pick; the ending overwrites it on a new one.
+        **({"provider": chosen} if (chosen := provider_choice.chosen_provider(home)) else {}),
         "user_name": _registry_user_name(home),
         "outcome": "step_failed" if failed else "doctor_errors" if counts.get("error", 0) else "installed",
         "failed_steps": failed or [],
@@ -526,8 +564,6 @@ def _final_screen(
         return 1
     json_handler.log_operation("install_report", {"path": str(report_path), "attention": len(attention)})
     console.print(f"Report: {report_path}", markup=False, highlight=False)
-    console.print("Wake devpulse on it:")
-    console.print(wake_command(home), markup=False, highlight=False, soft_wrap=True)
     console.print()
     for line in _CLOSING_NOTE:
         console.print(f"[dim]{line}[/dim]")
@@ -626,6 +662,9 @@ def run_finish(
         console.print()
         warning("Cancelled.")
         return 1
+    except ValueError as exc:
+        error(f"Home refused: {exc}. Give an absolute path or ~/name.")
+        return 2
     if not dry_run:
         _verify_binaries(home)
     return _finish(home, dry_run, non_interactive, yes=yes)
@@ -642,8 +681,9 @@ def run_install(
     baud_tag: str = LATEST,
     source: str | None = None,
     yes: bool = False,
+    provider: str | None = None,
 ) -> int:
-    """Run the 5-step one-command install. Returns 0 on success, 1 on failure.
+    """Run the 5-step one-command install, then the provider question. Returns 0 on success, 1 on failure.
 
     A bad ``baud_tag`` or ``source`` is refused with 2 (bad usage) before anything is cloned.
     """
@@ -673,6 +713,9 @@ def run_install(
         console.print()
         warning("Cancelled.")
         return 1
+    except ValueError as exc:
+        error(f"Home refused: {exc}. Give an absolute path or ~/name.")
+        return 2
     console.print(f"  Home: [cyan]{home}[/cyan]")
     if source is not None:
         console.print(f"  Source: [cyan]{_redact_url(clone_from)}[/cyan]")
@@ -742,13 +785,26 @@ def run_install(
         },
     )
 
-    return _finish(home, dry_run, non_interactive, last_print=phone_print, yes=yes, failed=failed)
+    result = _finish(home, dry_run, non_interactive, last_print=phone_print, yes=yes, failed=failed)
+    ending = provider_choice.run_ending(
+        provider,
+        home,
+        WAKE_PROMPT,
+        non_interactive=non_interactive,
+        dry_run=dry_run,
+        prompt=input,
+        say=lambda line: console.print(line, markup=False, highlight=False),
+    )
+    return result or ending
 
 
 def print_help() -> None:
     """Print usage help for the install command."""
     console.print()
     console.print("[bold cyan]aipass install[/bold cyan] — one-command bootstrap of AIPass")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]aipass install[/green]  /  [green]aipass install --non-interactive[/green]")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
     console.print("  [green]aipass install[/green]                      [dim]# interactive, ends at the report[/dim]")
@@ -767,6 +823,10 @@ def print_help() -> None:
     console.print(
         "  [green]aipass install --source PATH|URL[/green]   [dim]# clone AIPass from this path or URL instead of the"
         " public repo (a local path clones its committed HEAD; for the install sandbox)[/dim]"
+    )
+    console.print(
+        "  [green]aipass install --provider NAME[/green]    [dim]# claude|codex|opencode: answer the last question"
+        " headless (install it if missing, wire it, open devpulse in it)[/dim]"
     )
     console.print("  [green]aipass install --no-symlink[/green]         [dim]# skip global CLI symlinks[/dim]")
     console.print("  [green]aipass install --force-symlink[/green]      [dim]# repoint from another install[/dim]")
@@ -798,6 +858,7 @@ def print_introspection() -> None:
     console.print(f"[dim]Default home: {DEFAULT_HOME}[/dim]")
     console.print(f"[dim]Source: {REPO_URL}[/dim]")
     console.print()
+    console.print("[dim]Run 'aipass install --help' for usage and examples.[/dim]")
 
 
 def _flag_value(args: list[str], flag: str) -> str | None:
@@ -814,6 +875,25 @@ def _flag_value(args: list[str], flag: str) -> str | None:
     return None
 
 
+_SWITCHES = (
+    "--non-interactive", "--yes", "--dry-run", "--here", "--finish",
+    "--no-symlink", "--force-symlink", "--no-baud", "--force-global-home",
+)  # fmt: skip
+_VALUE_FLAGS = ("--path", "--baud-tag", "--source", "--provider")
+
+
+def _unknown_args(args: list[str]) -> list[str]:
+    """The args install does not know; a value flag's next arg is its value, whatever it looks like."""
+    unknown: list[str] = []
+    it = iter(args)
+    for arg in it:
+        if arg in _VALUE_FLAGS:
+            next(it, None)
+        elif arg not in _SWITCHES and arg.split("=", 1)[0] not in _VALUE_FLAGS:
+            unknown.append(arg)
+    return unknown
+
+
 def handle_command(command: str, args: list[str]) -> bool:
     """Route install subcommands. Returns True if handled, False otherwise."""
     if command != COMMAND:
@@ -826,21 +906,33 @@ def handle_command(command: str, args: list[str]) -> bool:
         print_introspection()
         return True
 
-    run_args = args[1:] if args and args[0] == "run" else args
+    unknown = _unknown_args(args)
+    if unknown:
+        logger.warning("[install] refused unknown args: %s", unknown)
+        error(f"aipass install: unknown argument(s): {' '.join(unknown)}")
+        print_help()
+        sys.exit(2)
 
-    non_interactive = "--non-interactive" in run_args
-    yes = "--yes" in run_args
-    dry_run = "--dry-run" in run_args
-    here = "--here" in run_args
-    finish = "--finish" in run_args
-    no_symlink = "--no-symlink" in run_args
-    force_symlink = "--force-symlink" in run_args
-    no_baud = "--no-baud" in run_args
-    path = _flag_value(run_args, "--path") or None
+    non_interactive = "--non-interactive" in args
+    yes = "--yes" in args
+    dry_run = "--dry-run" in args
+    here = "--here" in args
+    finish = "--finish" in args
+    no_symlink = "--no-symlink" in args
+    force_symlink = "--force-symlink" in args
+    no_baud = "--no-baud" in args
+    path = _flag_value(args, "--path") or None
     # A valueless --baud-tag or --source reaches its validator as "" and is refused there.
-    baud_tag = _flag_value(run_args, "--baud-tag")
+    baud_tag = _flag_value(args, "--baud-tag")
     baud_tag = LATEST if baud_tag is None else baud_tag
-    source = _flag_value(run_args, "--source")
+    source = _flag_value(args, "--source")
+    provider = _flag_value(args, "--provider")
+    if provider is not None and provider not in provider_choice.PROVIDERS:
+        error(f"--provider takes one of: {', '.join(provider_choice.ORDER)}")
+        sys.exit(2)
+    if finish and provider:
+        error(f"--finish asks no provider question: after it, run aipass provider {provider}")
+        sys.exit(2)
 
     if finish:
         result = run_finish(non_interactive=non_interactive, path=path, here=here, dry_run=dry_run, yes=yes)
@@ -856,6 +948,7 @@ def handle_command(command: str, args: list[str]) -> bool:
             baud_tag=baud_tag,
             source=source,
             yes=yes,
+            provider=provider,
         )
     json_handler.log_operation(
         "install_run",

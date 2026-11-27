@@ -1,0 +1,92 @@
+# =================== AIPass ====================
+# Name: sound.py
+# Version: 2.2.1
+# Description: Shared sound utilities — Piper TTS speech with mute support
+# Branch: hooks
+# Layer: apps/handlers/notification
+# Created: 2026-05-22
+# Modified: 2026-11-26
+# =============================================
+
+"""Shared sound functions for hook handlers. Silent unless hook sounds are switched on."""
+
+import subprocess
+import tempfile
+from pathlib import Path
+
+from aipass.hooks.apps.handlers.json import json_handler
+from aipass.prax import logger
+
+# Sound is the exception: off unless this flag exists. Per-user, outside the temp dir so a reboot keeps it.
+SOUND_FLAG = Path.home() / ".aipass" / "aipass-hooks-sound-on"
+PIPER_BIN = Path.home() / ".local" / "share" / "piper" / "piper"
+PIPER_VOICE = Path.home() / ".local" / "share" / "piper-voices" / "en_US-amy-medium.onnx"
+
+_PLAY_CMD: list[str] = ["aplay", "-q"]
+
+
+def is_muted() -> bool:
+    """True unless SOUND_FLAG exists: hook sounds are off by default."""
+    return not SOUND_FLAG.exists()
+
+
+def mute() -> bool:
+    """Turn hook sounds off. Idempotent.
+
+    Returns the resulting muted state (always True); @api imports this directly.
+    """
+    SOUND_FLAG.unlink(missing_ok=True)
+    logger.info("[hooks] sound: muted")
+    json_handler.log_operation("mute", {"muted": True})
+    return True
+
+
+def unmute() -> bool:
+    """Turn hook sounds on. Idempotent."""
+    SOUND_FLAG.parent.mkdir(parents=True, exist_ok=True)
+    SOUND_FLAG.touch()
+    logger.info("[hooks] sound: unmuted")
+    json_handler.log_operation("unmute", {"muted": False})
+    return False
+
+
+def speak(text: str, tmp_dir: str | None = None) -> None:
+    """Generate speech via Piper TTS and play it. Skips if muted.
+
+    tmp_dir is a test seam: tests pass their own dir instead of patching tempfile process-wide.
+    """
+    if is_muted():
+        return
+
+    if not PIPER_BIN.exists() or not PIPER_VOICE.exists():
+        return
+
+    wav_path, playing = "", False
+    try:
+        wav_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=tmp_dir)
+        wav_path = wav_file.name
+        wav_file.close()
+
+        piper_result = subprocess.run(
+            [str(PIPER_BIN), "-m", str(PIPER_VOICE), "-f", wav_path],
+            input=text,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+        if piper_result.returncode == 0 and Path(wav_path).exists():
+            # The player's own shell removes the wav when playback ends: the prompt path never waits on it.
+            subprocess.Popen(
+                ["sh", "-c", " ".join(_PLAY_CMD) + ' "$1"; rm -f "$1"', "sh", wav_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            playing = True
+    except subprocess.TimeoutExpired:
+        logger.info("[hooks] speak: piper timed out")
+    except OSError as exc:
+        logger.info("[hooks] speak: playback error: %s", exc)
+    finally:
+        if wav_path and not playing:
+            Path(wav_path).unlink(missing_ok=True)

@@ -36,7 +36,7 @@ Codex 0.164 parses `permissionDecision: "ask"` but does not support it. It marks
 
 ## Installers
 
-An AI running `aipass doctor --fix`, `setup.sh` or `provider_wire.py` from Bash rewrites provider files in one call, so the run is judged like a write to the wiring. Only an executed installer counts: the program itself (`./setup.sh`, `timeout 60 ./setup.sh`) or an interpreter's script operand (`bash setup.sh`, `python3 provider_wire.py`). A program that reads the file (`cat setup.sh`, `rg needle setup.sh`) passes. A person running them in their own terminal passes no hook, so there is no exemption.
+An AI running `aipass doctor --fix`, `setup.sh` or `provider_wire.py` from Bash rewrites provider files in one call, so the run is judged like a write to the wiring. Only an executed installer counts: the program itself (`./setup.sh`, `timeout 60 ./setup.sh`) or an interpreter's script operand (`bash setup.sh`, `python3 provider_wire.py`). A shell's `-o`/`+o`/`-O`/`+O` takes the next word as an option name, so `bash -o pipefail setup.sh` still runs `setup.sh`. A program that reads the file (`cat setup.sh`, `rg needle setup.sh`) passes, and so does a shell's syntax check spelled exactly `bash -n setup.sh`, which parses the script and runs nothing; any other flag beside `-n` (`-n -i`, `-nx`) is judged as a run. A person running them in their own terminal passes no hook, so there is no exemption.
 
 ## What it cannot see
 

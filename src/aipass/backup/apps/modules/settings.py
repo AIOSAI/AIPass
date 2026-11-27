@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: settings.py
 # Description: Settings module — sets a project's drive_sync on or off; the settings UI is deferred
-# Version: 0.2.0
+# Version: 0.2.1
 # Created: 2026-04-17
-# Modified: 2026-10-17
+# Modified: 2026-11-26
 # =============================================
 
 """Settings Module — one live key, drive_sync, written through the project config handler."""
@@ -28,17 +28,21 @@ def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: drive_sync on|off is live; the settings UI awaits Phase 3")
+    console.print("  [dim]drive_sync on|off is live; the settings UI awaits Phase 3[/dim]")
     console.print("  Handlers: project/config")
+    console.print("  [dim]Run 'drone @backup settings --help' for usage[/dim]")
 
 
 def print_help():
     """Display help for this module."""
     print_introspection()
     console.print()
-    console.print(DRIVE_SYNC_USAGE, markup=False)
+    console.print("[yellow]Usage:[/yellow] settings drive_sync on|off <project_path|@name>")
     console.print("  on: 'all' runs the Drive step for this project; off: it skips it.")
     console.print("  The bare drive_sync verb uploads whatever this says.")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [cyan]drone @backup settings drive_sync on @backup[/cyan]")
 
 
 def set_drive_sync(args: list) -> bool:

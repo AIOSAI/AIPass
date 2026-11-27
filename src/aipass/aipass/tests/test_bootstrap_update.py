@@ -3,7 +3,7 @@
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
 # Version: 1.8.0
 # Created: 2026-10-08
-# Modified: 2026-11-17
+# Modified: 2026-11-24
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: update_project and the plans it reads."""
@@ -14,7 +14,8 @@
 import json
 import os
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest  # pyright: ignore[reportMissingImports]
 
@@ -791,11 +792,74 @@ def test_update_project_repoints_a_dangling_venv_link(tmp_path, monkeypatch):
     (host / ".venv").mkdir()
     monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda home: home != str(host))
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=MagicMock(return_value=True)))
+    monkeypatch.setattr("builtins.input", lambda _prompt: "yes")
     (target / ".venv").symlink_to(tmp_path / "old_home" / ".venv")
 
     bootstrap.update_project(target, apply=True)
 
     assert (target / ".venv").resolve() == (host / ".venv").resolve()
+
+
+def test_update_without_a_terminal_leaves_a_dangling_venv_link_and_says_action_needed(tmp_path, monkeypatch):
+    """X04: the update repointed a dangling .venv link with nobody asked."""
+    host, target = _make_nested_project(tmp_path)
+    (host / ".venv").mkdir()
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda home: home != str(host))
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=MagicMock(return_value=False)))
+    old = tmp_path / "old_home" / ".venv"
+    (target / ".venv").symlink_to(old)
+
+    result = bootstrap.update_project(target, apply=True)
+
+    assert (target / ".venv").readlink() == old
+    assert not [f for f in result["updated_files"] if f.startswith(".venv")]
+    assert [n for n in result["notes"] if n.startswith("ACTION NEEDED:") and "ln -sfn" in n]
+
+
+def test_update_drops_a_settings_hooks_and_env_left_empty_by_the_strip(tmp_path):
+    """A63: an AIPass-only hooks key and an AIPASS_HOME-only env key came back whole after the strip."""
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="strip")
+    settings_path = target / ".claude" / "settings.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    settings["hooks"] = {"Stop": [{"hooks": [{"type": "command", "command": "cat aipass_global_prompt.md"}]}]}
+    settings["env"] = {"AIPASS_HOME": "/somewhere/else"}
+    settings_path.write_text(json.dumps(settings), encoding="utf-8")
+
+    update_project(target)
+
+    written = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert "hooks" not in written and "env" not in written
+
+
+def test_the_scaffold_backup_stamp_is_local_time(tmp_path, monkeypatch):
+    """A69: the stamp was UTC with a Z, five hours off a clock at UTC-5."""
+    import time
+    from datetime import datetime
+
+    monkeypatch.setenv("TZ", "Etc/GMT+5")
+    time.tzset()
+    try:
+        target = tmp_path / "proj"
+        target.mkdir()
+        init_project(target, project_name="stamp")
+        (target / ".agents" / "skills" / "prep" / "SKILL.md").write_text("# mine\n", encoding="utf-8")
+        manifest_path = target / ".aipass" / "scaffold_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["files"][".agents/skills/prep/SKILL.md"] = sc_sha256("# mine\n")
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        update_project(target)
+
+        (backup,) = (target / ".aipass" / ".backup").glob("scaffold_*")
+        stamp = datetime.strptime(backup.name, "scaffold_%Y%m%dT%H%M%S")
+        assert abs((datetime.now() - stamp).total_seconds()) < 120
+    finally:
+        monkeypatch.delenv("TZ")
+        time.tzset()
 
 
 def _a_project_from_before_the_shared_skills(tmp_path, prep_text: str) -> Path:

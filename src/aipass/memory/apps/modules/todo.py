@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: todo.py
 # Description: Todo module — the pad at a glance, its backlog, and restore (CLI routing only)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-15
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -177,7 +177,7 @@ def print_help() -> None:
     console.print("[bold]BACKLOG:[/bold]")
     console.print("  Each record: number · date · priority (when set) · rolled · reason · task.")
     console.print("  The number is the todo's ORIGINAL number. status is never printed.")
-    console.print("  No file yet is a state, not an error (exit 0): .backup/ is gitignored,")
+    console.print("  No file yet is a state, not an error (exit 0): .backup/ is gitignored,", highlight=False)
     console.print("  so a fresh clone has no backlog. An unreadable file is refused (non-zero).")
     console.print()
     console.print("[bold]RESTORE:[/bold]")
@@ -185,11 +185,11 @@ def print_help() -> None:
     console.print("  naming another branch is refused, and so is a caller in no branch.")
     console.print("  Refused when the pad already holds COUNT, when no record carries the")
     console.print("  number, or when several do (the candidates are named). The todo returns")
-    console.print("  as max(pad and backlog numbers) + 1; task, date and priority unchanged.")
+    console.print("  as max(pad and backlog numbers) + 1; task, date and priority unchanged.", highlight=False)
     console.print("  Every refusal exits non-zero.")
     console.print()
     console.print("[bold]EXAMPLES:[/bold]")
     console.print("  drone @memory todo")
     console.print("  drone @memory todo backlog @devpulse")
-    console.print("  drone @memory todo restore 7")
+    console.print("  drone @memory todo restore 7", highlight=False)
     console.print()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: CLI Routing Tests for Drone (adapted from universal template)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-27
-# Modified: 2026-11-21
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/drone.py, the drone CLI entry point and its routing."""
@@ -360,7 +360,7 @@ class TestMainModuleRouting:
         ):
             result = main()
         assert result == 3
-        assert capsys.readouterr().out == "output"
+        assert capsys.readouterr().out == "output\n"
 
     def test_discovered_module_exception(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -493,9 +493,13 @@ class TestHandleSystems:
         assert "No registry found" in capsys.readouterr().out
 
     def test_with_branches_and_modules(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Modules list under services, agents under branches (mutant: the branch loop print removed)."""
+        """Library citizens under services, modules as routes only, agents under branches, each group explained.
+
+        Mutants: the branch loop print removed; an explainer line removed; escape() dropped from a description;
+        modules listed under services again; the routes line removed."""
         branches = [
             {"name": "drone", "profile": "library", "description": "Router"},
+            {"name": "memory", "profile": "library", "description": "Archive [vectors] on rollover"},
             {"name": "myapp", "profile": "agent"},
         ]
         with (
@@ -503,16 +507,17 @@ class TestHandleSystems:
             patch(f"{_DRONE}._cwd_has_registry", return_value=True),
             patch(f"{_DRONE}.get_all_branches", return_value=branches),
             patch(f"{_DRONE}.list_modules", return_value=["git"]),
-            patch(
-                f"{_DRONE}.get_module_info",
-                return_value=type("I", (), {"description": "Git ops"})(),
-            ),
         ):
             result = main()
         out = capsys.readouterr().out
         assert result == 0
-        assert "Git ops" in out
+        assert "AIPass Services (1):" in out
+        assert "routes: @git, systems, scan, activate, list, remove, rm, docker" in out
         assert "@myapp" in out
+        assert "Archive [vectors] on rollover" in out
+        assert "drone itself: the router every command walks through" in out
+        assert "citizens with profile library: the framework's own services" in out
+        assert "every other citizen: registry, roots, hosted projects; test citizens included" in out
 
     def test_aipass_home_hint(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         """`drone systems` prints the AIPASS_HOME hint when unset (mutant: hint print removed)."""
@@ -572,6 +577,9 @@ class TestHandleModule:
             patch(f"{_DRONE}.is_module", return_value=True),
             patch(f"{_DRONE}.branch_exists", return_value=False),
             patch(f"{_DRONE}.route_command") as mock_route,
+            patch(
+                f"{_DRONE}.get_module_printer", **patches.get("printer_patch", {"return_value": patches.get("printer")})
+            ),
             patch(f"{_DRONE}.get_module_introspective", return_value=patches.get("intro", "")),
             patch(f"{_DRONE}.get_module_help", return_value=patches.get("help", "")),
             patch(f"{_DRONE}.route_module_command", **patches.get("route", {"return_value": {}})) as mock_rmc,
@@ -620,6 +628,35 @@ class TestHandleModule:
         assert "module @git is registered but not available: it could not load" in err
         assert "No help available" not in out
 
+    def test_a_module_with_its_own_printer_prints_it_not_the_string(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Bare and --help call the module's print_* and skip the string lane; mutant: the printer branch removed."""
+        printer = MagicMock(side_effect=lambda: print("styled page"))
+        for argv in (["@git"], ["@git", "--help"]):
+            result, _ = self._run(argv, printer=printer, intro="plain intro", help="plain help")
+            assert result == 0
+            out = capsys.readouterr().out
+            assert "styled page" in out
+            assert "plain" not in out
+        assert printer.call_count == 2
+
+    def test_a_printer_that_cannot_import_is_named_on_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Bare and --help on a module whose printer cannot import exit 1 and say so; mutant: the except removed."""
+        for argv in (["@git"], ["@git", "--help"]):
+            result, _ = self._run(argv, printer_patch={"side_effect": ImportError("gone")})
+            assert result == 1
+            assert "module @git is registered but not available: it could not load" in capsys.readouterr().err
+
+    def test_git_bare_and_help_print_the_styled_pages(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Through the real lookup: @git bare ends on its --help pointer, --help carries Usage and Examples."""
+        with patch("sys.argv", ["drone", "@git"]), patch(f"{_DRONE}.branch_exists", return_value=False):
+            assert main() == 0
+        assert "Run 'drone @git --help' for usage information" in capsys.readouterr().out
+        with patch("sys.argv", ["drone", "@git", "--help"]), patch(f"{_DRONE}.branch_exists", return_value=False):
+            assert main() == 0
+        out = capsys.readouterr().out
+        assert "Usage:" in out
+        assert "Examples:" in out
+
     def test_command_routing(self, capsys: pytest.CaptureFixture[str]) -> None:
         """A verb routes through route_module_command and its stdout is written (mutant: stdout write removed)."""
         result, mock_rmc = self._run(
@@ -627,7 +664,12 @@ class TestHandleModule:
         )
         assert result == 0
         mock_rmc.assert_called_once_with("git", "status", None)
-        assert capsys.readouterr().out == "ok"
+        assert capsys.readouterr().out == "ok\n"
+
+    def test_an_answer_ending_in_a_newline_gets_no_second(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Two `drone @git log` runs back to back once ran together: the newline is added only when missing."""
+        self._run(["@git", "log"], route={"return_value": {"stdout": "ok\n", "stderr": "no\n", "exit_code": 0}})
+        assert capsys.readouterr() == ("ok\n", "no\n")
 
     def test_command_import_error(self, capsys: pytest.CaptureFixture[str]) -> None:
         """ImportError during a module verb exits 1 and says why on stderr (mutant: except returns 0)."""

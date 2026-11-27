@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Main orchestrator for agent spawning
-# Version: 1.6.0
+# Version: 1.8.1
 # Created: 2026-03-05
-# Modified: 2026-11-20
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -17,7 +17,7 @@ from aipass.prax import logger
 
 from aipass.cli import console
 
-# apps/spawn.py imports these two from here, so they are re-exported by name.
+# apps/spawn.py imports these from here, so they are re-exported by name.
 from aipass.spawn.apps.handlers.metadata import (
     get_branch_name as get_branch_name,
     normalize_branch_name as normalize_branch_name,
@@ -31,6 +31,7 @@ from aipass.spawn.apps.handlers.class_registry import (
 )
 from aipass.spawn.apps.handlers.mint_ops import INCOMPLETE_MARKER as INCOMPLETE_MARKER, spawn_at
 from aipass.spawn.apps.handlers.registry import find_registry as find_registry
+from aipass.spawn.apps.handlers.meta_ops import CorruptTemplateManifest as CorruptTemplateManifest
 
 _META_TAB_KEYS = {"TODOS_META", "KEY_LEARNINGS_META", "SESSIONS_META", "OBSERVATIONS_META"}
 
@@ -82,6 +83,28 @@ def print_introspection():
         "    [dim]- seed_ops.py (find_seed, load_seed, mint_from_seed — mint a citizen from its passport vault)[/dim]"
     )
     console.print()
+    console.print("[dim]Run drone @spawn create --help for usage[/dim]")
+
+
+def print_help():
+    """Display create command help."""
+    console.print()
+    console.print(
+        "[bold cyan]Usage:[/bold cyan] drone @spawn create \\[class] <target_path> "
+        "\\[--role <text>] \\[--traits <text>] \\[--purpose <text>] \\[--template <class|dir>] \\[--registry <path>]"
+    )
+    console.print()
+    console.print("  [green]--role[/green]      Agent role description")
+    console.print("  [green]--traits[/green]    Agent personality traits")
+    console.print("  [green]--purpose[/green]   Agent purpose (brief)")
+    console.print("  [green]--template[/green]  Template class name (manager, specialist) or custom directory path")
+    console.print("  [green]--registry[/green]  Registry path; default: nearest *_REGISTRY.json above the target")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print('  [green]drone @spawn create /path/to/new_agent --role "Analyst" --purpose "Reports"[/green]')
+    console.print("  [green]drone @spawn create specialist ./new_agent[/green]")
+    console.print("  [green]drone @spawn create ./new_agent --template manager[/green]")
+    console.print()
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -91,7 +114,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     if "--help" in args:
-        print_introspection()
+        print_help()
         return True
 
     if command == "create":
@@ -125,7 +148,7 @@ def handle_command(command: str, args: List[str]) -> bool:
                 i += 2
             else:
                 i += 1
-        result = spawn_agent(target_path, **kwargs)
+        result = spawn_agent(target_path, localize=True, **kwargs)
         return result["success"]
     else:
         logger.error(f"Unknown spawn command: {command}")
@@ -142,6 +165,7 @@ def spawn_agent(
     registry_path=None,
     citizen_class=None,
     arrival=None,
+    localize=False,
 ):
     """Create a new AIPass agent from template — the public door (aipass.spawn exports it).
 
@@ -158,4 +182,5 @@ def spawn_agent(
         registry_path=registry_path,
         citizen_class=citizen_class,
         arrival=arrival,
+        localize=localize,
     )

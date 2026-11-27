@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commons.py
 # Description: Entry point CLI for drone @commons
-# Version: 1.2.2
+# Version: 1.2.4
 # Created: 2026-03-08
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -30,17 +30,24 @@ for _script_dir in _script_dirs:
 
 from aipass.prax import logger
 from aipass.cli import console, header, error, warning
-from aipass.cli import reset_command_state, resolve_exit
+from aipass.cli import reset_command_state, resolve_exit, header_version
 
 
 MODULE_ROOT = Path(__file__).parent
 MODULES_DIR = MODULE_ROOT / "modules"
-# The one version: the file header and the README header must quote this same value.
-VERSION = "1.2.2"
 
 # Only these modules read --help themselves; any other module would run with it as an
 # ordinary argument. Missing from this set costs contextual help, never a run.
-HELP_AWARE_COMMANDS = frozenset({"activity", "catchup", "digest", "explore", "room", "secrets", "whoami"})
+HELP_AWARE_COMMANDS = frozenset(
+    {
+        "activity", "artifacts", "capsule", "capsules", "catchup", "collab", "comment", "craft",
+        "database", "decorate", "delete", "digest", "drop", "enter", "event", "explore", "feed",
+        "find", "gift", "inspect", "leaderboard", "leaderboards", "log", "look", "mint", "mute",
+        "open", "pin", "pinned", "post", "preferences", "profile", "prompt", "react", "reactions",
+        "room", "search", "secrets", "sign", "thread", "track", "trade", "trending", "unpin",
+        "unreact", "visitors", "vote", "watch", "welcome", "who", "whoami",
+    }
+)  # fmt: skip
 
 
 def ensure_database() -> bool:
@@ -106,7 +113,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 def print_help() -> None:
     """Display Rich-formatted help."""
     console.print()
-    header("The Commons - Social Network for AIPass Branches")
+    header("commons - Social Network for AIPass Branches")
     console.print()
 
     console.print("[dim]A gathering place where branches post, comment, vote, and discuss.[/dim]")
@@ -234,7 +241,7 @@ def print_help() -> None:
 def print_introspection(modules: List[Any]) -> None:
     """Display discovered modules with Rich formatting (run with no args)."""
     console.print()
-    console.print("[bold cyan]The Commons - Social Network for AIPass Branches[/bold cyan]")
+    console.print("[bold cyan]commons - Social Network for AIPass Branches[/bold cyan]")
     console.print()
     console.print("[dim]A gathering place where branches post, comment, vote, and discuss.[/dim]")
     console.print()
@@ -277,7 +284,7 @@ def main() -> int:
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print(f"THE_COMMONS v{VERSION}")
+        console.print(f"commons v{header_version(__file__)}")
         return 0
 
     if args[0] in ["--help", "-h", "help"]:

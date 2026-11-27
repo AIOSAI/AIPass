@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: openrouter_client.py
 # Description: OpenRouter Client Module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2025-11-15
-# Modified: 2026-11-20
+# Modified: 2026-11-26
 # =============================================
 # pyright: reportMissingImports=false
 
@@ -22,10 +22,10 @@ from aipass.api.apps.handlers.openrouter import client, models
 def print_introspection():
     """Show module introspection - connected handlers and capabilities"""
     console.print()
-    header("OpenRouter Client Module Introspection")
+    console.print("[bold cyan]OpenRouter Client Module Introspection[/bold cyan]")
     console.print()
 
-    console.print("[cyan]Purpose:[/cyan] OpenRouter LLM API client operations")
+    console.print("[cyan]Purpose:[/cyan] [dim]OpenRouter LLM API client operations[/dim]")
     console.print()
 
     console.print("[cyan]Connected Handlers:[/cyan]")
@@ -40,6 +40,8 @@ def print_introspection():
     console.print("  • make_call() - Make API call")
     console.print("  • list_models() - List models")
     console.print("  • check_status() - Check status")
+    console.print()
+    console.print("Run [green]'drone @api --help'[/green] for usage information")
     console.print()
 
 

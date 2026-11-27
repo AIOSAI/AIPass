@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_escalation_digest.py
 # Description: Tests for the escalation digest: sending, the mail it carries, reporting and the CLI
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/escalation.py's digest (send, mail, reporting) and apps/modules/escalation.py."""
@@ -263,7 +263,7 @@ class TestDigestEmail:
 
         assert len(rows) == 1
         assert rows[0]["error_type"] == "WARNING"
-        assert rows[0]["component"] == "FLOW"
+        assert rows[0]["component"] == "flow"
         assert rows[0]["message"] == WARNING_EVENT["message"]
         assert _entry(lane, signature)["registry_fingerprint"] == "abcdef0123456789"
 

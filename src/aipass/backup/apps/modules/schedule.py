@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: schedule.py
 # Description: Schedule module — read and set a registered project's scheduled backup
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-11-15
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Schedule Module — a registered project's scheduled backup: read it, set its time, turn it on or off.
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import aipass.drone as drone
 from aipass.prax import logger
-from aipass.cli import console, error
+from aipass.cli import console, error, escape
 
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.json.json_handler import InvalidDocument
@@ -48,22 +48,32 @@ DAEMON_TIMEOUT_SECONDS = 60
 def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
+    console.print("  [dim]Read and set a registered project's scheduled backup[/dim]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
     console.print("  Handlers: schedule/jobs, project/config, project/registry")
+    console.print("  [dim]Run[/dim] [green]drone @backup schedule --help[/green] [dim]for usage[/dim]")
 
 
 def print_help():
     """Display help for this module."""
     print_introspection()
     console.print()
-    console.print(f"Usage: {USAGE}", markup=False)
-    console.print("  A scheduled run is the all lane: snapshot, then drive_sync when the project has it on.")
-    console.print("  --json      one JSON object on stdout, nothing else")
-    console.print("  on | off    run the schedule, or keep it and never run it")
-    console.print("  daily HH:MM               every day at that 24-hour time")
-    console.print("  weekly WEEKDAY HH:MM      WEEKDAY is monday..sunday")
-    console.print("  monthly DAY HH:MM         DAY is 1-31; past a month's end it runs on the last day")
-    console.print("  A new schedule starts off; changing when it runs keeps on or off.")
+    console.print(f"[yellow]Usage:[/yellow] {escape(USAGE)}")
+    console.print("  [dim]A scheduled run is the all lane: snapshot, then drive_sync when the project has it on.[/dim]")
+    console.print("  [cyan]--json[/cyan]      one JSON object on stdout, nothing else")
+    console.print("  [cyan]on | off[/cyan]    run the schedule, or keep it and never run it")
+    console.print("  [cyan]daily HH:MM[/cyan]               every day at that 24-hour time", highlight=False)
+    console.print("  [cyan]weekly WEEKDAY HH:MM[/cyan]      WEEKDAY is monday..sunday")
+    console.print(
+        "  [cyan]monthly DAY HH:MM[/cyan]         DAY is 1-31; past a month's end it runs on the last day",
+        highlight=False,
+    )
+    console.print("  [dim]A new schedule starts off; changing when it runs keeps on or off.[/dim]")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @backup schedule @myapp --json[/green]")
+    console.print("  [green]drone @backup schedule @myapp daily 02:30[/green]", highlight=False)
+    console.print("  [green]drone @backup schedule @myapp on[/green]")
 
 
 def _registered(target: str) -> tuple[str, str] | None:

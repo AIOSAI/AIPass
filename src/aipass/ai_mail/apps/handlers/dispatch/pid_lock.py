@@ -1,18 +1,13 @@
 # =================== AIPass ====================
 # Name: pid_lock.py
 # Description: Process liveness, branch occupancy and the dispatch lock
-# Version: 1.3.1
+# Version: 1.3.3
 # Created: 2026-10-04
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
-Process liveness, branch occupancy and the dispatch lock.
-
-Split out of wake.py in leg 13, when wake.py
-passed the 1500-line line: these helpers ask the operating system about
-processes and own the .dispatch.lock file, and the wake calls them.
-Their public names are the interface wake.py imports.
+Process liveness, branch occupancy and the dispatch lock: the OS questions wake.py imports.
 """
 
 import json
@@ -25,22 +20,16 @@ from typing import List, Optional, Tuple
 from aipass.prax import logger
 
 
-# acquire_lock creates the lock empty (O_CREAT|O_EXCL) and fills it with one
-# small json.dump an instant later, so a reader can meet it empty or half
-# written. That window is milliseconds; 30 seconds is far past any such write
-# and far below a wake's turn, so a corrupt lock older than this is a crashed
-# writer's leftover and is reclaimed, and a younger one is held.
+# acquire_lock creates the lock empty and fills it an instant later; a corrupt lock older than this
+# is a crashed writer's leftover, far past any write and far below a wake's turn.
 _CORRUPT_LOCK_GRACE_SECONDS = 30
 
 
 def check_lock(branch_path: Path) -> Optional[dict]:
     """Return the lock data while the dispatch lock is held, or None once it is free.
 
-    The one lock check of the wake. A holder
-    that is dead, a linux zombie included, frees the lock and it is removed.
-    A corrupt lock is removed only past _CORRUPT_LOCK_GRACE_SECONDS; younger,
-    and a lock that cannot be read at all, answer held with a "corrupt" or
-    "unreadable" key in place of the pid.
+    A dead holder (a zombie included) frees the lock. A corrupt lock is removed past the grace; younger,
+    and an unreadable lock, answer held with a "corrupt" or "unreadable" key naming why, in place of the pid.
     """
     lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
     try:
@@ -54,21 +43,25 @@ def check_lock(branch_path: Path) -> Optional[dict]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError as e:
-        logger.info("[pid_lock] Lock at %s is not JSON: %s", lock_file, e)
-        data = None
+        return _corrupt_lock(lock_file, age, f"not JSON: {e}")
     if not isinstance(data, dict):
-        if age > _CORRUPT_LOCK_GRACE_SECONDS:
-            logger.warning("[pid_lock] Corrupt lock removed at %s (age %.0fs)", lock_file, age)
-            lock_file.unlink(missing_ok=True)
-            return None
-        logger.info("[pid_lock] Corrupt lock at %s is %.0fs old, held as mid-write", lock_file, age)
-        return {"corrupt": True}
+        return _corrupt_lock(lock_file, age, f"not a JSON object ({type(data).__name__})")
     pid = data.get("pid")
     if isinstance(pid, int) and check_pid_alive(pid):
         return data
     logger.warning("[pid_lock] Stale lock removed at %s (PID %s not running)", lock_file, pid)
     lock_file.unlink(missing_ok=True)
     return None
+
+
+def _corrupt_lock(lock_file: Path, age: float, why: str) -> Optional[dict]:
+    """None once a corrupt lock is past the grace and removed; younger, held as mid-write with the reason."""
+    if age > _CORRUPT_LOCK_GRACE_SECONDS:
+        logger.warning("[pid_lock] Corrupt lock removed at %s (age %.0fs): %s", lock_file, age, why)
+        lock_file.unlink(missing_ok=True)
+        return None
+    logger.info("[pid_lock] Corrupt lock at %s is %.0fs old, held as mid-write: %s", lock_file, age, why)
+    return {"corrupt": why}
 
 
 def acquire_lock(branch_path: Path, pid: int) -> Tuple[bool, str]:
@@ -93,8 +86,8 @@ def _get_pid_cwd(pid_str: str) -> Optional[str]:
     """Get the cwd of a process from /proc."""
     try:
         return os.readlink(f"/proc/{pid_str}/cwd")
-    except (OSError, PermissionError):
-        logger.info("[wake] Cannot read cwd for PID %s", pid_str)
+    except OSError as e:
+        logger.warning("[wake] Cannot read cwd for PID %s: %s", pid_str, e)
         return None
 
 
@@ -106,8 +99,8 @@ def _read_session_type(pid_str: str) -> str:
         for entry in data.split(b"\0"):
             if entry.startswith(b"AIPASS_SESSION_TYPE="):
                 return entry.split(b"=", 1)[1].decode("utf-8")
-    except (OSError, PermissionError):
-        logger.info("[wake] Cannot read session type for PID %s", pid_str)
+    except OSError as e:
+        logger.warning("[wake] Cannot read session type for PID %s, counted as interactive: %s", pid_str, e)
     return "interactive"
 
 
@@ -118,9 +111,7 @@ AGENT_PROCESS_PATTERN = "|".join(AGENT_PROCESS_NAMES)
 # Session types that should NOT block dispatch (idle/background sessions)
 _NON_BLOCKING_SESSION_TYPES = {"dispatched", "daemon"}
 
-# Codex subcommands that are never a person's session: the app-server daemon family (spawned by the
-# first TUI in a folder, parented by systemd --user, outliving every room) and headless `exec`.
-# codex-code-mode-host never reaches here: its comm is not `codex`, so pgrep -x skips it.
+# Never a person's session: the app-server daemon family (outlives every room) and headless `exec`.
 CODEX_NON_SESSION_SUBCOMMANDS = frozenset({"app-server", "mcp-server", "exec"})
 # `opencode serve --service` is the user's background daemon, `serve --stdio` a `run --standalone` child.
 OPENCODE_NON_SESSION_SERVE_FLAGS = frozenset({"--service", "--stdio"})
@@ -157,62 +148,58 @@ def _is_opencode_non_session(pid_str: str) -> bool:
 
 
 def branch_occupant(branch_path: Path) -> Optional[str]:
-    """The CLI ("claude", "codex" or "opencode") of an interactive session in this branch directory, or None."""
+    """The CLI ("claude", "codex" or "opencode") of an interactive session in this branch directory, or None.
+
+    Raises OSError or SubprocessError when pgrep cannot run: an empty branch is then not known.
+    """
     resolved = str(branch_path.resolve())
-    try:
-        # -l prints "<pid> <comm>": the comm is what matched, so it names the CLI.
-        result = subprocess.run(["pgrep", "-l", "-x", AGENT_PROCESS_PATTERN], capture_output=True, text=True, timeout=5)
-        if result.returncode != 0:
-            return None
-        for line in result.stdout.strip().split("\n"):
-            fields = line.split()
-            if not fields:
-                continue
-            pid_str = fields[0]
-            cli = fields[1] if len(fields) > 1 else "agent"
-            cwd = _get_pid_cwd(pid_str)
-            if cwd is None or str(Path(cwd).resolve()) != resolved:
-                continue
-            if _read_session_type(pid_str) in _NON_BLOCKING_SESSION_TYPES:
-                continue
-            if cli == "codex" and _is_codex_non_session(pid_str):
-                continue
-            if cli == "opencode" and _is_opencode_non_session(pid_str):
-                continue
-            return cli
-    except (subprocess.SubprocessError, OSError):
-        logger.info("[wake] Failed to check branch occupancy")
+    # -l prints "<pid> <comm>": the comm is what matched, so it names the CLI.
+    result = subprocess.run(["pgrep", "-l", "-x", AGENT_PROCESS_PATTERN], capture_output=True, text=True, timeout=5)
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.strip().split("\n"):
+        fields = line.split()
+        if not fields:
+            continue
+        pid_str = fields[0]
+        cli = fields[1] if len(fields) > 1 else "agent"
+        if _is_zombie_linux(int(pid_str)):
+            continue
+        cwd = _get_pid_cwd(pid_str)
+        if cwd is None or str(Path(cwd).resolve()) != resolved:
+            continue
+        if _read_session_type(pid_str) in _NON_BLOCKING_SESSION_TYPES:
+            continue
+        if cli == "codex" and _is_codex_non_session(pid_str):
+            continue
+        if cli == "opencode" and _is_opencode_non_session(pid_str):
+            continue
+        return cli
     return None
 
 
 def clean_zombies() -> int:
-    """Find and report zombie Claude processes. Returns count found."""
+    """Find and report zombie agent processes. Returns count found; raises when ps cannot run."""
     count = 0
-    try:
-        result = subprocess.run(["ps", "-eo", "pid,stat,comm"], capture_output=True, text=True, timeout=5)
-        for line in result.stdout.strip().split("\n"):
-            parts = line.split()
-            if len(parts) >= 3 and parts[2] in AGENT_PROCESS_NAMES and "Z" in parts[1]:
-                count += 1
-                logger.info("[wake] Found zombie Claude process PID %s", parts[0])
-    except (subprocess.SubprocessError, OSError):
-        logger.info("[wake] Failed to check for zombie processes")
+    result = subprocess.run(["ps", "-eo", "pid,stat,comm"], capture_output=True, text=True, timeout=5)
+    for line in result.stdout.strip().split("\n"):
+        parts = line.split()
+        if len(parts) >= 3 and parts[2] in AGENT_PROCESS_NAMES and "Z" in parts[1]:
+            count += 1
+            logger.info("[wake] Found zombie Claude process PID %s", parts[0])
     return count
 
 
 def check_pid_alive(pid: int) -> bool:
-    """Check if a process is alive (not zombie)."""
+    """Check if a process is alive (not zombie). Raises any os.kill error but no-such-process and not-permitted."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError as exc:
-        logger.warning("[wake] PID %s not found: %s", pid, exc)
+        logger.debug("[wake] PID %s not found: %s", pid, exc)
         return False
     except PermissionError as exc:
         logger.warning("[wake] PID %s permission denied: %s", pid, exc)
         return True
-    except OSError as exc:
-        logger.warning("[wake] PID %s os.kill error (assuming dead): %s", pid, exc)
-        return False
     return not _is_zombie_linux(pid)
 
 

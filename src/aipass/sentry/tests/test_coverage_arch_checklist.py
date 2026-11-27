@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_coverage_arch_checklist.py
 # Description: Line-coverage tests for architecture_check.py and checklist.py
-# Version: 1.1.4
+# Version: 1.1.5
 # Created: 2026-04-26
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py and apps/modules/checklist.py."""
@@ -95,7 +95,7 @@ def _run_one(tmp_path, monkeypatch, returned: dict, pin_branch: bool = True):
     return checklist.run_checklist(str(f)), probe
 
 
-def _baseline(tmp_path, monkeypatch, template: dict, branch_name: str = "mybranch", passport=None):
+def _baseline(tmp_path, monkeypatch, template: dict, branch_name: str = "mybranch", passport=None, rules=None):
     """check_template_baseline over a planted templates/citizen/; ``template`` maps path to text, None for a dir.
 
     ``passport`` is the passport.json text; the default is a specialist, and
@@ -119,7 +119,7 @@ def _baseline(tmp_path, monkeypatch, template: dict, branch_name: str = "mybranc
         (branch / ".trinity").mkdir()
         text = passport if passport is not None else json.dumps({"identity": {"citizen_class": "specialist"}})
         (branch / ".trinity" / "passport.json").write_text(text, encoding="utf-8")
-    return architecture_check.check_template_baseline(str(entry))
+    return architecture_check.check_template_baseline(str(entry), bypass_rules=rules)
 
 
 def _rows(result) -> set:
@@ -1258,3 +1258,38 @@ class TestIsEntryPointEdgeCases:
     def test_valid_entry_point(self, tmp_path):
 
         assert _is_entry_point(str(tmp_path / "branch" / "apps" / "branch.py")) is True
+
+
+def _verdicts(result) -> dict:
+    """Each template row's pass, by name."""
+    return {c["name"]: c["passed"] for c in result}
+
+
+class TestAMissingTemplateFileIsWaivedByItsOwnPath:
+    TEMPLATE = {"apps/plugins/README.md": "# p\n", "apps/plugins/__init__.py": "", "README.md": "# r\n"}
+
+    def test_a_row_naming_the_files_path_waives_it_and_no_other_readme(self, tmp_path, monkeypatch):
+        rules = [{"file": "apps/plugins/README.md", "standard": "architecture"}]
+        rows = _verdicts(_baseline(tmp_path, monkeypatch, self.TEMPLATE, rules=rules))
+        assert rows["File: apps/plugins/README.md"] is True
+        assert rows["File: README.md"] is False
+
+    def test_a_waived_missing_directory_waives_the_files_beneath_it(self, tmp_path, monkeypatch):
+        rules = [{"file": "apps/plugins", "standard": "architecture"}]
+        rows = _verdicts(_baseline(tmp_path, monkeypatch, self.TEMPLATE, rules=rules))
+        assert rows["File: apps/plugins/README.md"] is True and rows["File: apps/plugins/__init__.py"] is True
+        assert rows["File: README.md"] is False
+
+    def test_a_bare_name_row_still_waives_as_before(self, tmp_path, monkeypatch):
+        rules = [{"file": "__init__.py", "standard": "architecture"}]
+        rows = _verdicts(_baseline(tmp_path, monkeypatch, self.TEMPLATE, rules=rules))
+        assert rows["File: apps/plugins/__init__.py"] is True
+
+    def test_absent_targets_names_every_template_path_the_branch_lacks(self, tmp_path, monkeypatch):
+        _baseline(tmp_path, monkeypatch, {**self.TEMPLATE, "apps/plugins": None})
+        assert sorted(architecture_check.absent_targets(str(tmp_path / "mybranch"))) == [
+            "README.md",
+            "apps/plugins",
+            "apps/plugins/README.md",
+            "apps/plugins/__init__.py",
+        ]

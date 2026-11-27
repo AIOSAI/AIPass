@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_update.py
 # Description: Tests for spawn update orchestrator
-# Version: 1.3.0
+# Version: 1.5.0
 # Created: 2026-03-07
-# Modified: 2026-11-09
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
@@ -20,7 +20,7 @@ import pytest
 from aipass.spawn.apps.handlers.update_ignore import UpdateIgnoreUnreadable, read_ignore
 from aipass.spawn.apps.handlers.update_ops import update_all, update_branch
 from aipass.spawn.apps.modules.update import handle_update
-from aipass.spawn.tests.conftest import external_fleet
+from aipass.spawn.tests.conftest import external_fleet, write_registry
 
 
 @pytest.fixture
@@ -550,13 +550,25 @@ class TestMarkdownIsReportedAndNeverWritten:
         self, template_dir, branch_dir, mock_registry
     ):
         """Rendered, not raw: the comparison resolves placeholders first."""
-        (branch_dir / "README.md").write_text("# TEST_BRANCH\nTemplate readme\n", encoding="utf-8")
+        (branch_dir / "README.md").write_text("# test_branch\nTemplate readme\n", encoding="utf-8")
 
         result = self._update(template_dir, mock_registry)
 
         assert self._states(result)["README.md"] == "matches"
         assert result["md_differs"] == 0
         assert result["md_matches"] == 1
+
+    def test_a_readme_rendered_with_the_old_capital_fill_is_reported_and_never_rewritten(
+        self, template_dir, branch_dir, mock_registry
+    ):
+        """The fill went lowercase; a branch born before keeps its title. Mutant: apply rewrites .md -> red."""
+        old = "# TEST_BRANCH\nTemplate readme\n"
+        (branch_dir / "README.md").write_text(old, encoding="utf-8")
+
+        result = self._update(template_dir, mock_registry, dry_run=False)
+
+        assert self._states(result)["README.md"] == "differs"
+        assert (branch_dir / "README.md").read_text(encoding="utf-8") == old
 
     def test_a_missing_md_is_added_and_reports_as_absent(self, template_dir, branch_dir, mock_registry):
         """A missing file is still an addition — the report names why it was written."""
@@ -565,7 +577,7 @@ class TestMarkdownIsReportedAndNeverWritten:
         result = self._update(template_dir, mock_registry, dry_run=False)
 
         assert self._states(result)["README.md"] == "absent"
-        assert (branch_dir / "README.md").read_text(encoding="utf-8") == "# TEST_BRANCH\nTemplate readme\n"
+        assert (branch_dir / "README.md").read_text(encoding="utf-8") == "# test_branch\nTemplate readme\n"
 
     def test_an_apply_never_rewrites_an_existing_md(self, template_dir, branch_dir, mock_registry):
         """--apply is the dangerous world, so the pin lives there: byte-identical after."""
@@ -1107,6 +1119,49 @@ class TestUpdateAll:
         assert not (grow / "README.md").exists(), "a dry run wrote into the external citizen"
 
 
+class TestOneNameResolvesThroughTheFleet:
+    """update @name with no registry: the cwd's registry, then every registry memory's door answers."""
+
+    @pytest.fixture
+    def fleet(self, tmp_path, template_dir):
+        home, grow = external_fleet(tmp_path)
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=home / "AIPASS_REGISTRY.json"),
+            patch("aipass.spawn.apps.handlers.update_ops.aipass_home", return_value=home),
+        ):
+            yield home, grow
+
+    def test_a_citizen_at_a_declared_root_resolves_and_dry_runs(self, fleet):
+        """Mutant: the lookup reads the cwd's registry only -> 'not found' -> red."""
+        _, grow = fleet
+
+        result = update_branch("grow", dry_run=True)
+
+        assert result["success"] is True, result["errors"]
+        assert result["additions"] > 0
+        assert not (grow / "README.md").exists(), "a dry run wrote into the project citizen"
+
+    def test_a_name_in_two_registries_is_refused_and_both_are_named(self, fleet):
+        """Mutant: the first registry found wins -> red."""
+        home, grow = fleet
+        write_registry(home / "AIPASS_REGISTRY.json", {"grow": "src/aipass/grow"})
+
+        result = update_branch("grow", dry_run=True)
+
+        assert result["success"] is False
+        assert "in 2 registries, refused by name" in result["errors"][0]
+        assert "AIPASS_REGISTRY.json" in result["errors"][0] and "EXT_REGISTRY.json" in result["errors"][0]
+        assert not (grow / "README.md").exists()
+
+    def test_a_name_found_nowhere_says_where_it_looked(self, fleet):
+        """Mutant: the old bare 'not found in registry' sentence -> red."""
+        result = update_branch("nobody", dry_run=True)
+
+        looked = "AIPASS_REGISTRY.json, 0 project registries, 1 declared root"
+        assert result["errors"] == [f"Branch 'nobody' not found in {looked}"]
+
+
 class TestHandleUpdate:
     """Tests for handle_update() CLI parsing."""
 
@@ -1294,6 +1349,21 @@ class TestPassportHealIsNotAMigration:
         assert result == "updated"
         assert self._paths(healed) - self._paths(existing) == three
         assert healed["document_metadata"]["schema_version"] == "1.0.0"
+
+    @pytest.mark.parametrize(("existing", "expected"), [(None, ""), ("env_set_by_owner", "env_set_by_owner")])
+    def test_a_2_0_passport_gains_cloud_environment_id_empty_and_keeps_a_set_one(self, tmp_path, existing, expected):
+        """The cloud lane reads "" as absent; update adds the key, never overwrites an owner's id."""
+        template = {"citizenship": {"memory": True, "cloud_environment_id": ""}}
+        citizenship = {"memory": True} | ({} if existing is None else {"cloud_environment_id": existing})
+        passport = {
+            "document_metadata": {"schema_version": "2.0.0"},
+            "citizenship": citizenship,
+            "identity": {"citizen_class": "specialist"},
+        }
+
+        _result, healed = self._heal(tmp_path, template, passport)
+
+        assert healed["citizenship"]["cloud_environment_id"] == expected
 
     def test_a_passport_written_with_escapes_is_left_alone(self, tmp_path):
         """An untouched document must not be rewritten because it is SPELLED differently.

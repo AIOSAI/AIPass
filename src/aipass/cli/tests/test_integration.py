@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_integration.py
 # Description: Integration tests for CLI main() flow
-# Version: 2.2.0
+# Version: 2.2.1
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/cli.py main() — the routed flow end to end."""
@@ -66,7 +66,7 @@ class TestMainFlow:
             result = main()
         assert result == 0
         output = get_output()
-        assert "CLI v" in output
+        assert "cli v" in output
 
     def test_main_unknown_command_returns_one(self):
         """Unknown command returns 1."""
@@ -105,5 +105,5 @@ class TestBareDemo:
         handled = cli_module.route_command("demo", [], list(order))
         out, _err = capsys.readouterr()
         assert handled is True
-        assert "CLI Display Module - Demo" in out
-        assert "CLI Templates Module - Demo" not in out
+        assert "cli Display Module - Demo" in out
+        assert "cli Templates Module - Demo" not in out

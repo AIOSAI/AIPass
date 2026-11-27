@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: seed.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Seed bridge — a hooks.json command row of a Seed head, handed to the engine, answered in Claude's shape
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-11-04
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Seed bridge.
@@ -100,7 +100,7 @@ def _record_break(event_type: str, line: str) -> None:
     except BaseException as exc:  # the answer is already out: nothing the record raises may change it
         with contextlib.suppress(BaseException):
             sys.stderr.write(
-                f"[HOOKS:seed] bridge: the break was not recorded in {BREAK_LOG}: {type(exc).__name__}: {exc}\n"
+                f"[hooks:seed] bridge: the break was not recorded in {BREAK_LOG}: {type(exc).__name__}: {exc}\n"
             )
 
 

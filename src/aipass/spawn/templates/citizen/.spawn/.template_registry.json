@@ -189,19 +189,19 @@
       "path": ".trinity/README.md"
     },
     "f012": {
-      "content_hash": "362216e7b9fc",
+      "content_hash": "720bfb09b6e4",
       "has_branch_placeholder": false,
       "name": "local.json",
       "path": ".trinity/local.json"
     },
     "f013": {
-      "content_hash": "7e5de8f0ee63",
+      "content_hash": "b4fcf4e19973",
       "has_branch_placeholder": false,
       "name": "observations.json",
       "path": ".trinity/observations.json"
     },
     "f014": {
-      "content_hash": "8f16ca495272",
+      "content_hash": "37d90d67e469",
       "has_branch_placeholder": false,
       "name": "passport.json",
       "path": ".trinity/passport.json"
@@ -213,7 +213,7 @@
       "path": "apps/plugins/__init__.py"
     },
     "f016": {
-      "content_hash": "f4775daf1f75",
+      "content_hash": "63271754f160",
       "has_branch_placeholder": false,
       "name": "DASHBOARD.local.json",
       "path": "DASHBOARD.local.json"
@@ -237,7 +237,7 @@
       "path": "apps/README.md"
     },
     "f020": {
-      "content_hash": "41b011f487af",
+      "content_hash": "79ef47722d44",
       "has_branch_placeholder": false,
       "name": "__init__.py",
       "path": "apps/__init__.py"
@@ -249,13 +249,13 @@
       "path": "apps/handlers/README.md"
     },
     "f022": {
-      "content_hash": "c88189c02566",
+      "content_hash": "eb1c22a7bad4",
       "has_branch_placeholder": false,
       "name": "__init__.py",
       "path": "apps/handlers/__init__.py"
     },
     "f023": {
-      "content_hash": "a4cf0a8e3b4f",
+      "content_hash": "22f568600687",
       "has_branch_placeholder": false,
       "name": "README.md",
       "path": "apps/modules/README.md"
@@ -273,13 +273,13 @@
       "path": "apps/plugins/README.md"
     },
     "f026": {
-      "content_hash": "c498055b60b8",
+      "content_hash": "16ccb7b04b07",
       "has_branch_placeholder": false,
       "name": "__init__.py",
       "path": "__init__.py"
     },
     "f027": {
-      "content_hash": "9c477503cad8",
+      "content_hash": "ff802a14d46a",
       "has_branch_placeholder": true,
       "name": "{{BRANCH}}.py",
       "path": "apps/{{BRANCH}}.py"
@@ -291,7 +291,7 @@
       "path": "artifacts/README.md"
     },
     "f029": {
-      "content_hash": "1ec401f4e397",
+      "content_hash": "4ad55b02dd64",
       "has_branch_placeholder": false,
       "name": "birth_certificate.json",
       "path": "artifacts/birth_certificate.json"
@@ -345,7 +345,7 @@
       "path": "tests/README.md"
     },
     "f038": {
-      "content_hash": "937fc072728c",
+      "content_hash": "728aca91c800",
       "has_branch_placeholder": false,
       "name": "__init__.py",
       "path": "tests/__init__.py"
@@ -405,7 +405,7 @@
       "path": "apps/handlers/json/json_handler.py"
     },
     "f048": {
-      "content_hash": "8b54e9dde356",
+      "content_hash": "8491324e943a",
       "has_branch_placeholder": false,
       "name": "test_cli_routing.py",
       "path": "tests/test_cli_routing.py"
@@ -431,7 +431,7 @@
   },
   "metadata": {
     "description": "Template file tracking registry for ID-based updates",
-    "last_updated": "2026-11-20",
+    "last_updated": "2026-11-26",
     "version": "1.0.0"
   }
 }

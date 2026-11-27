@@ -4,7 +4,6 @@
 
 **Purpose:** The fleet's scheduler. A systemd user timer fires one tick every couple of minutes; the tick discovers every citizen's own `.daemon/schedule.json`, decides what is due, and either wakes the owner or runs a drone command as a subprocess. It also reports fleet activity and runs the night watch.
 **Module:** `aipass.daemon`
-**Version:** 1.1.0
 **Created:** 2026-03-07
 
 ---

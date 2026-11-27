@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: switch.py
 # Description: Per-skill off-switch — on, off, and status
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-18
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Skill off-switch module."""
@@ -36,7 +36,7 @@ def handle_command(command: str, args: list) -> bool:
 
     # on/off record their argument, so a help flag read as a skill name would be written to the state.
     if any(arg in ("--help", "-h", "help") for arg in args):
-        print_switch_help()
+        print_help()
         return True
 
     if command == "switch":
@@ -54,14 +54,18 @@ def handle_command(command: str, args: list) -> bool:
     return switch_off(args[0], reason)
 
 
-def print_switch_help():
+def print_help():
     """Print the usage page for on, off and switch."""
-    console.print("Skills Switch - Disconnect and reconnect a skill")
+    console.print("[bold cyan]skills Switch[/bold cyan] - Disconnect and reconnect a skill")
     console.print()
-    console.print("Usage:")
+    console.print("[yellow]Usage:[/yellow]")
     console.print("  drone @skills off <name> \\[reason]    Switch a skill off, stop its processes")
     console.print("  drone @skills on <name>              Switch a skill on, start its processes")
     console.print("  drone @skills switch \\[name]          Show each skill's on/off state")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print('  [green]drone @skills off screen_lock "not on this host"[/green]')
+    console.print("  [green]drone @skills on screen_lock[/green]")
 
 
 def switch_on(name: str) -> bool:
@@ -148,4 +152,6 @@ def print_introspection():
     console.print("  [dim]- skills on <name>            Reconnect a skill and start its processes[/dim]")
     console.print("  [dim]- skills off <name> \\[reason]  Disconnect a skill and stop its processes[/dim]")
     console.print("  [dim]- skills switch \\[name]        Show on/off state[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @skills switch --help' for usage information[/dim]")
     console.print()

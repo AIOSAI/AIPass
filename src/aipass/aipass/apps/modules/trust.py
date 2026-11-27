@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: trust.py
 # Description: Trust management — aipass trust / aipass revoke commands
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-07-15
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
-aipass trust / revoke — manage the trusted-project registry (DPLAN-0244)
+aipass trust / revoke — manage the trusted-project registry
 
 Enrollment controls which projects have their .aipass/hooks.json loaded
 by the hook engine. Projects created via `aipass init` auto-enroll;
@@ -42,6 +42,7 @@ def print_introspection() -> None:
 
     console.print()
     console.print("[bold cyan]aipass trust[/bold cyan] — trusted-project registry")
+    console.print("[dim]Projects whose hook config you have enrolled.[/dim]")
     console.print()
 
     if not projects:
@@ -58,6 +59,7 @@ def print_introspection() -> None:
 
     console.print()
     console.print("[dim]Use 'aipass trust <path>' to enroll or 'aipass revoke <path>' to remove.[/dim]")
+    console.print("[dim]Run 'aipass trust --help' for usage and examples.[/dim]")
     console.print()
 
 
@@ -76,6 +78,10 @@ def print_help() -> None:
         "  [green]aipass trust prune[/green]      [dim]# Drop entries whose project path no longer exists[/dim]"
     )
     console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]aipass trust .[/green]")
+    console.print("  [green]aipass trust prune[/green]")
+    console.print()
 
 
 def _do_trust(args: list[str]) -> bool:
@@ -90,7 +96,7 @@ def _do_trust(args: list[str]) -> bool:
         return True
     if enroll(str(target)):
         success(f"Enrolled {target}")
-        logger.info("[AIPASS] trust: enrolled %s", target)
+        logger.info("[aipass] trust: enrolled %s", target)
     else:
         error(f"Failed to enroll {target}")
     return True
@@ -114,11 +120,11 @@ def _do_prune() -> bool:
         target = registry_path()
         if not json_handler.write_json(target, registry):
             error(f"Could not write {target} — the registry is unchanged.")
-            logger.error("[AIPASS] trust: prune write failed, %d entries left in place", len(stale))
+            logger.error("[aipass] trust: prune write failed, %d entries left in place", len(stale))
             return True
         json_handler.log_operation("prune", {"pruned_count": len(stale)}, module_name="trust")
         success(f"Pruned {len(stale)} stale entr{'y' if len(stale) == 1 else 'ies'} from the trust registry.")
-        logger.info("[AIPASS] trust: pruned %d stale entries", len(stale))
+        logger.info("[aipass] trust: pruned %d stale entries", len(stale))
     else:
         console.print("[dim]No stale entries found.[/dim]")
     return True
@@ -129,7 +135,7 @@ def _do_revoke(args: list[str]) -> bool:
     target = Path(args[0]).resolve()
     if revoke(str(target)):
         success(f"Revoked {target}")
-        logger.info("[AIPASS] revoke: removed %s", target)
+        logger.info("[aipass] revoke: removed %s", target)
     else:
         console.print(f"[dim]{target} was not in the registry.[/dim]")
     return True

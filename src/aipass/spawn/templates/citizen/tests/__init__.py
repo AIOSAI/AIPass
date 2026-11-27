@@ -1,1 +1,1 @@
-# Tests package for {{BRANCHNAME}}
+# Tests package for {{BRANCH}}

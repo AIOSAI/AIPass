@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_help_markup.py
 # Description: Canary tests that literal [placeholders] survive Rich rendering
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-10
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/monitor.py, apps/prax.py and apps/modules/log_health.py's bracket rendering."""
@@ -85,7 +85,7 @@ class TestScopedBannerRenders:
 
     def test_scoped_banner_shows_branch_names(self):
         output = self._banner(["sentry,cli"])
-        assert "scoped to SENTRY, CLI" in output
+        assert "scoped to sentry, cli" in output
 
     def test_unscoped_banner_unchanged(self):
         assert "all branches, all levels, no filters" in self._banner([])

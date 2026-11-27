@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_birth_receipt.py
 # Description: Birth receipt lane — a newborn arrives carrying .trinity/.template_version.json
-# Version: 1.2.3
+# Version: 1.2.4
 # Created: 2026-08-27
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/receipt_ops.py and the birth-receipt lane it drives through apps/modules/core.py."""
@@ -446,7 +446,7 @@ def test_a_newborn_carries_its_own_dashboard_without_flow_or_prax(tmp_path):
 
     raw = (tmp_path / "dashed" / "DASHBOARD.local.json").read_text(encoding="utf-8")
     assert "{{" not in raw, "the newborn's dashboard still carries unrendered placeholders"
-    assert json.loads(raw)["branch"] == "DASHED"
+    assert json.loads(raw)["branch"] == "dashed"
 
 
 def _docs_page_cap() -> int:

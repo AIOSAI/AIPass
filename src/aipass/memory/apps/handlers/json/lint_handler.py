@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: lint_handler.py
 # Description: Read-only lint handler for .trinity entry limit violations
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-06-13
 # Modified: 2026-11-21
 # =============================================
@@ -371,6 +371,7 @@ def _lint_branch_fields(
     """Inventory every string field of one branch and flag what is outside the shape (same walk as _lint_branch)."""
     records: list[dict[str, Any]] = []
     violations: list[dict[str, Any]] = []
+    unreadable: set[str] = set()
     trinity_dir = Path(branch_path) / ".trinity"
 
     if not trinity_dir.is_dir():
@@ -387,8 +388,12 @@ def _lint_branch_fields(
             logger.info(f"[lint] {branch_name}: missing {file_name}, skipping {type_name}")
             continue
 
-        _raw, data = _read_trinity_file(branch_name, file_path)
-        if not isinstance(data, dict):
+        data, problem = _read_object(file_path)
+        if problem and file_name not in unreadable:
+            unreadable.add(file_name)
+            detail = f"unreadable: {problem}"
+            violations.append(_damage_record(branch_name, file_name, "", "", type_name, "unreadable_file", detail))
+        if problem:
             continue
 
         shape = fields_for(type_name, limits)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_engine_safeguards.py
 # Description: The hook engine's safeguards: trust, timeouts, one document, the ledger, fail-closed gates, promote
-# Version: 1.5.0
+# Version: 1.5.3
 # Created: 2026-10-08
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/engine.py: trust, timeouts, the ledger and the fail-closed gates."""
@@ -55,7 +55,7 @@ def _dispatch_handler(handle, handler: str = _FAKE, timeout: int | None = None):
     with (
         patch("aipass.hooks.apps.modules.engine._log") as log,
         patch("aipass.hooks.apps.modules.engine._import_handler_module", return_value=module) as importer,
-        patch("aipass.hooks.apps.sound.speak"),
+        patch("aipass.hooks.apps.handlers.notification.sound.speak"),
     ):
         result = dispatch("UserPromptSubmit", "{}", {"hooks_enabled": True, "UserPromptSubmit": {"h": hook}})
     return result, [c.args[0] for c in log.call_args_list], importer
@@ -537,7 +537,7 @@ class TestDispatchHandlerTimeout:
         with (
             patch("aipass.hooks.apps.modules.engine._log") as mock_log,
             patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
-            patch("aipass.hooks.apps.sound.speak") as mock_speak,
+            patch("aipass.hooks.apps.handlers.notification.sound.speak") as mock_speak,
         ):
             mock_run.side_effect = [
                 {"exit_code": -1, "stdout": "", "stderr": "TIMEOUT", "elapsed_ms": 30000},
@@ -565,7 +565,7 @@ class TestDispatchHandlerTimeout:
         }
         with (
             patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
-            patch("aipass.hooks.apps.sound.speak") as mock_speak,
+            patch("aipass.hooks.apps.handlers.notification.sound.speak") as mock_speak,
         ):
             mock_run.return_value = {"exit_code": -1, "stdout": "", "stderr": "TIMEOUT", "elapsed_ms": 30000}
             result = dispatch("UserPromptSubmit", "{}", config)
@@ -584,7 +584,7 @@ class TestDispatchHandlerTimeout:
         with (
             patch("aipass.hooks.apps.modules.engine._log") as mock_log,
             patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
-            patch("aipass.hooks.apps.sound.speak") as mock_speak,
+            patch("aipass.hooks.apps.handlers.notification.sound.speak") as mock_speak,
         ):
             mock_run.return_value = {"exit_code": -1, "stdout": "", "stderr": "TIMEOUT", "elapsed_ms": 30000}
             result = dispatch("PreToolUse", '{"tool_name":"Edit"}', config)
@@ -891,6 +891,12 @@ class TestInjectionLedger:
             with patch(f"{_LEDGER}.record", side_effect=RuntimeError("boom")):
                 assert dispatch("UserPromptSubmit", json.dumps(payload), config) == ("Temporal: now", 0)
         assert any("injection_ledger failed" in c.args[0] for c in mock_logger.warning.call_args_list)
+
+    def test_help_prints_usage_and_examples(self, capsys):
+        """`ledger --help` prints the Usage and Examples headings."""
+        assert injection_ledger.handle_command("ledger", ["--help"]) is True
+        out = capsys.readouterr().out
+        assert "Usage:" in out and "Examples:" in out
 
     def test_the_verb_prints_one_line_per_turn(self, ledger, capsys):
         mod, payload = ledger
@@ -1274,6 +1280,13 @@ class TestPromote:
             promote.PREFIX,
             promote.OVERRIDE_ENV,
         )
+
+    def test_help_prints_usage_and_examples_and_promotes_nothing(self, capsys):
+        with patch.object(promote, "promote") as run:
+            assert promote.handle_command("promote", ["--help"]) is True
+        run.assert_not_called()
+        err = capsys.readouterr().err
+        assert "Usage:" in err and "Examples:" in err
 
 
 class TestMount:

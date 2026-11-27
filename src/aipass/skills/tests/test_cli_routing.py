@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Unit tests for skills.py CLI routing
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-10
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # Category: skills/tests
 # =============================================
 
@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from aipass.cli import header_version
 from aipass.skills.apps import skills as entry
 from aipass.skills.apps.modules import runner
 from aipass.skills.apps.modules.switch import read_state
@@ -92,13 +93,16 @@ class TestHandleCommand:
     def test_version_command(self, capsys):
         result = handle_command("--version")
         assert result is True
-        assert capsys.readouterr().out.strip() == f"SKILLS v{entry.VERSION}"
+        assert capsys.readouterr().out.strip() == f"skills v{header_version(entry.__file__)}"
 
     def test_version_short_flag(self, capsys):
-        # Mutant killed: -V split off to print a bare VERSION.
+        # Mutant killed: -V split off to print a bare version.
         result = handle_command("-V")
         assert result is True
-        assert capsys.readouterr().out.strip() == f"SKILLS v{entry.VERSION}"
+        assert capsys.readouterr().out.strip() == f"skills v{header_version(entry.__file__)}"
+
+    def test_the_header_is_the_only_version(self):
+        assert not hasattr(entry, "VERSION")
 
     def test_unknown_command_returns_false(self):
         result = handle_command("bogus_command_xyz")
@@ -151,7 +155,7 @@ class TestHandleCommand:
         # Mutant killed: the create help guard prints print_help() instead of the create page.
         result = handle_command("create", ["--help"])
         assert result is True
-        assert "Skills Create - Scaffold a new skill from a template" in capsys.readouterr().out
+        assert "skills Create - Scaffold a new skill from a template" in capsys.readouterr().out
 
     def test_create_help_flag_shows_usage(self, capsys):
         """create --help prints usage text."""
@@ -164,13 +168,13 @@ class TestHandleCommand:
         """create -h shows help."""
         result = handle_command("create", ["-h"])
         assert result is True
-        assert "Skills Create - Scaffold a new skill from a template" in capsys.readouterr().out
+        assert "skills Create - Scaffold a new skill from a template" in capsys.readouterr().out
 
     def test_create_help_word_returns_true(self, capsys):
         """create help shows help."""
         result = handle_command("create", ["help"])
         assert result is True
-        assert "Skills Create - Scaffold a new skill from a template" in capsys.readouterr().out
+        assert "skills Create - Scaffold a new skill from a template" in capsys.readouterr().out
 
 
 class TestNoArgs:
@@ -262,7 +266,7 @@ class TestOutputCapture:
         header = Path(entry.__file__).read_text(encoding="utf-8")
         declared = next(line.split(":", 1)[1].strip() for line in header.splitlines() if line.startswith("# Version:"))
         handle_command("--version")
-        assert capsys.readouterr().out.strip() == f"SKILLS v{declared}"
+        assert capsys.readouterr().out.strip() == f"skills v{declared}"
 
     def test_output_capture_unknown_command(self, capsys):
         """output_capture: unknown command names itself and points at help."""
@@ -363,10 +367,10 @@ class TestReadVerbsHelpPrintsUsage:
     @pytest.mark.parametrize(
         "verb, title",
         [
-            ("list", "Skills List - Show every discovered skill"),
-            ("info", "Skills Info - Show one skill"),
-            ("validate", "Skills Validate - Check a skill's requirements"),
-            ("run", "Skills Run - Execute a skill"),
+            ("list", "skills List - Show every discovered skill"),
+            ("info", "skills Info - Show one skill"),
+            ("validate", "skills Validate - Check a skill's requirements"),
+            ("run", "skills Run - Execute a skill"),
         ],
     )
     @pytest.mark.parametrize("flag", ["--help", "-h", "help"])
@@ -376,6 +380,13 @@ class TestReadVerbsHelpPrintsUsage:
         assert title in out
         assert f"drone @skills {verb}" in out
 
+    @pytest.mark.parametrize("verb", ["list", "info", "run", "create", "validate", "switch"])
+    def test_every_verb_help_ends_on_a_worked_example(self, capsys, verb):
+        assert handle_command(verb, ["--help"]) is True
+        out = capsys.readouterr().out
+        assert "Examples:" in out
+        assert out.index("Usage:") < out.index("Examples:")
+
 
 class TestSwitchVerbsHelpWritesNothing:
     """`on`, `off` and `switch` take a help flag as a request for usage, never as a skill name to record."""
@@ -384,7 +395,7 @@ class TestSwitchVerbsHelpWritesNothing:
     @pytest.mark.parametrize("flag", ["--help", "-h", "help"])
     def test_a_help_flag_prints_the_switch_usage_and_records_no_skill(self, capsys, verb, flag):
         assert handle_command(verb, [flag]) is True
-        assert "Skills Switch - Disconnect and reconnect a skill" in capsys.readouterr().out
+        assert "skills Switch - Disconnect and reconnect a skill" in capsys.readouterr().out
         assert read_state() == {}
 
     def test_a_bare_switch_lists_every_skill(self, capsys):

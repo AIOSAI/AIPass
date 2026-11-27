@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: list_ops.py
 # Description: Plan Listing Implementation Handler
-# Version: 2.2.0
+# Version: 2.2.1
 # Created: 2026-03-08
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -130,16 +130,6 @@ def list_plans_impl(
             "formatted_list": formatted_list,
             "formatted_stats": formatted_stats,
             "empty": False,
-            "filter_type": filter_type,
-        }
-
-    except BrokenPipeError:
-        logger.info(f"[{MODULE_NAME}] Broken pipe (stdout closed early)")
-        return {
-            "success": True,
-            "formatted_list": "",
-            "formatted_stats": "",
-            "empty": True,
             "filter_type": filter_type,
         }
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-08-08
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -113,9 +113,9 @@ def _branch_name_pattern() -> Optional[re.Pattern]:
         if not BRANCH_REGISTRY_FILE.exists():
             raise FileNotFoundError(BRANCH_REGISTRY_FILE)
         rows = fleet_branches(repo_root=BRANCH_REGISTRY_FILE.parent, name_from="registry", strict=True)
-        names = {str(row["name"]).upper() for row in rows if row.get("name")}
+        names = {str(row["name"]).lower() for row in rows if row.get("name")}
         if names:
-            # Longest first so AI_MAIL is matched before AI.
+            # Longest first so ai_mail is matched before ai.
             ordered = sorted(names, key=len, reverse=True)
             pattern = re.compile(r"\b(" + "|".join(re.escape(n) for n in ordered) + r")\b", re.IGNORECASE)
     except Exception as exc:
@@ -149,9 +149,30 @@ def _normalize(message: str) -> str:
 
 
 def compute_signature(level: str, branch: str, module: str, message: str) -> str:
-    """Compute the repeat signature for a log line."""
-    raw = f"{level.upper()}|{branch.upper()}|{module}|{_normalize(message)}"
+    """Compute the repeat signature for a log line; the case of the branch never splits one."""
+    raw = f"{level.upper()}|{branch.lower()}|{module}|{_normalize(message)}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def _adopt_earlier_key(
+    signatures: Dict[str, Any], signature: str, level: str, branch: str, module: str, message: str
+) -> Optional[Dict[str, Any]]:
+    """Move the entry tracking this same repeat under an earlier key to *signature*, or return None.
+
+    Keys minted while the branch was hashed in capitals would otherwise restart their count and first_seen, and a
+    chronic repeat would age a second time and mail its owner again.
+    """
+    wanted = _normalize(message[:MAX_MESSAGE_CHARS])
+    for sig, other in signatures.items():
+        if (
+            other.get("level") == level
+            and other.get("module") == module
+            and str(other.get("branch", "")).lower() == branch.lower()
+            and _normalize(str(other.get("message", ""))) == wanted
+        ):
+            signatures[signature] = signatures.pop(sig)
+            return signatures[signature]
+    return None
 
 
 def _registry_report(**kwargs: Any) -> Dict[str, Any]:
@@ -359,7 +380,9 @@ def _record(
         with json_file_lock(STATE_FILE):
             state = _load_state()
             signatures = state.setdefault("signatures", {})
-            entry = signatures.get(signature)
+            entry = signatures.get(signature) or _adopt_earlier_key(
+                signatures, signature, level, branch, module, message
+            )
             if entry is None:
                 entry = {
                     "level": level,
@@ -558,7 +581,7 @@ def _send_aged_notice(
     row = _registry_report(
         error_type="WARNING",
         message=str(entry.get("message", "")),
-        component=branch.upper(),
+        component=branch.lower(),
         log_path=str(entry.get("log_file", "")),
         severity="low",
     )

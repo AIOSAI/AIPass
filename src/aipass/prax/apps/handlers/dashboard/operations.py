@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: operations.py
 # Description: Dashboard Operations Handler
-# Version: 0.6.1
+# Version: 0.8.0
 # Created: 2026-02-25
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Dashboard Operations Handler"""
@@ -101,11 +101,11 @@ def create_fresh_dashboard(branch_path: Path) -> Dict:
         try:
             template = json.loads(template_file.read_text())
             now = datetime.now().isoformat()
-            dashboard = json.loads(json.dumps(template).replace("{{BRANCHNAME}}", branch_path.name.upper()))
+            dashboard = json.loads(json.dumps(template).replace("{{BRANCH}}", branch_path.name.lower()))
             dashboard["last_updated"] = now
             return dashboard
         except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Failed to load dashboard template file %s, falling back to hardcoded: %s", template_file, e)
+            raise ValueError(f"Dashboard template {template_file} is unreadable: {e}") from e
 
     now = datetime.now().isoformat()
     return {
@@ -114,7 +114,7 @@ def create_fresh_dashboard(branch_path: Path) -> Dict:
             " This file is 100% automated and will be overwritten."
             " Services update their own sections."
         ),
-        "branch": branch_path.name.upper(),
+        "branch": branch_path.name.lower(),
         "last_updated": now,
         "quick_status": {"action_required": False},
         "sections": {
@@ -124,19 +124,17 @@ def create_fresh_dashboard(branch_path: Path) -> Dict:
     }
 
 
-def _load_for_write(dashboard_path: Path, branch_path: Path) -> "Dict | None":
-    """The dashboard on disk, a fresh one when there is none, or None when it is unreadable."""
-    # None, never a template rebuild: saving a rebuild wipes every other service's sections.
+def _load_for_write(dashboard_path: Path, branch_path: Path) -> Dict:
+    """The dashboard on disk, or a fresh one when there is none; raises ValueError when it is unreadable."""
+    # A raise, never a template rebuild: saving a rebuild wipes every other service's sections.
     if not dashboard_path.exists():
         return create_fresh_dashboard(branch_path)
     try:
         data = json.loads(dashboard_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
-        logger.error("Dashboard at %s is unreadable, refusing to overwrite it: %s", dashboard_path, e)
-        return None
+        raise ValueError(f"Dashboard at {dashboard_path} is unreadable, refusing to overwrite it: {e}") from e
     if not isinstance(data, dict):
-        logger.error("Dashboard at %s is not a JSON object, refusing to overwrite it", dashboard_path)
-        return None
+        raise ValueError(f"Dashboard at {dashboard_path} is not a JSON object, refusing to overwrite it")
     return data
 
 
@@ -149,8 +147,6 @@ def write_section(branch_path: Path, section_name: str, section_data: Dict) -> b
 
         with dashboard_lock(branch_path):
             dashboard = _load_for_write(dashboard_path, branch_path)
-            if dashboard is None:
-                return False
 
             if not isinstance(dashboard.get("sections"), dict):
                 dashboard["sections"] = {}

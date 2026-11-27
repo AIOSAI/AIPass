@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: metadata.py
 # Description: Branch name extraction and profile detection
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-03-05
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Branch name extraction and profile detection."""
@@ -30,10 +30,9 @@ def branch_name_refusal(name: str) -> str:
     return f"REFUSED: {name!r} is not a valid branch name: {BRANCH_NAME_RULE}. Nothing was written."
 
 
-def normalize_branch_name(name, case="upper"):
-    """Normalize branch name: replace hyphens with underscores, apply case."""
-    normalized = name.replace("-", "_")
-    return normalized.upper() if case == "upper" else normalized.lower()
+def normalize_branch_name(name):
+    """The stored form of a branch name: hyphens as underscores, lowercase. The system never capitalises one."""
+    return name.replace("-", "_").lower()
 
 
 def detect_profile(target_path):

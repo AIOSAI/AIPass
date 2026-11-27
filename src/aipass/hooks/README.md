@@ -1,13 +1,13 @@
 [← Back to AIPass](../../../README.md)
 
-# HOOKS
+# hooks
 
 **Purpose:** Hook infrastructure for AIPass. One dispatch engine routes every hook event across
 platforms (Claude Code, Codex, OpenCode) with per-project configuration, full logging and gates that fail closed. On
 one side it injects the grounding an agent wakes up with; on the other it fences the writes an agent
-makes.
+makes. A cloud session at the clone's root boots as the seat `AIPASS_SEAT` names.
 **Module:** `aipass.hooks`
-**Version:** 1.3.1
+**Version:** 1.3.2
 
 ---
 
@@ -95,21 +95,18 @@ Other branches import from the package top file, `from aipass.hooks import <name
 verbs, the sandbox builders, the branch-prompt cap and the mute flag, each read from its home on access.
 
 Three layers. `apps/hooks.py` is a thin router: it discovers the modules beside it and dispatches each
-command to the one that claims it. `apps/modules/` holds one business-logic module per concern —
-`engine` (the dispatcher), `engine_closure` (the engine's imports, kept free of NameErrors),
-`cadence` (which turn a loader fires on),
-`injection_ledger` (what a seat was told, per turn), `grounding_receipt` (whether the grounding
-reached the model), `grounding_content` (the injected blocks and their budgets), `write_ownership`
-(whose file a write lands in), `write_grant` (whether a dispatch's grant covers a crossing write),
-`bash_writes`, `shell_reader`, `shell_programs` and `testwrite_targets` (a shell command's visible
-writes, its programs, its new tests), `admin_seat` and `testgate_policy` (who is exempt,
-and what the policy says), `promote` (source to live code), `protected_paths` (the files that switch
-the gates), `provider_launch` (a provider session started outside the caller's branch), `comment_scan` and `comments` (the comment budget), `hookstatus`, `hooksound`, `alert_dismiss`, `feedback`, `context_window`,
-`cc_sessions`, `cc_transcripts`, `diagnostics_state`, `hook_test`, `release_notice`, `sandbox` and
-`wire_verify`. `apps/handlers/` holds the implementation, one directory per concern: `bridges/` per
-platform, `prompt/` for injection, `security/` for the gates, `lifecycle/` for session and compaction
-events, `notification/` for sound and mail, `parity/`, plus `config/`, `cli/` and the `json/` service
-every branch shares.
+command to the one that claims it. `apps/modules/` holds one business-logic module per concern — `engine`
+(the dispatcher), `cadence` (which turn a loader fires on), `injection_ledger` and `grounding_receipt`
+(what a seat was told, and whether it arrived), `grounding_content` (the injected blocks and budgets),
+`write_ownership` and `write_grant` (whose file a write lands in, and the grant that may cover it),
+`bash_writes`, `shell_reader`, `shell_programs` and `testwrite_targets` (what a shell command writes and
+runs), `promote` (source to live code), `protected_paths` (the files that switch the gates), plus
+`alert_dismiss`, `cc_sessions`, `cc_transcripts`, `comment_scan`, `context_window`, `diagnostics_state`,
+`engine_closure`, `feedback`, `hook_test`, `hooksound`, `hookstatus`, `provider_launch`,
+`testgate_policy` and `wire_verify`; bare `drone @hooks` describes each. `apps/handlers/` holds the
+implementation, one directory per concern: `bridges/` per platform, `prompt/` for injection, `security/`
+for the gates, `lifecycle/` for session and compaction events, `notification/` for sound and mail,
+`parity/`, plus `config/`, `cli/` and the `json/` service every branch shares.
 
 Handlers are imported dynamically by dotted path at dispatch time, never statically, which is why no
 handler is referenced anywhere in this tree and why static analysis cannot see them as used.
@@ -135,11 +132,11 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | [docs/bash_writes.md](docs/bash_writes.md) | What a shell command can be seen to write, and what it misses |
 | [docs/trinity_memory_gate.md](docs/trinity_memory_gate.md) | Memory writes: the shell refusal, the tripwire, judging what a write authors |
 | [docs/testwrite_gate.md](docs/testwrite_gate.md) | Agents do not create tests: the policy file, the fail-closed reasoning |
-| [docs/prompt_injection.md](docs/prompt_injection.md) | Injection caps and their sources, the loud fail-open, the alert banners |
+| [docs/prompt_injection.md](docs/prompt_injection.md) | Injection caps and their sources, the loud fail-open, the alert banners, what a compaction summary carries, `AIPASS_SEAT` at a repo root |
 | [docs/diagnostics.md](docs/diagnostics.md) | The two log streams and the post-edit diagnostics block |
 | [docs/comments.md](docs/comments.md) | The comment budget: the metric, the over-budget answer, the `comments` verb |
 | [docs/sandbox.md](docs/sandbox.md) | The kernel filesystem boundary: policy per role, what is writable, launch seam |
-| [docs/boot_shim.md](docs/boot_shim.md) | The one script here that writes outside the repo |
+| [docs/boot_shim.md](docs/boot_shim.md) | The one script here that writes outside the repo; the boot menu and the first-run chat |
 | [docs/cadence_investigation.md](docs/cadence_investigation.md) | The per-turn injection counter, keyed per session |
 | [docs/provider_parity.md](docs/provider_parity.md) | `parity` compares both CLIs hook by hook; `smoke` runs one live turn per provider |
 

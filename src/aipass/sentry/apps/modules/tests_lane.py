@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests_lane.py
 # Description: Tests Lane Module — the retire lane and the test-template distribution
-# Version: 1.2.3
+# Version: 1.2.5
 # Created: 2026-09-21
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Tests Lane Module
@@ -140,7 +140,11 @@ def _refuse(subcommand: str) -> None:
 
 def _handle_retired() -> None:
     """List what the retire lane holds."""
-    rows = retire_ops.list_retired(BRANCH)
+    try:
+        rows = retire_ops.list_retired(BRANCH)
+    except retire_ops.CorruptRetireLog as exc:
+        display_error(f"Cannot list retired tests: {exc}")
+        raise CommandRefused(EXIT_NOT_STAMPED, "tests retired") from exc
     folder = retire_ops.retire_root(BRANCH)
 
     console.print()
@@ -331,6 +335,8 @@ def print_help() -> None:
     console.print()
     header("Tests Lane")
     console.print()
+    console.print("[yellow]Usage:[/yellow] drone @sentry tests <command> <args>")
+    console.print()
     console.print("[yellow]COMMANDS:[/yellow]")
     console.print("  [green]drone @sentry tests retired[/green]                     [dim]The retire lane[/dim]")
     console.print("  [green]drone @sentry tests restore <name>[/green]              [dim]Bring one back[/dim]")
@@ -354,6 +360,10 @@ def print_help() -> None:
     console.print("  Each path is repo-relative (or absolute), spelled as one string or as Path parts.")
     console.print("  stdout carries only test paths, one per line; counts and skips go to stderr.")
     console.print("  A .py path is skipped. A path built from a variable is not seen.")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]drone @sentry tests retired[/green]")
+    console.print("  [green]drone @sentry tests template bump @flow --confirm[/green]")
     console.print()
     console.print("[dim]Commands: tests, tests_lane, --help[/dim]")
 

@@ -62,7 +62,7 @@
       "reason": "dispatch() is the engine's core purpose: it IS the module's primary function, not a handler that belongs elsewhere. Its stdlib json is the stdin payload and handler stdouts, never branch data. Moving dispatch to handlers/ would leave an empty module."
     },
     {
-      "file": "apps/sound.py",
+      "file": "apps/handlers/notification/sound.py",
       "standard": "trigger",
       "reason": "SOUND_FLAG.unlink(missing_ok=True) in mute() removes the sound-on flag file: not a tracked resource or production data. Deliberate user action via 'drone @hooks hooksound off' or an imported mute() call."
     },
@@ -261,12 +261,12 @@
       "file": "apps/modules/context_window.py",
       "standard": "logged_fallback",
       "lines": [
-        157,
-        160,
-        197,
-        295,
-        358,
-        380
+        158,
+        161,
+        198,
+        296,
+        359,
+        381
       ],
       "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 157-160: an unreadable transcript (Claude's or a Codex rollout) reads as no usage. 197: an unreadable status-line window file reads as window unknown, logged at INFO. 295: an unreadable OpenCode store reads as no usage, logged at INFO. 358: an unreadable OpenCode catalog reads as no limit, so the window is unknown, logged at INFO. 380: an unreadable limit cache reads as empty, so the catalog is read, logged at INFO."
     },
@@ -310,7 +310,7 @@
       "file": "apps/handlers/lifecycle/compact.py",
       "standard": "logged_fallback",
       "lines": [
-        46
+        60
       ],
       "reason": "Fleet green leg 5: an injector's content (the last session); None injects nothing. Injectors are skipped on error by doctrine; guards no write."
     },
@@ -330,10 +330,10 @@
       "file": "apps/handlers/lifecycle/session_boot.py",
       "standard": "logged_fallback",
       "lines": [
-        118,
-        187,
-        331,
-        865
+        126,
+        195,
+        339,
+        874
       ],
       "reason": "Fleet green leg 5: boot display (tmux name, age, pinned CLI version) and the dispatch-lock read for the boot banner. Guards no write."
     },
@@ -469,9 +469,9 @@
       "file": "tests/test_session_boot.py",
       "standard": "through_the_command",
       "lines": [
-        227,
-        232,
-        238
+        229,
+        234,
+        240
       ],
       "reason": "_stop_session's bg early return (a bg session is never SIGTERMed): every boot() caller (_menu_single_new, _menu_single_close, _close_all, _new_over_all) filters bg sessions out first, so no boot()/main() route reaches it and no single mutant can turn a boot()-level test red. Kept as a second layer; whether it is deliberate or dead is open with devpulse (2026-10-24)."
     },
@@ -583,7 +583,7 @@
       "file": "apps/handlers/config/loader.py",
       "standard": "fallback",
       "lines": [
-        171
+        185
       ],
       "reason": "Fails toward MORE enforcement: an unreadable AIPass config runs the built-in gate set from gates.builtin_config(), never no gates. It logs at ERROR, which @trigger's log watcher escalates."
     },
@@ -591,7 +591,7 @@
       "file": "apps/handlers/config/loader.py",
       "standard": "fallback",
       "lines": [
-        319
+        333
       ],
       "reason": "The guard file only stops a repeat of the one-per-session never-enrolled nudge; if it cannot be written the user sees the nudge again, which is itself the visible signal. No decision rests on it."
     },
@@ -639,7 +639,7 @@
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "fallback",
       "lines": [
-        77
+        79
       ],
       "reason": "Display only: an unreadable start leaves the age out of the refusal text (\"\" or None both drop the \"old\" part). No decision rests on the age; ranking uses _session_start."
     },
@@ -647,7 +647,7 @@
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "fallback",
       "lines": [
-        96
+        98
       ],
       "reason": "None is handed on as \"cannot rank\", never as \"younger\": _we_are_the_incumbent then answers False, so an unreadable start keeps the refusal of the newer seat. The refusal is the answer."
     },
@@ -723,7 +723,7 @@
       "file": "apps/handlers/lifecycle/compact.py",
       "standard": "fallback",
       "lines": [
-        44
+        58
       ],
       "reason": "Read-only: a corrupt local.json is never written here, it only drops the Last Session block from the post-compact injection. WARNING, which @trigger escalates, names the read failure."
     },
@@ -731,7 +731,7 @@
       "file": "apps/handlers/lifecycle/compact.py",
       "standard": "fallback",
       "lines": [
-        88
+        194
       ],
       "reason": "The injection still runs when cadence cannot reset its counter; the cost is a regrounding cadence measured from before the compaction. Raising would lose the recovery block. WARNING, which @trigger escalates, names the failure."
     },
@@ -739,9 +739,17 @@
       "file": "apps/handlers/lifecycle/compact.py",
       "standard": "fallback",
       "lines": [
-        93
+        199
       ],
       "reason": "The injection still runs when the grounding receipt cannot be set pending; the cost is one compaction the receipt verb does not track. It logs at ERROR, which @trigger escalates."
+    },
+    {
+      "file": "apps/handlers/lifecycle/compact.py",
+      "standard": "fallback",
+      "lines": [
+        72
+      ],
+      "reason": "_fact: one unreadable fact (no inbox, no git, a flow or ai_mail import that raises) must not cost the summary the rest of the work-still-out list. The failure is not hidden: the line reads 'could not be read (<error>)' in the list the summarizer and the next turn see, and a WARNING, which @trigger escalates, names it."
     },
     {
       "file": "apps/handlers/lifecycle/post_compact_regrounding.py",
@@ -827,7 +835,7 @@
       "file": "apps/handlers/prompt/feedback_pulse.py",
       "standard": "fallback",
       "lines": [
-        50
+        51
       ],
       "reason": "A corrupt counter is never overwritten here (the parse fails before the write); it reads as turn 0, so the feedback line stays quiet for the session. Only a nag line is lost. WARNING, which @trigger escalates, names the failure."
     },
@@ -859,9 +867,9 @@
       "file": "apps/handlers/lifecycle/session_boot.py",
       "standard": "fallback",
       "lines": [
-        116,
-        128,
-        147
+        124,
+        136,
+        155
       ],
       "reason": "Boot-menu tmux lookups: no tmux, a garbled pane line or a failed ppid read only means the session's tmux host is not found, and _stop_session falls to SIGTERM by PID and says which it did on stderr. Nothing is skipped."
     },
@@ -869,9 +877,9 @@
       "file": "apps/handlers/lifecycle/session_boot.py",
       "standard": "fallback",
       "lines": [
-        185,
-        599,
-        897
+        193,
+        602,
+        906
       ],
       "reason": "Display only: an unreadable start time, transcript mtime or lock timestamp drops the age from a boot-menu line. No choice or decision rests on the age."
     },
@@ -975,11 +983,11 @@
       "reason": "An absent session pointer is a defined state (0.0 = never written); the run compares the stamp before and after, so a pointer that appears reads as moved. Only FileNotFoundError is caught: any other stat failure raises out of the run. Kept because the checker's absence pass needs a read call and stat is none."
     },
     {
-      "file": "apps/sound.py",
+      "file": "apps/handlers/notification/sound.py",
       "standard": "fallback",
       "lines": [
-        90,
-        92
+        86,
+        88
       ],
       "reason": "Sound is cosmetic: a voice or chime that cannot play (piper timed out, no player) costs only that sound, and the hook's real output is already delivered. The event's engine.jsonl row still records the hook; a raise would only fail the hook for a missing beep."
     },
@@ -1142,7 +1150,7 @@
       "file": "apps/modules/context_window.py",
       "standard": "fallback",
       "lines": [
-        115
+        116
       ],
       "reason": "A provider transcript still being written ends mid-line as a matter of course: the torn line is skipped and the scan reads the next newest. The transcript is the provider's, only read here."
     },
@@ -1150,7 +1158,7 @@
       "file": "apps/modules/context_window.py",
       "standard": "fallback",
       "lines": [
-        155
+        156
       ],
       "reason": "Absence, not failure: on turn 0 the provider has not written the transcript yet, so there is no usage to read and the gauge stays quiet. Any other read error is logged at WARNING by the handler below it."
     },
@@ -1158,14 +1166,14 @@
       "file": "apps/modules/context_window.py",
       "standard": "fallback",
       "lines": [
-        195,
-        235,
-        293,
-        356,
-        396,
-        407,
-        419,
-        436
+        196,
+        236,
+        294,
+        357,
+        397,
+        408,
+        420,
+        437
       ],
       "reason": "Read-only inputs of the advisory context gauge (status-line window file, provider settings, OpenCode store and config, Codex config and rollout), each owned by its provider and never written here: an unreadable one costs a reading, and the window falls to the next source or the gauge stays quiet."
     },
@@ -1173,7 +1181,7 @@
       "file": "apps/modules/context_window.py",
       "standard": "fallback",
       "lines": [
-        378
+        379
       ],
       "reason": "A rebuildable cache of catalog limits: an unreadable one is left as found (None stops the write-back) and the limit is read from the OpenCode catalog itself, so the answer is still right. WARNING, escalated by @trigger, names it."
     },
@@ -1248,7 +1256,7 @@
       "file": "apps/handlers/config/loader.py",
       "standard": "logged_fallback",
       "lines": [
-        198
+        212
       ],
       "reason": "None here is the documented answer to find_project_config: serve the AIPass gate set, never no hooks. An unreadable trust registry fails toward MORE enforcement. It logs at ERROR naming the project and the cure, which @trigger escalates."
     },

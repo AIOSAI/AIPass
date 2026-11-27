@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations_refresh.py
 # Description: Unit tests for the dashboard refresh and section writes
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-10-08
-# Modified: 2026-11-08
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for the refresh and section writes: apps/handlers/dashboard/refresh.py and status.py."""
@@ -47,7 +47,7 @@ class TestRefreshAllDashboards:
             mod,
             "create_fresh_dashboard",
             lambda bp: {
-                "branch": bp.name.upper(),
+                "branch": bp.name.lower(),
                 "sections": {},
                 "quick_status": {},
             },
@@ -92,7 +92,7 @@ class TestRefreshAllDashboards:
             if bp.name == "bad":
                 raise RuntimeError("simulated failure")
             return {
-                "branch": bp.name.upper(),
+                "branch": bp.name.lower(),
                 "sections": {},
                 "quick_status": {},
             }
@@ -119,7 +119,7 @@ class TestRefreshSingleDashboard:
             mod,
             "create_fresh_dashboard",
             lambda bp: {
-                "branch": bp.name.upper(),
+                "branch": bp.name.lower(),
                 "sections": {},
                 "quick_status": {},
             },
@@ -127,7 +127,7 @@ class TestRefreshSingleDashboard:
 
         result = mod.refresh_single_dashboard(branch_dir)
         assert result["status"] == "success"
-        assert result["branch"] == "FLOW"
+        assert result["branch"] == "flow"
 
     def test_returns_error_on_exception(self, tmp_path, monkeypatch):
         """Exception during refresh returns status 'error' with message."""
@@ -145,13 +145,13 @@ class TestRefreshSingleDashboard:
 
         result = mod.refresh_single_dashboard(branch_dir)
         assert result["status"] == "error"
-        assert result["branch"] == "FAILING"
+        assert result["branch"] == "failing"
         assert "boom" in result["error"]
 
     def test_a_branch_with_no_mail_central_row_gets_its_own_inbox_count(self, tmp_path, monkeypatch):
         """The mail count is the branch's own inbox, so a branch the central never lists is not stamped 0.
 
-        An external project's branch has no row in AIPass's AI_MAIL.central.json
+        An external project's branch has no row in AIPass's ai_mail.central.json
         (18 core rows, measured 2026-09-11), and its project has no mail central
         at all. The central here lists only FLOW.
         """
@@ -165,7 +165,7 @@ class TestRefreshSingleDashboard:
 
         monkeypatch.setattr(mod, "read_all_centrals", lambda: {"ai_mail": {"branch_stats": {"FLOW": {"unread": 9}}}})
         monkeypatch.setattr(
-            mod, "create_fresh_dashboard", lambda bp: {"branch": bp.name.upper(), "sections": {}, "quick_status": {}}
+            mod, "create_fresh_dashboard", lambda bp: {"branch": bp.name.lower(), "sections": {}, "quick_status": {}}
         )
         saved: dict = {}
         monkeypatch.setattr(mod, "save_dashboard", lambda bp, data: saved.update(data))
@@ -394,3 +394,36 @@ class TestResolveBranchPathWrapper:
         mod.handle_command("dashboard", ["refresh", "@flow"])
 
         assert refreshed == [fake_path]
+
+
+class TestRegisteredBranchWalk:
+    """_registered_branch_at walks up to the registry's branch; an unreadable registry is warned, not skipped silently."""
+
+    def test_an_unreadable_registry_is_logged_at_warning(self, monkeypatch, tmp_path):
+        """Mutant: the old except that logged at info and walked on unseen."""
+        mod = _load_dashboard_module()
+
+        def unreadable(ref):
+            raise json.JSONDecodeError("bad", "{", 0)
+
+        monkeypatch.setattr(mod, "resolve_branch_path", unreadable)
+
+        assert mod._registered_branch_at(tmp_path) is None
+        assert mod.logger.warning.called
+        assert "Registry unreadable" in mod.logger.warning.call_args.args[0]
+
+    def test_a_missing_row_walks_up_to_the_registered_parent(self, monkeypatch, tmp_path):
+        """Mutant: treat a missing row as the end of the walk, and the parent branch is never found."""
+        mod = _load_dashboard_module()
+        child = tmp_path / "sub"
+        child.mkdir()
+
+        def resolve(ref):
+            if ref == tmp_path.name:
+                return tmp_path
+            raise FileNotFoundError(ref)
+
+        monkeypatch.setattr(mod, "resolve_branch_path", resolve)
+
+        assert mod._registered_branch_at(child) == tmp_path
+        assert not mod.logger.warning.called

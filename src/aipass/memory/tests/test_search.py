@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_search.py
 # Description: Tests for the search orchestration module
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-11-21
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/modules/search.py."""
@@ -11,11 +11,17 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(documentation) — the wording of the print_help() panel
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
+from aipass.cli import error as cli_error, reset_command_state, resolve_exit
+from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.apps.modules import search
+
+# Any directory that exists stands in for the caller's local store.
+_LOCAL = Path(__file__).resolve().parent
 
 
 def _prepare_search_mocks(monkeypatch):
@@ -44,8 +50,13 @@ def _prepare_search_mocks(monkeypatch):
         }
     )
     monkeypatch.setattr(search, "_handler_execute_search", mock_execute_search)
+    mock_store = MagicMock(return_value={"branch": "seed", "db_path": _LOCAL})
+    monkeypatch.setattr(search, "_handler_caller_local_store", mock_store)
+    # Never the live rail: the global gate reads this stand-in.
+    monkeypatch.setattr(caller_gate, "verified_caller", lambda: ("@memory", False))
 
     return {
+        "store": mock_store,
         "error": mock_error,
         "warning": mock_warning,
         "execute_search": mock_execute_search,
@@ -81,7 +92,9 @@ class TestHandleCommandRouting:
         result = search_mod.handle_command("search", ["hello", "world"])
 
         assert result is True
-        mock_show.assert_called_once_with("hello world", branch=None, memory_type=None, n_results=5)
+        mock_show.assert_called_once_with(
+            "hello world", memory_type=None, n_results=5, db_path=_LOCAL, owner=None, seat="seed"
+        )
 
     def test_unknown_command_returns_false(self, monkeypatch):
         """An unrecognised command should return False."""
@@ -98,7 +111,9 @@ class TestHandleCommandRouting:
         result = search_mod.handle_command("search", ["some query"])
 
         assert result is True
-        mocks["execute_search"].assert_called_once_with(query="some query", branch=None, memory_type=None, n_results=5)
+        mocks["execute_search"].assert_called_once_with(
+            query="some query", branch=None, memory_type=None, n_results=5, db_path=_LOCAL, owner=None
+        )
         mocks["error"].assert_not_called()
 
 
@@ -181,7 +196,7 @@ class TestHandleCommandArgParsing:
         mock_show = MagicMock(return_value=True)
         monkeypatch.setattr(search_mod, "show_search_results", mock_show)
 
-        search_mod.handle_command("search", ["my", "query", "--branch", "SENTRY"])
+        search_mod.handle_command("search", ["global", "my", "query", "--branch", "SENTRY"])
 
         mock_show.assert_called_once_with("my query", branch="SENTRY", memory_type=None, n_results=5)
 
@@ -193,7 +208,9 @@ class TestHandleCommandArgParsing:
 
         search_mod.handle_command("search", ["test", "--type", "observations"])
 
-        mock_show.assert_called_once_with("test", branch=None, memory_type="observations", n_results=5)
+        mock_show.assert_called_once_with(
+            "test", memory_type="observations", n_results=5, db_path=_LOCAL, owner=None, seat="seed"
+        )
 
     def test_n_option_parsed(self, monkeypatch):
         """--n value should override the default n_results."""
@@ -203,7 +220,9 @@ class TestHandleCommandArgParsing:
 
         search_mod.handle_command("search", ["test", "--n", "10"])
 
-        mock_show.assert_called_once_with("test", branch=None, memory_type=None, n_results=10)
+        mock_show.assert_called_once_with(
+            "test", memory_type=None, n_results=10, db_path=_LOCAL, owner=None, seat="seed"
+        )
 
     def test_all_options_combined(self, monkeypatch):
         """All options together should be correctly parsed."""
@@ -213,7 +232,7 @@ class TestHandleCommandArgParsing:
 
         search_mod.handle_command(
             "search",
-            ["find", "stuff", "--branch", "CLI", "--type", "local", "--n", "3"],
+            ["global", "find", "stuff", "--branch", "CLI", "--type", "local", "--n", "3"],
         )
 
         mock_show.assert_called_once_with("find stuff", branch="CLI", memory_type="local", n_results=3)
@@ -253,7 +272,7 @@ class TestHandleCommandArgParsing:
         mock_show = MagicMock(return_value=True)
         monkeypatch.setattr(search_mod, "show_search_results", mock_show)
 
-        search_mod.handle_command("search", ["q", "--branch", "@flow"])
+        search_mod.handle_command("search", ["global", "q", "--branch", "@flow"])
 
         mock_show.assert_called_once_with("q", branch="flow", memory_type=None, n_results=5)
 
@@ -277,6 +296,105 @@ class TestHandleCommandArgParsing:
         assert "search Module" in out
         assert "handlers/search/" in out
         mocks["execute_search"].assert_not_called()
+
+
+class TestSearchIsLocalByDefault:
+    """`search <query>` reads the caller's own .chroma; `search global <query>` is gated to memory and the admin."""
+
+    def test_a_bare_query_searches_the_callers_own_store(self, monkeypatch):
+        search_mod, mocks = _import_search(monkeypatch)
+
+        assert search_mod.handle_command("search", ["what", "did", "I", "do"]) is True
+
+        mocks["store"].assert_called_once_with()
+        assert mocks["execute_search"].call_args.kwargs["db_path"] == _LOCAL
+        mocks["error"].assert_not_called()
+
+    def test_branch_on_the_local_form_is_refused_before_the_model_loads(self, monkeypatch):
+        search_mod, mocks = _import_search(monkeypatch)
+
+        assert search_mod.handle_command("search", ["q", "--branch", "sentry"]) is True
+
+        mocks["error"].assert_called_once()
+        assert "your local store holds one citizen" in mocks["error"].call_args.args[0]
+        mocks["execute_search"].assert_not_called()
+
+    def test_a_branch_with_no_local_store_is_a_state_not_an_error(self, monkeypatch, tmp_path, capsys):
+        search_mod, mocks = _import_search(monkeypatch)
+        missing = tmp_path / "wren" / ".chroma"
+        mocks["store"].return_value = {"branch": "wren", "db_path": missing}
+
+        assert search_mod.handle_command("search", ["q"]) is True
+
+        out = " ".join(capsys.readouterr().out.split())
+        assert f"@wren: no local store at {missing} - nothing has rolled yet" in out
+        mocks["error"].assert_not_called()
+        mocks["execute_search"].assert_not_called()
+        assert not missing.exists()
+
+    def test_no_resolvable_branch_is_refused_in_one_sentence(self, monkeypatch):
+        search_mod, mocks = _import_search(monkeypatch)
+        mocks["store"].return_value = {"refusal": "search reads your own branch's store and no branch resolves here"}
+
+        assert search_mod.handle_command("search", ["q"]) is True
+
+        mocks["error"].assert_called_once_with("search reads your own branch's store and no branch resolves here")
+        mocks["execute_search"].assert_not_called()
+
+    @pytest.mark.parametrize(("caller", "admin"), [("@memory", False), ("@devpulse", True)])
+    def test_the_global_form_is_open_to_memory_and_the_admin(self, monkeypatch, caller, admin):
+        search_mod, mocks = _import_search(monkeypatch)
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: (caller, admin))
+
+        assert search_mod.handle_command("search", ["global", "q"]) is True
+
+        mocks["error"].assert_not_called()
+        mocks["store"].assert_not_called()
+        mocks["execute_search"].assert_called_once_with(
+            query="q", branch=None, memory_type=None, n_results=5, db_path=None, owner=None
+        )
+
+    def test_the_global_form_refuses_another_seat_with_exit_2(self, monkeypatch, capsys):
+        search_mod, mocks = _import_search(monkeypatch)
+        # The real error(), so the exit code the command state records is the one drone sees.
+        monkeypatch.setattr(search_mod, "error", cli_error)
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: ("@canary", False))
+        reset_command_state()
+
+        assert search_mod.handle_command("search", ["global", "q"]) is True
+
+        assert resolve_exit(True) == 2
+        err = " ".join(capsys.readouterr().err.split())
+        assert "search global reads every citizen's memories" in err
+        assert "not @canary - mail @devpulse, the verified admin" in err
+        mocks["execute_search"].assert_not_called()
+
+    def test_the_global_form_keeps_branch_and_type(self, monkeypatch):
+        search_mod, mocks = _import_search(monkeypatch)
+
+        search_mod.handle_command("search", ["global", "q", "--branch", "@wren", "--type", "local"])
+
+        mocks["execute_search"].assert_called_once_with(
+            query="q", branch="wren", memory_type="local", n_results=5, db_path=None, owner=None
+        )
+
+    @pytest.mark.parametrize(
+        ("args", "query", "is_global"),
+        [
+            (["global", "warming"], "warming", True),
+            (["global warming"], "global warming", False),
+            (["warming", "global"], "warming global", False),
+            (["global", "global"], "global", True),
+        ],
+    )
+    def test_only_a_first_argument_of_exactly_global_is_the_global_form(self, monkeypatch, args, query, is_global):
+        search_mod, mocks = _import_search(monkeypatch)
+
+        search_mod.handle_command("search", args)
+
+        kwargs = mocks["execute_search"].call_args.kwargs
+        assert kwargs["query"] == query
+        assert (kwargs["db_path"] is None) is is_global
 
 
 class TestDiscoverHandlers:
@@ -405,7 +523,9 @@ class TestShowSearchResults:
         result = search_mod.show_search_results("test query")
 
         assert result is True
-        mocks["execute_search"].assert_called_once_with(query="test query", branch=None, memory_type=None, n_results=5)
+        mocks["execute_search"].assert_called_once_with(
+            query="test query", branch=None, memory_type=None, n_results=5, db_path=None, owner=None
+        )
 
     def test_failed_search_returns_false(self, monkeypatch):
         """If the handler returns success=False, show_search_results returns False."""
@@ -441,7 +561,9 @@ class TestShowSearchResults:
 
         search_mod.show_search_results("q", branch="SENTRY", memory_type="local", n_results=3)
 
-        mocks["execute_search"].assert_called_once_with(query="q", branch="SENTRY", memory_type="local", n_results=3)
+        mocks["execute_search"].assert_called_once_with(
+            query="q", branch="SENTRY", memory_type="local", n_results=3, db_path=None, owner=None
+        )
 
     def test_handler_timeout_returns_false(self, monkeypatch):
         """When the handler returns a timeout error, show_search_results returns False."""
@@ -546,6 +668,45 @@ class TestResultMetadataDisplay:
         body = "\n".join(self._panel_bodies(mocks))
         assert "#14" in body
         assert "2026-05-31" in body
+
+    @staticmethod
+    def _titles(mocks):
+        return [call.kwargs["title"] for call in mocks["panel"].call_args_list]
+
+    def test_the_heading_names_the_owner_the_store_reports(self, monkeypatch):
+        """A name split at "_" headed ai_mail_email_sent as "ai (mail)"."""
+        search_mod, mocks = _import_search(monkeypatch)
+        found = self._search_returning({})
+        found["results"][0].update(collection="ai_mail_email_sent", branch="ai_mail", type="email_sent")
+        mocks["execute_search"].return_value = found
+
+        assert search_mod.show_search_results("sent mail") is True
+
+        assert self._titles(mocks)[0].startswith("Result 1 - ai_mail (email_sent) - ")
+
+    def test_a_local_plan_hit_is_headed_by_the_store_owner(self, monkeypatch):
+        """A local flow_plans carries the global collection's label: its hits read 'flow (plans)', not the owner."""
+        search_mod, mocks = _import_search(monkeypatch)
+        found = self._search_returning({})
+        found["results"][0].update(collection="flow_plans", branch="flow", type="plans")
+        mocks["execute_search"].return_value = found
+
+        assert search_mod.show_search_results("my plan", db_path=_LOCAL, seat="devpulse") is True
+        assert search_mod.show_search_results("my plan") is True
+
+        titles = self._titles(mocks)
+        assert titles[0].startswith("Result 1 - devpulse (plans) - ")
+        assert titles[1].startswith("Result 1 - flow (plans) - ")
+
+    def test_a_result_with_no_owner_is_headed_by_its_collection(self, monkeypatch):
+        search_mod, mocks = _import_search(monkeypatch)
+        found = self._search_returning({})
+        found["results"][0].update(collection="ai_mail_email_sent", branch="", type="")
+        mocks["execute_search"].return_value = found
+
+        assert search_mod.show_search_results("sent mail") is True
+
+        assert self._titles(mocks)[0].startswith("Result 1 - ai_mail_email_sent - ")
 
     def test_empty_timestamp_renders_no_time_label(self, monkeypatch):
         """Rollover writes timestamp="" for .trinity entries -- don't print a bare label."""

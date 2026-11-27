@@ -3,7 +3,7 @@
 # Description: Catchup Orchestration Module
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -24,23 +24,39 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("catchup")
-    console.print("Catchup orchestration — shows what happened since your last visit")
+    console.print("[bold cyan]catchup - Catchup[/bold cyan]")
+    console.print("[dim]Shows what happened in The Commons since your last visit.[/dim]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/catchup/")
-    console.print("    - catchup_ops.py (run_catchup — gather and return catchup data)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/catchup/[/cyan]")
+    console.print("    [cyan]-[/cyan] catchup_ops.py [dim](run_catchup — gather and return catchup data)[/dim]")
+    console.print()
+    console.print("[dim]Run 'drone @commons catchup --help' for usage[/dim]")
+    console.print()
+
+
+def print_help():
+    """Display usage help."""
+    console.print()
+    console.print("[bold cyan]catchup - Catchup[/bold cyan]")
+    console.print("[dim]Shows what happened in The Commons since your last visit.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone @commons catchup[/cyan]")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [cyan]drone @commons catchup[/cyan]")
     console.print()
 
 
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle catchup-related commands."""
+    if command == "catchup" and ("--help" in args or "-h" in args):
+        print_help()
+        return True
+
     if command != "catchup":
         return False
-
-    if "--help" in args or "-h" in args:
-        print_introspection()
-        return True
 
     return _handle_catchup()
 

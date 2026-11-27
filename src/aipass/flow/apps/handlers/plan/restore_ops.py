@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: restore_ops.py
 # Description: Plan Restore Implementation Handler
-# Version: 1.7.1
+# Version: 1.7.2
 # Created: 2026-03-08
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Plan Restore Operations Handler
@@ -374,7 +374,7 @@ def restore_plan_impl(
         if dashboard_success is False:
             logger.warning(f"[{MODULE_NAME}] Failed to update DASHBOARD.local.json")
         if not central_success:
-            logger.warning(f"[{MODULE_NAME}] Failed to update PLANS.central.json")
+            logger.warning(f"[{MODULE_NAME}] Failed to update plans.central.json")
 
         restored_location = plan_info.get("location", "unknown")
         messages.append(

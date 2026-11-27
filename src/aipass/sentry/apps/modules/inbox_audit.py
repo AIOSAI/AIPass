@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_audit.py
 # Description: Inbox ID validator — scans all inbox.json files for non-8-hex ids
-# Version: 1.1.4
+# Version: 1.1.6
 # Created: 2026-04-21
-# Modified: 2026-11-15
+# Modified: 2026-11-25
 # =============================================
 
 """Inbox ID validator for the drone @sentry audit inbox-ids command.
@@ -96,7 +96,7 @@ def _run_inbox_id_scan() -> int:
     skipped = len(matched) - len(inbox_files)
 
     console.print()
-    header("SENTRY — Inbox ID Validator")
+    header("sentry — Inbox ID Validator")
     console.print(f"[dim]Scanning {len(inbox_files)} live inbox file(s) for non-8-hex message ids...[/dim]")
     if skipped:
         console.print(f"[dim]Skipped {skipped} archived/backed-up copy(ies) — not live mail.[/dim]")
@@ -133,8 +133,23 @@ def _run_inbox_id_scan() -> int:
 def print_introspection() -> None:
     """Show inbox_audit module structure."""
     console.print("[bold cyan]inbox_audit[/bold cyan] — Inbox ID validator")
+    console.print("[dim]Flags inbox message ids that are not 8-character lowercase hex[/dim]")
     console.print("  Connected Handlers: none (uses stdlib + pathlib only)")
     console.print("  Command: drone @sentry audit inbox-ids")
+    console.print("  [dim]Run 'drone @sentry audit inbox-ids --help' for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Usage and examples for the inbox-ids audit."""
+    console.print()
+    console.print("[bold cyan]sentry audit inbox-ids[/bold cyan] — Inbox ID validator")
+    console.print()
+    console.print("[yellow]Usage:[/yellow]")
+    console.print("  drone @sentry audit inbox-ids    scan every live inbox.json; a bad id exits non-zero")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @sentry audit inbox-ids[/green]")
+    console.print()
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -144,7 +159,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             print_introspection()
             return True
         if wants_help(None, args):
-            print_introspection()
+            print_help()
             return True
     if command not in ("audit", "standards_audit"):
         return False
@@ -152,7 +167,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
     # After ownership is settled: args[0] is "inbox-ids", so the gate above never sees the flag.
     if wants_help(None, args):
-        print_introspection()
+        print_help()
         return True
     if _run_inbox_id_scan():
         raise CommandRefused(refusal.EXIT_SCORED_FAILED, "inbox-ids")

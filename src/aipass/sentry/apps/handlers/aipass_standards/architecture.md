@@ -453,6 +453,10 @@ The layer, file-size, domain and template-baseline findings are file-level: a ro
 `"functions": ["<file>"]` waives them and a line row does not. A row with no `lines` or `functions`
 waives the whole file.
 
+A missing template path is waived by a row naming its path relative to the branch
+(`apps/plugins/README.md`); a row naming a missing directory (`apps/plugins`) also waives the template files
+beneath it. A bare file name (`README.md`) still matches, and waives that name everywhere in the template.
+
 ---
 
 ## The Core Insight

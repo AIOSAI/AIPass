@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_ops.py
 # Description: README Update Operations Handler
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -40,14 +40,14 @@ def resolve_branch(branch_arg: str) -> Optional[Dict]:
     """Resolve @branch argument to branch info from registry.
 
     Raises OSError/ValueError on an unreadable registry: None means an unknown branch."""
-    name = branch_arg.lstrip("@").upper()
+    name = branch_arg.lstrip("@").lower()
 
     for branch in _load_branches():
-        if branch.get("name", "").upper() == name:
+        if branch.get("name", "").lower() == name:
             return branch
         aliases = branch.get("aliases", [])
         for alias in aliases:
-            if alias.lstrip("@").upper() == name:
+            if alias.lstrip("@").lower() == name:
                 return branch
 
     return None

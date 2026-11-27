@@ -4,7 +4,6 @@
 
 **Purpose:** The command router for AIPass. Resolves an `@name` to a real path at runtime, routes the command there, and owns every git operation behind a tier-based access gate — the one interface through which the whole fleet reaches git.
 **Module:** `aipass.drone`
-**Version:** 1.1.0
 **Created:** 2026-03-05
 
 ---
@@ -26,7 +25,7 @@ drone @git status                 # Read-only git, available to every branch
   module. A branch is dispatched as a subprocess; a module runs in-process. Which lane is taken is
   decided before the call, never discovered by failing one.
 - **Resolves `@names`.** Symbolic addressing against the project registry, with external projects
-  merged in, so the same command works from a repo that is not this one.
+  and the home's hosted projects merged in, so the same command works from a repo that is not this one.
 - **Owns git.** Read verbs for every branch, write verbs for the project's registry-declared owner,
   a door for repositories that are not AIPass, and one audit line per use of it.
 - **Deletes, and records it.** `drone rm` is the only sanctioned delete path in the fleet. Inside
@@ -34,6 +33,9 @@ drone @git status                 # Read-only git, available to every branch
   lands in an audit store and in the logs.
 - **Discovers.** Commands are read from the branches themselves, so the inventory is generated
   rather than written down.
+- **Makes disposable test boxes.** `drone docker` runs clean Ubuntu or Debian containers, blocks
+  credential mounts, and records both creation and removal so throwaway names can be reused.
+  `drone docker build` warms the cached base ahead, and a box says so before it builds one.
 
 Not a task runner, not a scheduler, and never a writer of another branch's files.
 
@@ -49,6 +51,7 @@ written down here and cannot go stale:
 - `drone @git --help` — every git verb, its tier, the machine surface and the external-repo door,
   including each refusal exactly as it prints.
 - `drone rm --help` — the delete rules, the carve-outs and the stale-temp sweep.
+- `drone docker --help` — disposable test boxes: the verbs, the options and the two rules.
 
 ---
 
@@ -78,8 +81,9 @@ Three layers. `apps/drone.py` is the entry point and the routing decision tree: 
 then `@target` resolution, then the module lane. `apps/modules/` holds one orchestrator per
 concern — `resolver` and `config` for addressing, `router` for dispatch, `registry` and
 `module_registry` for what exists, `discovery` and `scan` for what a branch can do, `commands` for
-shortcuts, `git_module` for the whole git surface, `rm` for contained deletes and `broker` for the
-daemon that performs them on request. Another branch imports none of them: it takes every name
+shortcuts, `git_module` for the whole git surface, `docker` for disposable test boxes,
+`rm` for contained deletes and `broker` for the daemon that performs them on request.
+Another branch imports none of them: it takes every name
 from the package door, `aipass.drone` (`__init__.py`), which hands each one out from its home.
 `apps/handlers/` holds the implementation, grouped one
 directory per concern: `git/` (a handler per verb), `broker/` (socket daemon, client, protocol and
@@ -99,13 +103,15 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | Doc | What it covers |
 |---|---|
 | [docs/routing_and_resolution.md](docs/routing_and_resolution.md) | The routing decision tree, the two kinds of module, registry resolution, the Python API, interactive commands, the help-flag rule, external projects |
-| [docs/caller_identity.md](docs/caller_identity.md) | Who a routed command is attributed to, why provenance travels with the name, and what each log level means |
+| [docs/caller_identity.md](docs/caller_identity.md) | Who a routed command is attributed to, why provenance travels with the name, what each log level means, and the cloud seat (`AIPASS_SEAT`) at a repo root |
 | [docs/subprocess_timeouts.md](docs/subprocess_timeouts.md) | The deadline ladder: the default, the idle grace, the ceiling, and why output extends life |
 | [docs/git_access.md](docs/git_access.md) | The three tiers, how owner and ci-cure are earned per repo, the session fence, the upstream issue lane, the two refusal species, the dev branch model, the plugins |
-| [docs/git_interface.md](docs/git_interface.md) | What each verb does: scoping, the `--json` machine surface, remote redaction, the commit subject cap, the pre-commit lane, tag lanes, gh passthrough |
+| [docs/git_interface.md](docs/git_interface.md) | What each verb does: scoping, the `--json` machine surface, remote redaction, the commit subject cap, commit with paths, the pre-commit lane, tag lanes, gh passthrough |
+| [docs/pull_requests.md](docs/pull_requests.md) | `pr list` and `pr view` (base, head prefix, body marker, CI), and how `merge` reads a PR's base: dev pulls dev, main is the train, any other base refuses |
 | [docs/external_repo_door.md](docs/external_repo_door.md) | `--repo <path>`: the admin-seat door into a repository that is not AIPass, and its ledger |
 | [docs/rm_and_the_record.md](docs/rm_and_the_record.md) | The delete record, the sibling-branch guard, the contains-a-citizen fence, dot names, and stale mode |
 | [docs/broker.md](docs/broker.md) | The broker removal lane, its one decision with drone rm, and its server-side path verification |
+| [docs/docker.md](docs/docker.md) | Disposable test boxes: the verbs, the base image and when it builds, names and the record, no host credentials, `--login` |
 | [docs/testing.md](docs/testing.md) | How the suite is run and judged, the standards lanes, the mutation bar |
 
 ---
@@ -113,7 +119,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 ## Integration Points
 
 ### Depends On
-- `AIPASS_REGISTRY.json` and `AIPASS_ROOTS.json` — branch resolution and the external tier
+- `AIPASS_REGISTRY.json`, `AIPASS_ROOTS.json` and `projects/*/*_REGISTRY.json` — branch resolution, the external and hosted tiers
 - `.trinity/passport.json` — the identity git authority reads
 - the `gh` CLI — GitHub operations
 - `aipass.prax` — structured logging, and the json service the local shim binds
@@ -129,7 +135,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ---
 
-**Last Updated:** 2026-11-21
+**Last Updated:** 2026-11-26
 
 ---
 [← Back to AIPass](../../../README.md)

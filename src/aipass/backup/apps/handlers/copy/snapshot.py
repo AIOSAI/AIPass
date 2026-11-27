@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: snapshot.py
 # Description: Snapshot copy strategy — mirror destination tree with cleanup
-# Version: 3.2.1
+# Version: 3.2.2
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-11-26
 # =============================================
 
 """Snapshot copy handler — mirror destination tree with cleanup."""
@@ -33,7 +33,7 @@ def _should_skip_mtime(abs_path: str, target: str) -> bool:
 
 
 def _make_target_writable(target_path: Path) -> None:
-    """Best-effort chmod to make an existing target writable before overwrite."""
+    """Make an existing target writable before overwrite; if it stays read-only, copy2 raises and the file fails."""
     try:
         target_path.chmod(stat.S_IWRITE | stat.S_IREAD)
     except OSError as e:
@@ -78,7 +78,7 @@ def copy_snapshot(
     on_progress=None,
     on_file=None,
 ) -> dict:
-    """Copy files into a snapshot destination with mirror-delete; a stop finishes the file in flight, starts no other."""
+    """Copy files into a snapshot destination with mirror-delete; a stop finishes the file in flight, starts none."""
     dest_path = Path(os.path.realpath(dest))
 
     files_deleted = 0

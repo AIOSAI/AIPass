@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: __init__.py
-# Description: {{BRANCHNAME}}'s front door: the names other branches take, each loaded from its home
+# Description: {{BRANCH}}'s front door: the names other branches take, each loaded from its home
 # Version: 1.1.0
 # Created: {{DATE}}
 # Modified: {{DATE}}
 # =============================================
 
-"""{{BRANCHNAME}}'s public surface: from aipass.{{BRANCH}} import <name>; apps/{{BRANCH}}.py stays the command door."""
+"""{{BRANCH}}'s public surface: from aipass.{{BRANCH}} import <name>; apps/{{BRANCH}}.py stays the command door."""
 
 import importlib
 from typing import TYPE_CHECKING, Any

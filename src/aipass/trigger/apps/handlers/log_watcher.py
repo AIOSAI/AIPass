@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Branch log watcher event producer for error detection
-# Version: 2.15.0
+# Version: 2.18.0
 # Created: 2026-02-02
-# Modified: 2026-11-18
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -22,11 +22,13 @@ from aipass.trigger.apps.config import TRIGGER_STATE_ROOT, AIPASS_PKG_ROOT, atom
 from aipass.drone import resolve_aipass_home
 from aipass.memory import fleet_branches
 from aipass.trigger.apps.handlers.json import json_handler
-from aipass.trigger.apps.handlers.error_registry import report as registry_report
+from aipass.trigger.apps.handlers.error_registry import fold_agent_tag, report as registry_report
 
 from aipass.prax import logger
 from aipass.prax import get_system_logs_dir, log_backup_count
 from aipass.trigger.apps.handlers import failure_report
+from watchdog.observers import Observer as WatchdogObserver
+from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
 
 
 TRIGGER_DATA_FILE = TRIGGER_STATE_ROOT / "trigger_data.json"
@@ -36,9 +38,6 @@ STALE_ENTRY_THRESHOLD_SECONDS = 300
 # Warnings feed only the escalation digest lane, never medic dispatch.
 ERROR_LEVELS = ("ERROR", "CRITICAL")
 WARNING_LEVELS = ("WARNING", "WARN")
-
-from watchdog.observers import Observer as WatchdogObserver
-from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
 
 _branch_log_observer: Any = None
 _active_watcher: Any = None
@@ -214,8 +213,8 @@ def is_stale_entry(timestamp_str: str) -> bool:
 
 
 def generate_error_hash(source_module: str, message: str) -> str:
-    """Generate hash for error deduplication."""
-    content = f"{source_module}:{message}"
+    """Generate hash for error deduplication; the case of a leading agent tag never splits one."""
+    content = f"{source_module}:{fold_agent_tag(message)}"
     return hashlib.md5(content.encode()).hexdigest()[:8]
 
 
@@ -265,7 +264,7 @@ def fleet_logs_dirs() -> Dict[Path, str]:
         logs_dir = branch_dir / "logs"
         if logs_dir.is_dir():
             # The address, not the directory: dispatch mails "@" + this name lowered ("my-agent/" is @my_agent).
-            found[logs_dir] = (row.get("email") or branch_dir.name).lstrip("@").upper()
+            found[logs_dir] = (row.get("email") or branch_dir.name).lstrip("@").lower()
         elif branch_dir not in _named_without_logs:
             _named_without_logs.add(branch_dir)
             logger.info("Citizen %s has no logs/ yet, not watched: %s", branch_dir.name, branch_dir)
@@ -314,7 +313,7 @@ def detect_branch_from_path(log_path: str) -> str:
         name_stem = path.stem
         for prefix in _known_branch_names():
             if name_stem.startswith(prefix + "_") or name_stem == prefix:
-                return prefix.upper()
+                return prefix.lower()
         return "UNKNOWN"
 
     named = fleet_logs_dirs().get(path.parent)
@@ -325,7 +324,7 @@ def detect_branch_from_path(log_path: str) -> str:
     for i, part in enumerate(parts):
         if part == "aipass" and i + 1 < len(parts) and parts[i + 1] != "__pycache__":
             if i + 2 < len(parts) and parts[i + 2] == "logs":
-                return parts[i + 1].upper()
+                return parts[i + 1].lower()
     return "UNKNOWN"
 
 
@@ -731,7 +730,9 @@ if __name__ == "__main__":
     set_event_callback(test_fire_event)
 
     print("Branch Log Watcher Test")
-    print(f"Monitoring: {len(fleet_logs_dirs())} fleet logs/ dirs")
+    from aipass.cli import console
+
+    console.print(f"Monitoring: {len(fleet_logs_dirs())} fleet logs/ dirs", highlight=False)
     print(f"Monitoring: {SYSTEM_LOGS_DIR}/*.log")
     print("Press Ctrl+C to stop")
     print()

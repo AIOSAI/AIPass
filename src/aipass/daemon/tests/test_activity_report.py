@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_activity_report.py
 # Description: Tests for the activity_report CLI module
-# Version: 1.3.0
+# Version: 1.4.1
 # Created: 2026-04-03
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/activity_report.py — activity, activity-report, branch-health."""
@@ -121,10 +121,13 @@ class TestActivityReportAlias:
         assert result is True
         mock_gen.assert_called_once()
 
-    def test_activity_report_alias_help(self, capsys):
+    def test_activity_report_alias_help_prints_the_module_help_with_examples(self, capsys):
+        """--help printed the introspection screen, which carries no usage or examples."""
         result = handle_command("activity_report", ["--help"])
         assert result is True
-        assert "activity_report Module" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "activity_report - Fleet Activity Reports" in out
+        assert "EXAMPLES:" in out and "drone @daemon branch-health drone" in out
 
 
 COLLECTOR = "aipass.daemon.apps.handlers.monitoring.activity_collector"
@@ -147,15 +150,15 @@ class TestFleetRootIsTheResolvedHome:
         assert "No AIPass home resolved" in caplog.text
 
 
-@pytest.fixture
-def seed_fleet(tmp_path):
+# Today's registry mixes capital and lowercase row names; the converted one is all lowercase.
+@pytest.fixture(params=[("TESTBRANCH", "grow"), ("testbranch", "grow")], ids=["mixed_registry", "lowercase_registry"])
+def seed_fleet(tmp_path, request):
     """AIPass home with one core citizen, plus a declared root whose citizen @grow no core registry lists."""
+    core_name, seed_name = request.param
     home = tmp_path / "home"
     (home / "src" / "aipass" / "testbranch").mkdir(parents=True)
     core = {
-        "branches": [
-            {"name": "TESTBRANCH", "email": "@testbranch", "path": "src/aipass/testbranch", "status": "active"}
-        ]
+        "branches": [{"name": core_name, "email": "@testbranch", "path": "src/aipass/testbranch", "status": "active"}]
     }
     (home / "AIPASS_REGISTRY.json").write_text(json.dumps(core), encoding="utf-8")
     (home / "AIPASS_ROOTS.json").write_text(
@@ -164,7 +167,7 @@ def seed_fleet(tmp_path):
     grow = tmp_path / "seed" / "src" / "grow"
     (grow / ".trinity").mkdir(parents=True)
     (grow / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
-    seed = {"branches": [{"name": "GROW", "email": "@grow", "path": "src/grow", "status": "active"}]}
+    seed = {"branches": [{"name": seed_name, "email": "@grow", "path": "src/grow", "status": "active"}]}
     (tmp_path / "seed" / "SEED_REGISTRY.json").write_text(json.dumps(seed), encoding="utf-8")
     with patch(f"{COLLECTOR}._REPO_ROOT", home):
         yield
@@ -173,16 +176,18 @@ def seed_fleet(tmp_path):
 class TestFleetScope:
     """Reports and red flags read @memory's fleet, so a declared-root citizen is in them."""
 
-    def test_a_declared_root_citizen_is_a_branch_health_target(self, seed_fleet):
+    @pytest.mark.parametrize("typed", ["grow", "GROW", "TestBranch"])
+    def test_a_citizen_is_a_branch_health_target_in_any_case_and_named_lowercase(self, typed, seed_fleet):
         with patch(f"{MODULE}.generate_branch_report", return_value="r") as mock_br:
-            assert handle_command("branch-health", ["grow"]) is True
-        mock_br.assert_called_once_with("GROW", since_hours=24.0)
+            assert handle_command("branch-health", [typed]) is True
+        mock_br.assert_called_once_with(typed.lower(), since_hours=24.0)
 
     def test_the_report_and_its_red_flags_carry_the_declared_root_citizen_on_one_fleet_read(self, seed_fleet, capsys):
         with patch(f"{COLLECTOR}.fleet_branches", wraps=fleet_branches) as reads:
             assert handle_command("activity-report", ["--json"]) is True
         report = json.loads(capsys.readouterr().out)
-        assert sorted(report["branches"]) == ["GROW", "TESTBRANCH"]
+        assert sorted(report["branches"]) == ["grow", "testbranch"], "report keys are lowercase whatever a row holds"
+        assert all(entry["activity"] for entry in report["branches"].values()), "each key finds its activity"
         assert report["summary"]["total_branches"] == 2, "red flags scanned the same two citizens"
         assert reads.call_count == 1, "red flags, activity and memory health share one fleet read"
 

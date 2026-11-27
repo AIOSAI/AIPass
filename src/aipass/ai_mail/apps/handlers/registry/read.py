@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: read.py
 # Description: Registry Read Handler
-# Version: 1.4.0
+# Version: 1.4.3
 # Created: 2025-11-15
-# Modified: 2026-11-08
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -29,7 +29,7 @@ BRANCH_REGISTRY_PATH = find_repo_root() / "AIPASS_REGISTRY.json"
 
 
 def get_all_branches() -> List[Dict]:
-    """All branches for email routing: [] for a missing registry, RegistryUnreadable for an unreadable or misshaped one."""
+    """All branches for email routing: [] for a missing registry, RegistryUnreadable for an unreadable/misshaped one."""
     json_handler.log_operation("get_all_branches", {"registry_path": str(BRANCH_REGISTRY_PATH)})
 
     if not BRANCH_REGISTRY_PATH.exists():
@@ -101,7 +101,7 @@ def _derive_email_from_branch_name(branch_name: str) -> str:
         email_part = branch_name.split(".")[-1].lower()
     elif " " in branch_name:
         email_part = branch_name.split()[0].lower()
-    elif "-" in branch_name and branch_name.split("-")[0] == "AIPASS":
+    elif "-" in branch_name and branch_name.split("-")[0].lower() == "aipass":
         email_part = branch_name.split("-", 1)[1].lower()
     else:
         email_part = branch_name.split("-")[0].lower()
@@ -252,13 +252,12 @@ def _classify_resident(name: str, path: Path, registry_path: Path) -> bool:
 
 
 def _residents_from_registry(registry_path: Path) -> Dict[str, str]:
-    """Email->path for the residents one registry lists and their passports confirm."""
+    """Email->path for the residents one registry lists and their passports confirm; unreadable raises."""
     try:
         with open(registry_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception as exc:
-        logger.error("[registry] unreadable resident registry %s: %s", registry_path, exc)
-        return {}
+    except (OSError, ValueError) as exc:
+        raise RegistryUnreadable(f"{registry_path.name} could not be read ({registry_path}): {exc}") from exc
 
     raw = data.get("branches", [])
     entries = [{**info, "name": n} for n, info in raw.items()] if isinstance(raw, dict) else raw
@@ -350,18 +349,19 @@ if __name__ == "__main__":
     from aipass.cli import console
 
     console.print("\n" + "=" * 70)
-    console.print("AI_MAIL HANDLER: registry/read.py")
+    console.print("ai_mail HANDLER: registry/read.py")
     console.print("=" * 70)
     console.print("\nRegistry Read Handler")
     console.print()
-    console.print("FUNCTIONS PROVIDED:")
+    console.print("[yellow]FUNCTIONS PROVIDED:[/yellow]")
+    console.print("[dim]The lookups email routing calls.[/dim]")
     console.print("  - get_all_branches() -> List[Dict]")
     console.print("  - get_branch_by_email(email) -> Optional[Dict]")
     console.print()
-    console.print("TESTING:")
+    console.print("[yellow]TESTING:[/yellow]")
 
     branches = get_all_branches()
-    console.print(f"\nLoaded {len(branches)} branches:")
+    console.print(f"\nLoaded [cyan]{len(branches)}[/cyan] branches:")
     for branch in branches[:5]:  # Show first 5
         console.print(f"  {branch['email']:15} -> {branch['name']}")
 

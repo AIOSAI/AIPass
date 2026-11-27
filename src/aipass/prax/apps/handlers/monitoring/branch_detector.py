@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detector.py
 # Description: Branch Attribution Handler
-# Version: 0.3.1
+# Version: 0.5.0
 # Created: 2025-11-23
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -36,6 +36,7 @@ class BranchDetector:
         self.log_map: Dict[str, str] = {}  # log file -> branch
         self.known_branches: Set[str] = set()
         self._repo_root: Optional[Path] = None
+        self._bad_passports: Dict[str, Exception] = {}
         self._load_registry()
         json_handler.log_operation("branch_detected", {"known_branches": len(self.known_branches)})
 
@@ -47,7 +48,7 @@ class BranchDetector:
 
     def _register_branch(self, branch: dict) -> None:
         """Register a single branch entry into the lookup tables; a relative path resolves against the repo root."""
-        branch_name = branch.get("name", "").upper()
+        branch_name = branch.get("name", "").lower()
         branch_path = branch.get("path", "")
         if not branch_name or not branch_path:
             return
@@ -99,7 +100,7 @@ class BranchDetector:
         return best[1] if best else None
 
     def _detect_from_claude_project(self, path_str: str) -> Optional[str]:
-        """Detect PROJECT/BRANCH label from Claude Code project path encoding."""
+        """Detect project/branch label from Claude Code project path encoding."""
         projects_idx = path_str.index(".claude/projects/") + len(".claude/projects/")
         remaining = path_str[projects_idx:]
         project_folder = remaining.split("/")[0]
@@ -116,14 +117,14 @@ class BranchDetector:
                 reg_norm = registered_path.replace("_", "/")
                 proj_norm = project_path.replace("_", "/")
                 if reg_norm == proj_norm or registered_path == project_path:
-                    return f"AIPASS/{branch_name}{sub_suffix}"
+                    return f"aipass/{branch_name}{sub_suffix}"
             segs = [s for s in project_folder.split("-") if s]
             for n in range(min(3, len(segs)), 0, -1):
-                candidate = "_".join(segs[-n:]).upper()
+                candidate = "_".join(segs[-n:]).lower()
                 if candidate in self.known_branches:
-                    return f"AIPASS/{candidate}{sub_suffix}"
+                    return f"aipass/{candidate}{sub_suffix}"
             if segs:
-                return f"AIPASS/{segs[-1].upper()}{sub_suffix}"
+                return f"aipass/{segs[-1].lower()}{sub_suffix}"
             return None
 
         branch_name = self._detect_from_transcript_folder(project_folder)
@@ -134,10 +135,10 @@ class BranchDetector:
         if not segments:
             return None
         for i in range(len(segments) - 1, 0, -1):
-            candidate = "_".join(segments[i:]).upper()
+            candidate = "_".join(segments[i:]).lower()
             if candidate in self.known_branches:
                 return candidate
-        last = segments[-1].upper()
+        last = segments[-1].lower()
         if last in self.known_branches:
             return last
         return None
@@ -153,42 +154,48 @@ class BranchDetector:
         for parent in path.parents:
             passport = parent / ".trinity" / "passport.json"
             if passport.is_file():
-                try:
-                    data = json.loads(passport.read_text(encoding="utf-8"))
-                except (json.JSONDecodeError, OSError) as exc:
-                    logger.info(
-                        "[branch_detector] Passport at %s is unreadable (%s); falling back to path "
-                        "matching for this file.",
-                        passport,
-                        type(exc).__name__,
-                    )
-                    return None
-                name = (data.get("branch_info", {}) or {}).get("branch_name", "")
-                return str(name).upper() or None
+                return self._passport_name(passport)
             if parent == repo_root:
                 break
         return None
+
+    def _passport_name(self, passport: Path) -> Optional[str]:
+        """The lower-cased branch name a passport holds, or None when it is unreadable or names none."""
+        try:
+            data = json.loads(passport.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            # Once per passport: every file under it would otherwise repeat the warning.
+            if str(passport) not in self._bad_passports:
+                logger.warning(
+                    "[branch_detector] Passport at %s is unreadable (%s); files under it are "
+                    "labelled by path matching instead.",
+                    passport,
+                    type(exc).__name__,
+                )
+            self._bad_passports[str(passport)] = exc
+            return None
+        name = (data.get("branch_info", {}) or {}).get("branch_name", "")
+        return str(name).lower() or None
 
     def _detect_from_compound_parts(self, path_parts: list) -> Optional[str]:
         """Check compound path parts for known branch names."""
         for part in path_parts:
             if "_" in part:
                 for subpart in part.split("_"):
-                    branch_upper = subpart.upper()
-                    if branch_upper in self.known_branches:
-                        return branch_upper
+                    if subpart in self.known_branches:
+                        return subpart
         return None
 
     def _extract_branch_from_central(self, path_str: str, path: Path) -> Optional[str]:
         """Extract branch name from ai_mail central filename patterns."""
-        if not ("AI_MAIL" in path_str or ".ai_mail" in path_str or "ai_mail" in path_str.lower()):
+        if "ai_mail" not in path_str.lower():
             return None
 
         name = path.name
         if ".central.json" in name:
-            return name.replace(".central.json", "").upper()
+            return name.replace(".central.json", "").lower()
         if "_central.json" in name:
-            return name.replace("_central.json", "").upper()
+            return name.replace("_central.json", "").lower()
         return None
 
     def detect_from_path(self, file_path: str) -> str:
@@ -231,7 +238,7 @@ class BranchDetector:
                 return "SYSTEM"
 
             # The passport outranks everything below, which guesses from path text
-            # (the repo directory AIPass would label every file AIPASS).
+            # (the repo directory AIPass would label every file aipass).
             result = self._detect_from_passport(path)
             if result:
                 self.log_map[path_str] = result
@@ -239,10 +246,9 @@ class BranchDetector:
 
             path_parts = path_str.lower().split("/")
             for part in path_parts:
-                branch_upper = part.upper()
-                if branch_upper in self.known_branches:
-                    self.log_map[path_str] = branch_upper
-                    return branch_upper
+                if part in self.known_branches:
+                    self.log_map[path_str] = part
+                    return part
 
             result = self._detect_from_compound_parts(path_parts)
             if result:
@@ -279,20 +285,20 @@ class BranchDetector:
                     self.log_map[name] = branch_name
                     return branch_name
 
-            # A full path goes to path detection first: ai_mail/logs/mail_*.log is AI_MAIL, not MAIL.
+            # A full path goes to path detection first: ai_mail/logs/mail_*.log is ai_mail, not mail.
             if "/" in log_file:
                 return self.detect_from_path(log_file)
 
             if "_" in name:
                 parts = name.split("_")
-                first_part = parts[0].upper()
+                first_part = parts[0].lower()
                 self.log_map[name] = first_part
                 return first_part
 
-            name_upper = name.upper()
-            if name_upper in self.known_branches:
-                self.log_map[name] = name_upper
-                return name_upper
+            name_lower = name.lower()
+            if name_lower in self.known_branches:
+                self.log_map[name] = name_lower
+                return name_lower
 
             logger.info(f"Could not detect branch from log: {log_file}")
             return "UNKNOWN"

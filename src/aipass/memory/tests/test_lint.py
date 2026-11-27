@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_lint.py
 # Description: check_entry validator, the read-only lint handler and the lint module (FPLAN-0270 phase 2)
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-06-13
 # Modified: 2026-11-21
 # =============================================
@@ -781,6 +781,17 @@ class TestThePassportRow:
         result = _run_fields(handler, branches)
 
         assert result["passport"] == []
+
+    def test_an_unreadable_file_is_flagged_not_skipped(self, tmp_path: Path) -> None:
+        handler = lint_handler
+        branches = _plant(tmp_path, "alpha", [_session()])
+        (tmp_path / "alpha" / ".trinity" / "local.json").write_text("{ not json", encoding="utf-8")
+
+        result = _run_fields(handler, branches)
+
+        damage = [v for v in result["violations"] if v.get("reason") == "unreadable_file"]
+        assert len(damage) == 1
+        assert damage[0]["file"] == "local.json"
 
 
 class TestFieldsModeIsReadOnly:

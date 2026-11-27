@@ -18,10 +18,13 @@ noise. `show` sits at global tier because reading history is not a write, and it
 **not** scoped: scoping it would refuse the case it exists for — one citizen auditing another's
 past. Auditing a deletion means reading what was deleted, and the present-tense verbs cannot.
 
+**The live remote head.** `origin/<branch>` is only the last fetch. `log --remote <branch>` asks
+origin now (`git ls-remote origin refs/heads/<branch>`) and prints `<sha>  refs/heads/<branch>`;
+`--json` carries `sha`. No branch name, or one origin lacks, is refused, exit 1 (`TestLogRemote`).
+
 Both the ref and the optional path are refused before any argv is built if git would read them as a
-flag (empty, or a leading `-`) — the same guard the tag lanes use. `--stat` is the one flag `show`
-takes: in any slot, it adds git's summary of the files the commit changed. Any other flag-shaped
-token still reaches that guard and is refused.
+flag (empty, or a leading `-`) — the same guard the tag lanes use. `--stat`, in any slot, is the
+one flag `show` takes (git's per-file summary); any other flag-shaped token is refused.
 
 ---
 
@@ -32,18 +35,16 @@ document with `--json`. The flag rides in **any slot** and is stripped before po
 `log --json 20` parses exactly like `log 20`. A help flag outranks it: `status --help --json` is
 still a question.
 
-Every document carries an `ok` verdict, **including refusals** — a caller that asked for JSON can
-parse why it failed rather than getting a bare sentence it has to guess at. The exit code still
-goes non-zero, so a shell script reading only `$?` is told the same truth.
+Every document carries an `ok` verdict, **including refusals**, so a JSON caller can parse why it
+failed; the exit code still goes non-zero for a script reading only `$?`.
 
 Prose output is kept stable for human readers; a machine caller takes the document, never the
 shape of a rendered row.
 
 **`status --json` reports git's two porcelain columns, which the rendered view cannot.** The
 columns are index then worktree, and they are different facts: `M ` is a staged modification, ` M`
-an unstaged one. The rendered row shows one right-aligned letter and always has, so those two
-collapse into the same `   M` on screen — a consumer reading the rendered row sees every staged
-change as unstaged. The document carries `status` verbatim plus `index` and `worktree` split out:
+an unstaged one. The rendered row shows one right-aligned letter, so both read as `   M` on
+screen. The document carries `status` verbatim plus `index` and `worktree` split out:
 
 ```json
 {"status": "M ", "path": "src/x.py", "index": "M", "worktree": " "}
@@ -62,12 +63,10 @@ directory for free.
 no audit record. The whole component goes, not just a password: the common personal-access-token
 form is `https://<TOKEN>@host/path`, where the secret sits in the username slot.
 
-SSH forms are left alone deliberately — in `git@github.com:a/b.git` the `git@` is the standard
-account name, not a secret, and redacting it would mangle every ordinary remote to hide nothing.
+SSH forms are left alone: in `git@github.com:a/b.git` the `git@` is the account name, not a secret.
 
-A repository with no remote is a real answer (`ok: true`, `count: 0`), not an error. A directory
-with no `.git` at all answers `ok: false` on a non-zero return — a different answer, and the two
-are not collapsed.
+A repository with no remote is a real answer (`ok: true`, `count: 0`); a directory with no `.git`
+answers `ok: false` on a non-zero return.
 
 **`remote set <name> <url>`** is the one write, owner tier (the gate's `remote-write`), so a
 project's manager runs it in its own repo and the admin seat reaches another repo with `--repo`.
@@ -90,8 +89,7 @@ in the body — a body of any length is fine and wanted.
 The number is **prax's** `SUBJECT_CAP`, imported from `aipass.prax.apps.modules.dashboard` and
 never copied into drone: a commit subject and a plan subject are the same glance (the dashboard's
 `last_commit_msg`, the oneline log, the PR list), so they are the same cap. Pinned by reading the
-import line out of the source, because a hand-copied number survives an identity check: CPython
-interns small ints.
+import line out of the source (CPython interns small ints, so an identity check passes a copy).
 
 Where it sits matters as much as the number. `subject_refusal()` runs **first** in
 `commit_handler.commit_changes()` — before the repo is resolved, before `--all`'s ruff pass, before
@@ -102,6 +100,14 @@ refusal like any other outcome.
 
 Pinned by `TestCommitSubjectCap` in `tests/test_git_access_handlers.py` (including the boundary: a
 subject exactly at the cap commits).
+
+## Commit with paths
+
+`commit "<message>" <path ...>` commits exactly those paths (`git commit --only`); other staged work
+stays staged. A path the index holds, a deleted one included, skips `git add`, so a tracked file
+under an ignored folder commits; a new path is added, so an ignored new one is refused. Nothing is
+forced. The nothing-to-commit check reads them against `HEAD`. Pinned by
+`TestNamedPathsUnderAnIgnoredFolder` in `tests/test_commit_gate_branch_mapping.py`.
 
 ---
 
@@ -114,9 +120,8 @@ is done for it, and a directory is refused unless `--recursive` is given, becaus
 untrack a whole tree. Refusals do not stop the accepted paths, and any refusal makes the exit 1.
 
 The verb never touches the working tree and never commits. Its last line names the next step:
-`drone @git commit "<message>"` with **no paths**. Commit with paths runs `git add` on them, which
-stages a still-present file straight back into the index, or fails outright on one that is now
-ignored. No PR lock is taken, because `commit` takes none; the operation log records each run as
+`drone @git commit "<message>"` with **no paths**. Commit with paths runs `git add` on a path the index no
+longer holds, which stages it straight back, or fails on one now ignored. No PR lock is taken, because `commit` takes none; the operation log records each run as
 every verb's does, and there is no separate owner-verb ledger to write. `untrack` and `tracked` also
 run through the external-repo door (`--repo <path>`, admin seat, paths repo-relative, every use in
 its ledger; see [external_repo_door.md](external_repo_door.md)). Pinned by `TestUntrack` in
@@ -278,8 +283,9 @@ own repo. `--repo <path>` is the external-repo door, admin seat only. The reads 
 | `release edit <tag>` | owner | `gh release edit <tag> --notes-file -` |
 | `label list [--json]` | global | `gh label list --json name,color,description` |
 | `label create <name> [--color hex] [--description text]` | owner | `gh label create` |
-| `alerts list [--state open\|dismissed\|all] [--json]` | global | `gh api repos/OWNER/NAME/code-scanning/alerts` |
+| `alerts list [--state open\|dismissed\|all] [--pr <n>] [--json]` | global | `gh api repos/OWNER/NAME/code-scanning/alerts[?ref=refs/pull/<n>/merge]` |
 | `alerts dismiss <n> --reason R --comment 'text'` | owner | `gh api -X PATCH .../code-scanning/alerts/<n>` |
+| `alerts reopen <n>` | owner | `gh api -X PATCH .../code-scanning/alerts/<n> -f state=open` |
 
 **`release edit`** rewrites a published release's notes with the CHANGELOG.md block for its tag,
 by publish.yml's rule: the block whose `## [` header carries the tag between non-version
@@ -293,17 +299,23 @@ match.
 label already there is reported present, exit 0, and nothing is sent. `--color` takes six hex
 digits, with or without `#`.
 
-**`alerts dismiss`** requires `--comment`, which goes to GitHub with the reason, so every
-dismissal says why there; a missing or blank comment is refused by name, as is one over GitHub's
-280 characters. `--reason` takes `false_positive`, `wont_fix` or `used_in_tests`, sent in GitHub's
-words. Only an open alert is dismissed. `alerts list` prints number, rule id, severity, state and
-`file:line`, one row each.
+**`alerts dismiss`** requires `--comment`, sent to GitHub with the reason, so every dismissal says
+why; a missing, blank or over-280-character comment is refused by name. `--reason` takes
+`false_positive`, `wont_fix` or `used_in_tests`, sent in GitHub's words. An alert's state is its
+own, or its latest instance's when GitHub leaves the top level null (an alert on a pull request ref
+only). Only an open alert is dismissed, and **`alerts reopen <n>`** reopens only a dismissed one;
+any other state, an unknown number or no readable state is refused by name. `alerts list` prints
+number, rule id, severity, state and `file:line`, one row each. `--pr <n>` (a positive number) reads
+pull request n's alerts from the ref `refs/pull/<n>/merge`, which the default branch's list never
+shows.
 
 Every write subcommand writes one line to AIPass's own `.ai_central/git_gh_writes.jsonl`, a no-op
 included: caller, verb, repo, OWNER/NAME, outcome (`written` or `unchanged`), and the verb's own
-fields (tag and both lengths; label, color and description; number, rule, reason and comment).
-Through the door the door's own ledger records the use as well. Pinned by `TestReleaseEdit`,
-`TestLabel`, `TestAlerts` and `TestChoresThroughTheDoor` in `tests/test_git_access_gh_door.py`.
+fields (tag and both lengths; label, color and description; number, rule, reason and comment for
+a dismissal, number and rule for a reopen).
+Through the door the door's own ledger records the use as well. Pinned by `TestReleaseEdit` and
+`TestChoresThroughTheDoor` in `tests/test_git_access_gh_door.py`, `TestLabel` and `TestAlerts` in
+`tests/test_git_module.py`.
 
 ---
 

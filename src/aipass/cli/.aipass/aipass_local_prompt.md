@@ -26,6 +26,7 @@ cli/
 │   │   └── templates.py            operation_start, operation_complete
 │   ├── handlers/                   private — the fence (v2.1) refuses a foreign importer
 │   │   ├── cli/help_flags.py       wants_help() — whole-sequence help detection
+│   │   ├── cli/header_version.py   header_version() — the # Version line, published through display
 │   │   ├── json/json_handler.py    shim binding the fleet json service in prax
 │   │   └── templates/              package only, no implementation
 │   ├── integrations/               scaffold, no Python
@@ -40,7 +41,7 @@ Re-derive this with `find` before trusting it. Scaffold and dot-directories are 
 
 # Public API
 
-Other branches import from `aipass.cli`, the one door: the `display` module and `console`, `err_console`, `header`, `success`, `error`, `warning`, `fatal`, `section`, `escape`, `operation_start`, `operation_complete`, plus the exit seam — `mark_command_failed`, `command_failed`, `reset_command_state`, `resolve_exit`.
+Other branches import from `aipass.cli`, the one door: the `display` module and `console`, `err_console`, `header`, `success`, `error`, `warning`, `fatal`, `section`, `escape`, `operation_start`, `operation_complete`, `header_version`, plus the exit seam — `mark_command_failed`, `command_failed`, `reset_command_state`, `resolve_exit`.
 
 Signatures and examples are in `docs/display_api.md`. Do not restate them here.
 
@@ -72,7 +73,7 @@ These are the things that have actually broken here.
 # Verbs
 
  - Live top-level verbs include `display`, `templates`, `show` and a bare `demo`; `show` is an alias of `display`, and a bare `demo` belongs to display alone (templates declines it).
- - The entry point's help page is the reference. When a verb and the help page disagree, fix the help page and bump the entry point version.
+ - The entry point's help page is the reference. When a verb and the help page disagree, fix the help page and bump the `# Version:` line of `apps/cli.py` — `--version` reads it, there is no constant.
 
 # Integration
 

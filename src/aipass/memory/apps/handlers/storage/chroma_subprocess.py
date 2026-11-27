@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: chroma_subprocess.py
 # Description: ChromaDB Subprocess Handler
-# Version: 1.8.1
+# Version: 1.11.0
 # Created: 2025-11-27
-# Modified: 2026-11-15
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -231,6 +231,12 @@ def _check_plan(plan_label, db_path=None):
     return {"success": True, "found": match_count > 0, "count": match_count, "source_files": sorted(matching_files)}
 
 
+def _owner(collection) -> dict:
+    """The branch and type the collection was created with: its name cannot be split (ai_mail_email_sent)."""
+    meta = collection.metadata or {}
+    return {"branch": str(meta.get("branch", "")).lower(), "type": str(meta.get("type", ""))}
+
+
 def _get_by_source(collection_name, source_pattern, n_results=5, db_path=None):
     """Fetch documents whose source_file metadata contains a pattern."""
     client = _get_client(db_path)
@@ -240,7 +246,8 @@ def _get_by_source(collection_name, source_pattern, n_results=5, db_path=None):
     try:
         collection = client.get_collection(collection_name, embedding_function=None)
     except NotFoundError as e:
-        return {"success": False, "error": f"Collection '{collection_name}' not found: {e}"}
+        # A store nothing has written plans to yet is a state, the answer _count_vectors gives too.
+        return {"success": True, "results": [], "count": 0, "exists": False, "message": str(e)}
 
     result = collection.get(include=["metadatas", "documents"])
     matches = []
@@ -254,6 +261,7 @@ def _get_by_source(collection_name, source_pattern, n_results=5, db_path=None):
                     "metadata": meta,
                     "id": result["ids"][i],
                     "distance": 0.0,
+                    **_owner(collection),
                 }
             )
             if len(matches) >= n_results:
@@ -313,6 +321,90 @@ def _get_by_ids(collection_name, ids, db_path=None):
     return {"success": True, "documents": documents, "count": len(documents)}
 
 
+_BATCH = 1000  # under Chroma's max batch size for one get/add call
+
+
+def _read_collection(collection_name, db_path=None):
+    """Every row of one collection as stored, embeddings included; an absent collection answers ``exists: False``."""
+    client = _get_client(db_path)
+
+    from chromadb.errors import NotFoundError
+
+    try:
+        collection = client.get_collection(collection_name, embedding_function=None)
+    except NotFoundError as e:
+        empty = {"ids": [], "embeddings": [], "documents": [], "metadatas": []}
+        return {"success": True, "exists": False, "message": str(e), **empty}
+
+    result = collection.get(include=["embeddings", "documents", "metadatas"])
+    return {
+        "success": True,
+        "exists": True,
+        "metadata": collection.metadata,
+        "ids": list(result["ids"]),
+        "embeddings": [emb.tolist() if hasattr(emb, "tolist") else list(emb) for emb in result["embeddings"]],
+        "documents": list(result["documents"]),
+        "metadatas": list(result["metadatas"]),
+    }
+
+
+def _add_missing(collection_name, ids, embeddings, documents, metadatas, metadata=None, db_path=None):
+    """Add, exactly as given, the rows whose ids the collection lacks; a present id is counted and never touched."""
+    client = _get_client(db_path)
+    collection = client.get_or_create_collection(
+        name=collection_name, metadata=metadata or {"hnsw:space": "cosine"}, embedding_function=None
+    )
+
+    ids = list(ids or [])
+    present = set()
+    for start in range(0, len(ids), _BATCH):
+        present.update(collection.get(ids=ids[start : start + _BATCH], include=[])["ids"])
+    missing = [i for i, doc_id in enumerate(ids) if doc_id not in present]
+    for start in range(0, len(missing), _BATCH):
+        batch = missing[start : start + _BATCH]
+        collection.add(
+            ids=[ids[i] for i in batch],
+            embeddings=[embeddings[i] for i in batch],
+            documents=[documents[i] for i in batch],
+            metadatas=[metadatas[i] for i in batch],
+        )
+    return {"success": True, "collection": collection_name, "added": len(missing), "present": len(present)}
+
+
+def _merge_collection(source, target, db_path=None):
+    """Move every row of *source* into *target* as stored; *source* is dropped only once all its ids read back there."""
+    rows = _read_collection(source, db_path=db_path)
+    if not rows["exists"]:
+        return {"success": True, "exists": False, "source": source, "target": target, "moved": 0}
+    copied = _add_missing(
+        target,
+        rows["ids"],
+        rows["embeddings"],
+        rows["documents"],
+        rows["metadatas"],
+        metadata=rows["metadata"],
+        db_path=db_path,
+    )
+    client = _get_client(db_path)
+    landed = client.get_collection(target, embedding_function=None)
+    present = set()
+    for start in range(0, len(rows["ids"]), _BATCH):
+        present.update(landed.get(ids=rows["ids"][start : start + _BATCH], include=[])["ids"])
+    lost = len(rows["ids"]) - len(present)
+    if lost:
+        return {"success": False, "error": f"{lost} of {len(rows['ids'])} {source} ids not in {target} - {source} kept"}
+    client.delete_collection(source)
+    return {
+        "success": True,
+        "exists": True,
+        "source": source,
+        "target": target,
+        "moved": copied["added"],
+        "already_there": copied["present"],
+        "target_count": landed.count(),
+    }
+
+
 # Every archive that rolls over owns a "<name>_local" or "<name>_observations" collection.
 _OWNER_SUFFIXES = ("_local", "_observations")
 
@@ -332,11 +424,15 @@ def _branch_collections(collection_names, branch):
     ]
 
 
-def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5, db_path=None):
-    """Search for similar vectors."""
+def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5, db_path=None, owner=None):
+    """Search for similar vectors; ``owner`` reads only that citizen's rows of a shared store (its own collections
+    and the ``flow_plans`` chunks tagged with its branch)."""
     client = _get_client(db_path)
 
-    if branch and memory_type:
+    if owner:
+        names = [col.name for col in client.list_collections()]
+        collection_names = _branch_collections(names, owner) + [c for c in names if c == "flow_plans"]
+    elif branch and memory_type:
         collection_names = [f"{branch.lower()}_{memory_type.lower()}"]
     else:
         all_collections = client.list_collections()
@@ -354,7 +450,8 @@ def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5,
     for cname in collection_names:
         try:
             collection = client.get_collection(cname, embedding_function=None)
-            results = collection.query(query_embeddings=[query_embedding], n_results=n_results)
+            mine = {"where": {"branch": owner}} if owner and cname == "flow_plans" else {}
+            results = collection.query(query_embeddings=[query_embedding], n_results=n_results, **mine)
             if results["documents"] and results["documents"][0]:
                 for i, doc in enumerate(results["documents"][0]):
                     all_results.append(
@@ -364,6 +461,7 @@ def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5,
                             "metadata": results["metadatas"][0][i] if results["metadatas"] else {},
                             "distance": results["distances"][0][i] if results["distances"] else None,
                             "id": results["ids"][0][i] if results["ids"] else None,
+                            **_owner(collection),
                         }
                     )
         except Exception as e:
@@ -419,6 +517,7 @@ def main(stdin: TextIO | None = None):
                 memory_type=input_data.get("memory_type"),
                 n_results=input_data.get("n_results", 5),
                 db_path=input_data.get("db_path"),
+                owner=input_data.get("owner"),
             )
         elif operation == "check_plan":
             result = _check_plan(plan_label=input_data.get("plan_label"), db_path=input_data.get("db_path"))
@@ -434,6 +533,22 @@ def main(stdin: TextIO | None = None):
                 collection_name=input_data.get("collection_name"),
                 ids=input_data.get("ids"),
                 db_path=input_data.get("db_path"),
+            )
+        elif operation == "read_collection":
+            result = _read_collection(input_data.get("collection_name"), db_path=input_data.get("db_path"))
+        elif operation == "add_missing":
+            result = _add_missing(
+                collection_name=input_data.get("collection_name"),
+                ids=input_data.get("ids"),
+                embeddings=input_data.get("embeddings"),
+                documents=input_data.get("documents"),
+                metadatas=input_data.get("metadatas"),
+                metadata=input_data.get("metadata"),
+                db_path=input_data.get("db_path"),
+            )
+        elif operation == "merge_collection":
+            result = _merge_collection(
+                input_data.get("source"), input_data.get("target"), db_path=input_data.get("db_path")
             )
         elif operation == "delete_by_source":
             result = _delete_by_source(

@@ -8,7 +8,9 @@
 standard. Per branch it does exactly three things:
 
 1. **Re-renders the machine frame.** `document_metadata` is rebuilt as a **CLOSED set** — any key
-   the standard does not name is pruned, `status` with it; `managed_by` takes the exact branch
+   the standard does not name is pruned, `status` and `last_updated` with it; the set is
+   `document_type`, `document_name`, `version`, `schema_version`, `created`, `managed_by`, `tags`,
+   `_usage` (no file-level stamp: every entry carries its own date); `managed_by` takes the exact branch
    **directory** name (what @sentry's checker compares against — the registry's own `name` field
    disagrees in casing for six citizens); `_usage` and the `guidelines` block come **verbatim** from
    the gold-source templates; all four `*_meta` lines are re-composed from config + template prose.

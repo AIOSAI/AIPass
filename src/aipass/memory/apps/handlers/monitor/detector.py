@@ -3,7 +3,7 @@
 # Description: Rollover Trigger Detection Handler
 # Version: 0.9.0
 # Created: 2025-11-16
-# Modified: 2026-11-21
+# Modified: 2026-11-23
 # =============================================
 
 """
@@ -135,13 +135,13 @@ def _rows_or_skip(registry_path: Path) -> List[Dict[str, Any]]:
 
 
 def write_scope() -> List[Dict[str, Any]]:
-    """The rollover WRITE scope: the registry rows of every branch rollover may trim, core, residents, then callers.
+    """The rollover WRITE scope: every branch rollover may trim, core, residents, callers, then declared externals.
 
-    Externals are not in it: rollover writes, and a declared external project is another repository's
-    memory, which only ``read_scope()`` reports. Residents are named, not discovered: the glob is generous
-    and ``accepted_resident_paths()`` (the passport's residency) is what makes it safe. Callers are fenced
-    to the AIPass root and nothing they found outlives the call. An unreadable core registry raises
-    ``RegistryUnreadable``.
+    Services write where they serve, so a declared external (``AIPASS_ROOTS.json``) is in it, unless its
+    name is already taken: every write lane matches by name. Residents are named, not discovered: the glob
+    is generous and ``accepted_resident_paths()`` (the passport's residency) is what makes it safe. Callers
+    are fenced to the AIPass root and nothing they found outlives the call. An unreadable core registry
+    raises ``RegistryUnreadable``.
     """
     from aipass.memory.apps.handlers.monitor import registry_scope
 
@@ -168,14 +168,27 @@ def write_scope() -> List[Dict[str, Any]]:
             branches.append(branch)
             seen_paths.add(branch.get("path"))
 
+    names = {str(b.get("name", "")).lower() for b in branches}
+    resolved = {str(Path(b["path"]).resolve()) for b in branches if b.get("path")}
+    for item in registry_scope.external_branches(_REPO_ROOT, name_from="path"):
+        if str(Path(item["path"]).resolve()) in resolved:
+            continue
+        if item["name"].lower() in names:
+            logger.warning(
+                f"[detector] External '{item['name']}' at {item['path']} left out of the write scope: "
+                "its name is already in scope, and write lanes match by name"
+            )
+            continue
+        branches.append({**item, "path": str(item["path"])})
+        names.add(item["name"].lower())
+
     return branches
 
 
 def read_scope() -> List[Dict[str, Any]]:
-    """Every branch a READ-ONLY lane may name: the write scope plus declared externals.
+    """Every branch a READ-ONLY lane may name: the write scope plus any declared external it left out by name.
 
-    ``write_scope()`` is the WRITE scope and stops at the repo edge. Externals come only from
-    roots declared in ``AIPASS_ROOTS.json``, never a caller's cwd. Nothing resolved here may be written.
+    Externals come only from roots declared in ``AIPASS_ROOTS.json``, never a caller's cwd.
     """
     from aipass.memory.apps.handlers.monitor import registry_scope
 

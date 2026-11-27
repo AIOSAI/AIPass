@@ -3,7 +3,7 @@
 # Description: Registry loading, lookup and credential verification
 # Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-11-15
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/handlers/registry_handler.py: registry loading, lookup and credential verification."""
@@ -26,6 +26,8 @@ from aipass.drone.apps.handlers import registry_handler, router_handler
 from aipass.drone.apps.handlers.registry_handler import (
     find_registry,
     get_all_branches,
+    get_branch_by_name,
+    get_branch_with_registry,
     get_registry_path,
     load_registry,
     reset_registry_path,
@@ -355,6 +357,81 @@ class TestGetAllBranches:
 
         result = get_all_branches(status="active")
         assert result == []
+
+
+# ===================================================================
+# 5b. The hosted tier — <home>/projects/<p>/*_REGISTRY.json
+# ===================================================================
+
+
+def _hosted_home(root: Path, monkeypatch: pytest.MonkeyPatch, home_branches: list | None = None) -> Path:
+    """An AIPass home holding finch (active + a retired citizen), and a project whose registry is corrupt."""
+    home = root / "home"
+    home.mkdir()
+    _write_registry(
+        home, _minimal_registry(branches=home_branches or [{"name": "api", "path": "api", "status": "active"}])
+    )
+    finch = home / "projects" / "finch"
+    finch.mkdir(parents=True)
+    _write_registry(
+        finch,
+        _minimal_registry(
+            branches=[
+                {"name": "finch", "path": "src/finch/finch", "status": "active"},
+                {"name": "old", "path": "src/old", "status": "retired"},
+            ]
+        ),
+        name="FINCH_REGISTRY.json",
+    )
+    broken = home / "projects" / "broken"
+    broken.mkdir()
+    (broken / "BROKEN_REGISTRY.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.setenv("AIPASS_HOME", str(home))
+    set_registry_path(home / "AIPASS_REGISTRY.json")
+    return home
+
+
+class TestHostedProjects:
+    """Every lookup reads the home's hosted projects after the declared roots; earlier wins a collision."""
+
+    def test_a_hosted_citizen_is_listed_and_resolves(self, registry_dir: Path, monkeypatch: pytest.MonkeyPatch):
+        """Mutant: _outer_branches returns the declared roots only — finch vanishes from all three lookups."""
+        home = _hosted_home(registry_dir, monkeypatch)
+        finch_registry = home / "projects" / "finch" / "FINCH_REGISTRY.json"
+
+        names = sorted(b["name"] for b in get_all_branches())
+        branch, registry = get_branch_with_registry("finch")
+
+        assert names == ["api", "finch"]
+        assert get_branch_by_name("FINCH")["path"] == str(home / "projects" / "finch" / "src" / "finch" / "finch")
+        assert branch["name"] == "finch"
+        assert registry == finch_registry
+
+    def test_a_retired_hosted_citizen_stays_out(self, registry_dir: Path, monkeypatch: pytest.MonkeyPatch):
+        """Mutant: the status filter dropped from the hosted tier — old resolves by name."""
+        _hosted_home(registry_dir, monkeypatch)
+        assert get_branch_by_name("old") is None
+        assert "old" not in {b["name"] for b in get_all_branches(status="")}
+
+    def test_the_home_wins_a_name_collision(self, registry_dir: Path, monkeypatch: pytest.MonkeyPatch):
+        """A hosted finch never shadows the home's own finch."""
+        home = _hosted_home(
+            registry_dir, monkeypatch, home_branches=[{"name": "finch", "path": "finch", "status": "active"}]
+        )
+        assert get_branch_by_name("finch")["path"] == str(home / "finch")
+        assert [b["path"] for b in get_all_branches() if b["name"] == "finch"] == [str(home / "finch")]
+
+    def test_standing_in_a_hosted_project_lists_it_once(self, registry_dir: Path, monkeypatch: pytest.MonkeyPatch):
+        """The primary registry is skipped in the hosted tier: no false shadowing warning for its own citizens.
+
+        Mutant: the primary-registry skip removed — finch is reported as SHADOWED by itself."""
+        home = _hosted_home(registry_dir, monkeypatch)
+        set_registry_path(home / "projects" / "finch" / "FINCH_REGISTRY.json")
+        with patch.object(registry_handler, "logger") as log:
+            names = [b["name"] for b in get_all_branches()]
+        assert names.count("finch") == 1
+        assert "api" in names
+        assert not [c for c in log.warning.call_args_list if "SHADOWED" in c.args[0]]
 
 
 # ===================================================================

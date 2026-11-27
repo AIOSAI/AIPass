@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rollover.py
 # Description: Rollover Orchestration Module
-# Version: 0.11.0
+# Version: 0.12.1
 # Created: 2025-11-16
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -28,7 +28,7 @@ from aipass.memory.apps.handlers.cli.branch_flag import read_branch_flag
 
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover.orchestrator import execute_rollover as _handler_execute_rollover
-from aipass.memory.apps.handlers.rollover import todo_report
+from aipass.memory.apps.handlers.rollover import backfill, todo_report
 
 # Re-exported unchanged: the CLI and the tests reach these as `rollover.<name>`. Neither module imports this one.
 from aipass.memory.apps.modules.rollover_config import (
@@ -101,6 +101,7 @@ _SUBCOMMANDS = {
     "status": "Show rollover statistics for all branches",
     "check": "Check which files need rollover (dry run, fleet-wide), plus one branch's todo pad",
     "push": "Overwrite all per_branch limits to defaults (system-wide reset)",
+    "backfill-local": "Copy each branch's rows from the global store into its local .chroma (dry run; --apply)",
 }
 
 # Public alias — the introspection surface and the tests read this name.
@@ -167,6 +168,10 @@ def _handle_rollover_verb(args: List[str]) -> bool:
         push_defaults(json_mode)
         return True
 
+    if sub == "backfill-local":
+        backfill_local_command(args[1:])
+        return True
+
     _refuse(
         _Json(_VERB_ROLLOVER, json_mode),
         f"Unknown subcommand: '{sub}'",
@@ -225,6 +230,7 @@ def print_help() -> None:
     console.print("  drone @memory rollover <command>")
     console.print("  drone @memory rollover run [--branch @name]")
     console.print("  drone @memory rollover check [--branch @name]")
+    console.print("  drone @memory rollover backfill-local [--branch @name] [--apply]")
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
     console.print("  [cyan]rollover[/cyan]    Execute rollover for files exceeding limits, plus ONE branch's todo pad")
@@ -233,6 +239,10 @@ def print_help() -> None:
     console.print("  [cyan]check[/cyan]       Check which files need rollover (dry run), plus ONE branch's todo pad")
     console.print("              The file list is fleet-wide; only the todo pad follows --branch.")
     console.print("  [cyan]push[/cyan]        Reset ALL per_branch limits to defaults (system-wide, use with caution)")
+    console.print(
+        "  [cyan]backfill-local[/cyan]  Copy each branch's global _local, _observations and own flow_plans rows"
+    )
+    console.print("              into its local .chroma as stored. Dry run unless --apply; @memory or the admin only.")
     console.print("  [cyan]help[/cyan]        Show this help message")
     console.print()
     console.print("[bold]FLAGS:[/bold]")
@@ -241,14 +251,20 @@ def print_help() -> None:
     console.print("              At the repo root or outside every branch, no pad is touched and one line says so.")
     console.print("              The sessions / key_learnings / observations file list stays fleet-wide.")
     console.print("  [cyan]--json[/cyan]      Machine output for [cyan]push[/cyan] — one JSON document, no Rich")
-    console.print('              {"ok": true, "verb": "rollover push", "branches": 17}')
+    console.print('              {"ok": true, "verb": "rollover push", "branches": 17}', highlight=False)
     console.print("              Rides in any slot. A help flag still outranks it.")
     console.print()
     console.print("[bold]LIMITS:[/bold]")
-    console.print("  v2 entry-count based (sessions, key_learnings, observations) from config")
-    console.print("  A container held as a dict (schema 2.0.0) cannot be drained: check, run and status")
-    console.print("  list it as UNDRAINABLE, never as ready, until it is migrated to the 3.0.0 list shape")
-    console.print("  A DAMAGED file is never rolled and exits 2: empty or not JSON, a capped container that")
+    console.print("  v2 entry-count based (sessions, key_learnings, observations) from config", highlight=False)
+    console.print(
+        "  A container held as a dict (schema 2.0.0) cannot be drained: check, run and status", highlight=False
+    )
+    console.print(
+        "  list it as UNDRAINABLE, never as ready, until it is migrated to the 3.0.0 list shape", highlight=False
+    )
+    console.print(
+        "  A DAMAGED file is never rolled and exits 2: empty or not JSON, a capped container that", highlight=False
+    )
     console.print("  is not a list, or a list over its count with an entry missing or repeating its number")
     console.print("  todos: count only (rollover.defaults.local.todos.count) — own branch, never the fleet walk")
     console.print()
@@ -258,10 +274,15 @@ def print_help() -> None:
     console.print("  after every rolled todo reads back json-equal. check says 'ready for rollover' when over.")
     console.print()
     console.print("[bold]WORKFLOW:[/bold]")
-    console.print("  1. Detect files exceeding v2 entry-count limits")
-    console.print("  2. Extract oldest entries")
-    console.print("  3. Generate embeddings via fastembed")
-    console.print("  4. Store vectors in local + global ChromaDB")
+    console.print("  1. Detect files exceeding v2 entry-count limits", highlight=False)
+    console.print("  2. Extract oldest entries", highlight=False)
+    console.print("  3. Generate embeddings via fastembed", highlight=False)
+    console.print("  4. Store vectors in local + global ChromaDB", highlight=False)
+    console.print()
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  [dim]drone @memory rollover check[/dim]")
+    console.print("  [dim]drone @memory rollover run --branch @memory[/dim]")
+    console.print("  [dim]drone @memory rollover backfill-local[/dim]")
     console.print()
 
 
@@ -311,7 +332,7 @@ def run_rollover(branch: str | None = None) -> bool:
     Returns the vector rollover's outcome only; the todo roll never changes it.
     """
     console.print()
-    console.print(Panel.fit("[bold cyan]Memory - Rollover Execution[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+    console.print(Panel.fit("[bold cyan]memory - Rollover Execution[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     _todo_report(todo_report.roll_pad(branch))
@@ -355,7 +376,7 @@ def run_rollover(branch: str | None = None) -> bool:
     console.print()
     # 0/N is a result, not a reason to say nothing: it must not look like a run with nothing to do.
     marker = "[green]>[/green]" if success_count else "[yellow]>[/yellow]"
-    console.print(f"{marker} Rollover complete: {success_count}/{triggers_count} successful")
+    console.print(f"{marker} Rollover complete: {success_count}/{triggers_count} successful", highlight=False)
 
     # A declined trigger is neither win nor break; unprinted, "0/1 successful" sat above an empty failure list.
     # error(), so the exit is non-zero: a skipped trigger is a file over its limit left unrolled.
@@ -393,20 +414,14 @@ def _normalize_rolled(rolled: List[str]) -> None:
 
     Failures are logged, never raised: a cosmetic re-render must not retract a rollover that succeeded.
     """
-    from aipass.memory.apps.handlers.monitor import registry_scope
     from aipass.memory.apps.handlers.rollover import normalizer
     from aipass.memory.apps.handlers.json import config_loader
 
     wanted = {name.lower() for name in rolled}
     try:
         config = config_loader.load()
-        # Stops at the repo edge: normalize_branch WRITES and matches by name, so an external
-        # project's branch sharing a name with one of ours would be rewritten.
-        targets = [
-            item
-            for item in registry_scope.fleet_branches()
-            if item["name"].lower() in wanted and item.get("residency") != registry_scope.RESIDENCY_EXTERNAL
-        ]
+        # The scope that rolled them: it holds declared externals, never two branches under one name.
+        targets = [item for item in detector.write_scope() if str(item.get("name", "")).lower() in wanted]
     except Exception as e:
         logger.warning(f"[rollover] Frame normalize skipped — cannot resolve scope: {e}")
         return
@@ -437,7 +452,7 @@ def _normalize_rolled(rolled: List[str]) -> None:
 def process_plans_command() -> None:
     """Process pending plan files into vector storage in one embed + store call."""
     console.print()
-    console.print(Panel.fit("[bold cyan]Memory - Process Plans[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+    console.print(Panel.fit("[bold cyan]memory - Process Plans[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     console.print("[cyan]Processing plan files into vector storage...[/cyan]")
@@ -481,6 +496,19 @@ def process_plans_command() -> None:
     )
 
 
+def backfill_local_command(tokens: List[str]) -> None:
+    """Print, per branch, what the backfill copies (or would copy) and what it skips as already present."""
+    apply = "--apply" in tokens
+    branch, refused = _branch_flag([t for t in tokens if t != "--apply"], "backfill-local")
+    if refused:
+        return
+    result = backfill.backfill_local(branch, apply)
+    for line in result.get("lines", []):
+        console.print(line, markup=False, highlight=False, soft_wrap=True)
+    if not result.get("success"):
+        error(str(result.get("error")))
+
+
 def push_defaults(json_mode: bool = False) -> None:
     """Overwrite every per_branch entry in memory.config.json with defaults."""
     from aipass.memory.apps.handlers.json import config_loader
@@ -493,7 +521,7 @@ def push_defaults(json_mode: bool = False) -> None:
 
     if not ctx.on:
         console.print()
-        console.print(Panel.fit("[bold cyan]Memory - Push Defaults[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+        console.print(Panel.fit("[bold cyan]memory - Push Defaults[/bold cyan]", border_style="cyan", box=box.ROUNDED))
         console.print()
 
         console.print("[cyan]Overwriting all per_branch limits with defaults...[/cyan]")
@@ -518,7 +546,7 @@ def push_defaults(json_mode: bool = False) -> None:
 def show_status() -> None:
     """Show rollover statistics for all branches."""
     console.print()
-    console.print(Panel.fit("[bold cyan]Memory - Rollover Status[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+    console.print(Panel.fit("[bold cyan]memory - Rollover Status[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     stats_result = detector.get_rollover_stats()
@@ -571,7 +599,7 @@ def show_status() -> None:
 def check_triggers(branch: str | None = None) -> None:
     """Check which branches need rollover (without executing), then ONE branch's todo pad."""
     console.print()
-    console.print(Panel.fit("[bold cyan]Memory - Rollover Check[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+    console.print(Panel.fit("[bold cyan]memory - Rollover Check[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     _check_fleet_triggers()
@@ -657,6 +685,9 @@ def print_introspection() -> None:
     console.print("  [green]drone @memory rollover status[/green]       [dim]# View rollover stats[/dim]")
     console.print("  [green]drone @memory rollover check[/green]        [dim]# Dry-run check[/dim]")
     console.print("  [green]drone @memory rollover check --branch @devpulse[/green] [dim]# One branch's todo pad[/dim]")
+    console.print(
+        "  [green]drone @memory rollover backfill-local[/green] [dim]# Dry run: global rows each local store lacks[/dim]"
+    )
     console.print("  [green]drone @memory rollover --help[/green]       [dim]# Full usage guide[/dim]")
     console.print()
 

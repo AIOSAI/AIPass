@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: rollover.py
-# Version: 2.6.0
+# Version: 2.6.1
 # Description: Triggers memory rollover via @memory when files are overdue (PreCompact), naming the compacting branch
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Delegates rollover detection to @memory and triggers rollover if overdue.
@@ -51,7 +51,7 @@ def _find_repo_root() -> Path | None:
     if _probe_run():
         return None
     logger.error(
-        "[HOOKS] rollover: _find_repo_root failed — no AIPASS_REGISTRY.json found. AIPASS_HOME=%r, cwd=%s",
+        "[hooks] rollover: _find_repo_root failed — no AIPASS_REGISTRY.json found. AIPASS_HOME=%r, cwd=%s",
         aipass_home,
         cwd,
     )
@@ -67,7 +67,7 @@ def _compacting_branch(hook_data: dict) -> Path | None:
     context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
     branch_dir = context_window.find_branch_dir(cwd)
     if branch_dir is None:
-        logger.info("[HOOKS] rollover: no branch resolved from cwd=%s — fleet rollover only, no todo pad", cwd)
+        logger.info("[hooks] rollover: no branch resolved from cwd=%s — fleet rollover only, no todo pad", cwd)
         return None
     return branch_dir
 
@@ -88,7 +88,7 @@ def _recently_clean(repo_root: Path, branch: str | None) -> bool:
     except FileNotFoundError:
         return False
     except OSError as exc:
-        logger.info("[HOOKS] rollover: clean stamp unreadable, checking: %s", exc)
+        logger.info("[hooks] rollover: clean stamp unreadable, checking: %s", exc)
         return False
     return 0 <= age < CHECK_FRESH_SECONDS
 
@@ -97,7 +97,7 @@ def _mark_clean(repo_root: Path, branch: str | None) -> None:
     try:
         _clean_stamp(repo_root, branch).touch()
     except OSError as exc:
-        logger.info("[HOOKS] rollover: clean stamp not written, the next compaction checks again: %s", exc)
+        logger.info("[hooks] rollover: clean stamp not written, the next compaction checks again: %s", exc)
 
 
 def _run_check(repo_root: Path, branch: str | None, seat: Path) -> tuple[bool, str]:
@@ -115,10 +115,10 @@ def _run_check(repo_root: Path, branch: str | None, seat: Path) -> tuple[bool, s
             _mark_clean(repo_root, branch)
         return has_overdue, stdout
     except subprocess.TimeoutExpired:
-        logger.warning("[HOOKS] rollover: check timed out (30s)")
+        logger.warning("[hooks] rollover: check timed out (30s)")
         return False, "check timed out"
     except Exception as exc:
-        logger.warning("[HOOKS] rollover: check failed: %s", exc)
+        logger.warning("[hooks] rollover: check failed: %s", exc)
         return False, str(exc)
 
 
@@ -133,10 +133,10 @@ def _run_rollover(branch: str | None, seat: Path) -> tuple[bool, str]:
         )
         return result.returncode == 0, result.stdout + result.stderr
     except subprocess.TimeoutExpired:
-        logger.warning("[HOOKS] rollover: drone rollover timed out (110s)")
+        logger.warning("[hooks] rollover: drone rollover timed out (110s)")
         return False, "Rollover timed out (110s)"
     except Exception as exc:
-        logger.warning("[HOOKS] rollover: drone rollover failed: %s", exc)
+        logger.warning("[hooks] rollover: drone rollover failed: %s", exc)
         return False, str(exc)
 
 
@@ -153,7 +153,7 @@ def _handle(hook_data: dict) -> dict:
     repo_root = _find_repo_root()
     if not repo_root:
         if not _probe_run():
-            logger.warning("[HOOKS] rollover: no repo root found — cannot check")
+            logger.warning("[hooks] rollover: no repo root found — cannot check")
         return {"stdout": "", "exit_code": 0}
 
     branch_dir = _compacting_branch(hook_data)
@@ -161,24 +161,24 @@ def _handle(hook_data: dict) -> dict:
     seat = branch_dir or repo_root
     if _recently_clean(repo_root, branch):
         logger.info(
-            "[HOOKS] rollover: checked clean within %d min, skipped (branch=%s)", CHECK_FRESH_SECONDS // 60, branch
+            "[hooks] rollover: checked clean within %d min, skipped (branch=%s)", CHECK_FRESH_SECONDS // 60, branch
         )
         return {"stdout": "", "exit_code": 0}
     has_overdue, check_output = _run_check(repo_root, branch, seat)
     if not has_overdue:
         return {"stdout": "", "exit_code": 0}
 
-    logger.info("[HOOKS] rollover: overdue files detected — %s", check_output.replace("\n", " | "))
+    logger.info("[hooks] rollover: overdue files detected — %s", check_output.replace("\n", " | "))
 
     # `rollover run` trims fleet memory and ignores cwd and AIPASS_HOME, so the probe must stop it here.
     if _probe_run():
-        logger.info("[HOOKS] rollover: probe run — check ran, fleet rollover suppressed")
+        logger.info("[hooks] rollover: probe run — check ran, fleet rollover suppressed")
         return {"stdout": "", "exit_code": 0, "sound": "pre compact rollover"}
 
     success, output = _run_rollover(branch, seat)
     if success:
-        logger.info("[HOOKS] rollover: complete (branch=%s)", branch)
+        logger.info("[hooks] rollover: complete (branch=%s)", branch)
     else:
-        logger.warning("[HOOKS] rollover: FAILED — %s", output[:300])
+        logger.warning("[hooks] rollover: FAILED — %s", output[:300])
 
     return {"stdout": "", "exit_code": 0, "sound": "pre compact rollover"}

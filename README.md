@@ -40,7 +40,7 @@
 
 ## Install
 
-**You need:** Python 3.10+, [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it, and Ubuntu (native or WSL2). [Codex](https://github.com/openai/codex) and [OpenCode](https://opencode.ai) if you want them: with a binary on your PATH, install sets it up as another CLI for the same agents, and each agent runs on any of them, your choice per task.
+**You need:** Python 3.10+ with [pipx](https://pipx.pypa.io) (`sudo apt install pipx` on Ubuntu; a bare `pipx: command not found` means it is missing), [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it, and Ubuntu (native or WSL2). [Codex](https://github.com/openai/codex) and [OpenCode](https://opencode.ai) if you want them: with a binary on your PATH, install sets it up as another CLI for the same agents, and each agent runs on any of them, your choice per task.
 
 ```bash
 pipx install aipass
@@ -148,9 +148,9 @@ The boring stuff works. One human and these agents built it, and use it every da
 <details>
 <summary>The full list</summary>
 
-Install builds the environment, puts `aipass` and `drone` on your PATH, and sets up the 18 agents. It ends on a health check that fixes what it can, an install report in devpulse's dropbox, and a final screen with what still needs attention. In a terminal it asks where AIPass should live (unless `--path`), your git identity (only if it is not set globally), one yes or no before the changes outside the repo listed below (on no it skips them, says what will not work, and `./setup.sh` makes them later), and Enter before the phone pairing code. Your name comes from git's `user.name`, else your login. A non-interactive shell asks nothing and makes those changes only when you pass `--yes`; without it they are skipped, each one named as a warning, and `aipass install --yes` makes them later; on the clone route `--no-finish` skips the health check and the report.
+Install builds the environment, puts `aipass` and `drone` on your PATH, and sets up the 18 agents. It ends on a health check that fixes what it can, an install report in devpulse's dropbox, and a final screen with what still needs attention. In a terminal it asks where AIPass should live (unless `--path`), one yes or no before the changes outside the repo listed below (on no it skips them, says what will not work, and `./setup.sh` makes them later), and Enter before the phone pairing code. Your name comes from git's `user.name`, else your login; install never asks for a git identity, git itself does at your first commit. A non-interactive shell asks nothing and makes those changes only when you pass `--yes`; without it they are skipped, each one named as a warning, and `aipass install --yes` makes them later; on the clone route `--no-finish` skips the health check and the report.
 
-Install changes a few things outside the repo, and you should know what. It adds AIPass deny rules to your user-level Claude Code settings (no raw git writes: `commit`, `push`, `reset`, `rebase`, `merge`, `config` and the destructive `checkout`, `restore`, `stash` and `branch` forms; no reading `~/.secrets/`), and these apply to every Claude Code project on the machine. It merges its hooks with any you already have. It adds a `claude` shell function that, inside an agent directory, boots that agent's seat, attaching to it if one is already live. It sets `git config --global pull.rebase true` when it sets your git identity. It installs the `@anthropic-ai/sandbox-runtime` npm package if it is missing. `sudo` may ask once to place the `/usr/local/bin` symlinks. Re-running install rebuilds `.venv`. The list below names every file it touches.
+Install changes a few things outside the repo, and you should know what. It adds AIPass deny rules to your user-level Claude Code settings (no raw git writes: `commit`, `push`, `reset`, `rebase`, `merge`, `config` and the destructive `checkout`, `restore`, `stash` and `branch` forms; no reading `~/.secrets/`), and these apply to every Claude Code project on the machine. It merges its hooks with any you already have. It adds a `claude` shell function that, inside an agent directory, boots that agent's seat, attaching to it if one is already live. `sudo` may ask once to place the `/usr/local/bin` symlinks. Re-running install rebuilds `.venv`. The list below names every file it touches.
 
 The installer writes a layer outside the project. Remove all of it to erase AIPass completely:
 
@@ -205,7 +205,7 @@ devpulse (orchestrator: the one you talk to)
    ├── daemon   : scheduler for recurring jobs
    ├── skills   : capability units any agent can run
    ├── commons  : the social space where agents post and gather
-   └── canary   : test citizen, broken on purpose so working agents never are
+   └── canary_test : test citizen, broken on purpose so working agents never are
 ```
 
 </details>
@@ -248,7 +248,7 @@ Ubuntu is the platform, native or WSL2: the daily driver, the one CI proves.
 - [OpenCode](https://opencode.ai) optional: with its binary on PATH, install adds the AIPass plugin so the same agents run on it (`/opencode` from Claude Code, `$opencode` from Codex, `/claude` and `/codex` back); signed out, it runs on OpenCode's free models
 - Ubuntu, native or [WSL2](https://learn.microsoft.com/windows/wsl/install): the platform CI tests. Other Linux distributions are untested.
 - `sudo` access optional (used for `/usr/local/bin` symlinks — falls back to `~/.local/bin` without it)
-- Node.js + npm optional (install uses them to add the `@anthropic-ai/sandbox-runtime` kernel sandbox; without them the sandbox is reported as optional and not set up, AIPass runs without it, and `aipass doctor` says how to add it later)
+- Node.js + npm optional (only the Codex and OpenCode CLIs need them; install sets up no kernel sandbox)
 - API keys / OAuth optional (OpenRouter, Google — only for optional add-on integrations)
 
 </details>

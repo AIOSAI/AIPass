@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_help_flag_safety.py
 # Description: A help probe must never execute the thing it asks about
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-13
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/log_audit.py, log_health.py, monitor.py and apps/handlers/cli/help_flags.py."""
@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.cli import header_version
 from aipass.prax.apps import prax as prax_entry
 from aipass.prax.apps.handlers.cli import help_flags
 from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
@@ -237,6 +238,29 @@ class TestACrashedHandlerIsNotAnUnknownCommand:
             "aipass.prax.apps.modules.monitor",
             "aipass.prax.apps.modules.status",
         ]
+
+
+class TestPraxEntryVersionAndDiscovery:
+    """--version reads the header; a module that cannot import is loud, not skipped."""
+
+    def test_version_prints_the_header_version(self, prax_entry_point, capsys):
+        """Mutant: the old 'prax v2.4.0' literal, which disagreed with the # Version header."""
+        mod = prax_entry_point
+
+        with patch("sys.argv", ["prax", "--version"]):
+            assert mod.main() == 0
+
+        assert capsys.readouterr().out.strip() == f"prax v{header_version(mod.__file__)}"
+
+    def test_a_module_that_cannot_import_raises(self, prax_entry_point):
+        """Mutant: the old except that logged a warning and dropped the module's commands."""
+        mod = prax_entry_point
+
+        with (
+            patch.object(mod.importlib, "import_module", side_effect=ImportError("broken module")),
+            pytest.raises(ImportError, match="broken module"),
+        ):
+            mod.discover_command_modules()
 
 
 class TestOwnershipStillComesFirst:

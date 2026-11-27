@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cc_sessions.py
-# Version: 3.8.0
+# Version: 3.8.1
 # Description: CC-native session discovery, listing, and reclaim
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-30
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Read Claude Code native session files (~/.claude/sessions/<pid>.json).
@@ -378,20 +378,32 @@ def _print_sessions_list():
 def print_introspection():
     """Print CC session state for drone routing."""
     CONSOLE.print("[bold cyan]sessions[/bold cyan] — CC session listing & reclaim")
+    CONSOLE.print("[dim]Lists the CLI sessions on this machine and stops the ones you name.[/dim]")
     CONSOLE.print(f"  Sessions dir: {CC_SESSIONS_DIR}")
     _print_sessions_list()
+    CONSOLE.print("[dim]Run drone @hooks sessions --help for usage.[/dim]")
+
+
+def print_help():
+    """Print the sessions verb's usage and examples."""
+    CONSOLE.print("[bold cyan]sessions[/bold cyan] — CC session listing & reclaim")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks sessions[/cyan]                  List all CC sessions")
+    CONSOLE.print("  [cyan]drone @hooks sessions reclaim[/cyan]          Stop all live sessions")
+    CONSOLE.print("  [cyan]drone @hooks sessions reclaim[/cyan] @branch  Stop sessions for a branch")
+    CONSOLE.print()
+    CONSOLE.print("  [cyan]drone @hooks cc_sessions[/cyan]               (legacy alias for sessions)")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks sessions[/cyan]")
+    CONSOLE.print("  [cyan]drone @hooks sessions reclaim[/cyan] @hooks")
 
 
 def handle_command(command: str, args: list) -> bool:
     """Route sessions/cc_sessions commands from drone @hooks."""
     if command in ("--help", "-h", "help"):
-        CONSOLE.print("[bold cyan]sessions[/bold cyan] — CC session listing & reclaim")
-        CONSOLE.print()
-        CONSOLE.print("  drone @hooks sessions                  List all CC sessions")
-        CONSOLE.print("  drone @hooks sessions reclaim          Stop all live sessions")
-        CONSOLE.print("  drone @hooks sessions reclaim @branch  Stop sessions for a branch")
-        CONSOLE.print()
-        CONSOLE.print("  drone @hooks cc_sessions               (legacy alias for sessions)")
+        print_help()
         return True
 
     if command in ("sessions", "cc_sessions"):
@@ -400,11 +412,7 @@ def handle_command(command: str, args: list) -> bool:
             return True
 
         if wants_help(args):
-            CONSOLE.print("[bold cyan]sessions[/bold cyan] — CC session listing & reclaim")
-            CONSOLE.print()
-            CONSOLE.print("  drone @hooks sessions                  List all CC sessions")
-            CONSOLE.print("  drone @hooks sessions reclaim          Stop all live sessions")
-            CONSOLE.print("  drone @hooks sessions reclaim @branch  Stop sessions for a branch")
+            print_help()
             return True
 
         if args[0] == "reclaim":

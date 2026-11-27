@@ -51,7 +51,7 @@ def format_command_list(commands: list[dict]) -> None:
 
     console.print(table)
     console.print()
-    console.print(f"{len(commands)} custom command(s) registered.")
+    console.print(f"[cyan]{len(commands)}[/cyan] custom command(s) registered.")
     console.print()
 
 
@@ -73,7 +73,7 @@ def format_activation_results(
     if skipped:
         if added:
             console.print()
-        console.print(f"Skipped {len(skipped)} command(s) (already registered):")
+        console.print(f"Skipped [cyan]{len(skipped)}[/cyan] command(s) (already registered):")
         for name in skipped:
             console.print(f"  - {name}")
 

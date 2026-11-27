@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: merge_plugin.py
-# Description: Merge a PR and sync local main
-# Version: 1.1.1
+# Description: Merge a PR into dev or main and sync the branch it lands on
+# Version: 1.1.2
 # Created: 2026-03-30
-# Modified: 2026-10-24
+# Modified: 2026-11-26
 # =============================================
 
-"""Merge a PR and sync local main.
+"""Merge a PR into dev or main and sync the branch it lands on.
 
 Merges the PR via ``gh``, pulls, and returns the merge commit hash and PR title.
 """
@@ -24,10 +24,22 @@ from aipass.drone.apps.handlers.git.sync_handler import stash_changes
 
 
 PROTECTED_BRANCHES = ("dev", "main")
+# main is the dev->main train; dev is a cloud session's PR. Any other base is refused before the merge.
+MERGE_BASES = ("dev", "main")
+REFS_JQ = '.baseRefName + " " + .headRefName'
+REFUSE_BASE = "PR #{pr} was not merged: its base is {base}, and drone merges only PRs into dev or main."
+
+
+def _on_dev(repo_root) -> bool:
+    """Whether *repo_root*'s checked-out branch is dev; an unreadable answer is not dev."""
+    proc = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo_root)
+    )
+    return proc.returncode == 0 and proc.stdout.strip() == "dev"
 
 
 def merge_pr(pr_number: str, caller: str) -> dict:
-    """Merge a PR and sync local main.
+    """Merge a PR and sync: a main-base PR pulls the checked-out branch, a dev-base PR pulls dev and stays on dev.
 
     Args:
         pr_number: The PR number to merge (e.g. ``"42"``).
@@ -49,13 +61,19 @@ def merge_pr(pr_number: str, caller: str) -> dict:
     }
 
     try:
-        head_proc = subprocess.run(
-            ["gh", "pr", "view", pr_number, "--json", "headRefName", "--jq", ".headRefName"],
+        refs_proc = subprocess.run(
+            ["gh", "pr", "view", pr_number, "--json", "baseRefName,headRefName", "--jq", REFS_JQ],
             capture_output=True,
             text=True,
             cwd=str(repo_root),
         )
-        head_ref = head_proc.stdout.strip() if head_proc.returncode == 0 else ""
+        refs = refs_proc.stdout.rstrip() if refs_proc.returncode == 0 else ""
+        base_ref, _, head_ref = refs.partition(" ")
+        # Read before acting: the base decides what is pulled afterwards, so an unread or foreign base merges nothing.
+        if base_ref not in MERGE_BASES:
+            result["message"] = REFUSE_BASE.format(pr=pr_number, base=base_ref or "unreadable")
+            logger.warning(result["message"])
+            return result
 
         # An unknown head ref (gh lookup failed) never deletes: a protected branch may be behind it.
         merge_cmd = ["gh", "pr", "merge", pr_number, "--merge"]
@@ -90,12 +108,22 @@ def merge_pr(pr_number: str, caller: str) -> dict:
         # Stashed first: git pull --rebase aborts on a dirty working tree.
         stashed, error = stash_changes(repo_root)
         if error:
-            result["message"] = f"PR #{pr_number} merged, but local main was not pulled: {error}"
+            result["message"] = f"PR #{pr_number} merged, but local {base_ref} was not pulled: {error}"
             logger.error(result["message"])
             return result
 
+        # A dev-base PR (a cloud session's) lands on dev: dev is pulled onto dev, and main is left as it is.
+        if base_ref == "dev" and not _on_dev(repo_root):
+            checkout = subprocess.run(["git", "checkout", "dev"], capture_output=True, text=True, cwd=str(repo_root))
+            if checkout.returncode != 0:
+                if stashed:
+                    subprocess.run(["git", "stash", "pop"], capture_output=True, text=True, cwd=str(repo_root))
+                reason = checkout.stderr.strip()
+                result["message"] = f"PR #{pr_number} merged, but dev could not be checked out: {reason}"
+                logger.error(result["message"])
+                return result
         pull = subprocess.run(
-            ["git", "pull", "--rebase"],
+            ["git", "pull", "--rebase"] + (["origin", "dev"] if base_ref == "dev" else []),
             capture_output=True,
             text=True,
             cwd=str(repo_root),

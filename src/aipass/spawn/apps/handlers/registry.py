@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: *_REGISTRY.json discovery and CRUD operations
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-03-05
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """*_REGISTRY.json discovery and CRUD operations.
@@ -305,13 +305,11 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
 
         branches = registry.get("branches", [])
 
-        if isinstance(branches, dict):
-            if branch_name in branches:
-                return False
-        else:
-            for branch in branches:
-                if branch.get("name") == branch_name:
-                    return False
+        # A registry still holding capital rows beside lowercase ones must see FLOW and flow as one agent.
+        taken = [str(b.get("name", "")) for b in branches_as_list(branches)]
+        taken += list(branches) if isinstance(branches, dict) else []
+        if branch_name.lower() in {name.lower() for name in taken}:
+            return False
 
         today = datetime.now().strftime("%Y-%m-%d")
         entry = {

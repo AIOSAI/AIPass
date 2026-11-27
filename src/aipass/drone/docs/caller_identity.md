@@ -80,6 +80,31 @@ stamp proves nothing about the caller; a gate that reads the rail inside a modul
 
 ---
 
+## A cloud seat at a repo root
+
+A cloud session starts at the repo root, which has no passport, so the cwd names no one.
+`AIPASS_SEAT=<branch>` names the seat there. `caller_seat()` returns `src/aipass/<branch>` when,
+and only when, the cwd holds `src/aipass`, no passport sits at or above the cwd, the name is a
+plain non-dot directory name, and that directory holds `.trinity`. Anything else returns the cwd
+unchanged: from inside a branch the branch's own passport wins over the variable. It is the twin of
+hooks' `loader.seat_at_root`, so the hooks and drone agree on who is sitting.
+
+Two readers, two questions. Identity readers take `caller_seat()`: the `[CALLER:X]` tag, the
+`AIPASS_CALLER_*` stamp (so `AIPASS_CALLER_CWD` carries the seat), `@git`'s own branch detection,
+the `inbox` passport walk, the global tier of `@git` auth, the repo-root lock, the registry
+credential checks, and the cwd written to the deletion and door records. Path readers keep `caller_cwd()`, the raw
+directory: `drone rm` targets and its sibling fence, the stale sweep, `@git export`'s destination
+and the path arguments of `diff`, `log`, `blame`, `tracked`, `untrack` and `restore`. A relative
+path typed at the root means the root, whoever is sitting.
+
+**Writes need the cwd.** The owner and ci-cure tiers of `@git` resolve the caller from the seat too,
+then refuse when the seat is not the cwd: `owner-tier verbs need the cwd inside the seat; AIPASS_SEAT
+is not enough`, with `ci-cure` in place of `owner-tier` for that tier. The seat is one environment
+variable, a weaker credential than standing in the branch, so from a repo root it names who is
+reading (`pr list`, `status`) and earns no commit, push, merge or ci-cure.
+
+---
+
 ## Related
 
 - [routing_and_resolution.md](routing_and_resolution.md) — the routing lanes that do the stamping

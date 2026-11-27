@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: retire_ops.py
 # Description: The retire lane — a test file leaves by a logged move and can come back
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-21
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """Retire lane operations.
@@ -56,19 +56,23 @@ def log_path(branch: str, root: Optional[Path] = None) -> Path:
     return retire_root(branch, root) / LOG_FILE
 
 
+class CorruptRetireLog(ValueError):
+    """The retire log exists but cannot be read as one: nothing may act on it, nothing may write over it."""
+
+
 def read_log(branch: str, root: Optional[Path] = None) -> Dict:
-    """Read a branch's retire log, or the empty document if it has none."""
+    """Read a branch's retire log, or the empty document if it has none; CorruptRetireLog when it is unreadable."""
     path = log_path(branch, root)
     if not path.exists():
         return {"document_metadata": dict(EMPTY_LOG["document_metadata"]), "entries": []}
     try:
         document = json_handler.read_json(path)
     except Exception as exc:
-        logger.info("Cannot read retire log at %s: %s", path, exc)
-        return {"document_metadata": dict(EMPTY_LOG["document_metadata"]), "entries": []}
+        logger.warning("Cannot read retire log at %s: %s", path, exc)
+        raise CorruptRetireLog(f"the retire log {path} is corrupt ({exc}); repair or move it aside") from exc
     if not isinstance(document, dict) or "entries" not in document:
-        logger.info("Retire log at %s is not a retire log", path)
-        return {"document_metadata": dict(EMPTY_LOG["document_metadata"]), "entries": []}
+        logger.warning("Retire log at %s is not a retire log", path)
+        raise CorruptRetireLog(f"the retire log {path} is corrupt (no entries list); repair or move it aside")
     return document
 
 
@@ -105,7 +109,10 @@ def restore(name: str, branch: str, root: Optional[Path] = None) -> Tuple[bool, 
     if not source.exists():
         return False, f"nothing retired under that name: {filename}"
 
-    origin = _recorded_origin(filename, branch, root)
+    try:
+        origin = _recorded_origin(filename, branch, root)
+    except CorruptRetireLog as exc:
+        return False, str(exc)
     if origin is None:
         return False, f"{filename} has no log line, so nothing records where it came from"
 
@@ -122,7 +129,11 @@ def restore(name: str, branch: str, root: Optional[Path] = None) -> Tuple[bool, 
         return False, f"could not move {filename}: {exc}"
 
     json_handler.log_operation("test_restored", {"file": filename, "branch": branch})
-    if not _drop_entry(filename, branch, root):
+    try:
+        dropped = _drop_entry(filename, branch, root)
+    except CorruptRetireLog as exc:
+        return False, f"{filename} restored to {target}, but its line was left in place: {exc}"
+    if not dropped:
         return False, f"{filename} restored to {target}, but its line in {log_path(branch, root)} could not be removed"
     return True, f"{filename} restored to {target}"
 

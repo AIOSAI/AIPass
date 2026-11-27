@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: verified_caller.py
 # Description: Verified-Caller Rail for privilege-bearing decisions
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-08-12
-# Modified: 2026-10-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -137,14 +137,16 @@ if __name__ == "__main__":
     console.print("  - verify_admin_caller() -> (bool, reason)  [dim](5-leg admin grant, devpulse reference)[/dim]")
     console.print()
     console.print("[yellow]RESOLUTION ORDER:[/yellow]")
-    console.print("  1. AIPASS_CALLER_BRANCH  [dim](drone, from real process ancestry)[/dim]")
-    console.print("  2. AIPASS_CALLER_CWD walked up to .trinity/passport.json")
-    console.print("  3. nothing — bare cwd is NOT a fallback here")
+    console.print("  [cyan]1.[/cyan] AIPASS_CALLER_BRANCH  [dim](drone, from real process ancestry)[/dim]")
+    console.print("  [cyan]2.[/cyan] AIPASS_CALLER_CWD walked up to .trinity/passport.json")
+    console.print("  [cyan]3.[/cyan] nothing — bare cwd is NOT a fallback here")
     console.print()
     console.print("[yellow]PRIVILEGED SENDERS:[/yellow]")
+    console.print("[dim]Senders whose wake lane needs a verified identity.[/dim]")
     for _addr in sorted(PRIVILEGED_SENDERS):
         console.print(f"  - {_addr}")
     console.print()
     console.print("[yellow]LIVE RESOLUTION:[/yellow]")
+    console.print("[dim]Who this process resolves to right now.[/dim]")
     console.print(f"  verified caller: {resolve_verified_caller() or '<unverified>'}")
     console.print()

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_bypass.py
 # Description: Unit tests for handlers/bypass/
-# Version: 1.8.0
+# Version: 1.8.1
 # Created: 2026-03-24
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/bypass/bypass_handler.py, ignore_handler.py, utils.py and inert.py."""
@@ -1052,3 +1052,16 @@ def test_waived_sites_counts_one_per_pinned_line_or_function_and_one_per_whole_f
         {"file": "", "standard": "naming"},
     ]
     assert bypass_handler.waived_sites(rules) == 4
+
+
+def test_a_row_naming_a_template_path_the_branch_lacks_is_live_and_a_typo_is_dead(tmp_path):
+    """A waiver for an absent template path has no file on disk by design; only a name no checker expects is dead."""
+    lacks = SimpleNamespace(absent_targets=lambda branch: ["apps/plugins", "apps/plugins/README.md"])
+    rules = [
+        {"file": "apps/plugins", "standard": "architecture"},
+        {"file": "apps/plugins/README.md", "standard": "architecture"},
+        {"file": "apps/plugin", "standard": "naming"},
+        {"file": "apps/plugins_typo", "standard": "architecture"},
+    ]
+    dead = dead_rules.dead_rules(tmp_path, rules, {"architecture", "naming"}, listers={"architecture": lacks})
+    assert [d["index"] for d in dead] == [2, 3]

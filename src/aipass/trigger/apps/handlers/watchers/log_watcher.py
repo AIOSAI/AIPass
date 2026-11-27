@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Centralized log file watcher for system_logs directory
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-01-31
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -21,14 +21,13 @@ from typing import Any, Dict, Optional
 from aipass.prax import logger
 from aipass.prax import get_system_logs_dir, log_backup_count
 from aipass.trigger.apps.handlers.json import json_handler
+from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
 
 # Bound once: prax caches per process, and tests redirect by patching this name.
 SYSTEM_LOGS_DIR = get_system_logs_dir()
 
 # Sole owner of system_logs; see start_log_watcher() for why this module does not watch it.
 SYSTEM_LOGS_OWNER = "branch_log_events"
-
-from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
 
 _log_observer: Any = None
 
@@ -40,13 +39,13 @@ def generate_error_hash(module_name: str, message: str) -> str:
 
 
 def detect_branch_from_log(log_file: str) -> str:
-    """Detect branch from log filename: sentry_audit.log -> SENTRY."""
+    """Detect branch from log filename: sentry_audit.log -> sentry."""
     try:
         name = Path(log_file).stem
         if "_" in name:
             parts = name.split("_")
-            return parts[0].upper()
-        return name.upper()
+            return parts[0].lower()
+        return name.lower()
     except Exception as exc:
         logger.warning("Failed to detect branch from log '%s': %s", log_file, exc)
         return "UNKNOWN"
@@ -281,7 +280,7 @@ def start_log_watcher() -> Any:
     A second observer mints duplicate escalation signatures. Returns None always; callers take the not-started path.
     """
     logger.info(
-        "[TRIGGER] system_logs is watched by %s — centralized observer not started (the owner's ruling, 2026-08-14)",
+        "[trigger] system_logs is watched by %s — centralized observer not started (the owner's ruling, 2026-08-14)",
         SYSTEM_LOGS_OWNER,
     )
     return None

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_pusher.py
 # Description: Dashboard Template Push Handler
-# Version: 1.2.2
+# Version: 1.5.0
 # Created: 2026-02-25
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -63,11 +63,11 @@ REQUIRED_SECTIONS = {
 
 
 def _replace_placeholders(template: dict, branch_name: str) -> dict:
-    """Recursively replace {{BRANCHNAME}} with branch_name in all string values."""
+    """Recursively replace {{BRANCH}} with branch_name in all string values."""
 
     def _walk(val: Any) -> Any:
         if isinstance(val, str):
-            return val.replace("{{BRANCHNAME}}", branch_name)
+            return val.replace("{{BRANCH}}", branch_name)
         elif isinstance(val, list):
             return [_walk(item) for item in val]
         elif isinstance(val, dict):
@@ -114,7 +114,8 @@ def _update_spawn_template(
     if not changed:
         return
 
-    spawn_data["branch"] = "{{BRANCHNAME}}"
+    # Spawn's citizen template stores the lowercase token in data files; the capital one is for markdown.
+    spawn_data["branch"] = "{{BRANCH}}"
     spawn_data["last_updated"] = "{{DATE}}"
     for section in spawn_data.get("sections", {}).values():
         if isinstance(section, dict) and "last_updated" in section:
@@ -180,10 +181,11 @@ def _push_one(
     branch_actions: List[str] = []
 
     if not dashboard_path.exists():
-        new_dashboard = _replace_placeholders(template, branch_name)
+        # The system stores names lowercase; branch_name stays the screen label.
+        new_dashboard = _replace_placeholders(template, branch_name.lower())
         if _safe_write_dashboard(dashboard_path, new_dashboard, branch_name, dry_run, result):
             result["branches_created"] += 1
-            updated_list.append(branch_name)
+            updated_list.append(branch_name.lower())
             result["changes"].append({"branch": branch_name, "actions": ["created from template"]})
         return
 
@@ -193,7 +195,7 @@ def _push_one(
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("Unreadable dashboard for %s: %s", branch_name, e)
         result["branches_skipped"] += 1
-        result["errors"].append(f"{branch_name}: invalid JSON in dashboard, skipped")
+        result["errors"].append(f"{branch_name}: unreadable dashboard ({e}), skipped")
         return
     if not isinstance(data, dict):
         result["branches_skipped"] += 1
@@ -207,7 +209,7 @@ def _push_one(
         if not _safe_write_dashboard(dashboard_path, data, branch_name, dry_run, result):
             return
         result["branches_updated"] += 1
-        updated_list.append(branch_name)
+        updated_list.append(branch_name.lower())
         result["changes"].append({"branch": branch_name, "actions": branch_actions})
 
 
@@ -255,7 +257,7 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
     repo_root = _find_repo_root()
 
     for branch in branches:
-        branch_name = branch["name"].upper()
+        branch_name = branch["name"].lower()
         branch_path = branch["path"]
         result["branches_scanned"] += 1
 

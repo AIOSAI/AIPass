@@ -3,7 +3,7 @@
 # Description: Post orchestration module
 # Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -26,21 +26,51 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("post")
-    console.print("Thin router for post workflows. Handles creating posts, viewing threads, and deleting posts.")
+    console.print("[bold cyan]post - Posts and Threads[/bold cyan]")
+    console.print(
+        "[dim]Thin router for post workflows. Handles creating posts, viewing threads, and deleting posts.[/dim]"
+    )
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/posts/")
-    console.print("    - post_ops.py (create_post — create a new post in a room)")
-    console.print("    - post_ops.py (view_thread — view a post with its threaded comments)")
-    console.print("    - post_ops.py (delete_post — delete a post by ID)")
-    console.print("  handlers/identity/")
-    console.print("    - identity_ops.py (resolve_display_name — resolve branch agent to display name)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/posts/[/cyan]")
+    console.print("    [cyan]-[/cyan] post_ops.py [dim](create_post — create a new post in a room)[/dim]")
+    console.print("    [cyan]-[/cyan] post_ops.py [dim](view_thread — view a post with its threaded comments)[/dim]")
+    console.print("    [cyan]-[/cyan] post_ops.py [dim](delete_post — delete a post by ID)[/dim]")
+    console.print("  [cyan]handlers/identity/[/cyan]")
+    console.print(
+        "    [cyan]-[/cyan] identity_ops.py [dim](resolve_display_name — resolve branch agent to display name)[/dim]"
+    )
+    console.print()
+    console.print("[dim]Run 'drone @commons <verb> --help' for usage[/dim]")
+
+
+def print_help():
+    """Display usage help for post commands."""
+    console.print()
+    console.print("[bold cyan]post - Posts and Threads[/bold cyan]")
+    console.print("[dim]Create a post in a room, view a post with its comments, or delete a post.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print(
+        "  [cyan]drone @commons post[/cyan] <room> <title> <content> \\[--type discussion|review|question|announcement]"
+    )
+    console.print("  [cyan]drone @commons thread[/cyan] <post_id>")
+    console.print("  [cyan]drone @commons delete[/cyan] <post_id>")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print('  [cyan]drone @commons post general "Hello" "First post"[/cyan]')
+    console.print('  [cyan]drone @commons post general "Why?" "Asking" --type question[/cyan]')
+    console.print("  [cyan]drone @commons thread 42[/cyan]")
+    console.print("  [cyan]drone @commons delete 42[/cyan]")
     console.print()
 
 
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle post-related commands (post, thread, delete)."""
+    if command in ("post", "thread", "delete") and ("--help" in args or "-h" in args):
+        print_help()
+        return True
+
     if command == "post":
         result = _handle_create_post(args)
     elif command == "thread":

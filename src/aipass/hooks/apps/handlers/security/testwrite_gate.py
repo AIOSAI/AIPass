@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: testwrite_gate.py
-# Version: 1.5.0
+# Version: 1.5.1
 # Description: Blocks agent creation of NEW test files (PreToolUse) + the test template pointer (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-09-01
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Enforces the owner's 2026-09-01 ruling: agents do not create tests for now.
@@ -45,7 +45,7 @@ def _is_admin_seat(cwd: str) -> bool:
     try:
         return bool(_module("admin_seat").is_admin_seat(cwd))
     except Exception as exc:
-        logger.warning("[HOOKS] testwrite_gate: admin lane dark — admin_seat unavailable: %s", exc)
+        logger.warning("[hooks] testwrite_gate: admin lane dark — admin_seat unavailable: %s", exc)
         return False
 
 
@@ -206,7 +206,7 @@ def _decide(hook_data: dict) -> dict:
 
         if _is_admin_seat(cwd):
             logger.info(
-                "[HOOKS] testwrite_gate: test write ALLOWED for the admin seat (@%s): %s",
+                "[hooks] testwrite_gate: test write ALLOWED for the admin seat (@%s): %s",
                 ADMIN_SEAT,
                 [str(p) for p in created + edited],
             )
@@ -216,15 +216,15 @@ def _decide(hook_data: dict) -> dict:
         if policy.error:
             if not created:
                 # The ruling only ever blocked creation; refusing an edit here would extend it by accident.
-                logger.warning("[HOOKS] testwrite_gate: policy unreadable, edit-only write allowed: %s", policy.error)
+                logger.warning("[hooks] testwrite_gate: policy unreadable, edit-only write allowed: %s", policy.error)
                 return _ALLOW
-            logger.warning("[HOOKS] testwrite_gate: refusing (fail-closed): %s", policy.error)
+            logger.warning("[hooks] testwrite_gate: refusing (fail-closed): %s", policy.error)
             return _refuse_unreadable(created, policy, lane)
 
         branch = _caller_branch(cwd)
         if policy.writing_enabled or branch in policy.allow:
             logger.info(
-                "[HOOKS] testwrite_gate: test write allowed (writing_enabled=%s, branch=%s): %s",
+                "[hooks] testwrite_gate: test write allowed (writing_enabled=%s, branch=%s): %s",
                 policy.writing_enabled,
                 branch or "<none>",
                 [str(p) for p in created + edited],
@@ -233,7 +233,7 @@ def _decide(hook_data: dict) -> dict:
 
         if created:
             logger.warning(
-                "[HOOKS] testwrite_gate: new test file refused for '%s' via the %s lane: %s",
+                "[hooks] testwrite_gate: new test file refused for '%s' via the %s lane: %s",
                 branch or "<no branch>",
                 lane,
                 [str(p) for p in created],
@@ -242,7 +242,7 @@ def _decide(hook_data: dict) -> dict:
 
         if edited and policy.block_edits:
             logger.warning(
-                "[HOOKS] testwrite_gate: test EDIT refused (block_test_edits on): %s",
+                "[hooks] testwrite_gate: test EDIT refused (block_test_edits on): %s",
                 [str(p) for p in edited],
             )
             return _refuse_edit(edited, policy, lane)
@@ -250,7 +250,7 @@ def _decide(hook_data: dict) -> dict:
         return _ALLOW
 
     except Exception as exc:  # fail closed on the write this gate guards
-        logger.error("[HOOKS] testwrite_gate: crashed on %s, refusing it: %s", tool_name, exc)
+        logger.error("[hooks] testwrite_gate: crashed on %s, refusing it: %s", tool_name, exc)
         return _block(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
 
 
@@ -286,7 +286,7 @@ def _template_version(tests_dir: Path) -> str:
         data = json.loads(receipt.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         # Only reached when the PAGE exists, so a missing receipt is a half-landed stamp.
-        logger.info("[HOOKS] testwrite_gate: template receipt unread at %s (%s)", receipt, exc)
+        logger.info("[hooks] testwrite_gate: template receipt unread at %s (%s)", receipt, exc)
         return _DEFAULT_VERSION
     version = (data.get("template_versions") or {}).get(_TEMPLATE_KEY) if isinstance(data, dict) else None
     if not isinstance(version, str) or not version:
@@ -301,7 +301,7 @@ def _spelled(path: Path, cwd: str) -> str:
         if project is not None:
             return path.resolve().relative_to(project.root).as_posix()
     except Exception as exc:
-        logger.info("[HOOKS] testwrite_gate: no project root for %s (%s) — absolute path", path, exc)
+        logger.info("[hooks] testwrite_gate: no project root for %s (%s) — absolute path", path, exc)
     return path.as_posix()
 
 
@@ -330,7 +330,7 @@ def template_pointer(hook_data: dict) -> dict:
         page = tests_dir / TEMPLATE_PAGE
         if not page.exists():
             logger.info(
-                "[HOOKS] testwrite_gate: template pointer suppressed — no page at %s (branch unstamped)",
+                "[hooks] testwrite_gate: template pointer suppressed — no page at %s (branch unstamped)",
                 page,
             )
             return _ALLOW
@@ -339,7 +339,7 @@ def template_pointer(hook_data: dict) -> dict:
             f"Test template {_template_version(tests_dir)}: {_spelled(page, cwd)}"
             f" - then drone @sentry checklist {_spelled(touched, cwd)}"
         )
-        logger.info("[HOOKS] testwrite_gate: template pointer injected for %s", touched)
+        logger.info("[hooks] testwrite_gate: template pointer injected for %s", touched)
         document = {
             "hookSpecificOutput": {
                 "hookEventName": "PostToolUse",
@@ -350,5 +350,5 @@ def template_pointer(hook_data: dict) -> dict:
 
     except Exception as exc:
         # A pointer is a courtesy, never a wall: a defect costs the line and nothing else.
-        logger.error("[HOOKS] testwrite_gate: template pointer failed (silent): %s", exc)
+        logger.error("[hooks] testwrite_gate: template pointer failed (silent): %s", exc)
         return _ALLOW

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_display.py
 # Description: Tests for apps/handlers/plan/display.py -- plan display formatting
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-29
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/plan/display.py."""
@@ -44,7 +44,7 @@ class TestDisplayPlanCreated:
         result = fn(plan_num=5, relative_location="flow", subject="Test", template_type="default")
         lines = result.split("\n")
         assert len(lines) == 3
-        assert lines[0].startswith("[FLOW]")
+        assert lines[0].startswith("\\[flow]")
         assert "Template:" in lines[1]
         assert "Subject:" in lines[2]
 

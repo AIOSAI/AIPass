@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: api.py
 # Description: Entry point CLI for drone @api — external clients, secrets, usage and the host API
-# Version: 1.2.2
+# Version: 1.2.4
 # Created: 2026-03-08
-# Modified: 2026-11-06
+# Modified: 2026-11-26
 # =============================================
 
 """api Branch - Main Orchestrator"""
@@ -16,7 +16,7 @@ from typing import Any, List
 
 from aipass.prax import logger
 
-from aipass.cli import console, header, error, reset_command_state, resolve_exit
+from aipass.cli import console, header, header_version, error, reset_command_state, resolve_exit
 from rich.panel import Panel
 from rich.table import Table
 from rich.columns import Columns
@@ -61,7 +61,7 @@ def discover_modules() -> List[Any]:
 def print_introspection():
     """Display discovered modules and available commands"""
     console.print()
-    console.print("[bold cyan]API Branch - API Operations[/bold cyan]")
+    console.print("[bold cyan]api Branch - API Operations[/bold cyan]")
     console.print()
     console.print("[dim]Universal API client and key management[/dim]")
     console.print()
@@ -89,7 +89,7 @@ def print_help():
     """Display Rich-formatted help"""
 
     console.print()
-    header("API Branch - API Operations")
+    header("api Branch - API Operations")
     console.print()
 
     console.print("[dim]Universal API client and key management system[/dim]")
@@ -97,9 +97,9 @@ def print_help():
     console.print("─" * 70)
     console.print()
 
-    console.print("[bold cyan]WHAT IS API?[/bold cyan]")
+    console.print("[bold cyan]WHAT IS api?[/bold cyan]")
     console.print()
-    console.print("API Branch provides:")
+    console.print("api Branch provides:")
     console.print("  [cyan]•[/cyan] OpenRouter API client integration")
     console.print("  [cyan]•[/cyan] API key management and validation")
     console.print("  [cyan]•[/cyan] Model discovery and availability")
@@ -230,7 +230,7 @@ def main():
             return 0
 
         if args[0] in ["--version", "-V"]:
-            console.print("API v1.0.0")
+            console.print(f"api v{header_version(__file__)}", highlight=False)
             return 0
 
         if args[0] in ["--help", "-h", "help"]:

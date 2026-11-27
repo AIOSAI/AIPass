@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update.py
 # Description: Update orchestrator — thin CLI layer for branch updates
-# Version: 1.3.0
+# Version: 1.5.0
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Update orchestrator for branch lifecycle management.
@@ -20,6 +20,7 @@ from aipass.spawn.apps.handlers.update_ops import (
     update_all,
 )
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.meta_ops import CorruptTemplateManifest
 from aipass.spawn.apps.handlers.seat_gate import PREVIEW_NOTE, seat_refusal
 from aipass.spawn.apps.handlers.registry import find_registry
 
@@ -37,6 +38,34 @@ def print_introspection():
         " — renames, additions, JSON merges, pruned file archival)[/dim]"
     )
     console.print()
+    console.print("[dim]Run drone @spawn update --help for usage[/dim]")
+
+
+def print_help():
+    """Display usage for drone @spawn update."""
+    console.print(
+        "[bold cyan]Usage:[/bold cyan] drone @spawn update <@branch|class --all> [--apply] [--dry-run] [--trace]"
+    )
+    console.print()
+    console.print("  [green]@branch[/green]           Update a single branch (uses its own class)")
+    console.print("  [green]<class> --all[/green]     Update every branch of one class (manager | specialist)")
+    console.print("  [green]--apply[/green]           Execute changes (default is preview-only)")
+    console.print("  [green]--dry-run[/green]         Preview changes without modifying files [dim](default)[/dim]")
+    console.print("  [green]--trace[/green]           Enable verbose logging")
+    console.print()
+    console.print("  [dim]@branch looks in the registry above the cwd, then core, residents and declared[/dim]")
+    console.print("  [dim]roots; a name in two registries is refused. --all walks the same fleet.[/dim]")
+    console.print()
+    console.print("  [dim]A branch may protect its own files from update with a .updateignore at its[/dim]")
+    console.print("  [dim]root — one pattern per line, e.g. .trinity/passport.json or docs.local/[/dim]")
+    console.print()
+    console.print("  [dim].md files are REPORTED, never written: the preview says differ / match /[/dim]")
+    console.print("  [dim]absent per file. A README or prompt diet is the owner's to run.[/dim]")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  drone @spawn update @api", highlight=False)
+    console.print("  drone @spawn update @api --apply", highlight=False)
+    console.print("  drone @spawn update specialist --all", highlight=False)
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -49,7 +78,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if "--help" in args:
-        print_introspection()
+        print_help()
         return True
 
     return handle_update(args) == 0
@@ -61,21 +90,7 @@ def handle_update(args: list[str]) -> int:
     Returns exit code (0=success, 1=failure).
     """
     if "--help" in args or "-h" in args:
-        console.print(
-            "[bold cyan]Usage:[/bold cyan] drone @spawn update <@branch|class --all> [--apply] [--dry-run] [--trace]"
-        )
-        console.print()
-        console.print("  [green]@branch[/green]           Update a single branch (uses its own class)")
-        console.print("  [green]<class> --all[/green]     Update every branch of one class (manager | specialist)")
-        console.print("  [green]--apply[/green]           Execute changes (default is preview-only)")
-        console.print("  [green]--dry-run[/green]         Preview changes without modifying files [dim](default)[/dim]")
-        console.print("  [green]--trace[/green]           Enable verbose logging")
-        console.print()
-        console.print("  [dim]A branch may protect its own files from update with a .updateignore at its[/dim]")
-        console.print("  [dim]root — one pattern per line, e.g. .trinity/passport.json or docs.local/[/dim]")
-        console.print()
-        console.print("  [dim].md files are REPORTED, never written: the preview says differ / match /[/dim]")
-        console.print("  [dim]absent per file. A README or prompt diet is the owner's to run.[/dim]")
+        print_help()
         return 0
 
     if not args:
@@ -150,6 +165,8 @@ def _run(args: list[str], apply: bool) -> int:
 
     try:
         result = update_branch(branch_name, dry_run=dry_run, trace=trace)
+    except CorruptTemplateManifest:
+        raise
     except Exception as exc:
         logger.error(f"[update] Unexpected error updating {branch_name}: {exc}")
         error(f"Error updating {branch_name}: {exc}")
@@ -290,7 +307,8 @@ def _print_all_summary(results: list[dict], dry_run: bool) -> None:
         f"  Totals: +{total_add} added, ~{total_upd} updated, "
         f">{total_ren} renamed, -{total_prn} pruned, "
         f"!{total_skip} py-skipped, ={total_prot} owner-protected, "
-        f"~{total_md} md-drifted, ~{total_gi} gitignore-drifted (reported, never written)"
+        f"~{total_md} md-drifted, ~{total_gi} gitignore-drifted (reported, never written)",
+        highlight=False,
     )
 
     if total_err:

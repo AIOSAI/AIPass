@@ -15,8 +15,9 @@ NAME_RATCHET_GATES = False
 
 # Standards consulted (scored + not_applicable): 86 aipass checkers + diagnostics. Moves by hand only, so a
 # checker that vanishes (retired, or its import broken) turns this job red instead of averaging one fewer.
-# 86 -> 89 on 2026-11-18: stdlib_only, fixed_depth_path, caller_file_depth.
-EXPECTED_STANDARDS = 89
+# 86 -> 89 on 2026-11-18: stdlib_only, fixed_depth_path, caller_file_depth. 89 -> 90 on 2026-11-22: lowercase_name.
+# 90 -> 91 on 2026-11-26: pack_registry (sentry audits its own checker registry; not_applicable elsewhere).
+EXPECTED_STANDARDS = 91
 
 src = Path("src/aipass")
 pack = src / "sentry/apps/handlers/aipass_standards"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access — the tiers, the owner gate and its log severity
-# Version: 1.7.1
+# Version: 1.8.1
 # Created: 2026-05-12
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py: the git tiers and how owner tier is earned per repo."""
@@ -13,7 +13,10 @@
 
 from __future__ import annotations
 
+import ast
+import inspect
 import json
+import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -28,7 +31,9 @@ from aipass.drone.apps.plugins.devpulse_ops.auth import (
 )
 from aipass.drone.apps.plugins.devpulse_ops import auth
 from aipass.ai_mail import transcript_dir
+from aipass.drone.apps.handlers.git import alerts_handler, label_handler, release_handler
 from aipass.drone.apps.handlers.git import delete_branch_handler, help_pages, repo_door, session_home
+from aipass.drone.apps.modules import git_module
 from aipass.drone.apps.modules.git_module import handle_command
 
 from .conftest import OWNER_REGISTRY_ID, make_owner_project
@@ -522,6 +527,32 @@ class TestNoSeatLiftsItsOwnGate:
             verify_git_access("commit")
 
 
+class TestTheSeatVariableIsNotAnOwnerCredential:
+    """AIPASS_SEAT names who is sitting at a passportless root; only the cwd inside the seat earns owner tier."""
+
+    @pytest.fixture()
+    def root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        make_owner_project(tmp_path, branch_dir=tmp_path / "src" / "aipass" / "devpulse")
+        monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
+        monkeypatch.setenv("AIPASS_SEAT", "devpulse")
+        return tmp_path
+
+    def test_a_seat_at_the_root_is_refused_commit_and_still_reads_pr_list(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: drop the cwd check, and one variable at the clone root holds the only write tier."""
+        monkeypatch.chdir(root)
+
+        with pytest.raises(PermissionError, match=re.escape(auth.REFUSE_SEAT.format(tier="owner-tier"))):
+            verify_git_access("commit")
+        assert verify_git_access("pr-read") == "devpulse"
+
+    def test_the_same_seat_with_the_cwd_inside_it_commits(self, root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(root / "src" / "aipass" / "devpulse")
+
+        assert verify_git_access("commit") == "devpulse"
+
+
 class TestRegistryIdIsNotASecret:
     """The registry id is readable off local disk, so it cannot carry authority alone."""
 
@@ -903,3 +934,85 @@ class TestManagerDeletesABranchInItsOwnRepo:
         assert _deletes(calls) == []
         (pr_check,) = [argv for argv, _ in calls if argv[0] == "gh"]
         assert pr_check[:3] == ["gh", "pr", "list"] and "vera/studio" in pr_check and _DEPENDABOT in pr_check
+
+
+_GATE = "aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access"
+_CHORE_HANDLERS = {"alerts": alerts_handler, "label": label_handler, "release": release_handler}
+
+
+def _compared_with_args(tree: ast.AST) -> set[str]:
+    """Every word *tree* compares ``args[0]`` or ``args[:1]`` against: the subcommands it answers."""
+    words: set[str] = set()
+    for node in ast.walk(tree):
+        left = node.left if isinstance(node, ast.Compare) else None
+        if isinstance(left, ast.Subscript) and isinstance(left.value, ast.Name) and left.value.id == "args":
+            for comparator in node.comparators:  # type: ignore[union-attr]
+                words |= {
+                    c.value for c in ast.walk(comparator) if isinstance(c, ast.Constant) and isinstance(c.value, str)
+                }
+    return {word for word in words if not word.startswith("-")}
+
+
+def _answered(command: str) -> set[str]:
+    """The subcommands a chore's handler answers, plus any the router hands to another of its entries (release edit)."""
+    handler = _CHORE_HANDLERS[command]
+    words = _compared_with_args(ast.parse(inspect.getsource(handler)))
+    name = handler.__name__.rsplit(".", 1)[1]
+    for function in ast.walk(ast.parse(inspect.getsource(git_module))):
+        if isinstance(function, ast.FunctionDef) and any(
+            isinstance(node, ast.Attribute)
+            and getattr(node.value, "id", "") == name
+            and node.attr != f"{command}_command"
+            for node in ast.walk(function)
+        ):
+            words |= _compared_with_args(function)
+    return words
+
+
+class TestASubcommandInNoRowIsRefused:
+    """A gh or chore subcommand in no row of the permission table is refused before the gate and its handler."""
+
+    @pytest.mark.parametrize(
+        ("command", "args", "sub"),
+        [
+            ("alerts", ["frobnicate"], "frobnicate"),
+            ("alerts", ["--json", "bogus"], "bogus"),
+            ("label", ["delete", "ci"], "delete"),
+            ("release", ["create", "v9"], "create"),
+            ("issue", ["frobnicate", "12"], "frobnicate"),
+        ],
+    )
+    def test_it_is_refused_by_name_for_every_seat_before_the_gate_and_gh(
+        self, command: str, args: list[str], sub: str
+    ) -> None:
+        """Mutant: the chore lane falls back to its read key — any seat reaches the handler with an unknown verb."""
+        with patch(_GATE) as gate, patch("aipass.drone.apps.modules.git_module.subprocess.run") as run:
+            result = handle_command(command, args)
+
+        assert result == {"stdout": "", "stderr": auth.no_row_refusal(command, sub), "exit_code": 1}
+        assert f"'{sub}'" in result["stderr"] and "in no row" in result["stderr"] and "auth.py" in result["stderr"]
+        gate.assert_not_called()
+        run.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("command", "args", "key"),
+        [
+            ("alerts", ["--json", "list"], "alerts"),
+            ("alerts", ["reopen", "1"], "alerts-write"),
+            ("label", ["create", "ci"], "label-write"),
+            ("release", ["edit", "v1.0.0"], "release-write"),
+            ("release", [], "release"),
+        ],
+    )
+    def test_a_subcommand_with_a_row_still_asks_its_tier(self, command: str, args: list[str], key: str) -> None:
+        with patch(_GATE, side_effect=PermissionError("stop")) as gate:
+            handle_command(command, args)
+
+        gate.assert_called_once_with(key)
+
+    @pytest.mark.parametrize("command", sorted(_CHORE_HANDLERS))
+    def test_every_subcommand_a_chore_handler_answers_holds_a_row(self, command: str) -> None:
+        """Mutant: reopen's row deleted — this goes red at test time, not refused in the first caller's hands."""
+        row = auth.CHORE_SUBCOMMANDS[command]
+
+        assert _answered(command) and _answered(command) <= {*row["read"], *row["write"]}

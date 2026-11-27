@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tracker.py
 # Description: Drive upload tracker — mtime+size dedup for file sync
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-11-26
 # =============================================
 
 """Drive upload tracker.
@@ -146,7 +146,7 @@ def update_entry(
     try:
         rel_key = str(local_file.relative_to(backup_root))
     except ValueError:
-        logger.info(f"File {local_file} not relative to {backup_root}, using absolute")
+        logger.warning(f"File {local_file} not relative to {backup_root}, using absolute")
         rel_key = str(local_file)
 
     try:
@@ -158,7 +158,7 @@ def update_entry(
             "last_sync": datetime.now(timezone.utc).isoformat(),
         }
     except OSError as exc:
-        logger.info(f"Failed to stat {local_file} for tracker update: {exc}")
+        logger.warning(f"Failed to stat {local_file} for tracker update: {exc}")
         tracker[rel_key] = {
             "local_size": 0,
             "local_mtime": 0.0,

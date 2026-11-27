@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: push_branch_dashboard.py
 # Description: Push flow section to branch dashboards
-# Version: 2.4.0
+# Version: 2.5.0
 # Created: 2026-03-01
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Push Flow Section to Branch Dashboard
@@ -161,51 +161,43 @@ def _calculate_quick_status(sections: Dict[str, Any], existing: Any = None) -> D
 
 
 def _get_all_registry_files() -> List[str]:
-    """Return per-type registry filenames from template_registry.json."""
-    try:
-        template_reg = FLOW_JSON_DIR / "template_registry.json"
-        if template_reg.exists():
-            with open(template_reg, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            files: List[str] = []
-            for _key, type_cfg in data.get("types", {}).items():
-                prefix = type_cfg.get("prefix", "")
-                if prefix:
-                    rf = f"{prefix.lower()}_registry.json"
-                    if rf not in files:
-                        files.append(rf)
-            if files:
-                return files
-    except Exception as exc:
-        logger.warning("[push_branch_dashboard] Failed to read template registry, falling back to default: %s", exc)
-    return [REGISTRY_FILE.name]
+    """Per-type registry filenames from template_registry.json; absent means default, unreadable raises."""
+    template_reg = FLOW_JSON_DIR / "template_registry.json"
+    files: List[str] = []
+    if template_reg.exists():
+        with open(template_reg, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        for _key, type_cfg in data.get("types", {}).items():
+            prefix = type_cfg.get("prefix", "")
+            if prefix:
+                rf = f"{prefix.lower()}_registry.json"
+                if rf not in files:
+                    files.append(rf)
+    return files or [REGISTRY_FILE.name]
 
 
 def _load_registry() -> Dict[str, Any]:
     """Load all per-type plan registries and merge into a single dict.
-    Keys are PREFIX-NNNN so registries sharing a plan number (FPLAN-0013, DPLAN-0013) do not collide.
+    Keys are PREFIX-NNNN so registries sharing a plan number do not collide; an unreadable one raises.
     """
     merged: Dict[str, Any] = {"plans": {}, "next_number": 1}
     for registry_file in _get_all_registry_files():
         target = FLOW_JSON_DIR / registry_file
         reg_prefix = registry_file.replace("_registry.json", "").upper()
-        try:
-            if not target.exists():
-                continue
-            with open(target, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            for plan_num, plan_data in data.get("plans", {}).items():
-                file_path = plan_data.get("file_path", "")
-                filename = Path(file_path).name if file_path else ""
-                prefix_match = re.match(r"^([A-Z]+PLAN)", filename)
-                prefix = prefix_match.group(1) if prefix_match else reg_prefix
-                composite_key = f"{prefix}-{plan_num.zfill(4)}"
-                merged["plans"][composite_key] = plan_data
-            nn = data.get("next_number", 1)
-            if nn > merged["next_number"]:
-                merged["next_number"] = nn
-        except Exception as exc:
-            logger.warning("Failed to load registry '%s': %s", target, exc)
+        if not target.exists():
+            continue
+        with open(target, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        for plan_num, plan_data in data.get("plans", {}).items():
+            file_path = plan_data.get("file_path", "")
+            filename = Path(file_path).name if file_path else ""
+            prefix_match = re.match(r"^([A-Z]+PLAN)", filename)
+            prefix = prefix_match.group(1) if prefix_match else reg_prefix
+            composite_key = f"{prefix}-{plan_num.zfill(4)}"
+            merged["plans"][composite_key] = plan_data
+        nn = data.get("next_number", 1)
+        if nn > merged["next_number"]:
+            merged["next_number"] = nn
     return merged
 
 

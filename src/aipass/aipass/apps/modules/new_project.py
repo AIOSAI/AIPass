@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: new_project.py
 # Description: aipass new — create projects inside the AIPass installation
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-07-17
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """
-aipass new — create projects inside the AIPass installation (DPLAN-0247)
+aipass new — create projects inside the AIPass installation
 
 Creates a project at <host>/projects/<name> with its own git repo,
 AIPass scaffold, and optional resident agent. Born deployable.
@@ -47,6 +47,7 @@ def print_introspection() -> None:
     host = find_host_root(Path.cwd())
     console.print()
     console.print("[bold cyan]aipass new[/bold cyan] — project creator")
+    console.print("[dim]Create and list projects inside this AIPass installation.[/dim]")
     console.print()
 
     if host is None:
@@ -79,6 +80,7 @@ def print_introspection() -> None:
 
     console.print()
     console.print("[dim]Create: aipass new <name> [--template python] [--no-agent][/dim]")
+    console.print("[dim]Run 'aipass new --help' for usage and examples.[/dim]")
     console.print()
 
 
@@ -93,6 +95,10 @@ def print_help() -> None:
     console.print("  [green]aipass new <name>[/green]                      [dim]# Create with empty template[/dim]")
     console.print("  [green]aipass new <name> --template python[/green]    [dim]# Create with Python template[/dim]")
     console.print("  [green]aipass new <name> --no-agent[/green]           [dim]# Skip agent creation[/dim]")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  aipass new myapp")
+    console.print("  aipass new myapp --template python --no-agent")
     console.print()
     console.print("[yellow]TEMPLATES:[/yellow]")
     console.print(f"  [dim]{', '.join(TEMPLATES)}[/dim]")
@@ -113,6 +119,7 @@ def _prompt_template(templates: list[str]) -> str:
     """
     console.print()
     console.print("[yellow]Choose a template:[/yellow]")
+    console.print("[dim]Each template is a starting scaffold for the new project.[/dim]")
     for idx, t in enumerate(templates, 1):
         console.print(f"  [green]{idx}[/green]. {t}")
     console.print()
@@ -204,14 +211,14 @@ def handle_command(command: str, args: list[str]) -> bool:
         elif no_agent is None:
             no_agent = False
     except KeyboardInterrupt:
-        logger.info("[AIPASS] new project cancelled at a prompt: %s", name)
+        logger.info("[aipass] new project cancelled at a prompt: %s", name)
         error("Cancelled — no project created.")
         sys.exit(130)
 
     try:
         result = create_project(name, template, no_agent)
     except (RuntimeError, ValueError) as e:
-        logger.warning("[AIPASS] new project failed: %s", e)
+        logger.warning("[aipass] new project failed: %s", e)
         error(str(e))
         sys.exit(1)
 
@@ -231,25 +238,7 @@ def handle_command(command: str, args: list[str]) -> bool:
         "new_project_create",
         {"name": name, "template": template, "target": result["target"]},
     )
-    logger.info("[AIPASS] new project: %s (%s) at %s", name, template, result["target"])
-
-    if result["agent_created"] and sys.stdin.isatty():
-        from aipass.aipass.apps.handlers.handoff_platform import (
-            launch_inline,
-            return_path_breadcrumb,
-        )
-
-        console.print()
-        console.print("[dim]Launching your manager agent — Ctrl-C to stay in the shell.[/dim]")
-        console.print(f"[dim]Return anytime with: {return_path_breadcrumb(result['agent_home'])}[/dim]")
-        console.print()
-
-        launch_inline(
-            "claude",
-            "You are the new resident agent of this project."
-            " Read your passport and README, then tell me what you can do.",
-            result["agent_home"],
-        )
+    logger.info("[aipass] new project: %s (%s) at %s", name, template, result["target"])
 
     console.print()
     console.print("[yellow]Next steps:[/yellow]")

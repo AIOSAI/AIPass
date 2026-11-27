@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
-# Description: CLI Routing Tests for DAEMON
-# Version: 1.1.2
+# Description: CLI Routing Tests for daemon
+# Version: 1.1.3
 # Created: 2026-03-28
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/daemon.py — the router: help, introspection, unknown commands, the argument gate."""
@@ -70,7 +70,7 @@ def test_print_help(capsys: pytest.CaptureFixture[str]) -> None:
     _daemon_mod.print_help(modules)
     captured = capsys.readouterr()
     assert len(captured.out) > 0, "print_help() must produce output"
-    assert "DAEMON" in captured.out, "print_help output must mention DAEMON"
+    assert "daemon - Branch Management System" in captured.out, "print_help output must mention daemon"
 
 
 def test_print_introspection(capsys: pytest.CaptureFixture[str]) -> None:
@@ -79,7 +79,7 @@ def test_print_introspection(capsys: pytest.CaptureFixture[str]) -> None:
     _daemon_mod.print_introspection(modules)
     captured = capsys.readouterr()
     assert len(captured.out) > 0, "print_introspection() must produce output"
-    assert "DAEMON" in captured.out, "print_introspection output must mention DAEMON"
+    assert "daemon - Branch Management System" in captured.out, "print_introspection output must mention daemon"
 
 
 def test_output_capture(capsys: pytest.CaptureFixture[str]) -> None:
@@ -89,7 +89,7 @@ def test_output_capture(capsys: pytest.CaptureFixture[str]) -> None:
     captured = capsys.readouterr()
     assert len(captured.out) > 0, "Help output must be capturable on stdout"
     assert "USAGE:" in captured.out, f"help must print the USAGE: block, got: {captured.out[:200]!r}"
-    assert "DAEMON - Branch Management System" in captured.out, "help must print the DAEMON banner heading"
+    assert "daemon - Branch Management System" in captured.out, "help must print the daemon banner heading"
 
 
 def test_version_flag() -> None:

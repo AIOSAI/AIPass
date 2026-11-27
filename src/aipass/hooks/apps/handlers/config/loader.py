@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: loader.py
-# Version: 2.4.1
+# Version: 2.4.2
 # Description: Hook config loader — the AIPass config from AIPASS_HOME, a project's own behind trust, gates always
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-05-19
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """Which hook config a session runs. Security never depends on trust (DPLAN-0356 item 1).
@@ -51,7 +51,7 @@ def _absolute(raw: str) -> Path:
     try:
         return path.resolve()
     except OSError as exc:  # resolve() can read the cwd; the spelling is still the place
-        logger.info("[HOOKS] loader: cannot resolve %s, using it as spelled: %s", raw, exc)
+        logger.info("[hooks] loader: cannot resolve %s, using it as spelled: %s", raw, exc)
         return path
 
 
@@ -73,6 +73,20 @@ def aipass_home() -> Path | None:
     if (root / _CONFIG).is_file() and (root / "src" / "aipass").is_dir():
         return root
     return None
+
+
+def seat_at_root(cwd: str) -> Path | None:
+    """The branch $AIPASS_SEAT names, only when *cwd* is a repo root (it holds src/aipass); else None.
+
+    A cloud session cannot leave the clone's root, so the variable stands in for the cwd there and
+    nowhere else. The name must be one plain directory under src/aipass that holds .trinity/.
+    """
+    name = os.environ.get("AIPASS_SEAT", "")
+    fleet = Path(cwd).resolve() / "src" / AIPASS
+    if not name or name != Path(name).name or name.startswith(".") or not fleet.is_dir():
+        return None
+    seat = fleet / name
+    return seat if (seat / ".trinity").is_dir() else None
 
 
 def fleet_rows(repo_root: Path) -> list[dict]:
@@ -98,7 +112,7 @@ def _is_project_root(directory: Path) -> bool:
     try:
         return any(directory.glob(_PROJECT_MARKER))
     except OSError as exc:
-        logger.info("[HOOKS] loader: project marker scan failed at %s: %s", directory, exc)
+        logger.info("[hooks] loader: project marker scan failed at %s: %s", directory, exc)
         return False
 
 
@@ -114,7 +128,7 @@ def locate_config() -> tuple[str, Path | None]:
                 return AIPASS, home
             if home is not None and _inside(search, home) and not _is_project_root(search):
                 logger.warning(
-                    "[HOOKS] loader: IGNORED %s — inside AIPass only %s configures hooks",
+                    "[hooks] loader: IGNORED %s — inside AIPass only %s configures hooks",
                     search / _CONFIG,
                     home / _CONFIG,
                 )
@@ -147,11 +161,11 @@ def _stamp_namespace(config: dict, kind: str, where: Path) -> None:
     if namespace is None:
         return
     if kind != EXTERNAL:
-        logger.warning("[HOOKS] loader: %s refused in %s: AIPass's own config runs aipass.* only", NAMESPACE_KEY, where)
+        logger.warning("[hooks] loader: %s refused in %s: AIPass's own config runs aipass.* only", NAMESPACE_KEY, where)
         return
     if not isinstance(namespace, str) or not namespace.isidentifier() or namespace == "aipass":
         logger.warning(
-            "[HOOKS] loader: %s %r refused in %s: one package name, not aipass", NAMESPACE_KEY, namespace, where
+            "[hooks] loader: %s %r refused in %s: one package name, not aipass", NAMESPACE_KEY, namespace, where
         )
         return
     config[NAMESPACE_STAMP] = namespace
@@ -167,9 +181,9 @@ def gate_set() -> dict:
             if gates.has_gates(found):
                 found["_source"] = "project"
                 return found
-            logger.error("[HOOKS] loader: %s names no gate — the built-in gate set runs", home / _CONFIG)
+            logger.error("[hooks] loader: %s names no gate — the built-in gate set runs", home / _CONFIG)
         except (OSError, ValueError) as exc:
-            logger.error("[HOOKS] loader: AIPass config unreadable (%s) — the built-in gate set runs", exc)
+            logger.error("[hooks] loader: AIPass config unreadable (%s) — the built-in gate set runs", exc)
     return gates.builtin_config()
 
 
@@ -194,12 +208,12 @@ def find_project_config() -> dict | None:
         try:
             trusted = is_trusted(str(where))
         except ValueError as exc:  # a registry that cannot be read is no trust: the gate set serves
-            logger.error("[HOOKS] loader: %s — %s runs the AIPass gates only", exc, where)
+            logger.error("[hooks] loader: %s — %s runs the AIPass gates only", exc, where)
             return None
         if not trusted:
             # Its handler_namespace with it: no handler of an untrusted config is imported.
             logger.warning(
-                "[HOOKS] project not enrolled, or its hooks.json changed since enrollment: %s (its own hooks are off;"
+                "[hooks] project not enrolled, or its hooks.json changed since enrollment: %s (its own hooks are off;"
                 " the AIPass gates run; cure: aipass trust %s)",
                 where,
                 where,
@@ -209,7 +223,7 @@ def find_project_config() -> dict | None:
     try:
         config = _read_config(config_file)
     except (OSError, ValueError) as exc:  # unreadable is "nothing usable": the gate set serves, loudly
-        logger.error("[HOOKS] bad config %s: %s", config_file, exc)
+        logger.error("[hooks] bad config %s: %s", config_file, exc)
     if config is None:
         return None
     _stamp_namespace(config, kind, where)
@@ -218,7 +232,7 @@ def find_project_config() -> dict | None:
         return gates.enforce(config, gate_set())
     if kind == AIPASS and not gates.has_gates(config):
         # A root edit that drops every gate must not run ungated.
-        logger.error("[HOOKS] loader: %s names no gate — the built-in gates are forced over it", config_file)
+        logger.error("[hooks] loader: %s names no gate — the built-in gates are forced over it", config_file)
         return gates.enforce(config, gates.builtin_config())
     return config
 
@@ -258,7 +272,7 @@ def config_unavailable_reason() -> str:
             f"— the trust gate refused its own hooks.{tail}\n"
             f"Fix (re-enroll): aipass trust {where}"
         )
-    return f"{config_file} could not be read or parsed — see the [HOOKS] error in the engine log.{tail}"
+    return f"{config_file} could not be read or parsed — see the hooks error lines in the engine log.{tail}"
 
 
 def config_break_banner() -> str | None:
@@ -317,7 +331,7 @@ def _mark_nudged(session_id: str, project_path: str) -> None:
         try:
             path.touch()
         except OSError as exc:
-            logger.info("[HOOKS] never_enrolled_banner: guard write failed: %s", exc)
+            logger.info("[hooks] never_enrolled_banner: guard write failed: %s", exc)
 
 
 def never_enrolled_banner(session_id: str = "") -> str | None:

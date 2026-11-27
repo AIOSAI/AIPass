@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: protected_paths.py
-# Version: 2.4.0
+# Version: 2.4.1
 # Description: The files that switch the gates themselves — written by the admin seat alone (git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Which files decide whether the gates run, and so must never be an agent's to write (DPLAN-0356 item 1).
@@ -61,7 +61,7 @@ def _spelled(path: Path) -> str:
     try:
         path = path.resolve()
     except (OSError, RuntimeError) as exc:  # the spelling still names the file
-        logger.info("[HOOKS] protected_paths: cannot resolve %s: %s", path, exc)
+        logger.info("[hooks] protected_paths: cannot resolve %s: %s", path, exc)
     return str(path).replace("\\", "/")
 
 
@@ -135,7 +135,7 @@ def _by_identity(target: Path) -> str | None:
     try:
         info = os.stat(target)
     except FileNotFoundError as exc:  # a file that does not exist yet has one name: the one being written
-        logger.debug("[HOOKS] protected_paths: no file at %s: %s", target, exc)
+        logger.debug("[hooks] protected_paths: no file at %s: %s", target, exc)
     if info is None or info.st_nlink < 2:
         return None
     mine = (info.st_dev, info.st_ino)
@@ -143,7 +143,7 @@ def _by_identity(target: Path) -> str | None:
         try:
             theirs = os.stat(anchor)
         except FileNotFoundError as exc:  # gone since it was listed: no second name to share
-            logger.debug("[HOOKS] protected_paths: anchor gone %s: %s", anchor, exc)
+            logger.debug("[hooks] protected_paths: anchor gone %s: %s", anchor, exc)
             continue
         if (theirs.st_dev, theirs.st_ino) == mine:
             return _by_name(_spelled(anchor)) or TRUST

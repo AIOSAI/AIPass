@@ -3,7 +3,7 @@
 # Description: aipass doctor --smoke — one live turn per provider through hooks' smoke door
 # Version: 1.0.0
 # Created: 2026-10-28
-# Modified: 2026-10-28
+# Modified: 2026-11-24
 # =============================================
 
 """doctor_smoke — the opt-in live rows, read from ``drone @hooks smoke --json``."""
@@ -15,7 +15,6 @@ import subprocess
 from typing import List, Tuple
 
 from aipass.cli import console
-from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.json import json_handler
@@ -79,24 +78,3 @@ def print_smoke_json(model: str = "") -> int:
         return 1
     console.print(json.dumps(results, indent=2), markup=False, highlight=False)
     return int(any(r.get("status") == "fail" for r in results))
-
-
-def print_introspection() -> None:
-    """Display module info for doctor_smoke."""
-    console.print()
-    console.print("[bold cyan]doctor_smoke Module[/bold cyan]")
-    console.print("Live provider rows — doctor --smoke / --smoke --json")
-    console.print()
-
-
-def handle_command(command: str, args: list[str]) -> bool:
-    """Handle command routing. Helper module — no standalone commands."""
-    if command != "doctor_smoke":
-        return False
-    if args and args[0] in ("--info", "info"):
-        print_introspection()
-        return True
-    if not args or wants_help(args):
-        console.print("[dim]Helper module — use: aipass doctor --smoke [--json][/dim]")
-        return True
-    return False

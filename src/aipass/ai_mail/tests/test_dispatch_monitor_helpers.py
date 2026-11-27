@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_helpers.py
 # Description: Tests for the dispatch monitor's units - rate limit, fresh cmd, startup check, kill, logs, lock, JSONL
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's units: startup check, kill, result logs, own lock, JSONL."""
@@ -19,6 +19,7 @@ import json
 import subprocess
 import pytest
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
@@ -306,6 +307,8 @@ def test_unparseable_stdout_is_reported_as_no_result_json(monkeypatch, main_argv
     reason = _bounce_reason(monkeypatch, main_argv[0], tmp_path, "not json at all\nstill not json")
 
     assert "Last attempt result JSON: (no result JSON captured)\n\nrun: claude" in reason
+    warnings = [c.args[0] % c.args[1:] for c in cast(MagicMock, mod.logger).warning.call_args_list]
+    assert any(w.startswith("[monitor] No result JSON in") for w in warnings)
 
 
 def test_the_bounce_names_every_error_field_of_the_result_json(monkeypatch, main_argv, tmp_path):

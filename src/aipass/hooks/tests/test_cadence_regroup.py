@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cadence_regroup.py
 # Description: Cadence's regroup and counter machinery: reset, the regroup token and part queue, config, fail-loud
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-11-07
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/cadence.py: the regroup and counter machinery."""
@@ -291,7 +291,7 @@ class TestRegroupFireLog:
         log.info.assert_called_once()
         fmt, *args = log.info.call_args.args
         line = fmt % tuple(args)
-        assert "[HOOKS] regroup fired loader=branch,identity part=1/3" in line
+        assert "[hooks] regroup fired loader=branch,identity part=1/3" in line
         assert "bytes=6" in line  # the em dash is three UTF-8 bytes
         assert "chars=4" in line
         log.warning.assert_not_called()
@@ -424,6 +424,12 @@ class TestModuleInterface:
 
     def test_handle_command_unknown_returns_false(self):
         assert handle_command("other", []) is False
+
+    def test_help_prints_the_usage_and_examples_headings(self, capsys):
+        assert handle_command("cadence", ["--help"]) is True
+        err = capsys.readouterr().err
+        assert "Usage:" in err
+        assert "Examples:" in err
 
     def test_print_introspection_runs(self, tmp_path, capsys):
         """Introspection names the module and reports the cadence it read.
@@ -703,10 +709,9 @@ class TestPostCompactDeterminism:
                 assert result is True, f"navmap should fire after reset from turn {prev_turn}"
 
     def test_compact_handler_calls_reset_with_hook_data(self, tmp_path, monkeypatch):
-        """compact resets the cadence counter and files the git answer under ## Git.
+        """compact resets the cadence counter and files the dirty-files answer among the live facts.
 
-        _get_git_info is stood in by a recorder so no real git process starts; the
-        ## Git assert is proven by a mutant on compact.handle (see the fleet green report).
+        _dirty_files and _dispatches are stood in by recorders so no real git or mail is read.
         The real cadence runs with its guard dir under tmp_path (fleet green leg 7: no
         importlib patch): the reset is read off the disk, the session id from hook_data
         in the state file's name and the caller in the window stamp.
@@ -715,20 +720,20 @@ class TestPostCompactDeterminism:
         monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
         (tmp_path / "aipass-cadence-test-123.json").write_text(json.dumps({"turn": 7}), encoding="utf-8")
         hook_data = {"cwd": str(tmp_path / "fake"), "session_id": "test-123"}
-        git_answer = "Git branch: recorded-branch\nUncommitted changes: 3 files"
+        git_answer = "3: M a.py, M b.py, ?? c.py"
 
-        with patch(
-            "aipass.hooks.apps.handlers.lifecycle.compact._get_git_info",
-            return_value=git_answer,
-        ) as git_recorder:
+        with (
+            patch("aipass.hooks.apps.handlers.lifecycle.compact._dirty_files", return_value=git_answer) as git_recorder,
+            patch("aipass.hooks.apps.handlers.lifecycle.compact._dispatches", return_value="none"),
+        ):
             result = _compact_handle(hook_data)
 
         state = json.loads((tmp_path / "aipass-cadence-test-123.json").read_text(encoding="utf-8"))
         assert state["turn"] == -1
         window = json.loads((tmp_path / "aipass-window-opened-test-123.json").read_text(encoding="utf-8"))
         assert window["caller"] == "compact"
-        git_recorder.assert_called_once_with()
-        assert f"## Git\n{git_answer}" in result["stdout"].split("\n\n")
+        git_recorder.assert_called_once()
+        assert f"- Uncommitted files: {git_answer}" in result["stdout"].splitlines()
         assert result["exit_code"] == 0
 
     def test_double_reset_is_idempotent(self, tmp_path):

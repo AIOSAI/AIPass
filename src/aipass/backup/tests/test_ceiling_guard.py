@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_ceiling_guard.py
 # Description: Tests for the per-run size/file-count ceiling (runaway guard)
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-08-20
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/scan/ceiling.py and the per-run size/file-count ceiling."""
@@ -12,7 +12,7 @@
 # sentry: no-test-needed(ruff) — that scan/ceiling and modules/snapshot, all parse and import
 # sentry: no-test-needed(documentation) — that check_ceiling and breach methods carry docstrings
 # sentry: no-test-needed(constant) — DEFAULT_MAX_TOTAL_GB and DEFAULT_MAX_FILES values (the latter tested as the limit)
-# sentry: no-test-needed(stdlib) — the byte count os.path.getsize() returns; its OSError skip is tested here
+# sentry: no-test-needed(stdlib) — the byte count os.path.getsize() returns; its skip and refusal are tested here
 
 import json
 from pathlib import Path
@@ -128,6 +128,16 @@ class TestCheckCeiling:
         files.append((str(tmp_path / "src" / "ghost.py"), "src/ghost.py"))
         assert check_ceiling(files, {"max_backup_files": 100, "max_backup_size_gb": 10}) is None
 
+    def test_unmeasurable_file_refuses(self, tmp_path: Path) -> None:
+        """A file that exists but cannot be stat'ed refuses the run: the size gate never passes blind."""
+        files = _files(tmp_path, ["src/a.py"])
+        # A path under a regular file stats as NotADirectoryError: an OSError that is not absence.
+        files.append((str(tmp_path / "src" / "a.py" / "b.py"), "src/a.py/b.py"))
+        breach = check_ceiling(files, {"max_backup_files": 100, "max_backup_size_gb": 10})
+        assert breach is not None
+        assert breach.reason == "unmeasured"
+        assert "src/a.py/b.py" in breach.summary()
+
     def test_absent_max_backup_files_uses_default_limit(self, tmp_path: Path) -> None:
         """Without max_backup_files a small set passes and one file past DEFAULT_MAX_FILES refuses."""
         files = _files(tmp_path, ["src/a.py"])
@@ -139,6 +149,47 @@ class TestCheckCeiling:
         assert breach.reason == "file_count"
         assert breach.measured == DEFAULT_MAX_FILES + 1
         assert breach.limit == DEFAULT_MAX_FILES
+
+
+class TestGrowthCeiling:
+    """Before the walls, a run is held to max_growth_ratio times the last good run."""
+
+    WALLS = {"max_backup_files": 1000, "max_backup_size_gb": 10}
+
+    def test_three_point_one_times_the_baseline_refuses(self, tmp_path: Path) -> None:
+        """31 files against a 10-file baseline is past 3x: refused, naming both numbers and the escape key."""
+        files = _files(tmp_path, [f"t/{i}.o" for i in range(31)])
+        breach = check_ceiling(files, self.WALLS, {"files": 10, "bytes": 0})
+        assert breach is not None
+        assert breach.reason == "file_growth"
+        assert breach.summary() == "31 files is 3.1x the last run's 10"
+        assert breach.detail_lines()[-1].startswith("If the project really grew, raise 'max_growth_ratio'")
+
+    def test_two_point_nine_times_the_baseline_passes(self, tmp_path: Path) -> None:
+        """29 files against 10, and 2.9x the baseline's bytes, are growth inside the ratio."""
+        files = _files(tmp_path, [f"t/{i}.o" for i in range(29)])
+        assert check_ceiling(files, self.WALLS, {"files": 10, "bytes": 80}) is None
+
+    def test_bytes_past_the_ratio_refuse(self, tmp_path: Path) -> None:
+        """Same file count, 3.1x the bytes: the size layer of the ratio refuses."""
+        files = _files(tmp_path, [f"t/{i}.o" for i in range(10)], size=31)
+        breach = check_ceiling(files, self.WALLS, {"files": 10, "bytes": 100})
+        assert breach is not None
+        assert breach.reason == "size_growth"
+        assert breach.measured == 310
+
+    def test_no_baseline_falls_through_to_the_walls(self, tmp_path: Path) -> None:
+        """Without a record the ratio does not apply: 31 files pass under the walls, refuse past them."""
+        files = _files(tmp_path, [f"t/{i}.o" for i in range(31)])
+        assert check_ceiling(files, self.WALLS, None) is None
+        breach = check_ceiling(files, {"max_backup_files": 30, "max_backup_size_gb": 10}, None)
+        assert breach is not None
+        assert breach.reason == "file_count"
+
+    def test_zero_ratio_disables_the_growth_check(self, tmp_path: Path) -> None:
+        """max_growth_ratio=0 leaves only the walls, whatever the baseline says."""
+        files = _files(tmp_path, [f"t/{i}.o" for i in range(31)])
+        assert check_ceiling(files, {**self.WALLS, "max_growth_ratio": 0}, {"files": 10, "bytes": 0}) is None
 
 
 class TestOffenderReporting:
@@ -257,6 +308,29 @@ class TestRunRefusal:
 
         assert result.success is True
         assert result.files_copied >= 1
+
+    def test_a_completed_run_records_the_baseline(self, tmp_path: Path) -> None:
+        """The run that completes writes its file count and bytes to .backup/last_good_run.json."""
+        root = self._project(tmp_path, n=3, max_files=100)
+        result = run_snapshot(str(root), show_panels=False)
+
+        assert result.success is True
+        record = json.loads((root / ".backup" / "last_good_run.json").read_text(encoding="utf-8"))
+        assert record["files"] == result.files_checked
+        assert record["bytes"] > 0
+
+    def test_a_refused_run_leaves_the_baseline_unchanged(self, tmp_path: Path) -> None:
+        """40 files against a 2-file baseline refuses, and the baseline file stays byte for byte."""
+        root = self._project(tmp_path, n=40, max_files=1000)
+        record = root / ".backup" / "last_good_run.json"
+        written = json.dumps({"files": 2, "bytes": 64, "recorded": "2026-11-25T00:00:00+00:00"})
+        record.write_text(written, encoding="utf-8")
+
+        result = run_snapshot(str(root), show_panels=False)
+
+        assert result.success is False
+        assert "last run's 2" in result.errors[0]
+        assert record.read_text(encoding="utf-8") == written
 
 
 class TestSharedScanSeeding:

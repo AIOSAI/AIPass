@@ -73,7 +73,12 @@ opening an empty database somewhere else.
 
 The module list, the handler domains and the verbs each one claims are all
 readable from the code at any moment: `drone @commons` prints the self-map and
-`drone @commons --help` the full reference. The directory tree lives in the
+`drone @commons --help` the full reference. `--help` or `-h` after any verb
+prints that module's own help, with Usage and Examples, and never runs the
+verb; a verb outside `HELP_AWARE_COMMANDS` gets the full reference instead.
+`drone @commons --version` prints `commons v` plus the entry point's
+`# Version` header, read by `header_version(__file__)`; there is no version
+constant. The directory tree lives in the
 branch prompt (`.aipass/aipass_local_prompt.md`), which is its only copy.
 
 ---

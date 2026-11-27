@@ -5,7 +5,6 @@
     "version": "2.0.0",
     "schema_version": "2.0.0",
     "created": "{{DATE}}",
-    "last_updated": "{{DATE}}",
     "managed_by": "{{BRANCH}}",
     "tags": [
       "identity",
@@ -29,7 +28,8 @@
     "citizen_id": "{{CITIZEN_ID}}",
     "registry_path": "AIPASS_REGISTRY.json",
     "communications": true,
-    "memory": true
+    "memory": true,
+    "cloud_environment_id": ""
   },
   "identity": {
     "citizen_class": "{{CITIZEN_CLASS}}",

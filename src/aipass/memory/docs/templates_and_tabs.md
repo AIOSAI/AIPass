@@ -125,8 +125,8 @@ from aipass.memory.apps.handlers.tracking.tab_renderer import render_all_meta_ta
 tabs = render_all_meta_tabs()
 # → {"TODOS_META": "⟦ pad of 10 · oldest roll to .backup/todo/<branch>/backlog.json · task ≤100 chars · draft to 80 · next #? ⟧", "KEY_LEARNINGS_META": "⟦ rollover ON ...", ...}
 
-tabs = render_all_meta_tabs(branch_dir="canary")
-# → the todos tab names .backup/todo/canary/backlog.json; next #N from an empty pad + that backlog
+tabs = render_all_meta_tabs(branch_dir="canary_test")
+# → the todos tab names .backup/todo/canary_test/backlog.json; next #N from an empty pad + that backlog
 ```
 
 Returns defaults (not per-branch overrides) — appropriate for template resolution at branch creation. With no `branch_dir` the todos tab renders `<branch>` and `next #?` rather than guess a number.

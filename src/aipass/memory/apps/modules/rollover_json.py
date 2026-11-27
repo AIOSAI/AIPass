@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rollover_json.py
 # Description: The --json surface behind the rollover verbs - the emitter, the refusal writer, the projections
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-16
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -122,6 +122,20 @@ def print_introspection() -> None:
     console.print()
 
 
+def print_help() -> None:
+    """Display rollover_json help (sentry standard)."""
+    console.print()
+    console.print("[bold cyan]rollover_json[/bold cyan] - the --json surface of rollover and config")
+    console.print()
+    console.print("[bold]USAGE:[/bold]")
+    console.print("  drone @memory rollover_json     Show the library API")
+    console.print("  drone @memory config get --json  The surface, exercised")
+    console.print()
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  [dim]drone @memory config get --json[/dim]")
+    console.print()
+
+
 def handle_command(command: str, args: list) -> bool:
     """Entry point for drone module discovery - describes the --json surface, never runs a verb."""
     if command != "rollover_json":
@@ -135,7 +149,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if args[0] in ("--help", "-h", "help"):
-        print_introspection()
+        print_help()
         return True
 
     error(f"rollover_json: unknown subcommand '{args[0]}' - the verbs are 'drone @memory rollover' and 'config'")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for sentry's entry point routing, help and introspection
-# Version: 1.0.6
+# Version: 1.0.8
 # Created: 2026-09-03
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/sentry.py, the entry point: routing, help and introspection."""
@@ -17,6 +17,7 @@
 
 import re
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -58,7 +59,7 @@ def test_print_introspection_renders_identity_and_help_pointer(capsys):
     branch_entry.print_introspection()
 
     out = capsys.readouterr().out
-    assert "SENTRY" in out
+    assert "sentry - Standards Platform" in out
     assert "Discovered Modules:" in out
     assert "--help" in out
 
@@ -102,12 +103,11 @@ def test_help_flag_preempts_routing(monkeypatch, capsys, flag):
 
 @pytest.mark.parametrize("flag", ["--version", "-V"])
 def test_version_flag_prints_version(monkeypatch, capsys, flag):
-    """--version reports the branch and version, then exits 0."""
+    """--version prints sentry v plus the entry point's # Version header, then exits 0."""
     assert _run(monkeypatch, [flag]) == 0
 
-    out = capsys.readouterr().out
-    assert "sentry" in out
-    assert branch_entry.VERSION in out
+    header = re.search(r"^# Version: (\S+)$", Path(branch_entry.__file__).read_text(encoding="utf-8"), re.M)
+    assert capsys.readouterr().out.strip() == f"sentry v{header.group(1)}"
 
 
 def test_route_command_returns_true_for_known_command(stub_module):

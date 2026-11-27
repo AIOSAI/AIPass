@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_check_file_shape.py
 # Description: trinity_check file shape: metadata, guidelines, file set, receipt (split from test_trinity_check.py)
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/trinity_check.py and trinity_groups.py."""
@@ -67,11 +67,35 @@ class TestDocumentMetadataIsAClosedSet:
         assert "computed at run time" in message
         assert "unexpected field(s) status" not in message
 
-    def test_the_canonical_nine_fields_are_all_still_accepted(self, trinity, tmp_path):
+    def test_the_canonical_eight_fields_are_all_still_accepted(self, trinity, tmp_path):
         """Over-refusal guard: closing the set must not reject the set."""
         branch = _write_branch(tmp_path)
 
         assert _group(trinity.check_branch(str(branch)), "Top-level keys")["passed"] is True
+
+    @pytest.mark.parametrize("file_key", ["local", "observations"])
+    def test_a_file_without_last_updated_passes(self, trinity, tmp_path, file_key):
+        """The header stamp is out of the standard: its absence is no missing field."""
+        docs = {"local": _canonical_local(), "observations": _canonical_observations()}
+        assert "last_updated" not in docs[file_key]["document_metadata"]
+        branch = _write_branch(tmp_path, local=docs["local"], observations=docs["observations"])
+
+        result = trinity.check_branch(str(branch))
+
+        assert _group(result, "Top-level keys")["passed"] is True
+        assert result["passed"] is True
+
+    @pytest.mark.parametrize("file_key", ["local", "observations"])
+    def test_a_lagging_last_updated_is_tolerated_not_an_extra(self, trinity, tmp_path, file_key):
+        """A file the memory push has not yet stripped is not failed for the retired key."""
+        docs = {"local": _canonical_local(), "observations": _canonical_observations()}
+        docs[file_key]["document_metadata"]["last_updated"] = "2020-01-01"
+        branch = _write_branch(tmp_path, local=docs["local"], observations=docs["observations"])
+
+        result = trinity.check_branch(str(branch))
+
+        assert _group(result, "Top-level keys")["passed"] is True
+        assert result["passed"] is True
 
     def test_the_real_pre_push_drift_is_seen(self, trinity, tmp_path):
         """The exact shape found in 34 live *.pre_v3_backup files."""
@@ -281,34 +305,6 @@ class TestVersionedBackupsAreLegalResidents:
         branch.mkdir()
 
         assert trinity.check_branch_info(str(branch)) == []
-
-    def test_d15_last_updated_older_than_newest_entry(self, trinity, tmp_path):
-        """D15 -- 12/18 branches carry a stamp 100-170 days stale."""
-        local = _canonical_local()
-        local["document_metadata"]["last_updated"] = "2026-03-01"
-        branch = _write_branch(tmp_path, local=local)
-
-        result = trinity.check_branch(str(branch))
-
-        _assert_failed(_group(result, "Freshness"), "last_updated 2026-03-01", "2026-08-25")
-
-    def test_d15_last_updated_of_the_wrong_type_is_unmeasurable(self, trinity, tmp_path):
-        local = _canonical_local()
-        local["document_metadata"]["last_updated"] = 20260825
-        branch = _write_branch(tmp_path, local=local)
-
-        result = trinity.check_branch(str(branch))
-
-        _assert_failed(_group(result, "Freshness"), "last_updated is not a yyyy-mm-dd date", "int")
-
-    def test_d15_entry_date_that_is_not_a_date_is_unmeasurable(self, trinity, tmp_path):
-        local = _canonical_local()
-        local["sessions"][0]["date"] = "last tuesday"
-        branch = _write_branch(tmp_path, local=local)
-
-        result = trinity.check_branch(str(branch))
-
-        _assert_failed(_group(result, "Freshness"), "unmeasurable")
 
     def test_d16_observations_missing_created_is_flagged(self, trinity, tmp_path):
         """D16 -- devpulse's observations.json alone drops created."""

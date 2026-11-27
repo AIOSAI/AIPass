@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.1
 # Created: 2026-03-28
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -416,6 +416,28 @@ def test_gift_trade_mint_collab_name_an_unreadable_registry(tmp_path) -> None:
         ]
     assert [r["success"] for r in results] == [False] * 4
     assert [r["error"].startswith("Branch registry unreadable") for r in results] == [True] * 4
+
+
+def test_mint_writes_the_event_host_in_lowercase(initialized_db: sqlite3.Connection) -> None:
+    _insert_test_agent(initialized_db, "attendee")
+    with (
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.resolve_registered_name", return_value="attendee"),
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.get_db", return_value=initialized_db),
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.close_db") as close,
+    ):
+        result = trade_module.mint_event_artifact(["Launch", "@attendee"])
+
+    assert result["success"] is True, result
+    close.assert_called_once_with(initialized_db)
+    artifact_id = result["minted"][0]["artifact_id"]
+    row = initialized_db.execute("SELECT creator, owner FROM artifacts WHERE id = ?", (artifact_id,)).fetchone()
+    assert (row["creator"], row["owner"]) == ("the_commons", "attendee")
+    history = initialized_db.execute(
+        "SELECT from_agent FROM artifact_history WHERE artifact_id = ?", (artifact_id,)
+    ).fetchone()
+    assert history["from_agent"] == "the_commons"
+    hosts = initialized_db.execute("SELECT branch_name FROM agents WHERE LOWER(branch_name) = 'the_commons'").fetchall()
+    assert [h["branch_name"] for h in hosts] == ["the_commons"]
 
 
 def test_find_command_says_the_expired_sweep_failed_and_still_finds(

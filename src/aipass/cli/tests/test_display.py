@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_display.py
 # Description: The display module — messages, header, routing, demo, exit seam, escape, live colour
-# Version: 1.5.0
+# Version: 1.6.1
 # Created: 2026-03-24
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/display.py — the render surface every branch imports."""
@@ -336,7 +336,7 @@ class TestPrintIntrospectionOutput:
         with patch.object(display, "CONSOLE", cons):
             display.print_introspection()
         output = get_output()
-        assert "CLI Display Module" in output
+        assert "cli Display Module" in output
 
     def test_print_introspection_lists_all_functions(self):
         cons, get_output = _make_capture_console()
@@ -364,7 +364,7 @@ class TestPrintHelpOutput:
         ):
             display.print_help()
         output = get_output()
-        assert "CLI Display Module" in output
+        assert "cli Display Module" in output
 
     def test_print_help_contains_what_is_section(self):
         cons, get_output = _make_capture_console()
@@ -396,14 +396,14 @@ class TestPrintHelpOutput:
         assert "USAGE:" in output
         assert "drone @cli display" in output
 
-    def test_print_help_contains_code_examples(self):
+    def test_print_help_has_an_examples_heading(self):
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
         ):
             display.print_help()
         output = get_output()
-        assert "CODE EXAMPLES:" in output
+        assert "EXAMPLES:" in output.splitlines()
         assert "from aipass.cli" in output
 
     def test_print_help_contains_integration_section(self):
@@ -659,9 +659,53 @@ DOOR_NAMES = {
     "command_failed": display,
     "reset_command_state": display,
     "resolve_exit": display,
+    "header_version": display,
     "operation_start": templates,
     "operation_complete": templates,
 }
+
+
+def _entry(tmp_path: Path, text: str) -> Path:
+    """An entry point file holding `text`."""
+    path = tmp_path / "entry.py"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+HEADER = "# =================== AIPass ====================\n# Name: entry.py\n# Version: {v}\n# =====\n"
+
+
+class TestHeaderVersion:
+    """header_version reads the # Version line of a file's header block, and fails rather than guess."""
+
+    def test_returns_the_header_version_for_a_str_or_a_path(self, tmp_path):
+        path = _entry(tmp_path, HEADER.format(v="2.3.5") + '\nVERSION = "9.9.9"\n')
+        assert display.header_version(path) == "2.3.5"
+        assert display.header_version(str(path)) == "2.3.5"
+
+    def test_the_first_version_line_wins(self, tmp_path):
+        path = _entry(tmp_path, HEADER.format(v="1.0.0") + "# Version: 2.0.0\n")
+        assert display.header_version(path) == "1.0.0"
+
+    @pytest.mark.parametrize("value", ["2.3", "2.3.x", "v2.3.5", "2.3.5.1", ""])
+    def test_a_value_that_is_not_three_integers_raises_naming_the_file(self, tmp_path, value):
+        path = _entry(tmp_path, HEADER.format(v=value))
+        with pytest.raises(ValueError, match="entry.py"):
+            display.header_version(path)
+
+    def test_a_file_with_no_version_line_raises(self, tmp_path):
+        path = _entry(tmp_path, "# =================== AIPass ====================\n# Name: entry.py\n")
+        with pytest.raises(ValueError, match="entry.py"):
+            display.header_version(path)
+
+    def test_a_version_line_below_the_header_block_is_not_read(self, tmp_path):
+        path = _entry(tmp_path, '# Name: entry.py\n\n"""Doc."""\n# Version: 1.0.0\n')
+        with pytest.raises(ValueError, match="entry.py"):
+            display.header_version(path)
+
+    def test_the_header_is_read_as_utf8_text(self, tmp_path):
+        path = _entry(tmp_path, "# Description: café — résumé\n# Version: 0.1.0\n")
+        assert display.header_version(path) == "0.1.0"
 
 
 class TestTheFrontDoor:

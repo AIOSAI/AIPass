@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_citizen_classes.py
 # Description: Integration tests for citizen class system
-# Version: 1.3.4
+# Version: 1.3.6
 # Created: 2026-03-07
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/class_registry.py and the citizen-class-aware create and update paths."""
@@ -212,8 +212,8 @@ class TestMintTimeClass:
         assert handle_create([str(tmp_path / "sibling"), "--registry", str(registry)]) == 0
 
         out = capsys.readouterr().out
-        assert "Agent created: FIRSTBORN" in out
-        assert "Agent created: SIBLING" in out
+        assert "Agent created: firstborn" in out
+        assert "Agent created: sibling" in out
         assert self._class_of(tmp_path / "firstborn") == "manager"
         assert self._class_of(tmp_path / "sibling") == "specialist"
 
@@ -565,7 +565,7 @@ class TestAgentScaffoldContent:
         prompt = target / ".aipass" / "aipass_local_prompt.md"
         assert prompt.exists()
         content = prompt.read_text(encoding="utf-8")
-        assert "PROMPT_AGENT" in content
+        assert "prompt_agent" in content
         assert len(content) > 100
 
     def test_created_agent_passport_has_role(self, tmp_path):
@@ -641,8 +641,8 @@ class TestMultiAgentCoexistence:
 
         data = json.loads(reg.read_text(encoding="utf-8"))
         names = [b["name"] for b in data["branches"]]
-        assert "AGENT_A" in names
-        assert "AGENT_B" in names
+        assert "agent_a" in names
+        assert "agent_b" in names
         assert data["metadata"]["total_branches"] == 2
 
     def test_three_agents_distinct_identities(self, tmp_path):
@@ -697,9 +697,9 @@ class TestPassportOwnerFieldIsGone:
         spawn_agent(str(tmp_path / "third"), registry_path=str(reg))
 
         entries = {b["name"]: b for b in json.loads(reg.read_text(encoding="utf-8"))["branches"]}
-        assert entries["FIRST"].get("owner") is True
-        assert entries["SECOND"].get("owner") is not True
-        assert entries["THIRD"].get("owner") is not True
+        assert entries["first"].get("owner") is True
+        assert entries["second"].get("owner") is not True
+        assert entries["third"].get("owner") is not True
 
 
 class TestRetroactiveOwner:
@@ -722,9 +722,9 @@ class TestRetroactiveOwner:
         spawn_agent(str(tmp_path / "zeta"), registry_path=str(reg))
 
         entries = {b["name"]: b for b in json.loads(reg.read_text(encoding="utf-8"))["branches"]}
-        assert entries["ALPHA"].get("owner") is True
-        assert entries["BETA"].get("owner") is not True
-        assert entries["ZETA"].get("owner") is not True
+        assert entries["alpha"].get("owner") is True
+        assert entries["beta"].get("owner") is not True
+        assert entries["zeta"].get("owner") is not True
 
     def test_a_passport_can_no_longer_declare_itself_owner(self, tmp_path):
         """The DELETED step, pinned as deleted: no citizen seats itself by editing its own file."""
@@ -745,8 +745,8 @@ class TestRetroactiveOwner:
         assert ensure_project_has_owner(reg) is True
 
         entries = {b["name"]: b for b in json.loads(reg.read_text(encoding="utf-8"))["branches"]}
-        assert entries["ALPHA"].get("owner") is True, "a self-declared passport flag beat the manager"
-        assert entries["BETA"].get("owner") is not True
+        assert entries["alpha"].get("owner") is True, "a self-declared passport flag beat the manager"
+        assert entries["beta"].get("owner") is not True
 
     def test_created_date_fallback_when_nobody_is_a_manager(self, tmp_path):
         """Step 2 (the last one): oldest ``created`` wins when no manager exists."""
@@ -790,8 +790,8 @@ class TestRetroactiveOwner:
         assert ensure_project_has_owner(reg) is True
 
         entries = {b["name"]: b for b in json.loads(reg.read_text(encoding="utf-8"))["branches"]}
-        assert entries["AGENT_X"].get("owner") is True
-        assert entries["AGENT_Y"].get("owner") is not True
+        assert entries["agent_x"].get("owner") is True
+        assert entries["agent_y"].get("owner") is not True
 
 
 class TestBirthCertificateSchema:

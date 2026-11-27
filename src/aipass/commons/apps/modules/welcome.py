@@ -3,7 +3,7 @@
 # Description: Welcome Orchestration Module
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Welcome & Onboarding Orchestration Module"""
@@ -20,12 +20,30 @@ from aipass.commons.apps.handlers.json import json_handler
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("welcome")
-    console.print("Thin router for the welcome command. Scans for new branches and creates welcome posts.")
+    console.print("[bold cyan]welcome - Welcome & Onboarding[/bold cyan]")
+    console.print("[dim]Thin router for the welcome command. Scans for new branches and creates welcome posts.[/dim]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/welcome/")
-    console.print("    - welcome_ops.py (run_welcome — scan for new branches and post welcome messages)")
+    console.print("[bold cyan]Connected Handlers:[/bold cyan]")
+    console.print("  [cyan]handlers/welcome/[/cyan]")
+    console.print(
+        "    [cyan]-[/cyan] welcome_ops.py [dim](run_welcome — scan for new branches and post welcome messages)[/dim]"
+    )
+    console.print()
+    console.print("[dim]Run 'drone @commons welcome --help' for usage[/dim]")
+
+
+def print_help():
+    """Display usage help for the welcome module."""
+    console.print()
+    console.print("[bold cyan]welcome - Welcome & Onboarding[/bold cyan]")
+    console.print("[dim]Welcome new branches with a post, or preview who would be welcomed.[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [cyan]drone @commons welcome[/cyan] \\[branch] \\[--dry-run]")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [cyan]drone @commons welcome[/cyan]")
+    console.print("  [cyan]drone @commons welcome seedgo --dry-run[/cyan]")
     console.print()
 
 
@@ -33,6 +51,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     """Handle welcome-related commands; False if the command is not ours."""
     if command != "welcome":
         return False
+
+    if "--help" in args or "-h" in args:
+        print_help()
+        return True
 
     return _handle_welcome(args)
 

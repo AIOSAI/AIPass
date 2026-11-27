@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_external_roots.py
 # Description: Declared roots are the third resolution source
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-08-30
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/registry_handler.py's declared-roots tier: externals resolve, never over a local."""
@@ -54,7 +54,7 @@ def local_world(tmp_path, monkeypatch):
     """A complete stand-in AIPass installation — registry, citizens, passport.
 
     CI has no ``AIPASS_REGISTRY.json`` (gitignored), so the world is built; its ``metadata.id`` matches
-    the passport ``registry_id`` and ``caller_cwd`` is inside it, so the credential gate passes on merit.
+    the passport ``registry_id`` and ``caller_seat`` is inside it, so the credential gate passes on merit.
     """
     world = tmp_path / "StandInAIPass"
     registry_id = "standin-registry-id"
@@ -78,7 +78,7 @@ def local_world(tmp_path, monkeypatch):
     )
     monkeypatch.delenv("AIPASS_HOME", raising=False)
     monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
-    monkeypatch.setattr(registry_handler, "caller_cwd", lambda: world / "src" / "drone")
+    monkeypatch.setattr(registry_handler, "caller_seat", lambda: world / "src" / "drone")
     registry_handler.set_registry_path(world / "AIPASS_REGISTRY.json")
     yield world
     registry_handler.reset_registry_path()

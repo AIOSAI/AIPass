@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 2.6.0
+# Version: 2.6.1
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -292,7 +292,7 @@ def _tokenize(command: str) -> list[str]:
         lexer.commenters = ""
         tokens = list(lexer)
     except ValueError as exc:
-        logger.info("[HOOKS] bash_writes: lexer fell back to whitespace split (%s)", exc)
+        logger.info("[hooks] bash_writes: lexer fell back to whitespace split (%s)", exc)
         return [token for line in command.split("\n") for token in (*line.split(), "\n")]
     out: list[str] = []
     for token in tokens:
@@ -498,7 +498,7 @@ def write_targets_by_segment(command: str, cwd: str) -> list[tuple[list[str], li
     try:
         base = Path(cwd) if cwd else Path.cwd()
     except OSError as exc:
-        logger.warning("[HOOKS] bash_writes: no usable cwd, the command cannot be read: %s", exc)
+        logger.warning("[hooks] bash_writes: no usable cwd, the command cannot be read: %s", exc)
         raise
 
     # Heredoc bodies are stripped for the syntax read and kept for the interpreter read.
@@ -553,7 +553,7 @@ def _heredocs_by_segment(segments: list[list[str]], bodies: list[str]) -> dict[i
     if sum(openers) != len(bodies):
         if bodies:
             logger.info(
-                "[HOOKS] bash_writes: %d heredoc bodies, %d openers - whole-command read", len(bodies), sum(openers)
+                "[hooks] bash_writes: %d heredoc bodies, %d openers - whole-command read", len(bodies), sum(openers)
             )
         return {}
     owned: dict[int, str] = {}

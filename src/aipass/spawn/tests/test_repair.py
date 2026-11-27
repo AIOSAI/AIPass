@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_repair.py
 # Description: Tests for repair and adopt-citizen — move, rename, pollution, cross-project adoption
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-05-15
-# Modified: 2026-11-21
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/handlers/repair_ops.py and adopt_citizen_ops.py — move, rename, pollution, adopt-citizen."""
@@ -343,7 +343,7 @@ class TestRenameBranch:
         assert handle_repair(["--rename", "@old", "@new", "--apply"]) == 0
 
         row = json.loads(reg.read_text(encoding="utf-8"))["branches"][0]
-        assert (row["name"], row["path"], row["email"]) == ("NEW", "src/aipass/new", "@new")
+        assert (row["name"], row["path"], row["email"]) == ("new", "src/aipass/new", "@new")
         assert (row["registry_id"], row["created"], row["custom_key"]) == ("cid-old", "2026-01-01", "keep-me")
         passport = json.loads(passport_path.read_text(encoding="utf-8"))
         assert passport["branch_info"] == {
@@ -458,6 +458,26 @@ def _read(path):
 class TestRenameProjectCitizen:
     """repair --rename on a project's namesake seat: the registry file, its rows and both passports follow."""
 
+    def test_a_citizen_at_a_declared_root_is_found_and_its_renamed_passport_accepted(self, tmp_path, monkeypatch):
+        """The project lives outside AIPass, declared in AIPASS_ROOTS.json. Mutant: roots unread -> red."""
+        root, ext = tmp_path / "root", tmp_path / "wren_test"
+        new = {"name": "wren_test", "path": "src/wren_test/wren_test", "email": "@wren_test", "registry_id": "cid-w"}
+        row, meta = {**new, "name": "wren", "path": "src/wren/wren", "email": "@wren"}, {"name": "WREN", "id": "p"}
+        info = {"branch_name": "wren_test", "path": new["path"], "module": "wren_test", "email": "@wren_test"}
+        (trinity := ext / "src" / "wren_test" / "wren_test" / ".trinity").mkdir(parents=True)
+        root.mkdir()
+        _declare(root, ("../wren_test", "active"))
+        (ext / "WREN_REGISTRY.json").write_text(json.dumps({"metadata": meta, "branches": [row]}), encoding="utf-8")
+        passport = {"branch_info": info, "citizenship": {"citizen_id": "cid-w", "registry_id": "p"}}
+        (trinity / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+        monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: root / "AIPASS_REGISTRY.json")
+
+        assert handle_repair(["--rename", "@wren", "@wren_test", "--apply"]) == 0
+
+        registry = _read(ext / "WREN_TEST_REGISTRY.json")
+        assert (registry["metadata"]["name"], registry["branches"]) == ("WREN_TEST", [{**new, "description": ""}])
+        assert _read(trinity / "passport.json")["branch_info"] == info
+
     def test_apply_renames_the_registry_file_the_rows_and_both_passports(self, tmp_path, monkeypatch):
         root, project = _renamed_project(tmp_path)
         monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: root / "AIPASS_REGISTRY.json")
@@ -476,7 +496,7 @@ class TestRenameProjectCitizen:
             "description": "x",
         }
         assert (seed["name"], seed["path"], seed["email"], seed["registry_id"]) == (
-            "SEED",
+            "seed",
             "src/seed/seed",
             "@seed",
             "cid-beo",

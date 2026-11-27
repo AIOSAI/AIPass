@@ -1,31 +1,52 @@
 # =================== AIPass ====================
 # Name: cli_ux_check.py
 # Description: CLI UX Standards Checker Handler
-# Version: 1.1.1
+# Version: 2.1.1
 # Created: 2026-07-17
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """
 CLI UX Standards Checker Handler
 
-Validates that branch entry points follow the AIPass house pattern for CLI
-help and introspection output.
+Validates that every help surface and every piece of command output in a
+branch follows the AIPass house pattern: the entry point and each discovered
+module carry the two-tier help, and every print keeps its styling deliberate.
 """
 
 import ast
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Iterator, List, Optional
+
+from rich.errors import StyleSyntaxError
+from rich.style import Style
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
 
 APPLIES_TO = "production"
-AUDIT_SCOPE = "entry_point"
+AUDIT_SCOPE = "all_files"
 
 _RICH_TAG = re.compile(r"\[/?[^\[\]]*\]")
+#: A tag Rich would apply: no backslash before it, and its inside parses as a style.
+_UNESCAPED_TAG = re.compile(r"(?<!\\)\[(/?)([^\[\]]*)\]")
+_HELP_NAME = re.compile(r"help|usage|introspection")
+#: aipass.cli display helpers: each styles what it prints.
+STYLED_HELPERS = frozenset(
+    {"header", "success", "error", "warning", "fatal", "section", "operation_start", "operation_complete"}
+)
+STYLE_KEYWORDS = frozenset({"style", "header_style", "title_style", "border_style", "row_styles"})
+#: An interpolated value named like a number, which Rich's highlighter colours on an unstyled line.
+_NUMERIC_NAME = re.compile(r"(?i)(count|total|version|num|score|size|percent|pct|elapsed|seconds)")
+_NUMERIC_SPEC = re.compile(r"[dfe%n]$|,")
+#: A count after a heading's name, "Branches ({}):", is not one of its words.
+_COUNT = re.compile(r"\(\{\}\)")
+#: A version number in a literal: the header's # Version line is the only place one may live.
+_SEMVER = re.compile(r"\bv?\d+\.\d+\.\d+\b")
+#: The one helper that reads it, from aipass.cli.
+VERSION_HELPER = "header_version"
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
@@ -54,21 +75,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if path.name == "__init__.py":
         return {
             "passed": True,
-            "checks": [{"name": "CLI UX check", "passed": True, "message": "__init__.py skipped"}],
-            "score": 100,
-            "standard": "CLI_UX",
-        }
-
-    if not _is_entry_point(module_path, path):
-        return {
-            "passed": True,
-            "checks": [
-                {
-                    "name": "CLI UX check",
-                    "passed": True,
-                    "message": "Not an entry point file (not applicable)",
-                }
-            ],
+            "checks": [{"name": "CLI UX check", "passed": True, "message": "__init__.py skipped", "declined": True}],
             "score": 100,
             "standard": "CLI_UX",
         }
@@ -88,7 +95,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not content.strip():
         return {
             "passed": True,
-            "checks": [{"name": "CLI UX check", "passed": True, "message": "Empty file skipped"}],
+            "checks": [{"name": "CLI UX check", "passed": True, "message": "Empty file skipped", "declined": True}],
             "score": 100,
             "standard": "CLI_UX",
         }
@@ -104,29 +111,30 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "CLI_UX",
         }
 
+    entry = _is_entry_point(module_path, path)
     introspection_func = _find_function(tree, "print_introspection")
     help_func = _find_function(tree, "print_help")
 
-    checks.append(_check_two_tier_help(tree, path.name))
+    if entry or _is_discovered_module(path, tree):
+        checks.append(_check_two_tier_help(tree, path.name))
+        checks.append(_check_rich_console(introspection_func, help_func, path.name))
+        checks.append(_check_title_markup(introspection_func, path.name))
+        checks.append(_check_purpose_line(introspection_func, path.name))
+        checks.append(_check_help_pointer(introspection_func, path.name))
+        checks.append(_check_usage_section(help_func, path.name))
+        checks.append(_check_examples_section(help_func, path.name))
+    elif introspection_func is not None or help_func is not None:
+        checks.append(_check_rich_console(introspection_func, help_func, path.name))
+    if entry:
+        checks.append(_check_no_internal_modules(path))
+        checks.append(_check_version_from_header(tree, path))
+    checks.extend(_surface_checks(tree))
 
-    checks.append(_check_rich_console(introspection_func, help_func, path.name))
-
-    checks.append(_check_title_markup(introspection_func, path.name))
-
-    checks.append(_check_purpose_line(introspection_func, path.name))
-
-    checks.append(_check_help_pointer(introspection_func, path.name))
-
-    checks.append(_check_usage_section(help_func, path.name))
-
-    checks.append(_check_examples_section(help_func, path.name))
-
-    checks.append(_check_no_internal_modules(path))
+    if not checks:
+        return {"passed": True, "checks": [], "score": 100, "standard": "CLI_UX"}
 
     passed_checks = sum(1 for check in checks if check["passed"])
-    total_checks = len(checks)
-    score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
-
+    score = int(passed_checks / len(checks) * 100)
     overall_passed = all(check["passed"] for check in checks)
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "cli_ux"})
@@ -213,7 +221,7 @@ def _check_rich_console(
                 if (
                     node.func.attr == "print"
                     and isinstance(node.func.value, ast.Name)
-                    and node.func.value.id == "console"
+                    and node.func.value.id.lower().endswith("console")
                 ):
                     has_console_print = True
             if isinstance(node.func, ast.Name) and node.func.id == "print":
@@ -246,9 +254,7 @@ def _check_title_markup(introspection_func: Optional[ast.FunctionDef], filename:
         return {
             "name": "title_markup",
             "passed": False,
-            "message": (
-                "print_introspection() must include a styled title line (e.g. [bold cyan]Branch Name[/bold cyan])"
-            ),
+            "message": ("print_introspection() must include a styled title line (a bold style tag, e.g. bold cyan)"),
         }
 
     strings = _collect_string_constants(introspection_func)
@@ -263,7 +269,7 @@ def _check_title_markup(introspection_func: Optional[ast.FunctionDef], filename:
     return {
         "name": "title_markup",
         "passed": False,
-        "message": "print_introspection() must include a styled title line (e.g. [bold cyan]Branch Name[/bold cyan])",
+        "message": "print_introspection() must include a styled title line (a bold style tag, e.g. bold cyan)",
     }
 
 
@@ -350,8 +356,8 @@ def _is_print_call(node: ast.Call) -> bool:
     if not (isinstance(func, ast.Attribute) and func.attr == "print"):
         return False
     receiver = func.value
-    return (isinstance(receiver, ast.Name) and receiver.id == "console") or (
-        isinstance(receiver, ast.Attribute) and receiver.attr == "console"
+    return (isinstance(receiver, ast.Name) and receiver.id.lower().endswith("console")) or (
+        isinstance(receiver, ast.Attribute) and receiver.attr.lower().endswith("console")
     )
 
 
@@ -432,3 +438,328 @@ def _check_no_internal_modules(path: Path) -> Dict:
         "passed": True,
         "message": "No exposed internal plumbing files in modules/",
     }
+
+
+# ---- the module tier and every print: help surfaces and command output ---------------------
+
+
+def _is_discovered_module(path: Path, tree: ast.Module) -> bool:
+    """apps/modules/<name>.py, no leading underscore, defining handle_command: a module the CLI discovers."""
+    if path.parent.name != "modules" or path.parent.parent.name != "apps" or path.name.startswith("_"):
+        return False
+    return _find_function(tree, "handle_command") is not None
+
+
+def _is_any_print(node: ast.AST) -> bool:
+    """``print(...)``, or ``.print(...)`` on any receiver whose name ends in ``console``."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id == "print"
+    if not (isinstance(func, ast.Attribute) and func.attr == "print"):
+        return False
+    receiver = func.value
+    name = receiver.id if isinstance(receiver, ast.Name) else getattr(receiver, "attr", "")
+    return name.lower().endswith("console")
+
+
+def _keyword(call: ast.Call, name: str) -> Optional[ast.expr]:
+    """The value passed to ``name=``, or None."""
+    return next((kw.value for kw in call.keywords if kw.arg == name), None)
+
+
+def _is_false(node: Optional[ast.expr]) -> bool:
+    """A literal False."""
+    return isinstance(node, ast.Constant) and node.value is False
+
+
+def _shape(node: Optional[ast.expr]) -> Optional[str]:
+    """A printed string's literal text, each interpolated value as ``{}``; None when it is not a string."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        return "".join(str(part.value) if isinstance(part, ast.Constant) else "{}" for part in node.values)
+    return None
+
+
+def _first_text(call: Optional[ast.Call]) -> Optional[str]:
+    """The shape of a print call's first argument."""
+    return _shape(call.args[0]) if call is not None and call.args else None
+
+
+def _style_tags(text: str) -> List[str]:
+    """The tags in ``text`` Rich applies as styles; an unknown word in brackets is not one."""
+    tags = []
+    for closing, inside in _UNESCAPED_TAG.findall(text):
+        if closing and not inside:
+            tags.append("[/]")
+            continue
+        if _is_style(inside):
+            tags.append(inside)
+    return tags
+
+
+def _is_style(inside: str) -> bool:
+    """Whether Rich parses the inside of a bracket as a style; a placeholder word is not one."""
+    try:
+        Style.parse(inside)
+    except StyleSyntaxError:
+        return False
+    return True
+
+
+def _styled_call(call: ast.Call) -> bool:
+    """A print that applies a style: a style tag in its text, or a style keyword."""
+    if any(kw.arg in STYLE_KEYWORDS for kw in call.keywords):
+        return True
+    return any(_style_tags(_shape(arg) or "") for arg in call.args)
+
+
+def _numeric_value(node: ast.expr) -> bool:
+    """An f-string interpolating ``len(...)``, a number-named value, or a number format."""
+    if not isinstance(node, ast.JoinedStr):
+        return False
+    for part in node.values:
+        if not isinstance(part, ast.FormattedValue):
+            continue
+        spec = _shape(part.format_spec) or ""
+        if spec and _NUMERIC_SPEC.search(spec):
+            return True
+        value = part.value
+        if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == "len":
+            return True
+        name = value.id if isinstance(value, ast.Name) else getattr(value, "attr", "")
+        if name and _NUMERIC_NAME.search(name):
+            return True
+    return False
+
+
+def _plain(text: str) -> str:
+    """The text with its markup tags removed."""
+    return _RICH_TAG.sub("", text)
+
+
+def _heading(text: str) -> bool:
+    """A heading names a section in a few words: column 0, a capital, at most four words, one closing ``:``."""
+    plain = _plain(text).rstrip()
+    words = _COUNT.sub("", plain[:-1]).split()
+    return bool(words) and plain[0].isupper() and plain.endswith(":") and ":" not in plain[:-1] and len(words) <= 4
+
+
+def _help_scopes(tree: ast.Module) -> List[ast.FunctionDef]:
+    """Every function at any depth whose name says it prints help: print_help, print_introspection, _print_usage."""
+    return [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and _HELP_NAME.search(node.name)]
+
+
+def _help_styled(func: ast.FunctionDef) -> bool:
+    """A help function styles something: a style tag in any literal, a style keyword, or an aipass.cli helper."""
+    for node in ast.walk(func):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and _style_tags(node.value):
+            return True
+        if isinstance(node, ast.keyword) and node.arg in STYLE_KEYWORDS:
+            return True
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in STYLED_HELPERS:
+            return True
+    return False
+
+
+def _row(name: str, findings: List[str], rule: str) -> Dict:
+    """One check row: passed with no findings, else every finding and the spelling to use."""
+    if not findings:
+        return {"name": name, "passed": True, "message": f"{name}: no site found"}
+    return {"name": name, "passed": False, "message": f"{name}: {'; '.join(findings)} - {rule}"}
+
+
+def _blocks(tree: ast.Module) -> Iterator[List[ast.stmt]]:
+    """Every statement list in the tree: a body, an else, a finally."""
+    for node in ast.walk(tree):
+        for field in ("body", "orelse", "finalbody"):
+            block = getattr(node, field, None)
+            if isinstance(block, list) and block and isinstance(block[0], ast.stmt):
+                yield block
+
+
+def _printed_call(stmt: ast.stmt) -> Optional[ast.Call]:
+    """The print call a statement is, or None."""
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) and _is_any_print(stmt.value):
+        return stmt.value
+    return None
+
+
+def _line_findings(prints: List[ast.Call], in_help: set) -> Dict[str, List[str]]:
+    """markup_kept, heading_styled and highlight_deliberate sites, one pass over the print calls."""
+    found: Dict[str, List[str]] = {"markup_kept": [], "heading_styled": [], "highlight_deliberate": []}
+    for call in prints:
+        text = _first_text(call)
+        off = _is_false(_keyword(call, "markup"))
+        if off and (id(call) in in_help or _style_tags(text or "")):
+            found["markup_kept"].append(f"line {call.lineno} prints with markup=False")
+        if text is None or off or _styled_call(call):
+            continue
+        if _heading(text):
+            found["heading_styled"].append(f"line {call.lineno} '{_plain(text).strip()}'")
+        if _is_false(_keyword(call, "highlight")):
+            continue
+        if any(ch.isdigit() for ch in _plain(text).replace("{}", "")) or _numeric_value(call.args[0]):
+            found["highlight_deliberate"].append(f"line {call.lineno}")
+    return found
+
+
+def _unexplained_groups(tree: ast.Module, in_help: set) -> List[str]:
+    """Command-output headings that open a list with no [dim] line saying what the group is."""
+    found = []
+    for block in _blocks(tree):
+        for index, stmt in enumerate(block):
+            call = _printed_call(stmt)
+            text = _first_text(call)
+            if call is None or text is None or id(call) in in_help or not _heading(text) or "[dim" in text:
+                continue
+            following = block[index + 1] if index + 1 < len(block) else None
+            if _opens_a_list(following):
+                found.append(f"line {call.lineno} '{_plain(text).strip()}'")
+    return found
+
+
+def _opens_a_list(stmt: Optional[ast.stmt]) -> bool:
+    """What follows a heading is its list: a loop, or a print of an indented item; a [dim] line explains it instead."""
+    if isinstance(stmt, (ast.For, ast.AsyncFor)):
+        return True
+    text = _first_text(_printed_call(stmt)) if stmt is not None else None
+    return bool(text) and "[dim" not in text and _plain(text)[:1].isspace()
+
+
+def _surface_checks(tree: ast.Module) -> List[Dict]:
+    """The rules every print obeys, in help surfaces and command output alike."""
+    prints = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and _is_any_print(node)]
+    if not prints:
+        return []
+    help_funcs = _help_scopes(tree)
+    in_help = {id(node) for func in help_funcs for node in ast.walk(func)}
+    found = _line_findings(prints, in_help)
+    unstyled_help = [
+        f"{func.name}() line {func.lineno} prints with no style"
+        for func in help_funcs
+        if any(_is_any_print(node) for node in ast.walk(func)) and not _help_styled(func)
+    ]
+    highlighted = found["highlight_deliberate"]
+    return [
+        _row("markup_kept", found["markup_kept"], "keep markup on; escape() the literal brackets (aipass.cli escape)"),
+        _row("help_styled", unstyled_help, "style the title, section headings and verbs with Rich markup"),
+        _row("heading_styled", found["heading_styled"], "give the heading a style tag, e.g. bold cyan"),
+        _row(
+            "group_explained",
+            _unexplained_groups(tree, in_help),
+            "follow a group heading with a dim-styled line saying what the group is",
+        ),
+        _row(
+            "highlight_deliberate",
+            [f"{', '.join(highlighted)} coloured only by Rich's number highlighter"] if highlighted else [],
+            "style the line, or pass highlight=False",
+        ),
+    ]
+
+
+# ---- the version: one number, the header's, printed as <name> v<semver> -----------------------
+
+
+def _docstring_ids(tree: ast.Module) -> set:
+    """ids of the module, class and function docstrings."""
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                found.add(id(first.value))
+    return found
+
+
+def _version_constants(tree: ast.Module) -> List[str]:
+    """Module-level names ending in VERSION, __version__ included: each is a second version."""
+    found = []
+    for node in tree.body:
+        targets = (
+            node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+        )
+        found += [
+            f"line {node.lineno} {t.id}"
+            for t in targets
+            if isinstance(t, ast.Name) and t.id.strip("_").upper().endswith("VERSION")
+        ]
+    return found
+
+
+def _version_literals(tree: ast.Module) -> List[str]:
+    """String literals, docstrings aside, that hold an X.Y.Z number."""
+    docstrings = _docstring_ids(tree)
+    return [
+        f"line {node.lineno} '{match.group(0)}'"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings
+        for match in [_SEMVER.search(node.value)]
+        if match
+    ]
+
+
+def _version_branch(tree: ast.Module) -> Optional[ast.If]:
+    """The first ``if`` whose test names "--version"."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and any(
+            isinstance(sub, ast.Constant) and sub.value == "--version" for sub in ast.walk(node.test)
+        ):
+            return node
+    return None
+
+
+def _calls_helper(node: ast.expr) -> bool:
+    """A call to header_version, by name or as an attribute."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    return (func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")) == VERSION_HELPER
+
+
+def _prints_the_header(call: ast.Call, name: str) -> bool:
+    """``print(f"<name> v{header_version(__file__)}")``: the name, a v, the helper, nothing else."""
+    arg = call.args[0] if call.args else None
+    if not isinstance(arg, ast.JoinedStr) or len(arg.values) != 2:
+        return False
+    head, value = arg.values
+    return (
+        isinstance(head, ast.Constant)
+        and head.value == f"{name} v"
+        and isinstance(value, ast.FormattedValue)
+        and _calls_helper(value.value)
+    )
+
+
+def _branch_prints(tree: ast.Module, branch: ast.If) -> List[ast.Call]:
+    """The prints in the --version branch, and in a same-file function it calls, one hop."""
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    scopes: List[ast.AST] = list(branch.body)
+    for stmt in branch.body:
+        for sub in ast.walk(stmt):
+            if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id in functions:
+                scopes.append(functions[sub.func.id])
+    return [sub for scope in scopes for sub in ast.walk(scope) if isinstance(sub, ast.Call) and _is_any_print(sub)]
+
+
+def _check_version_from_header(tree: ast.Module, path: Path) -> Dict:
+    """The entry point holds no version of its own and its --version prints the header's as <name> v<semver>."""
+    name = path.stem
+    # a template's {{BRANCH}} stem prints, inside an f-string, as the escaped "{BRANCH}"
+    printed = name.replace("{{", "{").replace("}}", "}")
+    constants = _version_constants(tree)
+    held = {site.split()[1] for site in constants}
+    problems = [f"{site} holds a second version" for site in constants]
+    problems += [f"{site} is a version literal" for site in _version_literals(tree) if site.split()[1] not in held]
+    branch = _version_branch(tree)
+    if branch is None:
+        problems.append("no --version branch")
+    elif not any(_prints_the_header(call, printed) for call in _branch_prints(tree, branch)):
+        problems.append(f"line {branch.lineno} --version does not print {name} v plus {VERSION_HELPER}(__file__)")
+    cure = (
+        f"the # Version header is the one version: drop the constant and print "
+        f"f'{name} v{{{VERSION_HELPER}(__file__)}}' (from aipass.cli import {VERSION_HELPER})"
+    )
+    return _row("version_from_header", problems, cure)

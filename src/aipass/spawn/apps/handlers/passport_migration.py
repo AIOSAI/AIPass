@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: passport_migration.py
 # Description: Passport 2.0 fleet migration — structure transform, backup, measured receipt
-# Version: 1.0.1
+# Version: 1.2.0
 # Created: 2026-08-28
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """One-shot fleet migration of every live passport to schema 2.0 (DPLAN-0319).
 
 Moves fields, renames dead values, fixes shapes; never authors identity content. Never silently
-drops (only the R8 keys go; unknowns are kept and reported), never guesses (refuse and skip), and
-stamps last_updated only when something else changed, so a re-run is a measured no-op.
+drops (only the R8 keys go; unknowns are kept and reported) and never guesses (refuse and skip).
+It writes no date stamp, so a re-run over a migrated passport is a measured no-op.
 Reference: docs/registry_and_repair.md
 """
 
@@ -63,7 +63,6 @@ KEY_ORDER = {
         "version",
         "schema_version",
         "created",
-        "last_updated",
         "managed_by",
         "tags",
     ),
@@ -84,6 +83,7 @@ KEY_ORDER = {
         "registry_path",
         "communications",
         "memory",
+        "cloud_environment_id",
     ),
     "identity": (
         "citizen_class",
@@ -100,7 +100,8 @@ KEY_ORDER = {
 # Nothing else is ever removed.
 DROPPED_KEYS = {
     "citizenship": ("owner",),
-    "document_metadata": ("note",),
+    # last_updated had no reader once each entry carried its own date; the fleet dropped it.
+    "document_metadata": ("note", "last_updated"),
 }
 DROPPED_TOP_LEVEL = ("family",)
 
@@ -303,7 +304,6 @@ def migrate_document(
     *,
     residency: str,
     relative_path: str,
-    run_date: str,
 ) -> MigrationResult:
     """Transform one passport document to schema 2.0. Pure — no filesystem.
 
@@ -405,9 +405,6 @@ def migrate_document(
         unknown.append(key)
 
     changed = _canonical(migrated) != _canonical(document)
-    if changed and migrated["document_metadata"].get("last_updated") != run_date:
-        changes.append(("document_metadata.last_updated", migrated["document_metadata"].get("last_updated"), run_date))
-        migrated["document_metadata"]["last_updated"] = run_date
 
     if changed and "block order" not in {name for name, _, _ in changes}:
         if tuple(document.keys()) != tuple(migrated.keys()):
@@ -420,13 +417,11 @@ def migrate_passport_file(
     target: PassportTarget,
     *,
     confirm: bool = False,
-    run_date: str | None = None,
 ) -> dict:
     """Migrate one passport on disk. Writes nothing unless ``confirm``.
 
     Without confirm: no backup, no write, no mtime change. ``error`` is set when the file is skipped.
     """
-    stamp = run_date or datetime.now().strftime("%Y-%m-%d")
     record: dict = {
         "branch": target.branch_dir.name.lower(),
         "path": str(target.path),
@@ -455,7 +450,6 @@ def migrate_passport_file(
             document,
             residency=target.residency,
             relative_path=target.relative_path,
-            run_date=stamp,
         )
     except PassportMigrationError as exc:
         record["error"] = str(exc)
@@ -503,7 +497,7 @@ def migrate_fleet(
     if wanted:
         targets = [t for t in targets if t.branch_dir.name.lower() == wanted]
 
-    records = [migrate_passport_file(t, confirm=confirm, run_date=stamp) for t in targets]
+    records = [migrate_passport_file(t, confirm=confirm) for t in targets]
 
     field_counts: dict[str, int] = {}
     unknown_fields: dict[str, list[str]] = {}

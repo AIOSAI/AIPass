@@ -21,8 +21,10 @@ am I in", never "who am I", and stays refused: drone standing at the repo root s
 leaves everything below untouched — in-process callers depend on that.
 
 **1. `AIPASS_CALLER_BRANCH` is set** → registry lookup by name, **then** contacts, then an
-identity synthesized from the env vars alone (recorded `unverified` — no passport, no
-registry row).
+identity synthesized from the env vars alone (recorded `unverified` — no registry row).
+Synthesis happens only when `AIPASS_CALLER_CWD` sits in a branch (a passport at or above
+it): a name no catalog knows, standing in no branch, is no citizen and is refused, or its
+mailbox would be made wherever it stands (a project root).
 
 > **The registry is asked before contacts.** `AIPASS_REGISTRY.json` is the authoritative
 > catalog; `contacts.json` is a learned, writable cache, and a poisoned cache row must not

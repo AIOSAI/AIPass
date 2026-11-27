@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.6.1
+# Version: 1.6.4
 # Created: 2026-03-29
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's wake_branch: the spawn, session pointer, model, provider and marking."""
@@ -34,6 +34,7 @@ from aipass.ai_mail.tests.support_wake import (
     _make_wake_fixtures,
     _patch_wake_deps,
     _record_spawn_routes,
+    _step,
 )
 
 pytestmark = pytest.mark.usefixtures("wake_log_operation_suppressed")
@@ -373,7 +374,7 @@ class TestWakeBranch:
         status, ok = wake_branch("@testbranch")
 
         assert ok is False
-        step = status.find_step("occupancy")
+        step = _step(status, "occupancy")
         assert step[0] == "warn" and step[2].startswith("Interactive codex session in ")
 
     def test_fresh_true_no_continue_flag(self, tmp_path, monkeypatch):
@@ -482,7 +483,7 @@ class TestWakeBranch:
         )
 
     def test_prompt_instructs_synchronous_subagents(self, tmp_path, monkeypatch):
-        """Prompt tells the agent to run sub-agents in the foreground (headless mode kills orphaned background tasks)."""
+        """Prompt tells the agent to run sub-agents in the foreground (headless mode kills orphaned background work)."""
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
 
@@ -538,7 +539,7 @@ class TestWakeBranch:
         assert "src/aipass/sentry/docs/aipass_standards.md" in prompt
         assert "src/aipass/sentry/templates/test_template_v1.md" in prompt
         assert spec_at < prompt.find("IMPORTANT: run any sub-agents")
-        assert prompt.find("checklist last") > spec_at
+        assert spec_at < prompt.find("checklist last") < prompt.find("every docs/ page")
 
     def test_spawn_file_not_found(self, tmp_path, monkeypatch):
         """FileNotFoundError during Popen -> fail step."""
@@ -942,7 +943,7 @@ class TestDaemonSessionMarking:
         new_session = [c for c in calls["tmux"] if c[1] == "new-session"][0]
         session = new_session[new_session.index("-s") + 1]
         assert not session.startswith("daemon-"), "this is the name a human already killed"
-        assert "AIPASS" in session, "the name must say a machine started this, not a person"
+        assert session.startswith("aipass-daemon-wake-testbranch-"), "a machine started this, not a person"
 
     def test_marking_lands_before_the_agent_starts(self, tmp_path, monkeypatch):
         """A window is killable from the moment it exists, so marking precedes send-keys."""
@@ -1213,7 +1214,7 @@ class TestCodexWake:
 
         args = _claude_args(calls["popen"][0]["cmd"])
         assert "resume" not in args and self.THREAD not in args
-        assert status.find_step("session")[0] == "info"
+        assert _step(status, "session")[0] == "info"
 
     def test_the_monitor_is_told_codex_and_the_register_row_says_so(self, tmp_path, monkeypatch, fake_home):
         _, calls, _, _ = self._wake(tmp_path, monkeypatch)
@@ -1243,7 +1244,7 @@ class TestCodexWake:
         status, ok = wake_branch("@testbranch", provider="gemini")
 
         assert ok is False
-        assert status.find_step("provider")[0] == "fail" and "gemini" in status.find_step("provider")[2]
+        assert _step(status, "provider")[0] == "fail" and "gemini" in _step(status, "provider")[2]
         assert calls["popen"] == []
 
     @pytest.mark.parametrize("lane", [{"scheduled": True}, {"admin": True}])
@@ -1254,7 +1255,7 @@ class TestCodexWake:
 
         status, ok = wake_branch("@testbranch", provider="codex", **lane)
 
-        assert ok is True and status.find_step("manager")[0] == "ok"
+        assert ok is True and _step(status, "manager")[0] == "ok"
         cmd = calls["popen"][0]["cmd"]
         assert "--provider=codex" in cmd[: cmd.index("--")]
         assert _claude_args(cmd)[:2] == ["codex", "exec"]
@@ -1317,7 +1318,7 @@ class TestOpenCodeWake:
         assert wake_mod.session_pointer.read_pointer(branch_path) is None
         assert status.find_step("provider") == ("ok", "provider", "opencode")
         assert status.find_step("model") == ("ok", "model", "opencode/glm-5.3-flash-free")
-        assert status.find_step("session")[2].startswith("fresh, OpenCode mints the id")
+        assert _step(status, "session")[2].startswith("fresh, OpenCode mints the id")
         assert status.find_step("run") == (
             "info",
             "run",
@@ -1346,7 +1347,7 @@ class TestOpenCodeWake:
         args = _claude_args(calls["popen"][0]["cmd"])
         assert args == [*self.HEAD, "--session", sid, args[-1]]
         assert status.find_step("session") == ("ok", "session", f"resuming {sid} (pointer)")
-        assert wake_mod.session_pointer.read_pointer(branch_path)["session_id"] == sid
+        assert (wake_mod.session_pointer.read_pointer(branch_path) or {}).get("session_id") == sid
 
     @pytest.mark.parametrize(
         "row, why",
@@ -1367,7 +1368,7 @@ class TestOpenCodeWake:
 
         args = _claude_args(calls["popen"][0]["cmd"])
         assert "--session" not in args and sid not in args
-        assert why in status.find_step("session")[2]
+        assert why in _step(status, "session")[2]
 
     def test_a_codex_pointer_starts_an_opencode_wake_fresh_with_the_resolvers_reason(self, tmp_path, monkeypatch):
         def plant(branch_path):
@@ -1378,7 +1379,7 @@ class TestOpenCodeWake:
 
         args = _claude_args(calls["popen"][0]["cmd"])
         assert "ses_codexish" not in args
-        assert "pointer is for codex, waking on opencode - starting fresh" in status.find_step("session")[2]
+        assert "pointer is for codex, waking on opencode - starting fresh" in _step(status, "session")[2]
 
     def test_fresh_ignores_a_live_pointer_and_passes_no_session(self, tmp_path, monkeypatch):
         sid = "ses_aipass_live"
@@ -1487,7 +1488,7 @@ class TestOpenCodeConfigDoor:
         status, ok = wake_branch("@testbranch", provider="claude", opencode_config={})
 
         assert ok is False and calls["popen"] == []
-        assert status.find_step("config")[0] == "fail"
+        assert _step(status, "config")[0] == "fail"
 
 
 class TestAGrantTheRowCannotCarryWakesNobody:

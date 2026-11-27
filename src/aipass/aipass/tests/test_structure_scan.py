@@ -3,7 +3,7 @@
 # Description: Tests for doctor structure scanner (DPLAN-0177)
 # Version: 1.6.0
 # Created: 2026-05-14
-# Modified: 2026-11-20
+# Modified: 2026-11-24
 # =============================================
 
 """Tests for apps/handlers/structure_scan/structure_scanner.py and the handlers it drives."""
@@ -39,14 +39,13 @@ _OTHER_GROUPS = (
     "_check_services",
     "_check_community",
     "_check_scaffold",
-    "_check_sandbox",
 )
 
 
 def _structure_via_doctor() -> list:
     """The Structure group as run_doctor prints it (the public door, not the private name).
 
-    The six other groups are stubbed where doctor resolves them, and _print_doctor_groups
+    The five other groups are stubbed where doctor resolves them, and _print_doctor_groups
     is replaced by a recorder, so only the structure scan runs and nothing is printed.
     """
     printed: dict = {}
@@ -64,7 +63,7 @@ def _structure_via_doctor() -> list:
         finally:
             for stub in stubs:
                 stub.stop()
-    return printed["Structure"]
+    return printed.get("Structure", [])
 
 
 def _make_agent(
@@ -670,16 +669,14 @@ class TestCheckRootArtifacts:
 
 class TestCheckStructureIntegration:
     def test_no_project_root(self, tmp_path: Path, monkeypatch) -> None:
-        """Returns warning when no project root detected."""
+        """Outside a project the Structure group is left out: the scope line stands for it, no WARN row."""
         monkeypatch.chdir(tmp_path)
         with patch(
             "aipass.aipass.apps.modules.doctor.find_project_root",
             return_value=None,
         ):
             results = _structure_via_doctor()
-        assert len(results) == 1
-        assert results[0].glyph == GLYPH_WARN
-        assert "project root" in results[0].label
+        assert results == []
 
     def test_clean_project(self, tmp_path: Path) -> None:
         """Clean project with agents, registry, pyproject gets all PASS."""

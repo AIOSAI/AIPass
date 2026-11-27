@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_residency_scope.py
 # Description: Red-first pins for passport-declared residency as the fleet classifier (DPLAN-0319)
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-08-28
-# Modified: 2026-11-18
+# Modified: 2026-11-23
 # =============================================
 
 """Tests for apps/handlers/monitor/registry_scope.py and the callers that classify through it."""
@@ -282,10 +282,10 @@ class TestEveryLaneReadsTheOneDefinition:
         accepted = rs.accepted_resident_paths(fleet)
         assert accepted == {str(fleet / "projects/live/src/live/live")}
 
-    def test_the_read_scope_names_a_declared_external_the_write_scope_does_not(self, fleet, monkeypatch, tmp_path):
-        """The read scope names a declared external; the write scope does not.
+    def test_both_scopes_name_a_declared_external(self, fleet, monkeypatch, tmp_path):
+        """Services write where they serve: the read and the write scope both name a declared external.
 
-        Reads see the declared fleet through the declared roots, never cwd; writes stop at the repo edge.
+        Both see it through the declared roots, never cwd; a refused resident stays out of both.
         """
         outside = tmp_path / "outside"
         _write(outside / "OUTSIDE_REGISTRY.json", _registry(_branch("ext", "src/ext/ext")))
@@ -301,9 +301,10 @@ class TestEveryLaneReadsTheOneDefinition:
         write_names = {Path(branch["path"]).name for branch in detector.write_scope()}
         read_names = {Path(branch["path"]).name for branch in detector.read_scope()}
 
-        assert "ext" not in write_names, "the write scope reached a branch outside the repo"
+        assert "ext" in write_names, "a declared external branch cannot be written where it is served"
         assert "ext" in read_names, "a declared external branch cannot be named for a read"
-        assert write_names <= read_names, "the read scope dropped a branch the write scope holds"
+        assert write_names == read_names, "the scopes differ on a fleet with no name shared"
+        assert "mute" not in write_names, "admitting externals swept in a refused resident"
 
     def test_the_caller_lane_is_deliberately_not_classified(self):
         """External callers are a different mechanism — pinned so it stays a choice."""

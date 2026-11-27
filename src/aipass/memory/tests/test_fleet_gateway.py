@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_fleet_gateway.py
 # Description: Pins the public cross-branch gateway for the fleet definition and the package top file
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-30
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/fleet.py and __init__.py, memory's one import door."""
@@ -115,10 +115,17 @@ class TestTheCommandSurfaceIsIntrospectionOnly:
         assert fleet.handle_command("rollover", []) is False
         assert fleet.handle_command("search", ["x"]) is False
 
-    @pytest.mark.parametrize("args", [[], ["--help"], ["-h"], ["help"]])
-    def test_the_bare_command_and_every_help_spelling_introspect(self, capsys, args):
-        assert fleet.handle_command("fleet", args) is True
+    def test_the_bare_command_prints_the_self_map(self, capsys):
+        assert fleet.handle_command("fleet", []) is True
         assert "fleet Module" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("args", [["--help"], ["-h"], ["help"]])
+    def test_every_help_spelling_prints_the_help_page(self, capsys, args):
+        """The house pattern: help is title, USAGE and EXAMPLES; the self-map is the bare command's."""
+        assert fleet.handle_command("fleet", args) is True
+        out = capsys.readouterr().out
+        assert "fleet - " in out and "USAGE:" in out and "EXAMPLES:" in out
+        assert "fleet Module" not in out, "help routed to the self-map"
 
     def test_an_unknown_subcommand_is_named_not_swallowed(self, capsys):
         """Claimed and reported, never a silent no-op that looks like success: exits 2, read from both streams."""

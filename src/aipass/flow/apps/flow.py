@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: flow.py
 # Description: Entry point CLI for drone @flow — plan lifecycle management
-# Version: 1.2.1
+# Version: 1.2.3
 # Created: 2026-03-08
-# Modified: 2026-10-24
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -25,7 +25,7 @@ from typing import List, Any
 
 from aipass.prax import logger
 
-from aipass.cli import console, header, error, reset_command_state, resolve_exit
+from aipass.cli import console, err_console, header, error, header_version, reset_command_state, resolve_exit
 
 MODULES_DIR = Path(__file__).parent / "modules"
 
@@ -39,7 +39,7 @@ def discover_modules() -> List[Any]:
     modules = []
 
     if not MODULES_DIR.exists():
-        logger.warning(f"[FLOW] Modules directory not found: {MODULES_DIR}")
+        logger.warning(f"[flow] Modules directory not found: {MODULES_DIR}")
         return modules
 
     for file_path in MODULES_DIR.glob("*.py"):
@@ -53,12 +53,14 @@ def discover_modules() -> List[Any]:
 
             if hasattr(module, "handle_command"):
                 modules.append(module)
-                logger.info(f"[FLOW] Loaded module: {file_path.stem}")
+                logger.info(f"[flow] Loaded module: {file_path.stem}")
             else:
-                logger.info(f"[FLOW] Skipped {file_path.stem} - no handle_command()")
+                logger.info(f"[flow] Skipped {file_path.stem} - no handle_command()")
 
         except Exception as e:
-            logger.error(f"[FLOW] Failed to load module {module_name}: {e}")
+            logger.error(f"[flow] Failed to load module {module_name}: {e}")
+            # Its verbs vanish from the menu: say so, or they read as "Unknown command".
+            err_console.print(f"flow: module {file_path.stem} failed to load: {e}", markup=False, highlight=False)
 
     return modules
 
@@ -72,10 +74,10 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
             if module.handle_command(command, args):
                 return True
         except BrokenPipeError:
-            logger.info(f"[FLOW] Broken pipe in {module.__name__} (stdout closed early)")
+            logger.info(f"[flow] Broken pipe in {module.__name__} (stdout closed early)")
             return True
         except Exception as e:
-            logger.error(f"[FLOW] Module {module.__name__} error: {e}")
+            logger.error(f"[flow] Module {module.__name__} error: {e}")
 
     return False
 
@@ -101,7 +103,7 @@ def _main_impl():
     modules = discover_modules()
 
     if not modules:
-        logger.warning("[FLOW] No modules discovered")
+        logger.warning("[flow] No modules discovered")
         error("No modules available")
         return 1
 
@@ -112,7 +114,7 @@ def _main_impl():
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print(f"FLOW v{BRANCH_VERSION}")
+        console.print(f"flow v{header_version(__file__)}", highlight=False)
         return 0
 
     if args[0] in ["--help", "-h", "help"]:
@@ -140,7 +142,7 @@ def _main_impl():
 def print_introspection(modules: List[Any]):
     """Display discovered modules with Rich formatting (run with no args)"""
     console.print()
-    console.print("[bold cyan]Flow - PLAN Management System[/bold cyan]")
+    console.print("[bold cyan]flow - PLAN Management System[/bold cyan]")
     console.print()
     console.print("[dim]Task orchestration and workflow management[/dim]")
     console.print()
@@ -163,10 +165,6 @@ def print_introspection(modules: List[Any]):
     console.print()
 
 
-# Must match the version in the README header.
-BRANCH_VERSION = "2.7.0"
-
-
 def module_verbs(module: Any) -> str:
     """
     Render the verbs a module actually answers to, for the help table.
@@ -184,7 +182,7 @@ def module_verbs(module: Any) -> str:
 def print_help(modules: List[Any]):
     """Display Rich-formatted help (run with --help)"""
     console.print()
-    header("Flow - PLAN Management System")
+    header("flow - PLAN Management System")
     console.print()
 
     console.print("[dim]Task orchestration and workflow management for AIPass[/dim]")
@@ -279,7 +277,7 @@ def print_module_help(command: str, modules: List[Any]) -> bool:
 
     console.print()
     module_name = target_module.__name__.split(".")[-1]
-    header(f"Flow - {module_name} Command")
+    header(f"flow - {module_name} Command")
     console.print()
 
     if target_module.__doc__:
@@ -300,9 +298,9 @@ if __name__ == "__main__":
     except BrokenPipeError:
         import os
 
-        logger.info("[FLOW] Broken pipe in main (stdout closed early)")
+        logger.info("[flow] Broken pipe in main (stdout closed early)")
         try:
             sys.stdout.close()
         except Exception as e:
-            logger.warning(f"[FLOW] Error closing stdout after broken pipe: {e}")
+            logger.warning(f"[flow] Error closing stdout after broken pipe: {e}")
         os._exit(0)

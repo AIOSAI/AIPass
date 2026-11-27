@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_handler.py
 # Description: Handler for registry file operations
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-03-09
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -19,12 +19,13 @@ from typing import Any, Dict, List, NamedTuple, Optional
 from aipass.prax import logger
 from .exceptions import (
     RegistryCorruptError,
+    RegistryError,
     RegistryMismatchError,
     RegistryNotFoundError,
     RegistryPermissionError,
 )
 from aipass.drone.apps.handlers.json import json_handler
-from .router_handler import caller_cwd, registry_named_entries
+from .router_handler import caller_seat, registry_named_entries
 
 
 def _validate_branch_path(branch_path: Path, project_root: Path, branch_name: str) -> bool:
@@ -250,7 +251,7 @@ def _registry_matches_credential(registry_path: Path) -> bool:
     if not registry_id:
         return True
 
-    cwd = caller_cwd()
+    cwd = caller_seat()
     if cwd is None:
         logger.info(
             "Credential pre-check for %s has no current directory to walk from — "
@@ -283,7 +284,7 @@ def find_registry() -> Path:
     Order: walk up from cwd (skipping credential mismatches), the AIPass home,
     walk up from this package, then the package's project root.
     """
-    cwd = caller_cwd()
+    cwd = caller_seat()
     if cwd is not None:
         for parent in [cwd] + list(cwd.parents):
             hit = _first_registry_in(parent)
@@ -339,7 +340,7 @@ def _verify_registry_credential(registry_path: Path, registry_data: Dict[str, An
         if not registry_id:
             return
 
-        cwd = caller_cwd()
+        cwd = caller_seat()
         if cwd is None:
             logger.info(
                 "Registry credential verification for %s has no current directory to walk from — "
@@ -552,13 +553,45 @@ def _external_registry_path(entry: Dict[str, Any]) -> Optional[Path]:
     return None
 
 
+def _hosted_branches() -> List[Dict[str, Any]]:
+    """Active citizens of the projects the AIPass home hosts: each <home>/projects/<p>/*_REGISTRY.json, by name.
+
+    One fixed level under the home, the shape `aipass new` makes, never a walk. Declared roots refuse a
+    path inside the home, so this tier is how its hosted projects resolve. The primary registry is skipped:
+    standing in a hosted project, its citizens already answer first. An unreadable registry is named, skipped.
+    """
+    home_registry = _get_aipass_home_registry_path()
+    if home_registry is None:
+        return []
+    primary = get_registry_path().resolve()
+    entries: List[Dict[str, Any]] = []
+    for project in sorted(p for p in (home_registry.parent / "projects").glob("*") if p.is_dir()):
+        registry = _first_registry_in(project)
+        if registry is None or registry.resolve() == primary:
+            continue
+        try:
+            data = _load_registry_data(registry)
+        except RegistryError as exc:
+            logger.warning("Hosted project %s skipped: its registry could not be read: %s", project.name, exc)
+            continue
+        for branch in data["branches"].values():
+            if branch.get("status") == "active":
+                entries.append({**branch, "registry": registry.name})
+    return entries
+
+
+def _outer_branches() -> List[Dict[str, Any]]:
+    """The tiers after primary and home, in lookup order: declared roots, then hosted projects."""
+    return _external_branches() + _hosted_branches()
+
+
 def get_all_branches(
     branch_type: Optional[str] = None,
     status: str = "active",
 ) -> List[Dict[str, Any]]:
     """Get all branches from the registry, optionally filtered.
 
-    Merges primary, then AIPass home, then declared roots; earlier wins a name collision.
+    Merges primary, then AIPass home, then declared roots, then hosted projects; earlier wins a name collision.
     """
     merged: Dict[str, Any] = {}
 
@@ -581,11 +614,11 @@ def get_all_branches(
             logger.warning("get_all_branches: AIPass home registry unavailable: %s", exc)
 
     # The one place both sides of a collision are visible, so the shadowing is named here.
-    for entry in _external_branches():
+    for entry in _outer_branches():
         name = entry["name"]
         if name in merged:
             logger.warning(
-                "Name collision: '%s' is declared by external root %s (%s) and is SHADOWED by %s. "
+                "Name collision: '%s' is declared by %s (%s) and is SHADOWED by %s. "
                 "The external citizen is unreachable by name until one side renames.",
                 name,
                 entry["registry"],
@@ -607,7 +640,7 @@ def get_all_branches(
 
 
 def get_branch_by_name(name: str) -> Optional[Dict[str, Any]]:
-    """Get a single branch by name (case-insensitive): primary, then AIPass home, then declared roots."""
+    """Get a single branch by name (case-insensitive): primary, AIPass home, declared roots, hosted projects."""
     lower_name = name.lower()
 
     try:
@@ -630,7 +663,7 @@ def get_branch_by_name(name: str) -> Optional[Dict[str, Any]]:
         except RegistryNotFoundError as exc:
             logger.warning("get_branch_by_name: AIPass home registry unavailable for '%s': %s", name, exc)
 
-    for entry in _external_branches():
+    for entry in _outer_branches():
         if entry["name"] == lower_name:
             logger.info("Resolved '%s' from declared root %s", lower_name, entry["registry"])
             return entry
@@ -662,7 +695,7 @@ def get_branch_with_registry(name: str) -> Optional[tuple]:
         except RegistryNotFoundError as exc:
             logger.warning("get_branch_with_registry: AIPass home registry unavailable for '%s': %s", name, exc)
 
-    for entry in _external_branches():
+    for entry in _outer_branches():
         if entry["name"] == lower_name:
             external_registry = _external_registry_path(entry)
             if external_registry is None:

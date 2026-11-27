@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: push.py
 # Description: The trinity push lane — dry-run reporting and gated execution
-# Version: 1.2.0
+# Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Trinity Push Module
@@ -107,7 +107,7 @@ def _run_push(branch, dry_run: bool) -> None:
     mode = "DRY RUN" if dry_run else "PUSH"
     console.print()
     console.print(
-        Panel.fit(f"[bold cyan]Memory - Trinity {mode} · {label}[/bold cyan]", border_style="cyan", box=box.ROUNDED)
+        Panel.fit(f"[bold cyan]memory - Trinity {mode} · {label}[/bold cyan]", border_style="cyan", box=box.ROUNDED)
     )
     console.print()
 
@@ -142,6 +142,8 @@ def print_introspection() -> None:
         Panel.fit("[bold cyan]Push Module - The Trinity Push[/bold cyan]", border_style="cyan", box=box.ROUNDED)
     )
     console.print()
+    console.print("[dim]Bring a branch's .trinity/ files to the trinity standard, archive before prune.[/dim]")
+    console.print()
     console.print("[bold]PURPOSE:[/bold]")
     console.print("  Bring a branch's .trinity/ files to the trinity standard: re-render the")
     console.print("  machine frame, archive-then-prune every non-canonical entry, move todos off")
@@ -162,6 +164,8 @@ def print_introspection() -> None:
     console.print("  Todos never reach vectors: they move to .backup/todo/<branch>/backlog.json,")
     console.print("  and the pad is written only after that append reads back json-equal.")
     console.print()
+    console.print("[dim]Full usage: drone @memory push --help[/dim]")
+    console.print()
 
 
 def print_help() -> None:
@@ -171,17 +175,17 @@ def print_help() -> None:
     console.print()
     console.print("[bold]USAGE:[/bold]")
     console.print("  drone @memory push --dry-run                  Fleet dry-run (the gate report)")
-    console.print("  drone @memory push --branch @canary --dry-run One branch, no writes")
-    console.print("  drone @memory push --branch @canary           Push one branch for real")
+    console.print("  drone @memory push --branch @canary_test --dry-run One branch, no writes")
+    console.print("  drone @memory push --branch @canary_test           Push one branch for real")
     console.print("  drone @memory push --confirm                  FLEET push (needs the flag)")
     console.print()
     console.print("[bold]WHAT A PUSH DOES, per branch:[/bold]")
-    console.print("  1. Re-renders the machine frame — document_metadata as a CLOSED set,")
+    console.print("  1. Re-renders the machine frame — document_metadata as a CLOSED set,", highlight=False)
     console.print("     managed_by in exact branch-directory casing, _usage and guidelines")
     console.print("     verbatim from the templates, all four meta lines from config.")
-    console.print("  2. Vectorizes every non-canonical entry VERBATIM, VERIFIES the ingestion")
+    console.print("  2. Vectorizes every non-canonical entry VERBATIM, VERIFIES the ingestion", highlight=False)
     console.print("     by reading it back, and only then prunes it from the live file.")
-    console.print("  3. Writes one canonical session note saying where those entries and")
+    console.print("  3. Writes one canonical session note saying where those entries and", highlight=False)
     console.print("     todos went.")
     console.print()
     console.print("[bold]TODOS GO TO A FILE:[/bold] a canonical todo is {number, date, task,")
@@ -195,4 +199,8 @@ def print_help() -> None:
     console.print("  finch and aipass_site. Named explicitly — never a glob over projects/.")
     console.print()
     console.print("[bold]NOT IN SCOPE:[/bold] stray files in .trinity/ are reported, never deleted.")
+    console.print()
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  [dim]drone @memory push --dry-run[/dim]")
+    console.print("  [dim]drone @memory push --branch @canary_test --dry-run[/dim]")
     console.print()

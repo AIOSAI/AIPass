@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commit_handler.py
 # Description: Commit handler with scoped staging
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-05-12
-# Modified: 2026-11-15
+# Modified: 2026-11-22
 # =============================================
 
 """Commit handler with scoped staging."""
@@ -198,6 +198,11 @@ def _run_test_gate(repo_root: Path) -> dict | None:
     }
 
 
+def _repo_relative(path: str, repo_root: Path) -> str:
+    """*path* as git ls-files prints it from *repo_root*: a relative path is git's, already from the root."""
+    return os.path.relpath(path, repo_root) if Path(path).is_absolute() else os.path.normpath(path)
+
+
 def commit_changes(
     message: str,
     all_files: bool = False,
@@ -218,14 +223,23 @@ def commit_changes(
 
     rewritten: list[str] = []
     if files:
-        add_result = subprocess.run(
-            ["git", "add", "--"] + files,
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--", *files],
             capture_output=True,
             text=True,
             cwd=str(repo_root),
         )
-        if add_result.returncode != 0:
-            return {"stdout": "", "stderr": f"Failed to stage: {add_result.stderr.strip()}", "exit_code": 1}
+        if listed.returncode != 0:
+            return {"stdout": "", "stderr": f"Failed to stage: {listed.stderr.strip()}", "exit_code": 1}
+        tracked = set(listed.stdout.split("\0"))
+        # git add refuses a path under an ignored folder even when tracked; commit --only takes a tracked file as is.
+        untracked = [path for path in files if _repo_relative(path, repo_root) not in tracked]
+        if untracked:
+            add_result = subprocess.run(
+                ["git", "add", "--", *untracked], capture_output=True, text=True, cwd=str(repo_root)
+            )
+            if add_result.returncode != 0:
+                return {"stdout": "", "stderr": f"Failed to stage: {add_result.stderr.strip()}", "exit_code": 1}
     elif all_files:
         lint_refusal, rewritten = _lint_gate(repo_root)
         if lint_refusal is not None:
@@ -246,8 +260,9 @@ def commit_changes(
 
     # Named files commit alone (--only): whatever another agent staged stays staged, out of this commit.
     scope = ["--", *files] if files else []
+    # Named paths commit from the working tree (a tracked one was never added), so they are read against HEAD.
     diff_check = subprocess.run(
-        ["git", "diff", "--cached", "--quiet", *scope],
+        ["git", "diff", *(["HEAD"] if files else ["--cached"]), "--quiet", *scope],
         capture_output=True,
         text=True,
         cwd=str(repo_root),

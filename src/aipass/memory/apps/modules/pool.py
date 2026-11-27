@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pool.py
 # Description: Pool Module — drone CLI for pool commands
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-06-06
-# Modified: 2026-10-27
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -147,6 +147,8 @@ def print_introspection() -> None:
     for sub, desc in _SUBCOMMANDS.items():
         console.print(f"  [cyan]*[/cyan] {sub} — {desc}")
     console.print()
+    console.print("[dim]Run drone @memory pool --help for more info[/dim]")
+    console.print()
 
 
 def print_help() -> None:
@@ -172,5 +174,9 @@ def print_help() -> None:
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
     console.print("  [dim]drone @memory pool process[/dim]")
+    console.print("  [dim]drone @memory pool status[/dim]")
+    console.print()
+    console.print("[bold cyan]EXAMPLES:[/bold cyan]")
+    console.print("  # Check pool count and vector stats")
     console.print("  [dim]drone @memory pool status[/dim]")
     console.print()

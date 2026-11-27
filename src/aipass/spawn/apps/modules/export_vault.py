@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: export_vault.py
 # Description: Passport vault export — thin CLI layer over seed_ops
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-08-28
-# Modified: 2026-11-20
+# Modified: 2026-11-26
 # =============================================
 
 """Export the passport vaults of the tree or project the registry names.
@@ -127,6 +127,11 @@ def print_help():
     console.print("[dim]Vaults are GENERATED, never hand-edited — edit the passport, then re-export.[/dim]")
     console.print("[dim]Re-running is a measured no-op: an up-to-date vault reports 'current'.[/dim]")
     console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @spawn export-vault[/green]")
+    console.print("  [green]drone @spawn export-vault --only @drone[/green]")
+    console.print("  [green]drone @spawn export-vault --confirm[/green]")
+    console.print()
 
 
 def _print_receipt(receipt: dict) -> None:
@@ -169,6 +174,7 @@ def _print_per_branch(receipt: dict) -> None:
     """Print one line per scanned branch."""
     console.print()
     console.print("[bold]Per branch:[/bold]")
+    console.print("  [dim]each scanned branch's vault action, one line per branch[/dim]")
     for rec in receipt["seeds"]:
         if rec["error"]:
             continue

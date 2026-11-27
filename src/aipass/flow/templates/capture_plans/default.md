@@ -8,7 +8,7 @@ Tag: {tag}
 
 ## What is a CPLAN?
 
-Capture Plans (CPLANs) are **records, not plans** — a soft memo wearing the plan lifecycle. Something worth keeping just happened: an external review landed, a discovery connected systems nobody knew were connected, a dense session produced knowledge too big for a .trinity entry. Write it down, close it, done. Closing vectorizes it into @memory — recallable forever by concept via `drone @memory search`.
+Capture Plans (CPLANs) are **records, not plans** — a soft memo wearing the plan lifecycle. Something worth keeping just happened: an external review landed, a discovery connected systems nobody knew were connected, a dense session produced knowledge too big for a .trinity entry. Write it down, close it, done. Closing vectorizes it into @memory. `drone @memory search` recalls by concept from your own branch's store; the fleet-wide store answers `drone @memory search global`, for admin and @memory.
 
 **Born to close.** A CPLAN is created, filled, and closed in the same sitting. If it stays open past a day, it probably wanted to be a DPLAN.
 

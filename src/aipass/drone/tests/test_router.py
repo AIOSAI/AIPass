@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_router.py
 # Description: Command routing - router module and router_handler
-# Version: 1.2.1
+# Version: 1.2.3
 # Created: 2026-03-14
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/router.py and apps/handlers/router_handler.py."""
@@ -899,7 +899,7 @@ class TestIdentityMessageSeverity:
             route_command("@testbranch", "status")
 
         routing = " ".join(str(c) for c in mock_logger.info.call_args_list)
-        assert "CALLER:COMMONS" in routing
+        assert "CALLER:commons" in routing
 
 
 class TestCallerBranchEnvVar:
@@ -959,6 +959,71 @@ class TestCallerBranchEnvVar:
 
         env = mock_exec.call_args.kwargs["env"]
         assert "AIPASS_CALLER_BRANCH" not in env
+
+
+class TestCloudSeatAtRepoRoot:
+    """AIPASS_SEAT names the caller's seat only at a passportless repo root; paths keep the raw cwd."""
+
+    @pytest.fixture()
+    def repo(self, temp_test_dir: Path, monkeypatch) -> Path:
+        monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
+        for name in ("devpulse", "sentry", ".hidden"):
+            trinity = temp_test_dir / "src" / "aipass" / name / ".trinity"
+            trinity.mkdir(parents=True)
+            passport = {"branch_info": {"branch_name": name}}
+            (trinity / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+        (temp_test_dir / "apps").mkdir()
+        (temp_test_dir / "apps" / "target.py").write_text("# stub", encoding="utf-8")
+        return temp_test_dir
+
+    @staticmethod
+    def _stamp(repo: Path) -> dict:
+        with patch("aipass.drone.apps.handlers.router_handler.execute_command") as mock_exec:
+            mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
+            execute_branch_command(branch_path=str(repo), branch_name="target", command="status")
+        return mock_exec.call_args.kwargs["env"]
+
+    def test_root_with_a_seat_stamps_that_branch_and_paths_keep_the_root(self, repo: Path, monkeypatch):
+        monkeypatch.chdir(repo)
+        monkeypatch.setenv("AIPASS_SEAT", "devpulse")
+        env = self._stamp(repo)
+        assert env["AIPASS_CALLER_CWD"] == str(repo / "src" / "aipass" / "devpulse")
+        assert env["AIPASS_CALLER_BRANCH"] == "devpulse"
+        assert router_handler.caller_cwd() == repo
+
+    def test_root_without_the_variable_stamps_the_root(self, repo: Path, monkeypatch):
+        monkeypatch.chdir(repo)
+        monkeypatch.delenv("AIPASS_SEAT", raising=False)
+        env = self._stamp(repo)
+        assert env["AIPASS_CALLER_CWD"] == str(repo)
+        assert "AIPASS_CALLER_BRANCH" not in env
+
+    def test_a_citizen_cwd_keeps_its_own_name_over_the_seat(self, repo: Path, monkeypatch):
+        sentry = repo / "src" / "aipass" / "sentry"
+        monkeypatch.chdir(sentry)
+        monkeypatch.setenv("AIPASS_SEAT", "devpulse")
+        env = self._stamp(repo)
+        assert env["AIPASS_CALLER_CWD"] == str(sentry)
+        assert env["AIPASS_CALLER_BRANCH"] == "sentry"
+
+    @pytest.mark.parametrize("seat", ["../sentry", "sentry/../devpulse", "nope", ".trinity", ".hidden"])
+    def test_a_seat_that_is_not_a_plain_branch_name_leaves_the_root(self, repo: Path, monkeypatch, seat: str):
+        monkeypatch.chdir(repo)
+        monkeypatch.setenv("AIPASS_SEAT", seat)
+        env = self._stamp(repo)
+        assert env["AIPASS_CALLER_CWD"] == str(repo)
+        assert "AIPASS_CALLER_BRANCH" not in env
+
+    def test_a_root_that_is_itself_a_citizen_keeps_its_own_name(self, repo: Path, monkeypatch):
+        (repo / ".trinity").mkdir()
+        (repo / ".trinity" / "passport.json").write_text(
+            json.dumps({"branch_info": {"branch_name": "rootcitizen"}}), encoding="utf-8"
+        )
+        monkeypatch.chdir(repo)
+        monkeypatch.setenv("AIPASS_SEAT", "devpulse")
+        env = self._stamp(repo)
+        assert env["AIPASS_CALLER_CWD"] == str(repo)
+        assert env["AIPASS_CALLER_BRANCH"] == "rootcitizen"
 
 
 class TestHandleCommand:

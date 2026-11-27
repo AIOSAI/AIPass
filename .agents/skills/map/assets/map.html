@@ -1,0 +1,270 @@
+<title>Keep or Cut Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a sticky group rail on the left, a ledger of rows on the right; each row ends in a verdict cell (keep / cut) and a comment. */
+:root {
+  --bg: #f7f6f2; --panel: #ffffff; --fg: #1d1f24; --muted: #6a6f7a; --line: #e2e0d8;
+  --accent: #2b5fd9; --keep: #1f8a4c; --keep-bg: #e4f4ea; --cut: #c23b3b; --cut-bg: #fbe6e6;
+  --flag: #a86a00; --flag-bg: #fff3d6; --third: #7a3fd1; --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #15171b; --panel: #1d2026; --fg: #e8e7e2; --muted: #9aa0ab; --line: #2d313a;
+  --accent: #7ea2ff; --keep: #5ccf8a; --keep-bg: #173424; --cut: #ff7b7b; --cut-bg: #3a1c1c;
+  --flag: #f0b84a; --flag-bg: #3a2c10; --third: #b78cff; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #15171b; --panel: #1d2026; --fg: #e8e7e2; --muted: #9aa0ab; --line: #2d313a;
+  --accent: #7ea2ff; --keep: #5ccf8a; --keep-bg: #173424; --cut: #ff7b7b; --cut-bg: #3a1c1c;
+  --flag: #f0b84a; --flag-bg: #3a2c10; --third: #b78cff; color-scheme: dark; }
+
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.45; margin: 0; }
+* { box-sizing: border-box; }
+a { color: var(--accent); }
+code, .mono { font-family: var(--mono); font-size: 0.88em; }
+button { font: inherit; color: inherit; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line);
+  padding-block: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--panel); }
+.top-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.top h1 { font-size: 18px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+.top h1 small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+.tally { display: flex; gap: 6px; flex-wrap: wrap; }
+.tally span { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.tally .k { color: var(--keep); border-color: var(--keep); } .tally .c { color: var(--cut); border-color: var(--cut); }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-left: auto; }
+.filters button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.filters input { font: inherit; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); min-width: 180px; }
+.note-bar { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.note-bar.warn { color: var(--flag); }
+
+.wrap { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; max-width: 1400px; margin: 0 auto;
+  padding-block: 20px 60px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+nav.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 92px); align-self: start; font-size: 14px; }
+nav.rail a { display: flex; justify-content: space-between; gap: 8px; color: var(--fg); text-decoration: none; padding: 5px 8px; border-radius: 6px; }
+nav.rail a:hover { background: var(--panel); }
+nav.rail a .n { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+nav.rail a .n b { font-weight: 500; }
+.summary { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; margin-bottom: 22px; max-width: 72ch; }
+.summary h2 { margin: 0 0 6px; font-size: 15px; }
+.summary p { margin: 6px 0; color: var(--muted); font-size: 14px; }
+
+section.group { margin-bottom: 34px; min-width: 0; }
+section.group > h2 { font-size: 16px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; margin: 0 0 10px; display: flex; gap: 10px; align-items: baseline; }
+section.group > h2 .n { font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; min-width: 0; }
+.row.keep { border-left: 4px solid var(--keep); } .row.cut { border-left: 4px solid var(--cut); opacity: 0.85; }
+.row .head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+.row .name { font-weight: 600; font-size: 15px; }
+.row .id { color: var(--muted); font-size: 12px; }
+.pill { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: var(--muted); }
+.pill.fluff { color: var(--flag); border-color: var(--flag); background: var(--flag-bg); }
+.row .does { margin: 6px 0 4px; max-width: 72ch; }
+.row .meta { font-size: 13px; color: var(--muted); display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin-top: 6px; }
+.row .meta dt { font-weight: 500; } .row .meta dd { margin: 0; overflow-wrap: anywhere; }
+.row .note { font-size: 13px; margin-top: 6px; padding: 6px 10px; border-radius: 6px; background: var(--bg); }
+.row .note.fluff { background: var(--flag-bg); }
+.row .note.review { border-left: 3px solid var(--accent); }
+.row .note.review .why { color: var(--muted); display: block; margin-top: 2px; font-size: 12px; }
+.row .note.r3 { border-left: 3px solid var(--third); }
+.pill.second { color: var(--accent); border-color: var(--accent); }
+.pill.third { color: var(--third); border-color: var(--third); }
+.pill.ok { color: var(--keep); border-color: var(--keep); }
+details.more > summary { cursor: pointer; font-size: 13px; color: var(--accent); list-style: none; margin-top: 4px; }
+details.more > summary::before { content: "▸ "; } details.more[open] > summary::before { content: "▾ "; }
+.verdict { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ticks { display: flex; gap: 6px; }
+.ticks button { flex: 1; font-weight: 600; padding: 6px 0; }
+.ticks .bk[aria-pressed="true"] { background: var(--keep-bg); border-color: var(--keep); color: var(--keep); }
+.ticks .bc[aria-pressed="true"] { background: var(--cut-bg); border-color: var(--cut); color: var(--cut); }
+.verdict textarea { font: inherit; font-size: 13px; width: 100%; min-height: 58px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--bg); color: var(--fg); }
+.verdict .saved { font-size: 11px; color: var(--muted); min-height: 14px; text-align: right; }
+.empty { color: var(--muted); padding: 30px; text-align: center; }
+@media (max-width: 860px) {
+  .wrap { grid-template-columns: 1fr; }
+  nav.rail { position: static; display: flex; flex-wrap: wrap; gap: 4px; }
+  .row { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: no-preference) { .row { transition: border-color .15s; } }
+</style>
+
+<header class="top">
+  <div class="top-row">
+    <h1><span id="title">Map</span> <small id="count"></small></h1>
+    <div class="tally"><span id="t-keep" class="k">keep 0</span><span id="t-cut" class="c">cut 0</span><span id="t-open">undecided 0</span></div>
+    <div class="filters" role="group" aria-label="Filter">
+      <button data-f="all" aria-pressed="true">All</button>
+      <button data-f="open" aria-pressed="false">Undecided</button>
+      <button data-f="fluff" aria-pressed="false">Flagged</button>
+      <button data-f="second" aria-pressed="false">2nd pass</button>
+      <button data-f="third" aria-pressed="false">3rd pass</button>
+      <button data-f="keep" aria-pressed="false">Keep</button>
+      <button data-f="cut" aria-pressed="false">Cut</button>
+      <input id="q" type="search" placeholder="search name, file, text" aria-label="Search">
+    </div>
+  </div>
+  <div class="note-bar" id="status">Loading the map…</div>
+</header>
+
+<div class="wrap">
+  <nav class="rail" id="rail" aria-label="Groups"></nav>
+  <main id="main"><div class="empty">Loading…</div></main>
+</div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  let items = [], summaries = [], groupOrder = [], title = "Map", decisions = {}, filter = "all", query = "", db = null, storeMode = "none";
+  const status = $("#status");
+
+  // ---- storage: db when the viewer grants it, else this browser only ----
+  const LS_KEY = "keep-cut-map-decisions";
+  function lsLoad() { try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch { return {}; } }
+  function lsSave() { try { localStorage.setItem(LS_KEY, JSON.stringify(decisions)); } catch {} }
+  const pending = new Map();
+  async function persist(id) {
+    const d = decisions[id] || {};
+    if (!db) { lsSave(); return "saved here"; }
+    try {
+      await db.collection("decisions").doc(id).set({ verdict: d.verdict || "", comment: d.comment || "", updated: new Date().toISOString() });
+      return "saved";
+    } catch (e) {
+      if (e && e.code === "invalid_argument") { storeMode = "readonly"; setStatus(); return "read-only"; }
+      return "not saved";
+    }
+  }
+  function schedule(id, delay) {
+    clearTimeout(pending.get(id));
+    const stamp = $(`[data-saved="${id}"]`); if (stamp) stamp.textContent = "…";
+    pending.set(id, setTimeout(async () => { const r = await persist(id); if (stamp) stamp.textContent = r; }, delay));
+  }
+  function setStatus(extra) {
+    const where = storeMode === "db" ? "Decisions save to the shared store; the mapper reads them back."
+      : storeMode === "readonly" ? "You can read but not write decisions from this account."
+      : storeMode === "local" ? "No shared store in this view: decisions stay in this browser only."
+      : "Connecting the store…";
+    status.textContent = extra ? `${where} ${extra}` : where;
+    status.className = "note-bar" + (storeMode === "local" || storeMode === "readonly" ? " warn" : "");
+  }
+
+  // ---- rendering ----
+  function tally() {
+    let k = 0, c = 0;
+    for (const it of items) { const v = decisions[it.id]?.verdict; if (v === "keep") k++; else if (v === "cut") c++; }
+    $("#t-keep").textContent = `keep ${k}`; $("#t-cut").textContent = `cut ${c}`; $("#t-open").textContent = `undecided ${items.length - k - c}`;
+    $("#count").textContent = `${items.length} actions`;
+  }
+  function visible(it) {
+    const v = decisions[it.id]?.verdict || "";
+    if (filter === "open" && v) return false;
+    if (filter === "keep" && v !== "keep") return false;
+    if (filter === "cut" && v !== "cut") return false;
+    if (filter === "fluff" && !/FLUFF\?/i.test(it.note || "")) return false;
+    if (filter === "second" && it.source !== "codex" && !it.review) return false;
+    if (filter === "third" && !it.r3 && it.source !== "round3") return false;
+    if (query) { const hay = [it.id, it.name, it.file, it.does, it.touches, it.depends_on, it.note, it.group, it.kind, it.r3, it.tested_by, ...(it.review || []).map(r => r.should_be)].join(" ").toLowerCase(); if (!hay.includes(query)) return false; }
+    return true;
+  }
+  function rowHtml(it) {
+    const d = decisions[it.id] || {}; const v = d.verdict || ""; const fluff = /FLUFF\?/i.test(it.note || "");
+    return `<article class="row ${v}" id="it-${esc(it.id)}" data-id="${esc(it.id)}">
+      <div class="body">
+        <div class="head"><span class="id mono">${esc(it.id)}</span><span class="name">${esc(it.name)}</span><span class="pill">${esc(it.kind)}</span>${fluff ? '<span class="pill fluff">flagged</span>' : ""}${it.source === "codex" ? '<span class="pill second">2nd pass found</span>' : it.review ? '<span class="pill second">2nd pass corrected</span>' : ""}${it.source === "round3" ? '<span class="pill third">3rd pass found</span>' : it.r3 ? '<span class="pill third">3rd pass changed</span>' : ""}${it.verified ? '<span class="pill ok">verified</span>' : ""}</div>
+        <p class="does">${esc(it.does)}</p>
+        <dl class="meta">
+          ${it.file ? `<dt>file</dt><dd class="mono">${esc(it.file)}${it.lines ? ` <span style="color:var(--muted)">(${esc(it.lines)} lines)</span>` : ""}</dd>` : ""}
+          ${it.invoked_by ? `<dt>invoked by</dt><dd>${esc(it.invoked_by)}</dd>` : ""}
+        </dl>
+        <details class="more"><summary>touches, depends on, tests</summary><dl class="meta">
+          ${it.touches ? `<dt>touches</dt><dd>${esc(it.touches)}</dd>` : ""}
+          ${it.depends_on ? `<dt>depends on</dt><dd>${esc(it.depends_on)}</dd>` : ""}
+          ${it.tested_by ? `<dt>tested by</dt><dd class="mono">${esc(it.tested_by)}</dd>` : ""}
+        </dl></details>
+        ${it.note ? `<div class="note ${fluff ? "fluff" : ""}">${esc(it.note)}</div>` : ""}
+        ${(it.review || []).map(r => `<div class="note review"><b>Second pass, ${esc(r.field)}:</b> ${esc(r.should_be)} <span class="why">${esc(r.why)}</span></div>`).join("")}
+        ${it.r3 ? `<div class="note r3"><b>Round 3:</b> ${esc(it.r3)}</div>` : ""}
+      </div>
+      <div class="verdict">
+        <div class="ticks">
+          <button class="bk" data-v="keep" aria-pressed="${v === "keep"}" aria-label="Keep ${esc(it.name)}">✓ keep</button>
+          <button class="bc" data-v="cut" aria-pressed="${v === "cut"}" aria-label="Cut ${esc(it.name)}">✗ cut</button>
+        </div>
+        <textarea id="c-${esc(it.id)}" placeholder="comment for the mapper" aria-label="Comment on ${esc(it.name)}">${esc(d.comment || "")}</textarea>
+        <div class="saved" data-saved="${esc(it.id)}"></div>
+      </div>
+    </article>`;
+  }
+  function render() {
+    tally();
+    const groups = [...new Set([...groupOrder, ...items.map(i => i.group)])].filter(g => items.some(i => i.group === g));
+    $("#rail").innerHTML = groups.map(g => {
+      const gi = items.filter(i => i.group === g); const done = gi.filter(i => decisions[i.id]?.verdict).length;
+      return `<a href="#g-${esc(g)}">${esc(g)} <span class="n"><b>${done}</b>/${gi.length}</span></a>`;
+    }).join("");
+    const main = $("#main"); let html = "";
+    if (summaries.length && filter === "all" && !query) {
+      html += `<div class="summary"><h2>What ${esc(title)} is today</h2>${summaries.map(s => `<p><b>${esc(s.slice)}.</b> ${esc(s.summary)}</p>`).join("")}</div>`;
+    }
+    let shown = 0;
+    for (const g of groups) {
+      const gi = items.filter(i => i.group === g && visible(i)); if (!gi.length) continue; shown += gi.length;
+      html += `<section class="group" id="g-${esc(g)}"><h2>${esc(g)} <span class="n">${gi.length} of ${items.filter(i => i.group === g).length}</span></h2>${gi.map(rowHtml).join("")}</section>`;
+    }
+    main.innerHTML = shown ? html : `<div class="empty">Nothing matches this filter.</div>`;
+  }
+
+  // ---- events (delegated, so a re-render never re-binds) ----
+  $("#main").addEventListener("click", e => {
+    const b = e.target.closest("button[data-v]"); if (!b) return;
+    const row = b.closest(".row"); const id = row.dataset.id; const d = decisions[id] ||= {};
+    d.verdict = d.verdict === b.dataset.v ? "" : b.dataset.v;
+    row.classList.remove("keep", "cut"); if (d.verdict) row.classList.add(d.verdict);
+    row.querySelectorAll("button[data-v]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.v === d.verdict)));
+    tally(); refreshRail(); schedule(id, 150);
+  });
+  $("#main").addEventListener("input", e => {
+    const t = e.target.closest("textarea"); if (!t) return;
+    const id = t.closest(".row").dataset.id; (decisions[id] ||= {}).comment = t.value; schedule(id, 700);
+  });
+  function refreshRail() {
+    for (const a of $("#rail").querySelectorAll("a")) {
+      const g = a.getAttribute("href").slice(3); const gi = items.filter(i => i.group === g);
+      a.querySelector(".n").innerHTML = `<b>${gi.filter(i => decisions[i.id]?.verdict).length}</b>/${gi.length}`;
+    }
+  }
+  $(".filters").addEventListener("click", e => {
+    const b = e.target.closest("button[data-f]"); if (!b) return;
+    filter = b.dataset.f; $(".filters").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); render();
+  });
+  let qt; $("#q").addEventListener("input", e => { clearTimeout(qt); qt = setTimeout(() => { query = e.target.value.trim().toLowerCase(); render(); }, 120); });
+
+  // ---- boot: items from the published file, decisions from the store ----
+  async function boot() {
+    try {
+      const r = await fetch("items.json"); const data = await r.json();
+      items = data.items; summaries = data.summaries || []; groupOrder = data.groups || []; title = data.title || "Map";
+      document.title = `${title} Map`; $("#title").textContent = `${title} Map`;
+    } catch (e) { $("#main").innerHTML = `<div class="empty">Could not load items.json.</div>`; status.textContent = "The map file did not load."; return; }
+    decisions = lsLoad(); render();
+    db = await window.claude?.use?.("db");
+    if (!db) { storeMode = "local"; setStatus(); return; }
+    storeMode = "db"; setStatus();
+    let settled = false; const timer = setTimeout(() => { if (!settled) setStatus("The store has not answered yet; what you see may be stale."); }, 10000);
+    db.collection("decisions").onSnapshot(snap => {
+      if (!snap.metadata.fromCache) { settled = true; clearTimeout(timer); setStatus(); }
+      let changed = false;
+      for (const doc of snap.docs) {
+        const d = doc.data() || {}; const cur = decisions[doc.id] || {};
+        if (pending.has(doc.id)) continue; // my own unsent edit wins
+        if ((cur.verdict || "") !== (d.verdict || "") || (cur.comment || "") !== (d.comment || "")) { decisions[doc.id] = { verdict: d.verdict || "", comment: d.comment || "" }; changed = true; }
+      }
+      if (changed) { lsSave(); render(); }
+    }, err => { settled = true; clearTimeout(timer); setStatus(`Store error: ${err.code}.`); });
+  }
+  boot();
+})();
+</script>

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.10.1
+# Version: 3.11.1
 # Created: 2026-02-02
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -26,17 +26,20 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 
 def print_help() -> None:
     """Print help for dispatch commands."""
-    help_text = """
-Dispatch Module - Agent dispatch management
-
-COMMANDS:
-  dispatch @target "Subject" "Body"   - Send dispatch email + wake target
+    console.print()
+    console.print("[bold cyan]Dispatch Module[/bold cyan] - Agent dispatch management")
+    console.print()
+    console.print("[yellow]Usage:[/yellow]")
+    console.print(
+        """  dispatch @target "Subject" "Body"   - Send dispatch email + wake target
   dispatch register                   - Show outstanding dispatches and which are overdue
   dispatch wake @branch               - Wake only (no email sent)
   dispatch stop @agent [--by <who>]   - End the agent's running dispatch; the row reads stopped
   dispatch close <id> "reason"        - Close a register row no monitor will close (sender or admin)
-
-DISPATCH (send + wake):
+"""
+    )
+    console.print("[yellow]Examples:[/yellow]")
+    help_text = """DISPATCH (send + wake):
   drone @ai_mail dispatch @branch "Subject" "Body"                    # Send + wake
   drone @ai_mail dispatch @branch "Subject" "Body" --fresh            # Send + fresh wake
   drone @ai_mail dispatch @branch "Subject" "Body" --model opus       # Send + wake with Opus
@@ -44,6 +47,7 @@ DISPATCH (send + wake):
   drone @ai_mail dispatch @branch "Subject" "Body" --provider opencode --model opencode/glm-5.3-flash-free  # Wake on OpenCode
   drone @ai_mail dispatch @branch "Subject" "Body" --no-memory-save
   drone @ai_mail dispatch @branch "S" "B" --grant-root <dir> --grant a.ts,src  # Admin: write grant (grants --help)
+  drone @ai_mail dispatch @branch "Subject" "Body" --cloud            # In its Claude Code cloud VM; PR mailed back
 
 WAKE ONLY:
   drone @ai_mail dispatch wake @branch                       # Wake with default inbox check
@@ -407,9 +411,12 @@ def _orchestrate_close(args: List[str]) -> bool:
 def _orchestrate_dispatch_send(args: List[str]) -> bool:
     """Orchestrate combined dispatch: send email with --dispatch flag + wake branch."""
     flags, filtered = _parse_flags(
-        args, ("--from",) + _RUN_FLAGS + _GRANT_FLAGS, ("--fresh", "--no-memory-save", "--no-watchdog")
+        args,
+        ("--from",) + _RUN_FLAGS + _GRANT_FLAGS,
+        ("--fresh", "--no-memory-save", "--no-watchdog", "--cloud") + (("-c",) if "--cloud" in args else ()),
     )
-    use_fresh = flags.get("--fresh", False)
+    cloud = flags.get("--cloud", False)
+    use_fresh = flags.get("--fresh", False) or flags.get("-c", False)
     no_memory_save = flags.get("--no-memory-save", False)
     from_branch = flags.get("--from")
     use_model = flags.get("--model")
@@ -434,6 +441,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     body = filtered[2]
 
     # --from may author the mail but not buy a wake lane; refused BEFORE the send so a spoof delivers nothing.
+    from aipass.ai_mail.apps.handlers.dispatch.wake import cloud_send_refusal
     from aipass.ai_mail.apps.handlers.users import verified_caller
 
     refusal = verified_caller.sender_claim_refusal(from_branch)
@@ -442,6 +450,11 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         return True
 
     is_admin = _admin_lane()
+    local_flags = [f for f in flags if f in _RUN_FLAGS + _GRANT_FLAGS]
+    why = cloud_send_refusal(target, is_admin, local_flags, body) if cloud else ""
+    if why:
+        error(f"Dispatch to {target} not sent: {why}")
+        return True
 
     try:
         grant = grant_handler.from_send_args(flags, filtered, _GRANT_FLAGS, target, is_admin)
@@ -492,7 +505,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     from aipass.ai_mail.apps.handlers.dispatch.wake import is_manager, wake_branch
 
     # A manager's wake is skipped at the gate; "Waking" ahead of that verdict would be false.
-    if is_admin or not is_manager(target):
+    if cloud or is_admin or not is_manager(target):
         console.print(f"\nWaking {target}...")
 
     # The wake is attributed to the VERIFIED caller; --from never moves who the wake came from.
@@ -506,6 +519,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         provider=use_provider,
         opencode_config=opencode_config,
         grant=grant,
+        cloud={"body": body} if cloud else None,
     )
     console.print(dispatch_status.format())
 
@@ -515,7 +529,8 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
 
     if not wake_ok:
         logger.warning("[dispatch] Wake failed for %s — email was sent", target)
-        error(f"Email sent but wake failed — retry: drone @ai_mail dispatch wake {target}")
+        retry = f'dispatch {target} "S" "B" --cloud' if cloud else f"dispatch wake {target}"
+        error(f"Email sent but wake failed — {'re-run' if cloud else 'retry'}: drone @ai_mail {retry}")
     elif dispatch_status.busy_detail():
         _refuse_busy(dispatch_status.busy_detail(), target)
     elif (gate := dispatch_status.find_step("manager")) and gate[0] == "info":
@@ -573,21 +588,11 @@ def print_introspection():
     )
     console.print("  [cyan]modules/email_send.py[/cyan] [dim](_send_direct — the send half of combined dispatch)[/dim]")
     console.print()
+    console.print("[dim]Run 'drone @ai_mail dispatch --help' for usage[/dim]")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1:
+    if len(sys.argv) == 1 or sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
-
-    if sys.argv[1] in ["--help", "-h", "help"]:
-        print_help()
-        sys.exit(0)
-
-    command = sys.argv[1]
-    remaining_args = sys.argv[2:] if len(sys.argv) > 2 else []
-
-    if handle_command(command, remaining_args):
-        sys.exit(0)
-    else:
-        sys.exit(1)
+    sys.exit(0 if handle_command(sys.argv[1], sys.argv[2:]) else 1)

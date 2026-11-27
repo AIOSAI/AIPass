@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: engagement_ops.py
 # Description: Engagement Operations Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -19,7 +19,7 @@ from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
 
 
-AUTONOMOUS_HOST = "THE_COMMONS"
+AUTONOMOUS_HOST = "the_commons"
 DEFAULT_ROOM = "watercooler"
 
 PROMPT_THEMES = [
@@ -35,7 +35,7 @@ PROMPT_THEMES = [
 
 
 def generate_prompt(args: List[str]) -> dict:
-    """Post a day-of-year rotating discussion prompt in the watercooler as THE_COMMONS."""
+    """Post a day-of-year rotating discussion prompt in the watercooler as the_commons."""
     dry_run = "--dry-run" in args
     filtered_args = [a for a in args if a != "--dry-run"]
 
@@ -99,7 +99,7 @@ def generate_prompt(args: List[str]) -> dict:
 
 
 def create_event(args: List[str]) -> dict:
-    """Create an event announcement post in the watercooler, authored by THE_COMMONS."""
+    """Create an event announcement post in the watercooler, authored by the_commons."""
     dry_run = "--dry-run" in args
     filtered_args = [a for a in args if a != "--dry-run"]
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_regenerate_registry_ops.py
 # Description: Tests for regenerate_registry_ops handler
-# Version: 1.0.4
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/regenerate_registry_ops.py and apps/modules/regenerate_registry.py."""
@@ -19,7 +19,9 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.spawn.apps import spawn as spawn_entry
 from aipass.spawn.apps.handlers import regenerate_registry_ops
+from aipass.spawn.apps.handlers.meta_ops import CorruptTemplateManifest
 from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
 from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
 from aipass.spawn.apps.modules import regenerate_registry as regenerate_registry_module
@@ -192,7 +194,7 @@ class TestSkipsSpawnTrackingFiles:
     @patch("aipass.spawn.apps.handlers.regenerate_registry_ops.load_template_registry")
     @patch("aipass.spawn.apps.handlers.regenerate_registry_ops.compute_file_hash")
     def test_regenerate_skips_spawn_tracking_files(self, mock_hash, mock_load, tmp_path):
-        # {} not None: None beside an existing manifest means unreadable, which refuses.
+        # {}: a readable manifest with no entries, so every file gets a fresh id.
         mock_load.return_value = {}
         mock_hash.return_value = "aabb11223344"
 
@@ -248,20 +250,34 @@ class TestNonexistentDir:
 
 
 class TestUnreadableManifestIsRefused:
-    """A manifest that is there but cannot be read is named and refused (never read as absent)."""
+    """A manifest that is there but cannot be read raises, named by path (never read as absent)."""
 
-    def test_an_unreadable_manifest_refuses_and_writes_nothing(self, tmp_path):
+    def test_an_unreadable_manifest_raises_and_writes_nothing(self, tmp_path):
         tpl = _make_template(tmp_path, files={"README.md": "# hi", "apps/a.py": "x"})
         manifest = tpl / ".spawn" / ".template_registry.json"
         manifest.parent.mkdir()
         manifest.write_bytes(b'{"files": {"f007": ')
         before = {p.relative_to(tpl): (p.read_bytes() if p.is_file() else None) for p in tpl.rglob("*")}
 
-        result = regenerate_template_registry(tpl)
+        with pytest.raises(CorruptTemplateManifest, match=str(manifest)):
+            regenerate_template_registry(tpl)
 
-        assert list(result) == ["error"]
-        assert str(manifest) in result["error"]
         assert {p.relative_to(tpl): (p.read_bytes() if p.is_file() else None) for p in tpl.rglob("*")} == before
+
+    def test_the_entry_point_stops_in_one_line_and_exits_1(self, tmp_path, monkeypatch, capsys):
+        tpl = _make_template(tmp_path, files={"README.md": "# hi"})
+        manifest = tpl / ".spawn" / ".template_registry.json"
+        manifest.parent.mkdir()
+        manifest.write_bytes(b"[]")
+        monkeypatch.setattr(regenerate_registry_module, "get_template_dir", lambda _cls: tpl)
+        monkeypatch.setattr("sys.argv", ["spawn", "regenerate-registry"])
+
+        assert spawn_entry.main() == 1
+
+        err = " ".join(capsys.readouterr().err.split())
+        assert f"spawn regenerate-registry stopped: template manifest {manifest} cannot be read" in err
+        assert "Nothing was written." in err
+        assert manifest.read_bytes() == b"[]"
 
 
 class TestDetectsPlaceholderFilenames:

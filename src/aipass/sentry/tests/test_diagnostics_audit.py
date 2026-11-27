@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_diagnostics_audit.py
 # Description: Unit tests for the diagnostics_audit module
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/modules/diagnostics_audit.py."""
@@ -231,7 +231,7 @@ def test_print_system_summary_empty(capsys):
     """An empty fleet totals to zero everywhere, and lists no branches by error count."""
     _, lines = _console_lines(capsys, "print_system_summary", [])
 
-    assert "SYSTEM DIAGNOSTICS SUMMARY:" in lines
+    assert "SYSTEM DIAGNOSTICS SUMMARY: pyright totals across every branch" in lines
     assert "  Total branches:        0" in lines
     assert "  Clean branches:        0" in lines
     assert "  Total errors:          0" in lines

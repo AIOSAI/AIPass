@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: branch_scope.py
 # Description: Launch-time branch scoping for Mission Control
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-11
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Branch scoping for `drone @prax monitor run <branches>`.
 
-Matches names inside a display label (``AIPASS/DEVPULSE/opus``), not the whole label.
+Matches names inside a display label (``aipass/devpulse/opus``), not the whole label.
 Reference: docs/monitor.md
 """
 
@@ -30,8 +30,8 @@ def label_tokens(label: str) -> Set[str]:
     tokens: Set[str] = set()
     for segment in str(label).split("/"):
         for word in segment.split():
-            name = word.strip().upper()
-            if name and name not in _DECORATORS:
+            name = word.strip().lower()
+            if name and name.upper() not in _DECORATORS:
                 tokens.add(name)
                 break  # first word of a segment is the name; the rest decorate it
     return tokens
@@ -44,7 +44,7 @@ class BranchScope:
         ordered: List[str] = []
         seen: Set[str] = set()
         for raw in names or ():
-            name = str(raw).strip().upper()
+            name = str(raw).strip().lower()
             if name and name not in seen:
                 seen.add(name)
                 ordered.append(name)
@@ -96,8 +96,8 @@ class BranchScope:
         """
         if not known_branches or not self.is_scoped:
             return []
-        known_upper = {str(b).upper() for b in known_branches}
-        return [name for name in self.names if name not in known_upper]
+        known_lower = {str(b).lower() for b in known_branches}
+        return [name for name in self.names if name not in known_lower]
 
     def __repr__(self) -> str:
         return f"BranchScope({self.describe()})"
@@ -112,10 +112,10 @@ def parse_scope(args: Sequence[str]) -> BranchScope:
         if text.startswith("-"):
             continue
         for part in text.replace(",", " ").split():
-            name = part.strip().upper()
+            name = part.strip().lower()
             if not name:
                 continue
-            if name == _ALL_KEYWORD:
+            if name.upper() == _ALL_KEYWORD:
                 widened = True
                 names = []
                 break

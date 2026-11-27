@@ -45,6 +45,8 @@ def print_introspection():
         "    - [cyan]registry_handler.py[/cyan] [dim](get_branch_by_name — look up a single branch by name)[/dim]"
     )
     console.print()
+    console.print("Run [green]'drone @drone registry --help'[/green] for usage information")
+    console.print()
 
 
 def handle_command(command: Optional[str] = None, args: Optional[List[str]] = None) -> bool:
@@ -88,9 +90,15 @@ def print_help() -> None:
     """Print help for the registry module."""
     from aipass.cli import console
 
-    console.print("registry — Registry operations for branch management")
+    console.print("[bold cyan]registry[/bold cyan] — Registry operations for branch management")
     console.print()
-    console.print("Commands:")
-    console.print("  load                Load and show registry stats")
-    console.print("  branches \\[type]     List branches, optionally by type")
-    console.print("  lookup <name>       Look up a specific branch")
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [dim]drone @drone registry <command> \\[args][/dim]")
+    console.print()
+    console.print("[bold cyan]Commands:[/bold cyan]")
+    console.print("  [cyan]load[/cyan]                Load and show registry stats")
+    console.print("  [cyan]branches[/cyan] \\[type]     List branches, optionally by type")
+    console.print("  [cyan]lookup[/cyan] <name>       Look up a specific branch")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [green]drone @drone registry lookup flow[/green]")

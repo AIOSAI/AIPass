@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_ratchet.py
 # Description: Template v1 — the ratchet verb, its pick and its series
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-10-12
-# Modified: 2026-11-18
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/ratchet.py and the handlers it drives."""
@@ -146,7 +146,7 @@ class TestPick:
         ratchet.handle_command("ratchet", ["pick"])
 
         out, _ = capsys.readouterr()
-        assert "next probe: BETA" in out
+        assert "next probe: beta" in out, "a capital history line still counts for the lowercase name"
         assert "last probe 2026-10-05" in out
 
     def test_a_branch_whose_last_line_is_a_budget_fragment_beats_a_never_probed_one(self, fleet, probe, capsys):
@@ -219,8 +219,9 @@ class TestRun:
 
         ratchet.handle_command("ratchet", ["run"])
 
-        assert [name for name, _ in probe["calls"]] == ["alpha", "BETA"]
-        assert [line["branch"] for line in _series(fleet)] == ["alpha", "BETA"]
+        assert [name for name, _ in probe["calls"]] == ["alpha", "beta"]
+        assert [line["branch"] for line in _series(fleet)] == ["alpha", "beta"]
+        assert sorted(p.name for p in (fleet / "ratchet").iterdir()) == ["alpha_r1.json", "beta_r2.json"]
 
     def test_a_refused_probe_still_writes_its_line_and_exits_non_zero(self, fleet, probe, capsys):
         probe["document"] = _artifact(status="not_applicable")
@@ -324,6 +325,17 @@ class TestRecord:
         assert probe["calls"] == []
         out, err = capsys.readouterr()
         assert "already in the series" in err + out
+
+    def test_record_on_a_capital_row_finds_its_old_artifact_and_writes_the_lowercase_name(self, fleet, probe):
+        fleet.mkdir(exist_ok=True)
+        (fleet / "audit_tests_BETA.json").write_text(json.dumps(_artifact()), encoding="utf-8")
+
+        ratchet.handle_command("ratchet", ["record", "@BETA"])
+
+        (line,) = _series(fleet)
+        assert line["branch"] == "beta"
+        assert sorted(p.name for p in fleet.glob("audit_tests_*")) == ["audit_tests_beta.json"]
+        assert (fleet / "ratchet" / "beta_r1.json").is_file()
 
     def test_an_artifact_without_a_campaign_is_refused_and_nothing_is_written(self, fleet, probe, capsys):
         document = _artifact()

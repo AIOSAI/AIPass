@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: feedback.py
 # Description: Feedback Module — command routing for devpulse feedback mailbox
-# Version: 1.2.0
+# Version: 1.2.2
 # Created: 2026-04-11
-# Modified: 2026-10-22
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -31,10 +31,7 @@ from aipass.devpulse.apps.handlers.json import json_handler
 console = err_console
 
 HELP_TEXT = """\
-[bold cyan]feedback[/bold cyan] — DevPulse personal feedback mailbox
-
-[bold]Usage:[/bold]
-  feedback                        Inbox summary (count, unread)
+  feedback                      Inbox summary (count, unread)
   feedback inbox                  List all messages
   feedback view <id>              Read message + thread
   feedback reply <id> "message"   Reply to sender
@@ -70,11 +67,24 @@ def print_introspection() -> None:
     """Display module introspection info."""
     console.print()
     console.print("[bold cyan]feedback Module[/bold cyan]")
-    console.print("[dim]DevPulse personal feedback mailbox. Receives cross-project[/dim]")
+    console.print("[dim]devpulse personal feedback mailbox. Receives cross-project[/dim]")
     console.print("[dim]feedback messages from any agent via drone routing.[/dim]")
     console.print()
     console.print("[yellow]Subcommands:[/yellow] [cyan]inbox, view, reply, send, clear[/cyan]")
     console.print()
+    console.print("[dim]Run 'drone @devpulse feedback --help' for usage information[/dim]")
+
+
+def print_help() -> None:
+    """Print CLI help — usage and examples. Help is documentation: stdout."""
+    stdout_console.print("[bold cyan]feedback[/bold cyan] — devpulse personal feedback mailbox")
+    stdout_console.print()
+    stdout_console.print("[bold]USAGE:[/bold]")
+    stdout_console.print(HELP_TEXT)
+    stdout_console.print("[bold]EXAMPLES:[/bold]")
+    stdout_console.print("  drone @devpulse feedback inbox")
+    stdout_console.print('  drone @devpulse feedback send "drone routing" "the @ prefix was dropped"')
+    stdout_console.print("  drone @devpulse feedback clear --all")
 
 
 def _wants_help(args: list[str]) -> bool:
@@ -89,7 +99,7 @@ def handle_command(command: str, args: list[str]) -> bool:
 
     # Help and `send` stay open: send is the inbound channel any agent uses. Every other verb is owner-only.
     if _wants_help(args):
-        stdout_console.print(HELP_TEXT)
+        print_help()
         return True
 
     if args and args[0] == "send":

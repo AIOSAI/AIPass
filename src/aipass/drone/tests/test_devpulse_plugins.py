@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_devpulse_plugins.py
 # Description: Tests for devpulse_ops plugins — merge, smart-sync, fix
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-03-30
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/ merge, sync and fix, and their routing in apps/modules/git_module.py."""
@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
+from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import REFS_JQ, merge_pr
 from aipass.drone.apps.plugins.devpulse_ops.sync_plugin import smart_sync
 from aipass.drone.apps.plugins.devpulse_ops.fix_plugin import fix_git_state
 from aipass.drone.apps.modules.git_module import get_help, get_introspective, handle_command
@@ -136,7 +136,9 @@ class TestMergePrHappyPath:
             proc = MagicMock()
             proc.returncode = 0
             proc.stderr = ""
-            if cmd[:3] == ["gh", "pr", "merge"]:
+            if REFS_JQ in cmd:
+                proc.stdout = "main feature-x\n"
+            elif cmd[:3] == ["gh", "pr", "merge"]:
                 proc.stdout = "Merged\n"
             elif cmd[:2] == ["git", "pull"]:
                 proc.stdout = "Already up to date.\n"
@@ -169,11 +171,12 @@ class TestMergePrFailure:
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
         mock_root.return_value = tmp_path
 
-        proc = MagicMock()
-        proc.returncode = 1
-        proc.stderr = "PR is not mergeable"
-        proc.stdout = ""
-        mock_run.return_value = proc
+        def side_effect(cmd: list[str], **kwargs: object) -> MagicMock:
+            if REFS_JQ in cmd:
+                return MagicMock(returncode=0, stdout="main feature-x\n", stderr="")
+            return MagicMock(returncode=1, stdout="", stderr="PR is not mergeable")
+
+        mock_run.side_effect = side_effect
 
         result = merge_pr("99", "devpulse")
 
@@ -195,7 +198,7 @@ class TestMergePrFailure:
         def side_effect(cmd: list[str], **kwargs: object) -> MagicMock:
             seen.append(cmd)
             bad = cmd == ["git", "stash"] if failing == "stash" else cmd == ["git", "stash", "pop"]
-            stdout = "feature-x\n" if cmd[:3] == ["gh", "pr", "view"] else "Saved working directory\n"
+            stdout = "main feature-x\n" if cmd[:3] == ["gh", "pr", "view"] else "Saved working directory\n"
             return MagicMock(returncode=1 if bad else 0, stdout=stdout, stderr="boom" if bad else "")
 
         mock_run.side_effect = side_effect
@@ -653,11 +656,10 @@ class TestGitModuleRouting:
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
         mock_root.return_value = tmp_path
 
-        proc = MagicMock()
-        proc.returncode = 0
-        proc.stderr = ""
-        proc.stdout = "ok\n"
-        mock_run.return_value = proc
+        def side_effect(cmd: list[str], **kwargs: object) -> MagicMock:
+            return MagicMock(returncode=0, stderr="", stdout="main feature-x\n" if REFS_JQ in cmd else "ok\n")
+
+        mock_run.side_effect = side_effect
 
         # --confirm satisfies the joint-decision gate (DPLAN-0256); headless
         # merge without it is refused before routing reaches merge_pr.

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_dispatches.py
 # Description: Tests for watchdog seat attribution (FPLAN-0452 P2 — only MY dispatches reach me)
-# Version: 2.0.3
+# Version: 2.1.0
 # Created: 2026-08-22
-# Modified: 2026-11-18
+# Modified: 2026-11-21
 # =============================================
 
 """Tests for apps/handlers/watchdog/dispatches.py: whose completion was that, and what is still out."""
@@ -68,6 +68,26 @@ def test_seat_email_is_portable_across_projects(monkeypatch):
     """@devpulse owns AIPass, @vera owns Vera Studio — never a directory name."""
     monkeypatch.setattr(guard, "get_owner", lambda start_path=None: {"email": "wren", "owner": True})
     assert dispatches.seat_email() == "@wren"
+
+
+def test_seat_dir_is_the_owner_rows_path_in_the_callers_project(tmp_path, monkeypatch):
+    """A seat of another project lives beside ITS registry: a relative row is against that folder,
+    an absolute row stands, and a row with no path is None, never a guess under src/aipass."""
+    project = tmp_path / "studio"
+    project.mkdir()
+    registry = project / "STUDIO_REGISTRY.json"
+    monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(project))
+
+    def seal(row: dict) -> None:
+        registry.write_text(json.dumps({"branches": [{"email": "@vera", "owner": True, **row}]}), encoding="utf-8")
+
+    seal({"path": "agents/vera"})
+    assert dispatches.seat_dir() == project / "agents" / "vera"
+    seal({"path": str(tmp_path / "elsewhere")})
+    assert dispatches.seat_dir() == tmp_path / "elsewhere"
+    seal({})
+    assert dispatches.seat_dir() is None
 
 
 def test_seat_email_refuses_when_no_owner_is_sealed(monkeypatch):

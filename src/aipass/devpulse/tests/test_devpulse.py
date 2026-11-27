@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_devpulse.py
 # Description: Tests for devpulse.py CLI routing, introspection, and resilience
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-05-15
-# Modified: 2026-11-14
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/devpulse.py and the routing of apps/modules/release_notify.py."""
@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 
+from aipass.cli import header_version
 from aipass.devpulse.apps import devpulse as devpulse_module
 from aipass.devpulse.apps.modules import release_notify as release_notify_module
 
@@ -39,14 +40,14 @@ class TestCLIRouting:
         assert "drone @devpulse <command> [args...]" in capsys.readouterr().out
 
     def test_version_flag(self, capsys):
-        """--version prints the one version string and nothing else (mutant: a hardcoded 1.0.0)."""
+        """--version prints the header's number and nothing else (mutant: a second version constant)."""
         assert devpulse_module.handle_command("--version", []) is True
-        assert capsys.readouterr().out == f"devpulse {devpulse_module.VERSION}\n"
+        assert capsys.readouterr().out == f"devpulse v{header_version(devpulse_module.__file__)}\n"
 
     def test_version_short(self, capsys):
-        """-V prints the one version string and nothing else (mutant: a hardcoded 1.0.0)."""
+        """-V prints the header's number and nothing else (mutant: a second version constant)."""
         assert devpulse_module.handle_command("-V", []) is True
-        assert capsys.readouterr().out == f"devpulse {devpulse_module.VERSION}\n"
+        assert capsys.readouterr().out == f"devpulse v{header_version(devpulse_module.__file__)}\n"
 
     def test_unknown_command_returns_false(self, capsys):
         """Unrecognized command returns False AND names the token on stderr."""
@@ -94,7 +95,7 @@ class TestCLIRouting:
         with patch("sys.argv", ["devpulse"]):
             devpulse_module.main()
         out = capsys.readouterr().out
-        assert "DEVPULSE — Orchestration Hub" in out
+        assert "devpulse — Orchestration Hub" in out
         assert "Run 'drone @devpulse --help' for usage information" in out
 
     @patch.object(devpulse_module, "print_introspection")

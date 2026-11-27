@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: purge.py
 # Description: Sent/Deleted Auto-Purge Handler
-# Version: 2.0.2
+# Version: 2.0.4
 # Created: 2026-02-04
-# Modified: 2026-10-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -162,7 +162,7 @@ def _vectorize_emails(emails: List[Dict[str, Any]], folder_type: str) -> Dict[st
         # two callers' models in one collection would be silently unsearchable.
         input_data = {
             "operation": "vectorize_and_store",
-            "branch": "AI_MAIL",
+            "branch": "ai_mail",
             "memory_type": f"email_{folder_type}",
             "texts": texts,
             "metadatas": metadatas,
@@ -223,24 +223,28 @@ if __name__ == "__main__":
     console.print("SENT/DELETED AUTO-PURGE HANDLER")
     console.print("=" * 70)
     console.print("\nPURPOSE:")
-    console.print("  Auto-purge sent/deleted folders when they exceed 10 emails")
+    console.print("  Auto-purge sent/deleted folders when they exceed 10 emails", highlight=False)
     console.print()
-    console.print("FUNCTIONS PROVIDED:")
+    console.print("[bold cyan]FUNCTIONS PROVIDED:[/bold cyan]")
+    console.print("[dim]  the calls other modules import[/dim]")
     console.print("  - purge_sent_folder(mailbox_path) -> Dict")
     console.print("  - purge_deleted_folder(mailbox_path) -> Dict")
     console.print("  - run_purge(mailbox_path) -> Dict")
     console.print()
-    console.print("WORKFLOW (v2.0):")
-    console.print("  1. Check if folder exceeds 10 items")
-    console.print("  2. Vectorize oldest items to @memory")
-    console.print("  3. Archive originals to .archive/")
-    console.print("  4. Remove from sent/ or deleted/")
+    console.print("[bold cyan]WORKFLOW (v2.0):[/bold cyan]")
+    console.print("[dim]  the steps, in order[/dim]")
+    console.print("  1. Check if folder exceeds 10 items", highlight=False)
+    console.print("  2. Vectorize oldest items to @memory", highlight=False)
+    console.print("  3. Archive originals to .archive/", highlight=False)
+    console.print("  4. Remove from sent/ or deleted/", highlight=False)
     console.print()
-    console.print("FOLDER STRUCTURE:")
+    console.print("[bold cyan]FOLDER STRUCTURE:[/bold cyan]")
+    console.print("[dim]  the mailbox folders it purges[/dim]")
     console.print("  - sent/      -> Individual JSON files")
     console.print("  - deleted/   -> Individual JSON files (same as sent/)")
     console.print()
-    console.print("TRIGGERED BY:")
+    console.print("[bold cyan]TRIGGERED BY:[/bold cyan]")
+    console.print("[dim]  the handlers that call it[/dim]")
     console.print("  - create.py (after email sent)")
     console.print("  - inbox_cleanup.py (after email deleted)")
     console.print()

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_context_gauge.py
-# Version: 1.12.0
+# Version: 1.12.1
 # Description: Tests for context_gauge (per-window guard, real window, Codex, OpenCode store) and the grounding receipt
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/prompt/context_gauge.py."""
@@ -675,6 +675,12 @@ class TestGroundingReceipt:
         _, doc = self._prompt(seat, provider="claude")
         assert len(doc["history"]) == grounding_receipt.HISTORY_CAP
         assert doc["history"][0]["generation"] == 25
+
+    def test_help_prints_usage_and_examples(self, capsys):
+        """`receipt --help` prints the Usage and Examples headings."""
+        assert grounding_receipt.handle_command("receipt", ["--help"]) is True
+        out = capsys.readouterr().out
+        assert "Usage:" in out and "Examples:" in out
 
 
 def _seed_transcript(path):

@@ -10,6 +10,23 @@ in `drone @spawn update --help`. Everything below is what the engine decides onc
 
 ---
 
+## Finding the branch
+
+`update @name` looks for the name in the `*_REGISTRY.json` above the cwd, then in every
+registry @memory's door (`fleet_branches`) answers. That door covers `AIPASS_REGISTRY.json`,
+the residents under `projects/*/`, and the roots declared in `AIPASS_ROOTS.json`; adopt-citizen
+walks the same door. The row found gives the branch path, and the branch gets its class's
+templates like any core citizen.
+
+- **Two registries:** a name found in two registries is refused by name. Both paths are printed
+  and nothing is written.
+- **Not found:** a name found nowhere says where it looked, e.g. `Branch 'x' not found in
+  AIPASS_REGISTRY.json, 4 project registries, 3 declared roots`.
+- **Outside its project:** a row whose path resolves outside its own registry's directory is
+  refused before any write.
+
+---
+
 ## The walk
 
 The engine walks the template and decides per path — no renames, no pruning, no snapshot
@@ -121,6 +138,10 @@ same write) or raises `PassportMigrationError`; there is no partial write.
 `tests/test_update.py` pins both halves, including the rule that any field added to the heal
 allowlist must exist in every schema version it can meet.
 
+One field reaches only a passport that already has a `citizenship` block (2.0):
+`citizenship.cloud_environment_id`. A passport without the key gains it empty, and an id the
+owner wrote is kept. A 1.0 passport gets no citizenship block from the heal.
+
 The heal also answers "did anything change?" about the DOCUMENT, not about how it was
 spelled. Passports written with `ensure_ascii=True` carry an escape where the heal's
 serialiser writes the character itself, so the heal compares parsed documents: a passport
@@ -153,4 +174,4 @@ above the cwd it exits 1.
 
 ---
 
-**Last Updated:** 2026-11-09
+**Last Updated:** 2026-11-23

@@ -42,11 +42,13 @@ vendors the bundle, so the two licences stay apart.
   file. A running host api only sees a new face directory after a restart, and the
   command says so; it uses a new binary from its next request.
 
-A `--dest` install points @api at the scratch location too. Undo with
-`drone @api host-api set-config --face-dir <previous|default> --baud-bin <previous|default>`.
+A `--dest` install leaves @api's host server pointed at the face it already
+serves, and says so: a scratch or second copy never takes over the live face.
 
-`aipass install` runs this as step 4, best-effort: offline, a private repo or a
-missing token prints one line plus the retry command, and the install carries on.
+`aipass install` runs this as step 4: offline, a private repo or a
+missing token prints one line plus the retry command, and the install carries on
+to the Health check and the report; a face that was asked for (no `--no-baud`)
+and did not install then fails the install: outcome `step_failed`, exit 1.
 
 ## The command forms
 

@@ -37,7 +37,11 @@ its pin goes red.
 The two retired verbs behave slightly differently and deliberately: bare `schedule` / `actions`
 still print the migration notice and exit 0, because that notice is the right guidance. A retired
 *subcommand* (`schedule create x`) prints the notice **and then refuses** — it did not create
-anything, and exiting 0 told the caller's `&&` that it had.
+anything, and exiting 0 told the caller's `&&` that it had. `--help` on either prints a short help
+(usage and examples pointing at `drone @daemon run --help` and `queue`) and exits 0.
+
+`drone @daemon --version` prints `daemon v` plus the `# Version:` line of `apps/daemon.py`'s header,
+read by `header_version` from `aipass.cli`. That header is the only version; no constant copies it.
 
 The gate is a **handler**, so it decides and does not print: it raises `UnknownArgument`, and the
 router in `apps/daemon.py` renders it once — one message shape for twelve verbs. The router may

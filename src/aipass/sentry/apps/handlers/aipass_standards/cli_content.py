@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_content.py
 # Description: CLI Standards Content Handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-05
-# Modified: 2026-11-17
+# Modified: 2026-11-22
 # =============================================
 
 """
@@ -67,7 +67,7 @@ def get_cli_standards() -> str:
         "[bold cyan]BRANCH-LEVEL CLI:[/bold cyan]",
         "  [dim]handlers/cli/prompts.py[/dim] - User interaction specific to branch",
         "",
-        "[bold cyan]DRONE COMPLIANCE:[/bold cyan]",
+        "[bold cyan]drone compliance:[/bold cyan]",
         "  • Module responds to --help flag",
         "  • Help output includes 'Commands:' line",
         "  • Commands comma-separated with flags",

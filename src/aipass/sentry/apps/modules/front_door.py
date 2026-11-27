@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: front_door.py
 # Description: The front-door verb: counts every cross-branch import naming a path beneath another branch's top file
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-11-16
-# Modified: 2026-11-17
+# Modified: 2026-11-25
 # =============================================
 
 """The `front-door` verb: fleet counts for the `front_door` standard, read the same way the
@@ -174,7 +174,11 @@ def print_help() -> None:
     console.print("  skips it; the totals say how many")
     console.print()
     console.print("[yellow]Exit codes[/yellow]")
-    console.print("  0 measured (findings never fail)   2 could not measure   7 an unknown argument")
+    console.print("  0 measured (findings never fail)   2 could not measure   7 an unknown argument", highlight=False)
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @sentry front-door scan[/green]")
+    console.print("  [green]drone @sentry front-door scan --sites[/green]")
     console.print()
 
 

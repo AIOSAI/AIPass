@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: snapshot.py
 # Description: Snapshot module — full-copy backup of a project
-# Version: 2.2.2
+# Version: 2.3.0
 # Created: 2026-04-17
-# Modified: 2026-10-24
+# Modified: 2026-11-26
 # =============================================
 
 """Snapshot Module — full mirror backup of a project directory."""
@@ -13,7 +13,7 @@ import sys
 import time
 
 from aipass.prax import logger
-from aipass.cli import console, error
+from aipass.cli import console, error, escape
 
 from aipass.backup.apps.handlers.copy.snapshot import copy_snapshot
 from aipass.backup.apps.handlers.json.json_handler import WriteFailed
@@ -28,6 +28,7 @@ from aipass.backup.apps.handlers.report.result import BackupResult
 from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 from aipass.backup.apps.handlers.scan.filter import filter_paths
 from aipass.backup.apps.handlers.scan.walk import walk_project
+from aipass.backup.apps.handlers.state.baseline import load_baseline, save_baseline
 from aipass.backup.apps.handlers.state.changelog import append_changelog
 from aipass.backup.apps.handlers.state.metadata import build_metadata
 from aipass.backup.apps.handlers.state.progress import LaneProgress
@@ -52,14 +53,22 @@ USAGE = "snapshot <project_path|@name> [--quiet]"
 def print_introspection():
     """Display module info and connected handlers."""
     console.print(f"[bold cyan]{MODULE_NAME} Module[/bold cyan]")
+    console.print("  [dim]Full-copy backup of a project into its .backup/ store[/dim]")
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
-    console.print("  Status: Phase 3 — implemented")
     console.print("  Handlers: scan, copy/snapshot, state, ignore, path, report")
+    console.print("  [dim]Run[/dim] [green]drone @backup snapshot --help[/green] [dim]for usage[/dim]")
 
 
 def print_help():
     """Display help for this module."""
     print_introspection()
+    console.print()
+    console.print(f"[yellow]Usage:[/yellow] {escape(USAGE)}")
+    console.print("  [cyan]--quiet[/cyan]  skip the stage panels")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @backup snapshot @myapp[/green]")
+    console.print("  [green]drone @backup snapshot /path/to/project --quiet[/green]")
 
 
 def _build_current_timestamps(
@@ -74,7 +83,7 @@ def _build_current_timestamps(
         try:
             timestamps[rel_p] = os.path.getmtime(abs_p)
         except OSError as e:
-            logger.info(f"[backup] Quick-check mtime read failed for {rel_p}: {e}")
+            logger.warning(f"[backup] Quick-check mtime read failed for {rel_p}, copying every file: {e}")
             return None
     return timestamps
 
@@ -91,7 +100,7 @@ def _build_saved_timestamps(
         try:
             timestamps[rel_p] = os.path.getmtime(abs_p)
         except OSError as e:
-            logger.info(f"[backup] Vanished before timestamp save, skipping {rel_p}: {e}")
+            logger.warning(f"[backup] Vanished before timestamp save, skipping {rel_p}: {e}")
     return timestamps
 
 
@@ -116,6 +125,19 @@ def _persist_timestamps(
             {"project_root": project_root, "error": str(e)},
         )
         result.add_error(message, is_critical=True)
+
+
+def _persist_baseline(project_root: str, filtered: list[tuple[str, str]], result: BackupResult) -> None:
+    """Record a completed run as the growth ceiling's baseline; a lost record is a warning, never a failed run.
+
+    Without it the next run is held by the absolute walls alone, which still bound it.
+    """
+    try:
+        save_baseline(project_root, filtered)
+    except (WriteFailed, OSError) as e:
+        message = f"Run baseline not saved, the next run is held by the walls alone: {e}"
+        logger.warning(f"[backup] {message}")
+        result.add_warning(message)
 
 
 def _quick_check_early_return(
@@ -193,7 +215,7 @@ def _snapshot_run(
         filtered = filter_paths(all_files, spec, whitelist_entries, max_size)
 
     # Ceiling before any copying: a run this large is an ignore-pattern miss, not a big project.
-    breach = check_ceiling(filtered, config)
+    breach = check_ceiling(filtered, config, load_baseline(project_root))
     if breach is not None:
         return refuse_oversized_run("snapshot", project_root, breach, show_panels)
 
@@ -201,12 +223,14 @@ def _snapshot_run(
     if prev_timestamps:
         current_timestamps = _build_current_timestamps(filtered)
         if current_timestamps is not None and current_timestamps == prev_timestamps:
-            return _quick_check_early_return(
+            early = _quick_check_early_return(
                 project_root,
                 filtered,
                 start,
                 show_panels,
             )
+            _persist_baseline(project_root, filtered, early)
+            return early
 
     dest = str(build_snapshot_path(project_root))
 
@@ -255,7 +279,7 @@ def _snapshot_run(
         )
         return result
 
-    console.print(f"Processing completed: {len(filtered)}/{len(filtered)} files checked")
+    console.print(f"Processing completed: {len(filtered)}/{len(filtered)} files checked", highlight=False)
 
     metadata = build_metadata(result)
     append_changelog(project_root, metadata)
@@ -270,6 +294,9 @@ def _snapshot_run(
     # A run with failed copies keeps the old map, so the next quick-check cannot call it current.
     if not result.errors:
         _persist_timestamps(project_root, filtered, result)
+    # A run with failed copies is no baseline: a runaway must never become the new normal.
+    if not result.errors:
+        _persist_baseline(project_root, filtered, result)
 
     if show_panels:
         show_result_summary(result)
@@ -291,7 +318,7 @@ def handle_command(command: str, args: list) -> bool:
     # Screen every arg: the standalone __main__ skips the router's help normalisation.
     # Bare "help" is first-position only; later args are user values.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
-        print_introspection()
+        print_help()
         return True
 
     stray = [arg for arg in args[1:] if arg != "--quiet"]

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adoption_ops.py
 # Description: The target-exists lane — adopt a passported directory, or birth one from its tracked seed
-# Version: 1.1.1
+# Version: 1.1.3
 # Created: 2026-08-28
-# Modified: 2026-11-20
+# Modified: 2026-11-22
 # =============================================
 
 """The target-exists lane of ``spawn create``: adopt a passported directory, or birth it from its seed."""
@@ -50,7 +50,7 @@ def birth_from_seed(target, seed_file, purpose, profile, registry_path):
 
     An invalid seed is refused with nothing written to disk.
     """
-    branch_lower = normalize_branch_name(get_branch_name(target), "lower")
+    branch_lower = normalize_branch_name(get_branch_name(target))
     reg_path = Path(registry_path) if registry_path else find_registry(target.parent)
     if reg_path is None:
         return error_result(f"Cannot birth {target} from its passport vault: no *_REGISTRY.json found above it")
@@ -100,8 +100,7 @@ def adopt_existing(target, purpose, profile, registry_path, citizen_id="", crede
     credential: the registry_id already stamped into the passport, for a registry created by this add.
     """
     folder_name = get_branch_name(target)
-    branch_upper = normalize_branch_name(folder_name, "upper")
-    branch_lower = normalize_branch_name(folder_name, "lower")
+    branch_lower = normalize_branch_name(folder_name)
     detected_profile = profile or detect_profile(target)
 
     reg_path = Path(registry_path) if registry_path else find_registry(target.parent)
@@ -126,7 +125,7 @@ def adopt_existing(target, purpose, profile, registry_path, citizen_id="", crede
 
     registry_updated = add_to_registry(
         reg_path,
-        branch_upper,
+        branch_lower,
         registry_branch_path,
         detected_profile,
         f"@{branch_lower}",
@@ -141,10 +140,10 @@ def adopt_existing(target, purpose, profile, registry_path, citizen_id="", crede
     if not (target / ".trinity" / RECEIPT_NAME).exists():
         adopt_receipt = write_birth_receipt(target / ".trinity")
         if not adopt_receipt["success"]:
-            logger.warning("[spawn] Adopted %s without a trinity receipt: %s", branch_upper, adopt_receipt["error"])
+            logger.warning("[spawn] Adopted %s without a trinity receipt: %s", branch_lower, adopt_receipt["error"])
 
-    json_handler.log_operation("branch_adopted", data={"branch": branch_upper})
-    logger.info("[spawn] Adopted existing branch: %s (registered in %s)", branch_upper, reg_path.name)
+    json_handler.log_operation("branch_adopted", data={"branch": branch_lower})
+    logger.info("[spawn] Adopted existing branch: %s (registered in %s)", branch_lower, reg_path.name)
 
     update_additions = 0
     try:
@@ -154,13 +153,13 @@ def adopt_existing(target, purpose, profile, registry_path, citizen_id="", crede
         update_result = update_branch(branch_lower, registry_path=reg_path)
         update_additions = update_result.get("additions", 0)
         if update_result.get("errors"):
-            logger.warning("[spawn] Template update had errors for %s: %s", branch_upper, update_result["errors"])
+            logger.warning("[spawn] Template update had errors for %s: %s", branch_lower, update_result["errors"])
     except Exception as exc:
-        logger.warning("[spawn] Template update failed for %s (adoption succeeded): %s", branch_upper, exc)
+        logger.warning("[spawn] Template update failed for %s (adoption succeeded): %s", branch_lower, exc)
 
     return {
         "success": True,
-        "branch_name": branch_upper,
+        "branch_name": branch_lower,
         "path": str(target),
         "files_copied": update_additions,
         "dirs_created": 0,

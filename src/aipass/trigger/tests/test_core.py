@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_core.py
 # Description: Unit tests for trigger event bus core module
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/core.py, the Trigger event bus."""
@@ -718,7 +718,7 @@ def test_help_flag_after_the_event_name_does_not_fire(trigger_cls, monkeypatch):
     fired = MagicMock()
     monkeypatch.setattr(core.Trigger, "fire", fired)
     printed = MagicMock()
-    monkeypatch.setattr(core, "_print_help", printed)
+    monkeypatch.setattr(core, "print_help", printed)
 
     result = core.handle_command("fire", ["error_detected", "--help"])
 
@@ -732,7 +732,7 @@ def test_short_help_flag_after_key_values_does_not_fire(trigger_cls, monkeypatch
     fired = MagicMock()
     monkeypatch.setattr(core.Trigger, "fire", fired)
     printed = MagicMock()
-    monkeypatch.setattr(core, "_print_help", printed)
+    monkeypatch.setattr(core, "print_help", printed)
 
     result = core.handle_command("fire", ["error_detected", "branch=api", "-h"])
 
@@ -749,7 +749,7 @@ def test_bare_word_help_as_a_payload_value_still_fires(trigger_cls, monkeypatch)
     fired = MagicMock(return_value={"event": "e", "handlers": 1, "ran": 1, "failed": 0})
     monkeypatch.setattr(core.Trigger, "fire", fired)
     printed = MagicMock()
-    monkeypatch.setattr(core, "_print_help", printed)
+    monkeypatch.setattr(core, "print_help", printed)
 
     result = core.handle_command("fire", ["error_detected", "message=help"])
 
@@ -763,7 +763,7 @@ def test_module_route_help_flag_after_subcommand_does_not_fire(trigger_cls, monk
     fired = MagicMock()
     monkeypatch.setattr(core.Trigger, "fire", fired)
     printed = MagicMock()
-    monkeypatch.setattr(core, "_print_help", printed)
+    monkeypatch.setattr(core, "print_help", printed)
 
     result = core.handle_command("core", ["fire", "error_detected", "--help"])
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: skills.py
 # Description: Entry point CLI for drone @skills
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Skills system entry point."""
@@ -18,9 +18,7 @@ if _script_dir in sys.path:
     sys.path.remove(_script_dir)
 
 from aipass.prax import logger
-from aipass.cli import console, escape
-
-VERSION = "1.2.1"
+from aipass.cli import console, escape, header_version
 
 
 def _header_description(path):
@@ -78,7 +76,7 @@ def handle_command(command, args=None):
         return True
 
     if command in ("--version", "-V"):
-        console.print(f"SKILLS v{VERSION}")
+        console.print(f"skills v{header_version(__file__)}", highlight=False)
         return True
 
     module_name = _ROUTES.get(command)
@@ -95,19 +93,19 @@ def handle_command(command, args=None):
 
 def print_help():
     """Print skills help text."""
-    console.print("Skills - Capability framework for AI agents")
+    console.print("[bold cyan]skills[/bold cyan] - Capability framework for AI agents")
     console.print()
-    console.print("Usage:")
+    console.print("[yellow]Usage:[/yellow]")
     console.print("  drone @skills <command> \\[args]")
     console.print()
-    console.print("Commands:")
+    console.print("[yellow]Commands:[/yellow]")
     console.print("  list                         Show all discovered skills")
     console.print("  info <name>                  Display SKILL.md contents")
     console.print("  run <name> \\[action] \\[args]   Execute a skill's handler")
     console.print("  run <name> --help            Show a skill's SKILL.md instead of running it")
     console.print("  create <name>                Scaffold new skill (markdown only)")
     console.print("  create <name> --with-handler Scaffold with handler.py")
-    console.print("  create <name> --full         Scaffold with full 3-layer structure")
+    console.print("  create <name> --full         Scaffold with full 3-layer structure", highlight=False)
     console.print("  create <name> --help         Scaffold flags and what each tier writes")
     console.print("  validate <name>              Check if skill requirements are met")
     console.print("  on <name>                    Reconnect a skill and start its processes")
@@ -116,12 +114,12 @@ def print_help():
     console.print("  --help, -h, help             Show this help")
     console.print("  --version, -V                Show version")
     console.print()
-    console.print("Search paths (first match wins):")
-    console.print("  1. .aipass/skills/           Project-local skills")
-    console.print("  2. ~/.aipass/skills/         Global user skills")
-    console.print("  3. src/aipass/skills/lib/     Built-in skills")
+    console.print("[yellow]Search paths[/yellow] [dim](first match wins)[/dim]")
+    console.print("  [cyan]1.[/cyan] .aipass/skills/           Project-local skills")
+    console.print("  [cyan]2.[/cyan] ~/.aipass/skills/         Global user skills")
+    console.print("  [cyan]3.[/cyan] src/aipass/skills/lib/     Built-in skills")
     console.print()
-    console.print("Examples:")
+    console.print("[yellow]Examples:[/yellow]")
     console.print()
     console.print("  [dim]# List all available skills[/dim]")
     console.print("  [green]drone @skills list[/green]")

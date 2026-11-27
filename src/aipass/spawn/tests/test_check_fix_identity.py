@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_check_fix_identity.py
 # Description: Tests for owner/identity check and fix (DPLAN-0239 P4)
-# Version: 1.2.0
+# Version: 1.2.2
 # Created: 2026-07-11
-# Modified: 2026-11-21
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/sync_registry_ops.py, apps/modules/sync_registry.py and repair's damaged-agent report."""
@@ -182,6 +182,11 @@ class TestCheckOwnerIdentity:
         assert code == 0
         assert "clean" in said
         assert "note [owner_not_manager_or_first] Owner dean is not the manager" in said
+
+    def test_a_check_that_crashes_exits_two_not_the_issues_code(self):
+        """Mutant: the except returns 1 again -> a crash reads as 'issues found' -> red."""
+        with patch("aipass.spawn.apps.modules.sync_registry.check_owner_identity", side_effect=RuntimeError("boom")):
+            assert handle_sync_registry(["--check"]) == 2
 
     def test_owner_missing_branch_flag(self, tmp_path):
 
@@ -770,7 +775,7 @@ class TestSyncRegistryCommand:
         assert handle_sync_registry([str(project_b), "--fix"]) == 0
 
         assert reg_a.read_bytes() == before_a
-        assert [b["name"] for b in json.loads(reg_b.read_text(encoding="utf-8"))["branches"]] == ["BETA"]
+        assert [b["name"] for b in json.loads(reg_b.read_text(encoding="utf-8"))["branches"]] == ["beta"]
 
     def test_a_named_path_with_no_registry_exits_1_and_leaves_the_cwd_registry(self, tmp_path, monkeypatch, capsys):
 

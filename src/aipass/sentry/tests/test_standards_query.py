@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_standards_query.py
 # Description: Unit tests for the standards_query module
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/modules/standards_query.py."""
@@ -276,7 +276,7 @@ def test_help_after_the_pack_name_does_not_display_content(capsys):
 
     out = capsys.readouterr().out
     assert "Standards Query Module" in out
-    assert "STANDARDS IN AIPASS_STANDARDS" not in out
+    assert "standards in aipass_standards" not in out
 
 
 def test_standards_query_still_displays_content_without_a_help_flag(capsys):

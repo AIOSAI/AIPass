@@ -4,7 +4,6 @@
 
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events and registered handlers react; Medic watches every branch log for errors, fingerprints what it finds, gates dispatch, and tells the branch that owns the fault.
 **Module:** `aipass.trigger`
-**Version:** 3.0.0
 **Created:** 2026-03-07
 
 ---

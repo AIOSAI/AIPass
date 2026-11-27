@@ -4,7 +4,6 @@
 
 **Purpose:** The gateway every branch reaches an outside service through — authenticated clients (OpenRouter, Google), key and secret storage, OAuth flows, usage accounting — and the Stage 0 host API the BAUD phone talks to over the tailnet.
 **Module:** `aipass.api`
-**Version:** 2.0.0
 **Created:** 2026-03-07
 
 ---

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hooksound.py
-# Version: 1.4.0
+# Version: 1.4.2
 # Description: Hook sound control — mute/unmute all hook audio
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-22
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Hook sound control — mute and unmute all hook audio via drone @hooks hooksound."""
@@ -15,7 +15,7 @@ import json
 from aipass.cli import console, err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.hooks.apps.sound import is_muted, mute, unmute
+from aipass.hooks.apps.handlers.notification.sound import is_muted, mute, unmute
 from aipass.prax import logger
 
 CONSOLE = err_console
@@ -32,6 +32,24 @@ def print_introspection():
     """Print module structure for drone routing."""
     status = "MUTED" if is_muted() else "ACTIVE"
     CONSOLE.print(f"[bold cyan]hooksound[/bold cyan] — Hook sound control ({status})")
+    CONSOLE.print("[dim]Switches the spoken hook announcements on or off for every session.[/dim]")
+    CONSOLE.print("[dim]Run drone @hooks hooksound --help for usage.[/dim]")
+
+
+def print_help():
+    """Print hooksound usage and examples."""
+    CONSOLE.print("[bold cyan]hooksound[/bold cyan] — Mute/unmute all hook audio")
+    CONSOLE.print("  Hook sounds are off by default; 'on' is the switch.")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  drone @hooks [green]hooksound[/green]        Show current status")
+    CONSOLE.print("  drone @hooks [green]hooksound on[/green]     Unmute all hook sounds")
+    CONSOLE.print("  drone @hooks [green]hooksound off[/green]    Mute all hook sounds")
+    CONSOLE.print('  drone @hooks [green]hooksound --json[/green] Print {"active": bool} on stdout')
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  drone @hooks hooksound on")
+    CONSOLE.print("  drone @hooks hooksound off")
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -45,13 +63,7 @@ def handle_command(command: str, args: list) -> bool:
         sub = args[0]
 
         if wants_help(args):
-            CONSOLE.print("[bold cyan]hooksound[/bold cyan] — Mute/unmute all hook audio")
-            CONSOLE.print("  Hook sounds are off by default; 'on' is the switch.")
-            CONSOLE.print()
-            CONSOLE.print("  drone @hooks hooksound        Show current status")
-            CONSOLE.print("  drone @hooks hooksound on     Unmute all hook sounds")
-            CONSOLE.print("  drone @hooks hooksound off    Mute all hook sounds")
-            CONSOLE.print('  drone @hooks hooksound --json Print {"active": bool} on stdout')
+            print_help()
             return True
 
         if len(args) != 1:
@@ -64,7 +76,7 @@ def handle_command(command: str, args: list) -> bool:
 
         # sound.py is the one flag writer and logs the effect; this logs that the CLI asked.
         if sub in ("on", "off"):
-            logger.info("[HOOKS] hooksound: '%s' requested via CLI", sub)
+            logger.info("[hooks] hooksound: '%s' requested via CLI", sub)
 
         if sub == "off":
             mute()

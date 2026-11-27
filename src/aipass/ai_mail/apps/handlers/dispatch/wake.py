@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.12.2
+# Version: 3.13.2
 # Created: 2026-03-02
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -25,6 +25,7 @@ from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
+from aipass.ai_mail.apps.handlers.dispatch import cloud as cloud_lane
 from aipass.ai_mail.apps.handlers.dispatch import session_pointer
 from aipass.ai_mail.apps.handlers.dispatch.pid_lock import (
     acquire_lock,
@@ -98,6 +99,8 @@ PROVIDER_CLAUDE = session_pointer.CLAUDE
 PROVIDER_CODEX = session_pointer.CODEX
 PROVIDER_OPENCODE = session_pointer.OPENCODE
 KNOWN_PROVIDERS: Tuple[str, ...] = (PROVIDER_CLAUDE, PROVIDER_CODEX, PROVIDER_OPENCODE)
+# Not in KNOWN_PROVIDERS: only dispatch --cloud reaches it, with the mail the session answers.
+PROVIDER_CLOUD = cloud_lane.CLOUD
 CODEX_LAST_MESSAGE_FILE = "dispatch_last_message.txt"
 
 # Fable is granted by name, not class. Only the fallback: the live grant is read from CONFIG_FILE.
@@ -105,7 +108,7 @@ FABLE_GRANT_DEFAULT: frozenset[str] = frozenset({"@devpulse"})
 FABLE_GRANT_KEY = "fable_allowed"
 
 # The marking tmux cannot half-apply: a person deciding whether to kill a window reads it.
-DAEMON_SESSION_PREFIX = "AIPASS-DAEMON-WAKE-"
+DAEMON_SESSION_PREFIX = "aipass-daemon-wake-"
 
 # dispatch.py._orchestrate_dispatch_send bypasses this check.
 WAKE_BLOCKLIST: frozenset[str] = frozenset({"@devpulse"})
@@ -277,7 +280,7 @@ def _read_json(filepath: Path) -> Optional[dict]:
 
 def _load_config() -> dict:
     """Load safety config for max_turns."""
-    defaults = {"max_turns_per_wake": 100}
+    defaults = {"max_turns_per_wake": 100, **cloud_lane.CONFIG_DEFAULTS}
     config = _read_json(CONFIG_FILE)
     if config is None:
         return defaults
@@ -291,6 +294,14 @@ def prepend_path(spawn_env: dict, directory: str) -> None:
     """Put directory first on PATH once: background launchers (trigger, prax watchdog) run with a restricted one."""
     if directory not in spawn_env.get("PATH", ""):
         spawn_env["PATH"] = directory + os.pathsep + spawn_env.get("PATH", "")
+
+
+def _replace_lock(lock_file: Path, lock_data: dict) -> None:
+    """Rewrite the dispatch lock by rename, never truncation: the monitor refuses a lock it reads empty."""
+    staged = lock_file.with_name(lock_file.name + ".staged")
+    with open(staged, "w", encoding="utf-8") as f:
+        json.dump(lock_data, f, indent=2)
+    os.replace(staged, lock_file)
 
 
 def spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, lock_file_path, custom_message, status):
@@ -340,7 +351,8 @@ def spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, lo
         logger.warning("[wake] systemd-run failed (rc=%d): %s", result.returncode, result.stderr.strip())
         status.warn(
             "scope",
-            f"systemd-run failed (rc={result.returncode}: {result.stderr.strip()}); the monitor starts as a plain child",
+            f"systemd-run failed (rc={result.returncode}: {result.stderr.strip()}); "
+            "the monitor starts as a plain child",
         )
         return False
 
@@ -359,8 +371,7 @@ def spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, lo
                 "branch": str(branch_path),
                 "subject": custom_message or "daemon wake",
             }
-            with open(lock_file_path, "w", encoding="utf-8") as f:
-                json.dump(lock_data, f, indent=2)
+            _replace_lock(Path(lock_file_path), lock_data)
     except (subprocess.SubprocessError, ValueError, OSError) as e:
         logger.warning("[wake] Could not query systemd unit PID: %s", e)
         status.warn("pid", f"systemd unit PID unknown ({e}); no dispatch lock written")
@@ -444,10 +455,8 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
                 branch_path = Path(branch_path_str)
                 if branch_path.exists():
                     return branch_path, email
-        except RegistryUnreadable:
-            raise
-        except Exception as e:
-            logger.warning("[wake] resolve_branch caller registry fallback failed: %s", e)
+        except OSError as e:
+            raise RegistryUnreadable(f"caller project tree under {caller_cwd} could not be read ({e})") from e
 
     # Verified-admin only; the caller already proved the grant.
     if admin:
@@ -659,6 +668,87 @@ def _opencode_cmd(
     return [*head, prompt]
 
 
+def _cloud_cmd(
+    claude_bin: str,
+    branch_path: Path,
+    email: str,
+    cloud: Dict[str, str],
+    subject: str,
+    config: dict,
+    fresh: bool,
+    status: DispatchStatus,
+) -> Tuple[List[str], Dict[str, Any]]:
+    """The cloud start argv and the monitor's {"mail", "poll", "ceiling"}; ([], {}) once a refusal is recorded."""
+    if fresh:
+        status.info("fresh", "cloud sessions are always fresh — --fresh / -c ignored")
+    env_id, refusal = cloud_lane.environment_id(branch_path)
+    if refusal:
+        status.fail("cloud", f"{email} not started in the cloud: {refusal}")
+        return [], {}
+    try:
+        script_bin = _find_bin("script")
+        mail_id = cloud_lane.mark_requested(branch_path / ".ai_mail.local" / "inbox.json", subject)
+    except (FileNotFoundError, OSError, ValueError) as e:
+        status.fail("cloud", f"{email} not started in the cloud: {e}")
+        return [], {}
+    if not mail_id:
+        status.fail("cloud", f"{email} not started in the cloud: no dispatch mail {subject!r} in its inbox to answer")
+        return [], {}
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import TRANSCRIPT_NAMES
+
+    log = str(branch_path / "logs" / TRANSCRIPT_NAMES["stdout"])
+    prompt = cloud_lane.brief(cloud.get("body", ""), email, mail_id)
+    cfg = {"mail": mail_id, "poll": config[cloud_lane.POLL_KEY], "ceiling": config[cloud_lane.CEILING_KEY]}
+    status.ok("cloud", f"mail {mail_id} · environment {env_id} · poll {cfg['poll']}s, ceiling {cfg['ceiling']}s")
+    return cloud_lane.start_cmd(script_bin, claude_bin, env_id, prompt, log), cfg
+
+
+def cloud_send_refusal(target: str, admin: bool, local_flags: List[str], body: str) -> str:
+    """Why `dispatch --cloud` must not send, or "": the cloud lane's refusals, then the start's local half here."""
+    from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+
+    ok, why = cloud_lane.dispatch_refusal(target, admin, local_flags, body=body)
+    if not ok:
+        return why
+    try:
+        _find_bin("script")
+        resolved = resolve_branch(target, admin=admin)
+    except (FileNotFoundError, RegistryUnreadable) as e:
+        # Missing script and an unreadable registry are both refusals the sender reads, never a pass.
+        return str(e)
+    held = check_lock(resolved[0]) if resolved else None
+    if resolved and held:
+        return f"{resolved[1]} is busy: its dispatch lock is held (PID {held.get('pid', '?')}); re-run when it is done"
+    return why
+
+
+def cloud_expected_seconds(cloud_cfg: Dict[str, Any]) -> int:
+    """The cloud row's expected run: the start, the ceiling, the read that may start just before it, the last mail."""
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import MAIL_TIMEOUT
+
+    return cloud_lane.START_TIMEOUT + cloud_cfg["ceiling"] + cloud_cfg["poll"] + MAIL_TIMEOUT
+
+
+def _close_gone_rows(email: str, status: DispatchStatus) -> None:
+    """Close this target's open register rows whose monitor is gone; a monitor not known dead keeps its row."""
+    from aipass.ai_mail.apps.handlers.dispatch import register
+
+    try:
+        rows = register.outstanding()
+    except OSError as e:
+        logger.warning("[wake] register unreadable, %s's dead rows stay open: %s", email, e)
+        status.warn("gone", f"register unreadable, rows whose monitor is gone stay open ({e})")
+        return
+    for row in rows:
+        if row.get("target") != email or row.get("monitor_alive") is not False:
+            continue
+        dispatch_id = str(row.get("dispatch_id"))
+        if register.close_dispatch(dispatch_id, f"closed: its monitor was gone when the next wake reached {email}"):
+            status.info("gone", f"closed register row {dispatch_id}: its monitor is gone")
+        else:
+            status.warn("gone", f"register row {dispatch_id} has no monitor but could not be closed")
+
+
 def wake_branch(
     branch_email: str,
     custom_message: Optional[str] = None,
@@ -674,6 +764,7 @@ def wake_branch(
     provider: str = PROVIDER_CLAUDE,
     opencode_config: Optional[Dict[str, Any]] = None,
     grant: Optional[Dict[str, Any]] = None,
+    cloud: Optional[Dict[str, str]] = None,
 ) -> Tuple[DispatchStatus, bool]:
     """
     Spawn an agent (Claude, or Codex / OpenCode by provider) at the target branch with step-by-step status.
@@ -681,7 +772,10 @@ def wake_branch(
     admin is an ALREADY-DECIDED verdict (dispatch.py ran the grant check), never a request.
     True means "did what it should", not "woke an agent": check status.find_step("manager").
     A *grant* rides the register row; when the row cannot carry it, nothing is spawned.
+    *cloud* ({"body"}) makes it the cloud lane: the monitor starts a cloud session for the dispatch mail.
     """
+    if cloud is not None:
+        provider = PROVIDER_CLOUD
     json_handler.log_operation(
         "wake_branch",
         {"branch": branch_email, "fresh": fresh, "auto": auto, "model": model or DEFAULT_MODEL, "provider": provider},
@@ -709,8 +803,9 @@ def wake_branch(
     branch_path, email = result
     status.ok("resolve", f"{email} → {branch_path}")
 
+    # The blocklist, the manager gate and the occupancy check guard the local seat; a cloud session never sits in it.
     # Before the passport read: an unreadable passport must never be why @devpulse is spawned.
-    if (scheduled or admin) and is_wake_blocked(email):
+    if cloud is None and (scheduled or admin) and is_wake_blocked(email):
         lane = "scheduled" if scheduled else "admin"
         status.fail("blocklist", f"{email} is on WAKE_BLOCKLIST — refused in the {lane} lane")
         logger.warning("[wake] BLOCKED %s — %s wake refused by WAKE_BLOCKLIST", email, lane)
@@ -724,7 +819,7 @@ def wake_branch(
     try:
         with open(passport_file, "r", encoding="utf-8") as f:
             passport = json.load(f)
-        citizen_class = passport.get("identity", {}).get("citizen_class", "")
+        citizen_class = passport.get("identity", {}).get("citizen_class", "") if cloud is None else ""
         if citizen_class == MANAGER_CLASS and not (scheduled or admin or sender == "@daemon"):
             # Woken nothing, sent nothing: the caller owns the mail.
             status.info("manager", f"{email} is a manager — wake skipped, caller must mail")
@@ -747,7 +842,7 @@ def wake_branch(
         logger.info("[wake] No passport for %s: %s", email, exc)
     except (json.JSONDecodeError, OSError) as exc:
         # Unknown class may be a manager: fail closed in the lane that never wakes managers.
-        if not (scheduled or admin or sender == "@daemon"):
+        if cloud is None and not (scheduled or admin or sender == "@daemon"):
             status.info(
                 "manager",
                 f"{email} passport unreadable — class unknown, treated as a manager: wake skipped, caller must mail",
@@ -757,7 +852,7 @@ def wake_branch(
         logger.warning("[wake] %s passport unreadable, waking in a lane that wakes managers too: %s", email, exc)
 
     # After the manager gate: a skipped wake must not first print a provider it never uses.
-    if provider not in KNOWN_PROVIDERS:
+    if provider not in KNOWN_PROVIDERS and cloud is None:
         status.fail("provider", f"unknown provider {provider!r} — known: {', '.join(KNOWN_PROVIDERS)}")
         return status, False
     status.ok("provider", provider)
@@ -766,10 +861,11 @@ def wake_branch(
         return status, False
 
     # Decided ONCE for both spawn lanes; a second site would let the rule drift.
-    if provider in (PROVIDER_CODEX, PROVIDER_OPENCODE):
+    if provider in (PROVIDER_CODEX, PROVIDER_OPENCODE, PROVIDER_CLOUD):
         # The Claude default and the Fable grant are Claude's; these take the slug verbatim or their own default.
         resolved_model = model or ""
-        status.ok("model", model or ("codex config default" if provider == PROVIDER_CODEX else "opencode default"))
+        default = {PROVIDER_CODEX: "codex config default", PROVIDER_OPENCODE: "opencode default"}
+        status.ok("model", model or default.get(provider, "cloud session default"))
     else:
         decision = resolve_wake_model(email, model)
         resolved_model = decision.model
@@ -779,11 +875,16 @@ def wake_branch(
         else:
             status.ok("model", resolved_model)
 
-    zombie_count = clean_zombies()
-    if zombie_count > 0:
-        status.warn("zombies", f"{zombie_count} zombie Claude process(es) detected")
+    try:
+        zombie_count = clean_zombies()
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.warning("[wake] zombie scan for %s could not run: %s", email, e)
+        status.warn("pre-flight", f"cannot scan for zombie processes ({e})")
     else:
-        status.ok("pre-flight", "No zombie processes")
+        if zombie_count > 0:
+            status.warn("zombies", f"{zombie_count} zombie Claude process(es) detected")
+        else:
+            status.ok("pre-flight", "No zombie processes")
 
     existing = check_lock(branch_path)
     if existing is not None:
@@ -801,15 +902,25 @@ def wake_branch(
         return status, True
 
     status.ok("lock", "No active lock — agent is sleeping")
+    _close_gone_rows(email, status)
 
-    occupant = branch_occupant(branch_path)
+    try:
+        occupant = branch_occupant(branch_path) if cloud is None else None
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.warning("[wake] occupancy scan for %s could not run: %s", email, e)
+        status.warn("occupancy", f"cannot scan for an interactive session ({e}); spawning unchecked")
+        occupant = None
     if occupant:
         status.warn("occupancy", f"Interactive {occupant} session in {branch_path}")
         status.fail("blocked", "Cannot spawn — interactive session running")
         logger.warning("[wake] BLOCKED %s — interactive %s session", email, occupant)
         return status, False
 
-    status.ok("occupancy", "No interactive session")
+    if status.find_step("occupancy") is None:
+        status.ok(
+            "occupancy",
+            "No interactive session" if cloud is None else "not checked — the cloud lane runs no local seat",
+        )
 
     # The binary, then the dashboard: after every gate that can refuse, before any lock or spawn.
     try:
@@ -861,6 +972,8 @@ def wake_branch(
         "rows for a file) and the test template for tests "
         "(src/aipass/sentry/templates/test_template_v1.md); build to them; run the "
         "checklist last, to find what you missed. "
+        "Before you report done: bring your README and every docs/ page that describes "
+        "what you changed up to date. "
         "IMPORTANT: run any sub-agents synchronously (foreground) and wait for them to "
         "finish before ending your turn — headless dispatch kills orphaned background "
         "work after 600s with no reply sent."
@@ -879,10 +992,14 @@ def wake_branch(
         "json",
     ]
 
-    if provider == PROVIDER_CODEX:
-        claude_cmd = _codex_cmd(claude_bin, branch_path, email, prompt, resolved_model, fresh, status)
-    elif provider == PROVIDER_OPENCODE:
-        claude_cmd = _opencode_cmd(claude_bin, branch_path, email, prompt, resolved_model, fresh, status)
+    cloud_cfg: Dict[str, Any] = {}
+    if provider == PROVIDER_CLOUD:
+        claude_cmd, cloud_cfg = _cloud_cmd(
+            claude_bin, branch_path, email, cloud or {}, subject or "", config, fresh, status
+        )
+    elif provider in (PROVIDER_CODEX, PROVIDER_OPENCODE):
+        build = _codex_cmd if provider == PROVIDER_CODEX else _opencode_cmd
+        claude_cmd = build(claude_bin, branch_path, email, prompt, resolved_model, fresh, status)
     # The session comes from session_pointer, not -c's file mtime; -c is the no-pointer fallback.
     # Another host's pointer names a session Claude cannot resume, and -c would leave it in place.
     elif fresh or (session_pointer.read_pointer(branch_path) or {}).get("provider", PROVIDER_CLAUDE) != PROVIDER_CLAUDE:
@@ -903,6 +1020,8 @@ def wake_branch(
         else:
             status.info("session", "no pointer — continuing newest transcript (-c)")
             claude_cmd = [claude_bin, "-c", *base_args]
+    if not claude_cmd:
+        return status, False
 
     log_dir = branch_path / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -914,7 +1033,11 @@ def wake_branch(
     # wake_back rides argv, never spawn_env, which becomes the agent's own environment.
     from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import NO_WAKE_BACK_FLAG
 
-    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import OPENCODE_CONFIG_FLAG_PREFIX, PROVIDER_FLAG_PREFIX
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
+        CLOUD_FLAG_PREFIX,
+        OPENCODE_CONFIG_FLAG_PREFIX,
+        PROVIDER_FLAG_PREFIX,
+    )
 
     from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import requested_run
 
@@ -930,6 +1053,8 @@ def wake_branch(
         monitor_flags.append(f"{PROVIDER_FLAG_PREFIX}{provider}")
     if headless_config:
         monitor_flags.append(f"{OPENCODE_CONFIG_FLAG_PREFIX}{headless_config}")
+    if provider == PROVIDER_CLOUD:
+        monitor_flags.append(f"{CLOUD_FLAG_PREFIX}{json.dumps(cloud_cfg)}")
     monitor_cmd = [
         sys.executable,
         str(MONITOR_SCRIPT),
@@ -971,7 +1096,7 @@ def wake_branch(
             sender=sender,
             target=email,
             subject=subject or "",
-            expected_seconds=HARD_TIMEOUT,
+            expected_seconds=HARD_TIMEOUT if not cloud_cfg else cloud_expected_seconds(cloud_cfg),
             wake_back=wake_back,
             provider=provider,
             grant=grant,
@@ -1030,8 +1155,7 @@ def wake_branch(
                 "branch": str(branch_path),
                 "subject": custom_message or "manual wake",
             }
-            with open(lock_file, "w", encoding="utf-8") as f:
-                json.dump(lock_data, f, indent=2)
+            _replace_lock(lock_file, lock_data)
 
             status.ok("spawn", f"Monitor started as a plain child, outside a systemd scope (PID {monitor_pid})")
 
@@ -1082,7 +1206,9 @@ def wake_branch(
         from aipass.ai_mail.apps.handlers.notify import send_notification
 
         send_notification(f"@{email.lstrip('@')} waking", notif_body, source=email.lstrip("@"), kind="wake")
-    except Exception:
-        logger.info("[wake] Notification feed unavailable")
+    except Exception as e:
+        # The agent is already running: a lost feed line is said, never a failed wake.
+        logger.warning("[wake] Notification feed not written for %s: %s", email, e)
+        status.warn("notify", f"notification feed not written: {e}")
 
     return status, True

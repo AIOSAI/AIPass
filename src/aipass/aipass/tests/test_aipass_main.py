@@ -3,7 +3,7 @@
 # Description: Tests for aipass.py entry point / CLI main
 # Version: 1.5.0
 # Created: 2026-05-12
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/aipass.py and the handlers it drives."""
@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import importlib.metadata
 import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -27,7 +26,6 @@ import aipass.aipass.apps.aipass as aipass_mod
 import aipass.aipass.apps.modules as modules_pkg
 from aipass.cli import error as cli_error
 from aipass.aipass.apps.aipass import (
-    _pyproject_version,
     discover_modules,
     main,
     print_help,
@@ -169,121 +167,35 @@ class TestRouteCommand:
             route_command("cmd", [], [mod])
 
 
-class TestResolveVersion:
-    """Tests for _pyproject_version / _resolve_version — live repo version."""
-
-    @staticmethod
-    def _write_pyproject(root, name: str, version: str) -> None:
-        (root / "pyproject.toml").write_text(
-            f'[project]\nname = "{name}"\nversion = "{version}"\n',
-            encoding="utf-8",
-        )
-
-    def test_pyproject_version_found(self, tmp_path) -> None:
-        """Walks up from a nested file path to the aipass pyproject.toml."""
-        self._write_pyproject(tmp_path, "aipass", "9.9.9")
-        start = tmp_path / "src" / "aipass" / "aipass" / "apps" / "aipass.py"
-        assert _pyproject_version(start) == "9.9.9"
-
-    def test_pyproject_skips_foreign_name(self, tmp_path) -> None:
-        """A nested project's own pyproject is skipped; walk continues upward."""
-        self._write_pyproject(tmp_path, "aipass", "9.9.9")
-        nested = tmp_path / "projects" / "myapp"
-        nested.mkdir(parents=True)
-        self._write_pyproject(nested, "myapp", "0.0.1")
-        start = nested / "src" / "deep" / "file.py"
-        assert _pyproject_version(start) == "9.9.9"
-
-    def test_pyproject_malformed_continues_upward(self, tmp_path) -> None:
-        """Unparseable pyproject logs a warning and the walk continues."""
-        self._write_pyproject(tmp_path, "aipass", "9.9.9")
-        nested = tmp_path / "projects" / "broken"
-        nested.mkdir(parents=True)
-        (nested / "pyproject.toml").write_text("not [ valid toml", encoding="utf-8")
-        start = nested / "src" / "file.py"
-        assert _pyproject_version(start) == "9.9.9"
-
-    def test_pyproject_missing_version_key(self, tmp_path) -> None:
-        """An aipass-named pyproject without a version yields None, not a crash."""
-        (tmp_path / "pyproject.toml").write_text('[project]\nname = "aipass"\n', encoding="utf-8")
-        assert _pyproject_version(tmp_path / "file.py") is None
-
-    @staticmethod
-    def _version_out(capsys: pytest.CaptureFixture[str]) -> str:
-        """What `aipass --version` prints — the command is the door to _resolve_version."""
-        with (
-            patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "--version"]),
-            patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]),
-        ):
-            assert main() == 0
-        return capsys.readouterr().out
-
-    def test_resolve_version_prefers_pyproject(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Repo pyproject wins over installed metadata."""
-        with (
-            patch("aipass.aipass.apps.aipass._pyproject_version", return_value="1.2.3"),
-            patch("aipass.aipass.apps.aipass._installed_version", return_value="9.9.9") as mock_meta,
-        ):
-            assert self._version_out(capsys) == "aipass 1.2.3\n"
-        mock_meta.assert_not_called()
-
-    def test_resolve_version_falls_back_to_metadata(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """No repo pyproject → installed metadata is used."""
-        with (
-            patch("aipass.aipass.apps.aipass._pyproject_version", return_value=None),
-            patch("aipass.aipass.apps.aipass._installed_version", return_value="2.0.0"),
-        ):
-            assert self._version_out(capsys) == "aipass 2.0.0\n"
-
-    def test_resolve_version_live_is_current(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Live resolve returns the repo's real version — never the stale 0.1.0/2.7.4."""
-        version = self._version_out(capsys).removeprefix("aipass ").strip()
-        assert version not in ("unknown", "0.1.0")
-        assert version.count(".") == 2
-
-
 class TestMain:
     """Tests for the main() entry point."""
 
-    def test_version_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """--version prints the real package version and returns 0.
+    def test_version_flag_prints_the_header_version(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--version prints 'aipass v' plus aipass.py's own # Version header, never pyproject's.
 
-        Mutant: version line not printed -> red.
+        Mutant: the pyproject read restored -> 2.8.x printed -> red.
         """
+        header = next(
+            line.removeprefix("# Version:").strip()
+            for line in Path(aipass_mod.__file__).read_text(encoding="utf-8").splitlines()
+            if line.startswith("# Version:")
+        )
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "--version"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
                 result = main()
         out, err = capsys.readouterr()
         assert result == 0
-        assert out.startswith("aipass ")
-        assert out.strip() != "aipass 0.1.0"
+        assert out == f"aipass v{header}\n"
         assert err == ""
 
     def test_version_flag_short(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: version line not printed -> red."""
+        """Mutant: -V dropped from the version flags -> red."""
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "-V"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
                 result = main()
         out, _err = capsys.readouterr()
         assert result == 0
-        assert out.startswith("aipass ")
-
-    def test_version_flag_fallback(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """--version prints 'unknown' when no repo pyproject AND no metadata.
-
-        Mutant: version line not printed -> red.
-        """
-        _not_found = importlib.metadata.PackageNotFoundError
-        with (
-            patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "--version"]),
-            patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]),
-            patch("aipass.aipass.apps.aipass._pyproject_version", return_value=None),
-            patch("aipass.aipass.apps.aipass._installed_version", side_effect=_not_found),
-        ):
-            result = main()
-        out, _err = capsys.readouterr()
-        assert result == 0
-        assert out == "aipass unknown\n"
+        assert out.startswith("aipass v")
 
     def test_help_flag_shows_help(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: --help prints the introspection instead of the help -> red."""
@@ -372,7 +284,7 @@ class TestMain:
     def test_introspection_shows_public_commands(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: no public command collected -> red."""
         mod = types.ModuleType("aipass.aipass.apps.modules.doctor")
-        mod.__doc__ = "Doctor"
+        mod.__doc__ = "aipass doctor — the module's own\nwords.\n\nNot this paragraph."
         mod.COMMAND = "doctor"  # type: ignore[attr-defined]
         mod.handle_command = lambda c, a: True  # type: ignore[attr-defined]
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass"]):
@@ -380,7 +292,9 @@ class TestMain:
                 main()
         out, _err = capsys.readouterr()
         assert "Commands:" in out
-        assert "System health — structure, registry, hooks, tests" in out
+        assert "the module's own words." in out
+        assert "aipass doctor —" not in out
+        assert "Not this paragraph" not in out
 
     def test_introspection_hides_non_public(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: modules listed by file stem, public filter dropped -> red."""
@@ -484,7 +398,7 @@ class TestMain:
     def test_help_shows_command_constant(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: introspection names modules by file stem -> red."""
         mod = types.ModuleType("aipass.aipass.apps.modules.new_project")
-        mod.__doc__ = "New project"
+        mod.__doc__ = "aipass new: New project"
         mod.COMMAND = "new"  # type: ignore[attr-defined]
         mod.handle_command = lambda c, a: True  # type: ignore[attr-defined]
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass"]):
@@ -494,7 +408,7 @@ class TestMain:
             ):
                 main()
         out, _err = capsys.readouterr()
-        assert "Create a project inside AIPass" in out
+        assert "New project" in out
         assert "new_project" not in out
 
     def test_introspection_skips_no_command_module(self, capsys: pytest.CaptureFixture[str]) -> None:
@@ -587,33 +501,26 @@ class TestMain:
 
 
 class TestHelpAgreesWithCode:
-    """print_help against the verbs the dispatcher actually routes.
+    """print_help's command list is the discovered modules, never a hand-written copy."""
 
-    The README no longer carries a command table, so nothing else catches help that disagrees.
-    """
-
-    @staticmethod
-    def _help_text(capsys: pytest.CaptureFixture[str]) -> str:
-        """Rendered help as the user reads it on stdout."""
-        print_help(modules=[])
-        return capsys.readouterr().out
-
-    def test_help_names_revoke(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """`revoke` routes in trust.py, so help must name it — it named only `trust`."""
-        assert "revoke <path>" in self._help_text(capsys)
-
-    def test_help_does_not_claim_bare_json_is_json_output(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """JSON comes from `doctor --fix --json`; `--json` alone falls through."""
-        text = self._help_text(capsys)
-        assert "doctor --fix --json" in text
-        assert "JSON output for structure scan" not in text
+    def test_help_lists_each_discovered_module_in_its_own_words_and_nothing_else(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Mutant: the hand-written list back in print_help -> 'baud install' printed, 'Ship it' missing -> red."""
+        mod = types.ModuleType("aipass.aipass.apps.modules.ship")
+        mod.__doc__ = "aipass ship — Ship it"
+        mod.COMMAND = "ship"  # type: ignore[attr-defined]
+        mod.handle_command = lambda c, a: True  # type: ignore[attr-defined]
+        print_help(modules=[mod])
+        out = capsys.readouterr().out
+        assert "Ship it" in out
+        for gone in ("baud install", "doctor --fix --json", "revoke <path>"):
+            assert gone not in out
 
     def test_help_names_no_retired_command(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """help, profile, handoff, feedback and `init run` were retired 2026-11-14: help must not offer them.
-
-        Mutant: leaving the `init run` help line in place -> red.
-        """
-        text = self._help_text(capsys)
+        """help, profile, handoff, feedback and `init run` were retired 2026-11-14: help must not offer them."""
+        print_help(modules=discover_modules())
+        text = capsys.readouterr().out
         for retired in ("help <question>", "profile", "handoff", "feedback", "init run"):
             assert retired not in text
-        assert "init [target]" in text
+        assert "init" in text

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Log File Monitor
-# Version: 1.2.1
+# Version: 1.5.0
 # Created: 2025-11-23
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """PRAX Log Watcher - Event Queue Integration"""
@@ -62,6 +62,7 @@ class LogFileWatcher(FileSystemEventHandler):
         self.event_queue = event_queue
         self.log_positions: Dict[str, int] = {}
         self.last_command_per_branch: Dict[str, str] = {}
+        self._read_errors: Dict[str, Exception] = {}
 
     def _process_log_line(self, branch: str, line: str) -> None:
         """Process a single log line: detect hooks, commands, or emit as log event."""
@@ -105,9 +106,15 @@ class LogFileWatcher(FileSystemEventHandler):
                 self._process_log_line(branch, line)
 
         except Exception as e:
-            logger.info(f"Error reading log file {file_path}: {e}")
+            # Once per file: a broken file is modified on every write and would flood the logs.
+            if file_path not in self._read_errors:
+                logger.warning(
+                    f"[log_watcher] Could not read new lines from {file_path} ({type(e).__name__}: {e}); "
+                    f"they are left out of the live monitor. The log file itself is untouched."
+                )
+            self._read_errors[file_path] = e
 
-    _HOOK_PATTERN = re.compile(r"\[HOOKS\]\s+(\w+)\s+(\w+)")
+    _HOOK_PATTERN = re.compile(r"\[HOOKS\]\s+(\w+)\s+(\w+)", re.IGNORECASE)
 
     def _extract_hook_info(self, log_line: str) -> Optional[Dict[str, str]]:
         """Extract hook event info from structured [HOOKS] log lines.
@@ -183,7 +190,7 @@ class LogFileWatcher(FileSystemEventHandler):
             match = re.search(r"(?:FPLAN|PLAN)[- ]?(\d+)", log_line)
             plan_id = match.group(1) if match else ""
             return {"command": f"flow open plan {plan_id}".strip(), "caller": None, "target": None}
-        if "Loaded module:" in log_line and not self.last_command_per_branch.get("FLOW", "").startswith("FLOW:flow"):
+        if "Loaded module:" in log_line and not self.last_command_per_branch.get("flow", "").startswith("flow:flow"):
             return {"command": "flow command", "caller": None, "target": None}
         return None
 
@@ -203,7 +210,7 @@ class LogFileWatcher(FileSystemEventHandler):
                 command = " ".join(args)
                 return {"command": f"drone {command}", "caller": None, "target": self._extract_target_from_cmd(command)}
 
-        if "[FLOW]" in log_line or "FLOW_PLAN]" in log_line:
+        if "[flow]" in log_line.lower() or "flow_plan]" in log_line.lower():
             result = self._match_flow_command(log_line)
             if result:
                 return result
@@ -211,8 +218,8 @@ class LogFileWatcher(FileSystemEventHandler):
         if "[sentry]" in log_line.lower() and "audit" in log_line.lower():
             match = re.search(r"Auditing\s+(\w+)", log_line)
             if match:
-                target = match.group(1).upper()
-                return {"command": f"sentry audit @{target.lower()}", "caller": None, "target": target}
+                target = match.group(1).lower()
+                return {"command": f"sentry audit @{target}", "caller": None, "target": target}
 
         if "standards_checklist" in log_line.lower() and "Running" in log_line:
             match = re.search(r"Running\s+(\w+)\s+standard\s+check\s+on\s+(.+)", log_line)
@@ -222,7 +229,7 @@ class LogFileWatcher(FileSystemEventHandler):
         if "[ai_mail]" in log_line.lower():
             if "Sending" in log_line:
                 target_match = re.search(r"to\s+@?(\w+)", log_line, re.IGNORECASE)
-                target = target_match.group(1).upper() if target_match else None
+                target = target_match.group(1).lower() if target_match else None
                 return {"command": "ai_mail send", "caller": None, "target": target}
             elif "inbox" in log_line.lower():
                 return {"command": "ai_mail inbox", "caller": None, "target": None}
@@ -250,7 +257,7 @@ class LogFileWatcher(FileSystemEventHandler):
         if "[spawn]" in log_line.lower():
             if "Creating" in log_line and "branch" in log_line.lower():
                 match = re.search(r"Creating\s+(?:branch\s+)?(\w+)", log_line)
-                target = match.group(1).upper() if match else None
+                target = match.group(1).lower() if match else None
                 return {"command": "spawn create branch", "caller": None, "target": target}
 
         if "[trigger]" in log_line.lower():
@@ -259,13 +266,13 @@ class LogFileWatcher(FileSystemEventHandler):
 
         # Routing carries the caller; it must match before the generic Executing match below.
         # Format: "Routing @flow [CALLER:PRAX] → create ['.', 'Subject']"
-        if "Routing @" in log_line and "[CALLER:" in log_line:
-            caller_match = re.search(r"\[CALLER:(\w+)\]", log_line)
-            caller = caller_match.group(1) if caller_match else None
+        if "Routing @" in log_line and "[caller:" in log_line.lower():
+            caller_match = re.search(r"\[CALLER:(\w+)\]", log_line, re.IGNORECASE)
+            caller = caller_match.group(1).lower() if caller_match else None
 
             route_match = re.search(r"Routing\s+@(\w+).*?→\s*(\S+)\s*(.*)", log_line)
             if route_match:
-                target = route_match.group(1).upper()
+                target = route_match.group(1).lower()
                 cmd_name = route_match.group(2)
                 cmd_args = route_match.group(3).strip()
                 display_cmd = f"drone @{route_match.group(1)} {cmd_name} {cmd_args}".strip()
@@ -279,10 +286,12 @@ class LogFileWatcher(FileSystemEventHandler):
 
     def _match_executing_command(self, log_line: str) -> Optional[Dict[str, Optional[str]]]:
         """Match 'Executing command' log lines and extract caller/target info."""
-        caller_match = re.search(r"\[CALLER:(\w+)\]", log_line)
-        caller = caller_match.group(1) if caller_match else None
+        caller_match = re.search(r"\[CALLER:(\w+)\]", log_line, re.IGNORECASE)
+        caller = caller_match.group(1).lower() if caller_match else None
 
-        cmd_match = re.search(r"Executing(?:\s+activated)?\s+command(?:\s*\[CALLER:\w+\])?:\s*(.+)", log_line)
+        cmd_match = re.search(
+            r"Executing(?:\s+activated)?\s+command(?:\s*\[CALLER:\w+\])?:\s*(.+)", log_line, re.IGNORECASE
+        )
         if not cmd_match:
             return None
 
@@ -299,10 +308,10 @@ class LogFileWatcher(FileSystemEventHandler):
         """Extract target branch from a command string."""
         target_match = re.search(r"@(\w+)", cmd)
         if target_match:
-            return target_match.group(1).upper()
+            return target_match.group(1).lower()
         path_match = re.search(r"/aipass/(\w+)", cmd)
         if path_match:
-            return path_match.group(1).upper()
+            return path_match.group(1).lower()
         return None
 
     def _emit_command_separator(self, branch: str, command_info) -> None:
@@ -385,7 +394,10 @@ class LogFileWatcher(FileSystemEventHandler):
             try:
                 self.log_positions[str(log_file)] = log_file.stat().st_size
             except Exception as e:
-                logger.info(f"Could not get size for {log_file}: {e}")
+                logger.warning(
+                    f"[log_watcher] Could not get the size of {log_file} ({e}); the monitor will show "
+                    f"it from its first line when it next changes, instead of only new lines."
+                )
 
 
 def start_log_watcher(event_queue: MonitoringQueue, use_polling: bool = False) -> Any:
@@ -455,7 +467,7 @@ if __name__ == "__main__":
     import time
     from aipass.cli import console
 
-    console.print("[bold cyan]PRAX Log Watcher Test[/bold cyan]")
+    console.print("[bold cyan]prax Log Watcher Test[/bold cyan]")
     console.print()
     console.print(f"Monitoring: {get_system_logs_dir()}")
     console.print("Press Ctrl+C to stop")

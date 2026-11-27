@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_hooksound.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Tests for hooksound module (drone @hooks hooksound)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/hooksound.py."""
@@ -99,6 +99,7 @@ class TestHandleCommand:
         err = capsys.readouterr().err
         assert "hooksound — Mute/unmute all hook audio" in err
         assert "Hook sounds are off by default; 'on' is the switch." in err
+        assert "Usage:" in err and "Examples:" in err
         mock_mute.assert_not_called()
 
     def test_help_word(self, capsys):

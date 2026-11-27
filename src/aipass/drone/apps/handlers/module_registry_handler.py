@@ -14,6 +14,7 @@ import importlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
@@ -179,6 +180,18 @@ def get_module_help(name: str, command: str | None = None) -> str | None:
     except (ImportError, AttributeError) as exc:
         logger.warning("get_module_help: failed for module '%s': %s", name, exc)
         return None
+
+
+def get_module_printer(name: str, attr: str) -> Callable[[], None] | None:
+    """An internal module's own print function (print_introspection, print_help), or None.
+
+    None for an external module (its page is captured from its entry point) and for an internal one that
+    has no such function. An internal module that cannot import raises ImportError: the caller names it.
+    """
+    adapter_path = _INTERNAL_MODULES.get(name)
+    if adapter_path is None:
+        return None
+    return getattr(importlib.import_module(adapter_path), attr, None)
 
 
 def get_module_introspective(name: str) -> str | None:

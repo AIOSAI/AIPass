@@ -46,23 +46,24 @@ never reads a cwd. Called without one, it is core-only.
 
 **Mail counts come from the branch's own inbox, never from the ai_mail central.**
 `calculate_quick_status` counts `<branch>/.ai_mail.local/inbox.json`. The
-refresh also builds an `ai_mail` section from `AI_MAIL.central.json`, but
+refresh also builds an `ai_mail` section from `ai_mail.central.json`, but
 nothing reads it and it is popped before save. So a branch with no central row,
 which is every external branch today, still gets its true count. Pinned in
 `tests/test_operations.py`: a central listing only FLOW, a branch inbox with 3
 new, and `new_mail` 3. The `ai_mail` section feeds no count; the comment in
 `refresh.py` says so.
 
-**DEVPULSE gets two extra sections.** After the lock is released, a refresh of
-DEVPULSE runs `apps/plugins/devpulse_dashboard/`, which writes `sections.git` and
+**devpulse gets two extra sections.** After the lock is released, a refresh of
+devpulse runs `apps/plugins/devpulse_dashboard/`, which writes `sections.git` and
 `sections.dispatch` through `write_section()`. A failing builder is logged and
 does not block the other one. The dispatch section reads every citizen's
 `.ai_mail.local/.dispatch.lock`, the `{pid, timestamp, branch}` file ai_mail holds
 while a dispatched agent runs, and writes `managed_by` (`devpulse`),
 `agents_active` (branch directory names), `agents_active_count` and `details`
 (name to `{pid, timestamp}`). A lock whose PID is dead is skipped. A lock that
-cannot be parsed still counts as active, with `pid: null`, because ai_mail treats
-it as mid-write; a PID that cannot be checked counts as alive. A live dispatch
+cannot be parsed still counts as active, with `pid: null` and an `error` saying why,
+because ai_mail treats it as mid-write; a PID that cannot be checked counts as
+alive and is logged at warning. A live dispatch
 must never vanish from the board.
 
 ## Programmatic Dashboard API
@@ -97,6 +98,11 @@ closed universe, and reports 5 for a branch with 104 closed plans.
 `action_required` is true when any counter the block renders in `summary` is
 non-zero, todos included, so a branch never publishes `"1 todos"` beside
 `action_required: false`. @flow's writer counts them the same way.
+
+A shipped template that cannot be read raises instead of standing in a built-in
+dashboard; the refresh logs it per branch and moves on. A branch dashboard that
+cannot be parsed is skipped by `push-template`, and the skip line names the parse
+error.
 
 `push-template` writes every branch in the registry, so its deprecated list is
 the most dangerous constant here: a live key on it is deleted fleet-wide by

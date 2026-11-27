@@ -61,7 +61,7 @@
     {
       "file": "apps/modules/timer_install.py",
       "standard": "logged_fallback",
-      "lines": [105, 109],
+      "lines": [109, 113],
       "reason": "_run_systemctl (daemon, fleet green leg 5): every False this seam returns is a failure the user was already shown through cli error(), the non-zero exit on the success path included, so the caller cannot mistake it for an answer; True only on success (or not loaded, when asked) and None only for not found, when asked (leg 4b)."
     },
     {

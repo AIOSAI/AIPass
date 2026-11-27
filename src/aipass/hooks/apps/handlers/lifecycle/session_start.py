@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_start.py
-# Version: 1.6.0
+# Version: 1.6.2
 # Description: Resets cadence counter on new chat / clear; injects the culture file; writes the session pointer
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-07
-# Modified: 2026-11-17
+# Modified: 2026-11-27
 # =============================================
 
 """SessionStart: resets the cadence counter, injects the culture file, writes the session pointer.
@@ -37,12 +37,12 @@ def _handle(hook_data: dict) -> dict:
     source = hook_data.get("source", "")
 
     if source in _SKIP_SOURCES:
-        logger.info("[HOOKS] session_start: skipped cadence reset (source=%s)", source)
+        logger.info("[hooks] session_start: skipped cadence reset (source=%s)", source)
         return {"stdout": "", "exit_code": 0}
 
     cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
     cadence.reset_counter(hook_data=hook_data, caller="session_start")
-    logger.info("[HOOKS] session_start: cadence reset (source=%s)", source)
+    logger.info("[hooks] session_start: cadence reset (source=%s)", source)
     return {"stdout": "", "exit_code": 0, "sound": "cadence reset"}
 
 
@@ -61,7 +61,7 @@ def _handle_culture(hook_data: dict) -> dict:
     home = os.environ.get("AIPASS_HOME", "")
     culture = Path(home) / ".claude" / "AGENTS.md" if home else None
     if culture is None or not culture.is_file():
-        logger.warning("[HOOKS] session_start: no culture file at %s, none injected", culture or "(AIPASS_HOME unset)")
+        logger.warning("[hooks] session_start: no culture file at %s, none injected", culture or "(AIPASS_HOME unset)")
         return {"stdout": "", "exit_code": 0}
     cwd = Path(hook_data.get("cwd") or os.getcwd()).resolve()
     if (hook_data.get("provider") or "claude") == "claude" and cwd.is_relative_to(Path(home).resolve()):
@@ -70,7 +70,7 @@ def _handle_culture(hook_data: dict) -> dict:
 
 
 def _interactive(provider: str, hook_data: dict) -> bool:
-    """Whether a person runs this session: Codex's rollout session_meta source is not "exec", Claude's argv has no -p.
+    """Whether a person runs this session: Codex's rollout source is not "exec", Claude's argv has no -p or --cloud.
 
     Unreadable, or a Seed head (no resume to reopen), answers False: a headless pointer reopens an empty chat."""
     if provider == "seed":
@@ -80,13 +80,14 @@ def _interactive(provider: str, hook_data: dict) -> bool:
             with open(hook_data.get("transcript_path") or "", encoding="utf-8") as fh:
                 meta = json.loads(fh.readline())
         except (OSError, ValueError) as exc:
-            logger.info("[HOOKS] session_start: codex rollout unreadable: %s", exc)
+            logger.info("[hooks] session_start: codex rollout unreadable: %s", exc)
             return False
         source = meta.get("payload", {}).get("source") if isinstance(meta, dict) else None
         return isinstance(source, str) and source != "exec"
     sessions = importlib.import_module("aipass.hooks.apps.modules.cc_sessions")
     args = sessions.cli_ancestor("claude")
-    return args is not None and not {"-p", "--print"} & set(args[1:])
+    # --cloud: a local launcher for a VM session that never writes a transcript here.
+    return args is not None and not {"-p", "--print", "--cloud"} & set(args[1:])
 
 
 def handle_session_pointer(hook_data: dict) -> dict:
@@ -110,10 +111,10 @@ def _handle_session_pointer(hook_data: dict) -> dict:
         return {"stdout": "", "exit_code": 0}
     provider = hook_data.get("provider") or "claude"
     if not _interactive(provider, hook_data):
-        logger.info("[HOOKS] session_start: headless %s session %s, pointer left as is", provider, session_id)
+        logger.info("[hooks] session_start: headless %s session %s, pointer left as is", provider, session_id)
         return {"stdout": "", "exit_code": 0}
     from aipass.ai_mail import write_pointer
 
     written = write_pointer(branch, session_id, "session-start", provider=provider)
-    logger.info("[HOOKS] session_start: pointer %s -> %s (%s) written=%s", branch, session_id, provider, written)
+    logger.info("[hooks] session_start: pointer %s -> %s (%s) written=%s", branch, session_id, provider, written)
     return {"stdout": "", "exit_code": 0}

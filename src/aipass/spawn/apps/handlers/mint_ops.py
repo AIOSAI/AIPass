@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mint_ops.py
 # Description: The mint of a new citizen from the template, step by step
-# Version: 1.5.0
+# Version: 1.7.0
 # Created: 2026-09-28
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """The mint body: a validated target becomes a registered citizen."""
@@ -20,7 +20,11 @@ from aipass.spawn.apps.handlers.metadata import (
     normalize_branch_name,
     detect_profile,
 )
-from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, validate_no_placeholders
+from aipass.spawn.apps.handlers.placeholders import (
+    build_replacements_dict,
+    localize_package_imports,
+    validate_no_placeholders,
+)
 from aipass.spawn.apps.handlers.file_ops import (
     copy_template,
     regenerate_template_registry,
@@ -38,6 +42,7 @@ from aipass.spawn.apps.handlers.registry import (
     ensure_project_has_owner,
     load_registry,
     row_at,
+    save_registry,
 )
 from aipass.spawn.apps.handlers.adoption_ops import adopt_existing, birth_from_seed, error_result
 from aipass.spawn.apps.handlers.class_registry import (
@@ -72,12 +77,14 @@ def spawn_at(
     registry_path=None,
     citizen_class=None,
     arrival=None,
+    localize=False,
 ) -> dict:
     """Decide the lane for a target and run it: refuse, adopt, birth from seed, or mint.
 
     citizen_class None means decide at mint from the citizen number; retired names are refused.
     traits: a bare string becomes a one-element list (identity.traits is a list).
-    arrival: "fresh" or "adopted" stamps a project seat's defaults at mint; None stamps nothing."""
+    arrival: "fresh" or "adopted" stamps a project seat's defaults at mint; None stamps nothing.
+    localize: re-root the newborn's imports to the package its src/<package>/<branch> layout names."""
     # Forbidden and retired values refuse before any filesystem work, through every door.
     for candidate in (citizen_class, Path(template_dir).name if template_dir else ""):
         refusal = refuse_retired_or_forbidden(candidate)
@@ -154,6 +161,7 @@ def spawn_at(
         registry_path=registry_path,
         citizen_class=citizen_class,
         arrival=arrival,
+        localize=localize,
     )
 
 
@@ -163,7 +171,7 @@ def live_row_refusal(target: Path, registry_path) -> str:
     row = row_at(reg_path, target) if reg_path else None
     if reg_path is None or row is None:
         return ""
-    name = normalize_branch_name(row.get("name") or get_branch_name(target), "lower")
+    name = normalize_branch_name(row.get("name") or get_branch_name(target))
     return (
         f"REFUSED: {target} is already registered as @{name} in {reg_path}; create would rewrite a live "
         f"agent, so nothing was written. To bring its scaffold up to the template: "
@@ -183,11 +191,13 @@ def mint_citizen(
     registry_path=None,
     citizen_class=None,
     arrival=None,
+    localize=False,
 ) -> dict:
     """Mint a citizen at a target that does not exist yet, from template."""
+    # Read before the first write (the stale-row save below): a corrupt manifest raises with nothing on disk.
+    load_template_registry(template)
     folder_name = get_branch_name(target)
-    branch_upper = normalize_branch_name(folder_name, "upper")
-    branch_lower = normalize_branch_name(folder_name, "lower")
+    branch_lower = normalize_branch_name(folder_name)
     detected_profile = profile or detect_profile(target)
 
     # The registry must already exist above the target or be named explicitly; a mint never invents one.
@@ -202,8 +212,15 @@ def mint_citizen(
     except ValueError:
         logger.warning("[spawn] Mint refused: %s is outside registry %s", target, reg_path)
         return error_result(f"{target} is outside the project of registry {reg_path}; nothing was written.")
-    if any(b.get("name") == branch_upper for b in branches_as_list(load_registry(reg_path).get("branches", []))):
-        return error_result(f"{branch_upper} is already registered in {reg_path}; nothing was written.")
+    registry = load_registry(reg_path)
+    same_name = [b for b in branches_as_list(registry.get("branches", [])) if b.get("name", "").lower() == branch_lower]
+    if any((reg_path.parent / b.get("path", "")).is_dir() for b in same_name):
+        return error_result(f"{branch_lower} is already registered in {reg_path}; nothing was written.")
+    if same_name:
+        # A row whose directory is gone (archived by hand) guards nothing: the fresh birth replaces it.
+        registry["branches"] = [b for b in branches_as_list(registry.get("branches", [])) if b not in same_name]
+        save_registry(reg_path, registry)
+        logger.warning("[spawn] Stale row %s dropped from %s: directory gone; minting afresh", branch_lower, reg_path)
     citizen_number = get_next_citizen_number(reg_path)
 
     # Resolved before the copy: the passport is written before the registry, so both must carry this id.
@@ -234,6 +251,13 @@ def mint_citizen(
 
     ensure_directory(target)
     copied, skipped = copy_template(template, target, replacements)
+    if localize:
+        try:
+            package = localize_package_imports(target, branch_lower)
+        except RuntimeError as e:
+            return error_result(f"Imports not re-rooted: {e}. Nothing was registered; the tree is left at {target}.")
+        if package:
+            logger.info("[spawn] %s imports itself as %s.%s", branch_lower, package, branch_lower)
 
     # The template has no {{TRAITS}} placeholder, so traits are written after render or silently dropped.
     traits_issues = []
@@ -257,7 +281,7 @@ def mint_citizen(
         try:
             arrival_record["first_wake"] = stamp_onboarding(target, arrival)
         except OSError as e:
-            logger.warning("[spawn] First wake not stamped for %s: %s", branch_upper, e)
+            logger.warning("[spawn] First wake not stamped for %s: %s", branch_lower, e)
             arrival_record["first_wake"] = f"not stamped: {e}"
 
     regenerate_template_registry(target)
@@ -270,7 +294,7 @@ def mint_citizen(
     # Verified before the registry write, so a refusal has nothing to roll back; the partial tree stays.
     missing = verify_mint(template, target, replacements, branch_lower)
     if missing:
-        json_handler.log_operation("mint_refused", data={"branch": branch_upper, "missing": missing})
+        json_handler.log_operation("mint_refused", data={"branch": branch_lower, "missing": missing})
         shown = ", ".join(missing[:12])
         if len(missing) > 12:
             shown += f", +{len(missing) - 12} more"
@@ -300,7 +324,7 @@ def mint_citizen(
         logger.warning("[spawn] %s", seed_issues[0])
     if seed_record["error"]:
         refusal = error_result(
-            f"BIRTH REFUSED: the passport vault for {branch_upper} could not be written ({seed_record['error']}). "
+            f"BIRTH REFUSED: the passport vault for {branch_lower} could not be written ({seed_record['error']}). "
             f"Nothing was registered; the tree is left at {target}."
         )
         logger.error("[spawn] %s", refusal["error"])
@@ -322,7 +346,7 @@ def mint_citizen(
     registry_branch_path = target.relative_to(reg_path.parent).as_posix()
     registry_updated = add_to_registry(
         reg_path,
-        branch_upper,
+        branch_lower,
         registry_branch_path,
         detected_profile,
         f"@{branch_lower}",
@@ -333,7 +357,7 @@ def mint_citizen(
 
     if not registry_updated:
         return error_result(
-            f"Registry add failed for {branch_upper} in {reg_path}: the tree at {target} is minted but NOT registered."
+            f"Registry add failed for {branch_lower} in {reg_path}: the tree at {target} is minted but NOT registered."
         )
 
     ensure_project_has_owner(reg_path)
@@ -349,7 +373,7 @@ def mint_citizen(
             try:
                 arrival_record[name] = stamp()
             except (OSError, RuntimeError) as e:
-                logger.warning("[spawn] %s not stamped for %s: %s", name, branch_upper, e)
+                logger.warning("[spawn] %s not stamped for %s: %s", name, branch_lower, e)
                 arrival_record[name] = f"not stamped: {e}"
 
     placeholder_issues = [f"Unreplaced {sorted(names)} in {path}" for path, names in validate_no_placeholders(target)]
@@ -358,7 +382,7 @@ def mint_citizen(
 
     logger.info(
         "[spawn] BORN %s at %s (class %s, citizen %s, receipt %s)",
-        branch_upper,
+        branch_lower,
         target,
         resolved_class,
         citizen_number,
@@ -367,7 +391,7 @@ def mint_citizen(
     json_handler.log_operation(
         "branch_created",
         data={
-            "branch": branch_upper,
+            "branch": branch_lower,
             "citizen_class": resolved_class,
             "receipt": receipt_result.get("receipt", {}).get("template_versions", {}),
         },
@@ -375,7 +399,7 @@ def mint_citizen(
 
     return {
         "success": True,
-        "branch_name": branch_upper,
+        "branch_name": branch_lower,
         "path": str(target),
         "files_copied": len([c for c in copied if "(dir)" not in c]),
         "dirs_created": len([c for c in copied if "(dir)" in c]),

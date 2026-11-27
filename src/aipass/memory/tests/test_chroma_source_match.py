@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_chroma_source_match.py
 # Description: Tests for source_file matching in the ChromaDB subprocess handler
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-08-23
-# Modified: 2026-11-15
+# Modified: 2026-11-25
 # =============================================
 
 """Tests for apps/handlers/storage/chroma_subprocess.py."""
@@ -13,7 +13,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(covered_elsewhere) — _vectorize_and_store(): tests/test_chroma_vectorize.py
-# sentry: no-test-needed(external) — chromadb.PersistentClient behind _get_client(); a fake client stands in here
+# sentry: no-test-needed(external) — chromadb.PersistentClient behind _get_client(); a fake, or real under tmp_path
 
 import io
 import json
@@ -37,6 +37,8 @@ def run(capsys):
 
 class _FakeCollection:
     """Minimal stand-in for a Chroma collection backed by source_file names."""
+
+    metadata = None
 
     def __init__(self, source_files):
         self._sources = list(source_files)
@@ -223,7 +225,7 @@ class TestPinComposition:
         qe = self._query_executor()
         seen = {}
 
-        def _capture(plan_id, n_results):
+        def _capture(plan_id, n_results, db_path=None):
             seen["plan_id"] = plan_id
             return []
 
@@ -238,7 +240,7 @@ class TestPinComposition:
         collection = _FakeCollection(["TDPLAN-0012_hook.md"])
         monkeypatch.setattr(chroma_subprocess, "_get_client", lambda db_path=None: _FakeClient(collection))
 
-        def _through_handler(plan_id, n_results):
+        def _through_handler(plan_id, n_results, db_path=None):
             answer = run("get_by_source", collection_name="flow_plans", source_pattern=plan_id, n_results=n_results)
             return answer["results"]
 
@@ -265,10 +267,12 @@ _STORE = [
 
 
 class _SearchCollection:
-    def __init__(self, name):
+    def __init__(self, name, metadata=None):
         self.name = name
+        self.metadata = metadata
 
-    def query(self, query_embeddings=None, n_results=5):
+    def query(self, query_embeddings=None, n_results=5, where=None):
+        self.where = where
         return {
             "documents": [[f"doc in {self.name}"]],
             "metadatas": [[{}]],
@@ -282,6 +286,18 @@ class _MissingCollectionClient:
         from chromadb.errors import NotFoundError
 
         raise NotFoundError(f"Collection [{name}] does not exist (fake)")
+
+
+class TestGetBySourceWithNoCollection:
+    """A store nothing has written plans to yet answers with no rows, not with a failure."""
+
+    def test_an_absent_flow_plans_is_a_state_not_a_failure(self, monkeypatch, run):
+        monkeypatch.setattr(chroma_subprocess, "_get_client", lambda db_path=None: _MissingCollectionClient())
+
+        result = run("get_by_source", collection_name="flow_plans", source_pattern="FPLAN-0001")
+
+        assert (result["success"], result["results"], result["exists"]) == (True, [], False)
+        assert "Collection [flow_plans] does not exist (fake)" in result["message"]
 
 
 class TestCheckPlanWithNoCollection:
@@ -359,7 +375,7 @@ class TestSearchBranchScope:
 
 
 class _BrokenCollection(_SearchCollection):
-    def query(self, query_embeddings=None, n_results=5):
+    def query(self, query_embeddings=None, n_results=5, where=None):
         raise RuntimeError("segment unreadable")
 
 
@@ -388,3 +404,102 @@ class TestAFailedCollectionIsNotASearchedOne:
 
         assert result["success"] is False
         assert "flow_local" in result["error"] and "flow_plans" in result["error"]
+
+
+class TestTheResultNamesItsOwner:
+    """ai_mail_email_sent split at its first underscore read as branch "ai": the owner is the collection's own."""
+
+    @staticmethod
+    def _store(monkeypatch, metadata):
+        client = _SearchClient([])
+        client._collections = [_SearchCollection("ai_mail_email_sent", metadata)]
+        monkeypatch.setattr(chroma_subprocess, "_get_client", lambda db_path=None: client)
+
+    def test_branch_and_type_come_from_the_collection_metadata_lowercased(self, monkeypatch, run):
+        self._store(monkeypatch, {"hnsw:space": "cosine", "branch": "AI_MAIL", "type": "email_sent"})
+
+        result = run("search_vectors", query_embedding=[0.1], branch="ai_mail")
+
+        assert [(r["branch"], r["type"]) for r in result["results"]] == [("ai_mail", "email_sent")]
+
+    def test_a_collection_without_metadata_names_no_owner(self, monkeypatch, run):
+        self._store(monkeypatch, None)
+
+        result = run("search_vectors", query_embedding=[0.1], branch="ai_mail")
+
+        assert [(r["branch"], r["type"]) for r in result["results"]] == [("", "")]
+
+
+class TestTheBackfillPairCopiesRowsAsStored:
+    """read_collection hands back ids, embeddings, documents and metadatas; add_missing never touches a present id."""
+
+    _ROWS = {
+        "ids": ["FLOW_plans_aaa", "flow_plans_bbb"],
+        "embeddings": [[0.5, 0.25, 0.125], [0.75, 0.5, 0.25]],
+        "documents": ["first chunk", "second chunk"],
+        "metadatas": [{"source_file": "F1.md", "project": "AIPass"}, {"source_file": "F2.md", "branch": "wren"}],
+    }
+
+    def test_rows_read_back_as_added_and_a_second_add_adds_nothing(self, run, tmp_path):
+        store = str(tmp_path / "local_chroma")
+        meta = {"branch": "FLOW", "type": "plans", "hnsw:space": "cosine"}
+
+        first = run("add_missing", collection_name="flow_plans", metadata=meta, db_path=store, **self._ROWS)
+        changed = {**self._ROWS, "documents": ["rewritten", "rewritten"]}
+        second = run("add_missing", collection_name="flow_plans", metadata=meta, db_path=store, **changed)
+        read = run("read_collection", collection_name="flow_plans", db_path=store)
+
+        assert (first["added"], first["present"]) == (2, 0)
+        assert (second["added"], second["present"]) == (0, 2)
+        order = sorted(range(2), key=lambda i: read["ids"][i])
+        assert {f: [read[f][i] for i in order] for f in self._ROWS} == self._ROWS
+        assert read["metadata"]["branch"] == "FLOW"
+
+    def test_a_merge_moves_rows_as_stored_and_drops_the_source(self, run, tmp_path):
+        """A renamed branch's collection folds into its new name: ids, vectors and metadata intact, target meta kept."""
+        store = str(tmp_path / "local_chroma")
+        new_meta = {"branch": "canary_test", "type": "local", "hnsw:space": "cosine"}
+        run("add_missing", collection_name="old_local", metadata={"branch": "CANARY"}, db_path=store, **self._ROWS)
+        newer = {"ids": ["new_1"], "embeddings": [[0.1, 0.2, 0.3]], "documents": ["new"], "metadatas": [{"k": 1}]}
+        run("add_missing", collection_name="new_local", metadata=new_meta, db_path=store, **newer)
+
+        merged = run("merge_collection", source="old_local", target="new_local", db_path=store)
+        read = run("read_collection", collection_name="new_local", db_path=store)
+
+        assert (merged["moved"], merged["already_there"], merged["target_count"]) == (2, 0, 3)
+        assert run("read_collection", collection_name="old_local", db_path=store)["exists"] is False
+        order = sorted((i for i, doc_id in enumerate(read["ids"]) if doc_id != "new_1"), key=lambda i: read["ids"][i])
+        assert {f: [read[f][i] for i in order] for f in self._ROWS} == self._ROWS
+        assert read["metadata"] == new_meta
+
+    def test_a_merge_the_target_refuses_keeps_the_source(self, run, tmp_path, capsys):
+        """Write last: a copy that fails (vectors of another width) leaves the source whole."""
+        store = str(tmp_path / "local_chroma")
+        run("add_missing", collection_name="old_local", metadata={"branch": "CANARY"}, db_path=store, **self._ROWS)
+        narrow = {"ids": ["new_1"], "embeddings": [[0.1, 0.2]], "documents": ["new"], "metadatas": [{"k": 1}]}
+        run("add_missing", collection_name="new_local", metadata={"branch": "canary_test"}, db_path=store, **narrow)
+
+        with pytest.raises(SystemExit):
+            run("merge_collection", source="old_local", target="new_local", db_path=store)
+
+        assert json.loads(capsys.readouterr().out)["success"] is False
+        assert len(run("read_collection", collection_name="old_local", db_path=store)["ids"]) == 2
+        assert run("read_collection", collection_name="new_local", db_path=store)["ids"] == ["new_1"]
+
+    def test_an_absent_collection_reads_as_a_state(self, run, tmp_path):
+        read = run("read_collection", collection_name="flow_plans", db_path=str(tmp_path / "empty_chroma"))
+
+        assert (read["success"], read["exists"]) == (True, False)
+        assert [read[f] for f in ("ids", "embeddings", "documents", "metadatas")] == [[], [], [], []]
+
+
+class TestAnOwnerReadsOnlyItsRowsOfASharedStore:
+    """The global store is also @memory's local one: its seat reads memory's collections and its own plan chunks."""
+
+    def test_owner_reads_its_collections_and_only_its_tagged_plans(self, store, run):
+        result = run("search_vectors", query_embedding=[0.1], owner="memory")
+
+        assert store.queried == ["memory_pool_docs", "flow_plans"]
+        where = {c.name: getattr(c, "where", "unqueried") for c in store._collections}
+        assert where["flow_plans"] == {"branch": "memory"} and where["memory_pool_docs"] is None
+        assert {r["collection"] for r in result["results"]} == {"memory_pool_docs", "flow_plans"}

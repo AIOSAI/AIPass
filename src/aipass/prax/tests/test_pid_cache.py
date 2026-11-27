@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_pid_cache.py
 # Description: Tests for the PID cache handler
-# Version: 1.2.1
+# Version: 1.4.0
 # Created: 2026-07-10
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/monitoring/pid_cache.py"""
@@ -28,6 +28,8 @@ def _pid_cache_fresh(monkeypatch):
     monkeypatch.setattr(pid_cache, "logger", MagicMock())
     monkeypatch.setattr(pid_cache, "_pid_cache", {})
     monkeypatch.setattr(pid_cache, "_pid_cache_last_refresh", 0.0)
+    monkeypatch.setattr(pid_cache, "_lock_errors", {})
+    monkeypatch.setattr(pid_cache, "_refresh_error", None)
 
 
 def _import_pid_cache():
@@ -68,7 +70,7 @@ class TestParseLockPid:
         ):
             mod.parse_lock_pid(entry, new_cache, tmp_path)
 
-        assert new_cache.get("FLOW") == 12345
+        assert new_cache.get("flow") == 12345
 
     def test_lock_file_with_zero_pid(self, tmp_path):
         """Lock file with pid=0 skips entry."""
@@ -85,7 +87,10 @@ class TestParseLockPid:
         assert new_cache == {}
 
     def test_lock_file_with_invalid_json(self, tmp_path):
-        """Lock file with invalid JSON logs warning and continues."""
+        """A corrupt lock is warned once, not every 30 s refresh, and adds no PID.
+
+        Mutants killed: the old logger.info (no warning), and a warning per refresh (a log storm).
+        """
         mod = _import_pid_cache()
         branch_dir = tmp_path / "mybranch"
         mail_dir = branch_dir / ".ai_mail.local"
@@ -95,7 +100,9 @@ class TestParseLockPid:
         new_cache: dict[str, int] = {}
         entry = {"path": str(branch_dir), "name": "flow"}
         mod.parse_lock_pid(entry, new_cache, tmp_path)
+        mod.parse_lock_pid(entry, new_cache, tmp_path)
         assert new_cache == {}
+        assert mod.logger.warning.call_count == 1
 
     def test_lock_file_with_empty_name(self, tmp_path):
         """Branch entry with empty name skips cache update."""
@@ -185,7 +192,8 @@ class TestRefresh:
             assert mod.refresh(repo_root=tmp_path) is None
 
         assert mod._pid_cache == {"FLOW": 4242}
-        assert log.info.call_args.args[0] == "[pid_cache] Refresh failed: %s"
+        # Mutant killed: the old logger.info, which nobody reads at the fleet's level.
+        assert log.warning.call_args.args[0].startswith("[pid_cache] PID refresh failed")
 
 
 class TestGetPidForBranch:
@@ -195,17 +203,17 @@ class TestGetPidForBranch:
         """Returns PID when branch is in cache."""
         mod = _import_pid_cache()
         with mod._pid_cache_lock:
-            mod._pid_cache["FLOW"] = 42
+            mod._pid_cache["flow"] = 42
 
         with patch.object(mod, "refresh"):
             result = mod.get_pid_for_branch("flow")
         assert result == 42
 
     def test_strips_agent_suffix(self):
-        """Branch name ending in ' AGENT' is stripped before lookup."""
+        """Branch name ending in ' agent' is stripped before lookup."""
         mod = _import_pid_cache()
         with mod._pid_cache_lock:
-            mod._pid_cache["FLOW"] = 42
+            mod._pid_cache["flow"] = 42
 
         with patch.object(mod, "refresh"):
             result = mod.get_pid_for_branch("flow agent")
@@ -248,4 +256,4 @@ class TestDefaultRoot:
             ),
         ):
             mod.refresh()
-        assert mod._pid_cache == {"FLOW": 12345}
+        assert mod._pid_cache == {"flow": 12345}

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: promote.py
-# Version: 1.3.0
+# Version: 1.3.2
 # Description: The one step that makes edited hook code live: check, copy, smoke, then point (drone @hooks promote)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Hook code goes live through one explicit step, never by being saved (DPLAN-0356 item 3).
@@ -170,7 +170,7 @@ def check_smoke(root: Path, name: str) -> tuple[bool, str]:
     try:
         refused = code == 2 and json.loads(out).get("decision") == "block"
     except (json.JSONDecodeError, AttributeError) as exc:
-        logger.info("[HOOKS] promote: smoke refusal unreadable: %s", exc)
+        logger.info("[hooks] promote: smoke refusal unreadable: %s", exc)
         refused = False
     if not refused:
         return False, f"raw rm was not refused through the candidate (exit {code}): {out[:300]}"
@@ -194,7 +194,7 @@ def rotate(root: Path, keep: int = KEEP) -> list[str]:
     gone = [name for name in copies[:-keep] if name != live] if keep > 0 else []
     for name in gone:
         shutil.rmtree(root / name)
-        logger.info("[HOOKS] promote: rotated out %s", name)
+        logger.info("[hooks] promote: rotated out %s", name)
     return gone
 
 
@@ -216,26 +216,26 @@ def promote(
         ok, detail = check(root)
         report.append(f"{check.__name__}: {'ok' if ok else 'FAILED'} — {detail}")
         if not ok:
-            logger.warning("[HOOKS] promote refused at %s: %s", check.__name__, detail[:300])
+            logger.warning("[hooks] promote refused at %s: %s", check.__name__, detail[:300])
             return False, report
     name = copy_source(root)
     if fingerprint(root / name) != checked:
         _discard(root, name)
         report.append("copy: FAILED — apps/ changed while the checks ran; the copy is not what was checked")
-        logger.warning("[HOOKS] promote refused: apps/ changed while the checks ran")
+        logger.warning("[hooks] promote refused: apps/ changed while the checks ran")
         return False, report
     ok, detail = check_smoke(root, name)
     report.append(f"check_smoke: {'ok' if ok else 'FAILED'} — {detail}")
     if not ok:
         _discard(root, name)
-        logger.warning("[HOOKS] promote refused at check_smoke: %s", detail[:300])
+        logger.warning("[hooks] promote refused at check_smoke: %s", detail[:300])
         return False, report
     before = live_name(root)
     point_at(root, name)
     report.append(f"live: {name} (was {before or 'the source tree'})")
     report.extend(f"rotated out: {gone}" for gone in rotate(root))
     json_handler.log_operation("promote", {"live": name, "was": before or ""})
-    logger.info("[HOOKS] promote: %s is live (was %s)", name, before or "the source tree")
+    logger.info("[hooks] promote: %s is live (was %s)", name, before or "the source tree")
     return True, report
 
 
@@ -251,11 +251,11 @@ def rollback(root: Path | None = None) -> tuple[bool, list[str]]:
     target = older[-1]
     ok, detail = check_smoke(root, target)
     if not ok:
-        logger.warning("[HOOKS] rollback refused: %s failed its smoke: %s", target, detail[:300])
+        logger.warning("[hooks] rollback refused: %s failed its smoke: %s", target, detail[:300])
         return False, [f"rollback: refused — {target} failed its smoke ({detail}); {live} stays live"]
     point_at(root, target)
     json_handler.log_operation("rollback", {"live": target, "was": live})
-    logger.info("[HOOKS] rollback: %s is live (was %s)", target, live)
+    logger.info("[hooks] rollback: %s is live (was %s)", target, live)
     return True, [f"check_smoke: ok — {detail}", f"live: {target} (was {live})"]
 
 
@@ -263,14 +263,23 @@ def print_introspection():
     """Print module structure for drone routing."""
     CONSOLE.print("[bold cyan]promote[/bold cyan] — edited hook code goes live only through this step")
     CONSOLE.print(f"[dim]Live copy: {live_name() or 'none promoted — the source tree serves'}[/dim]")
+    CONSOLE.print("[dim]Run drone @hooks promote --help for usage.[/dim]")
 
 
-def _print_help() -> None:
+def print_help() -> None:
+    """Print the promote command lines and examples."""
     CONSOLE.print("[bold cyan]promote[/bold cyan] — make edited hook code live")
     CONSOLE.print()
-    CONSOLE.print("  drone @hooks promote          ruff + compile + suite, copy, smoke through the bridge, point")
-    CONSOLE.print("  drone @hooks promote status   which copy every hook process runs")
-    CONSOLE.print("  drone @hooks promote rollback point at the newest older copy, after its smoke passes")
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print(
+        "  drone @hooks [cyan]promote[/cyan]          ruff + compile + suite, copy, smoke through the bridge, point"
+    )
+    CONSOLE.print("  drone @hooks [cyan]promote status[/cyan]   which copy every hook process runs")
+    CONSOLE.print("  drone @hooks [cyan]promote rollback[/cyan] point at the newest older copy, after its smoke passes")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  drone @hooks promote status")
+    CONSOLE.print("  drone @hooks promote")
     CONSOLE.print()
     CONSOLE.print("Workflow: edit, test, promote. Saving a file changes no seat; promote does.")
 
@@ -280,7 +289,7 @@ def handle_command(command: str, args: list) -> bool:
     if command != "promote":
         return False
     if wants_help(args):
-        _print_help()
+        print_help()
         return True
     if args and args[0] == "status":
         CONSOLE.print(f"live: {live_name() or 'none promoted — the source tree serves'}")
@@ -293,7 +302,7 @@ def handle_command(command: str, args: list) -> bool:
             sys.exit(1)
         return True
     if args:
-        _print_help()
+        print_help()
         sys.exit(1)
     ok, report = promote()
     for line in report:

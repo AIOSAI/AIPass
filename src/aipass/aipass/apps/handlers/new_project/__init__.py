@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: New project handler — create projects inside AIPass
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-07-17
-# Modified: 2026-11-20
+# Modified: 2026-11-24
 # =============================================
 
 """
@@ -15,6 +15,7 @@ partial project, which is worse than none.
 """
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -59,12 +60,21 @@ def find_host_root(start: Path) -> Path | None:
 def _validate_name(name: str) -> str:
     if not name:
         raise ValueError("Project name cannot be empty")
-    if not re.match(r"^[a-zA-Z][a-zA-Z0-9_-]*$", name):
+    if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]*", name):
         raise ValueError(
             f"Invalid project name '{name}'. "
             "Must start with a letter, contain only letters, digits, hyphens, underscores."
         )
     return name
+
+
+def project_path(host: Path, name: str) -> Path:
+    """``<host>/projects/<name>`` proven inside ``projects/`` in the normpath+startswith shape analysers recognise."""
+    base = os.path.normpath(os.path.join(host, "projects"))
+    fullpath = os.path.normpath(os.path.join(base, name))
+    if not fullpath.startswith(base + os.sep):
+        raise ValueError(f"Project name '{name}' leaves {base}: a project is one folder directly inside it")
+    return Path(fullpath)
 
 
 def _registry_name(name: str) -> str:
@@ -345,7 +355,8 @@ def create_project(
             "`aipass new` creates projects inside the AIPass environment."
         )
 
-    target = host / "projects" / name
+    target = project_path(host, name)
+    name = target.name
     if target.exists():
         raise RuntimeError(f"Project already exists: {target}")
 
@@ -387,4 +398,7 @@ def create_project(
     except Exception:
         if target.exists():
             shutil.rmtree(target)
+        from aipass.hooks import revoke
+
+        revoke(str(target))
         raise

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_create.py
 # Description: Tests for email file creation handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-11-14
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/email/create.py."""
@@ -87,7 +87,7 @@ def test_create_email_file_json_content(tmp_path: Path):
         data = json.load(f)
 
     assert data["from"] == "test@branch"
-    assert data["from_name"] == "Test Branch"
+    assert data["from_name"] == "test branch"
     assert data["to"] == "@admin"
     assert data["subject"] == "Test Subject"
     assert data["message"] == "Body text"

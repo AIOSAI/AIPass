@@ -63,16 +63,20 @@ def print_help() -> None:
     """Print help for the discovery module."""
     from aipass.cli import console
 
-    console.print("discovery — Module and command discovery")
+    console.print("[bold cyan]discovery[/bold cyan] — Module and command discovery")
     console.print()
-    console.print("Functions:")
+    console.print("[bold cyan]Functions:[/bold cyan]")
     console.print("  discover_modules(target)           List available commands for a branch")
     console.print("  get_help(target, command=None)      Get structured help for a branch/command")
     console.print("  get_system_help()                   Aggregate help across all active branches")
     console.print()
-    console.print("Usage via drone:")
+    console.print("[bold cyan]Usage via drone:[/bold cyan]")
     console.print("  drone @branch --help               Show help for a branch")
     console.print("  drone systems                      List all registered branches")
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print("  [green]drone @flow --help[/green]")
+    console.print("  [green]drone systems[/green]")
 
 
 def print_introspection():
@@ -99,6 +103,8 @@ def print_introspection():
     console.print("[yellow]Connected Modules:[/yellow]")
     console.print("  [cyan]modules/[/cyan]")
     console.print("    - [cyan]resolver.py[/cyan] [dim](resolve_branch, list_branches — branch name resolution)[/dim]")
+    console.print()
+    console.print("Run [green]'drone @drone discovery --help'[/green] for usage information")
     console.print()
 
 

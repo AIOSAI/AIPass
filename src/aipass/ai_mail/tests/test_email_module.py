@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_email_module.py
 # Description: Tests for email.py's mailbox handlers - inbox, view, close, reply, sent
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-04-25
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/email.py's mailbox handlers: inbox, view, close, reply, sent."""
@@ -20,6 +20,7 @@
 # sentry: no-test-needed(shared) — handle_contacts() and handle_register(): tests/test_email_module_contacts.py
 
 import json
+
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -30,7 +31,7 @@ from unittest.mock import MagicMock
 # trigger/tests/test_memory_pool_handler.py) and never restore them, so any
 # string-path patch or in-test `from ... import x` would otherwise resolve to
 # a mock on an xdist worker that ran the polluter first.
-from aipass.ai_mail.apps.handlers.email import inbox_cleanup
+from aipass.ai_mail.apps.handlers.email import inbox_cleanup, purge
 from aipass.ai_mail.apps.modules import email as email_mod
 from aipass.ai_mail.apps.modules.email import (
     handle_close,
@@ -371,6 +372,22 @@ class TestHandleClose:
         assert result is True
         assert len(post_ops_called) == 1
         error_mock.assert_not_called()
+
+    def test_close_multiple_ids_reports_a_missing_purge(self, tmp_path, monkeypatch):
+        """A purge that cannot import is an error the caller sees, never a skipped purge."""
+        monkeypatch.delattr(purge, "run_purge")
+        monkeypatch.setattr(email_mod, "_resolve_branch_path", lambda: tmp_path)
+        monkeypatch.setattr(
+            email_mod, "batch_close", lambda bp, ids, fn: ([("m1", True, "ok"), ("m2", True, "ok")], 2, 0)
+        )
+        post_ops_called = []
+        monkeypatch.setattr(email_mod, "batch_close_post_ops", lambda *a: post_ops_called.append(a))
+        errors: list[str] = []
+        monkeypatch.setattr(email_mod, "error", errors.append)
+
+        assert handle_close(["m1", "m2"]) is True
+        assert post_ops_called == []
+        assert len(errors) == 1 and "purge" in errors[0], errors
 
 
 # ===========================================================================

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: diagnostics_state.py
-# Version: 2.5.0
+# Version: 2.5.2
 # Description: Post-edit diagnostics state per seat — location, meaning, and live re-validation
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-13
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Owns what the diagnostics state means: one file per seat since leg 4 (see load_seat).
@@ -159,11 +159,11 @@ def _parse(raw: bytes) -> tuple[Any, str]:
 
 def _set_aside(path: Path, why: str) -> dict:
     """Quarantine, under the lock: renamed beside, never unlinked; ERROR once, as the name is then absent."""
-    logger.error("[HOOKS] diagnostics_state: a damaged seat file is set aside, the seat reads empty: %s", why)
+    logger.error("[hooks] diagnostics_state: a damaged seat file is set aside, the seat reads empty: %s", why)
     aside = path.with_name(f"{path.name}.corrupt-{time.time_ns()}")
     os.replace(path, aside)
     os.utime(aside)
-    logger.info("[HOOKS] diagnostics_state: set aside as %s", aside)
+    logger.info("[hooks] diagnostics_state: set aside as %s", aside)
     return {}
 
 
@@ -181,7 +181,7 @@ def save_seat(seat: str, file_path: str, errors: list[dict]) -> None:
             temp_name = ""
         _prune()
     except (OSError, ValueError) as exc:
-        logger.error("[HOOKS] diagnostics_state: seat state write failed: %s", exc)
+        logger.error("[hooks] diagnostics_state: seat state write failed: %s", exc)
         if temp_name:
             Path(temp_name).unlink(missing_ok=True)
     json_handler.log_operation("save_seat", {"seat": seat, "errors": len(errors)})
@@ -198,7 +198,7 @@ def clear_seat(seat: str, when: Callable[[dict], bool] | None = None) -> None:
             if when is None or when(_read_seat_file(path)):
                 path.unlink(missing_ok=True)
     except OSError as exc:
-        logger.error("[HOOKS] diagnostics_state: could not clear seat state: %s", exc)
+        logger.error("[hooks] diagnostics_state: could not clear seat state: %s", exc)
 
 
 def _older(path: Path, cutoff: float) -> bool:
@@ -218,9 +218,9 @@ def _prune() -> None:
                 if _older(path, cutoff):
                     path.unlink(missing_ok=True)
         except BlockingIOError:
-            logger.warning("[HOOKS] diagnostics_state: %s is in use, kept for the next prune", path.name)
+            logger.warning("[hooks] diagnostics_state: %s is in use, kept for the next prune", path.name)
         except OSError as exc:
-            logger.warning("[HOOKS] diagnostics_state: could not prune %s: %s", path.name, exc)
+            logger.warning("[hooks] diagnostics_state: could not prune %s: %s", path.name, exc)
 
 
 def is_cross_file_error(error: dict) -> bool:
@@ -251,7 +251,7 @@ def of_the_tree(file_path: str, errors: list[dict] | None, base: int) -> list[di
     try:
         lines = Path(file_path).read_text(encoding="utf-8").splitlines()
     except (OSError, ValueError) as exc:
-        logger.info("[HOOKS] diagnostics_state: %s unreadable, its errors kept as found: %s", file_path, exc)
+        logger.info("[hooks] diagnostics_state: %s unreadable, its errors kept as found: %s", file_path, exc)
         return errors
     kept = []
     for error in errors:
@@ -291,16 +291,16 @@ def revalidate(file_path: str) -> list[dict] | None:
         )
         data = json.loads(result.stdout)
     except FileNotFoundError:
-        logger.warning("[HOOKS] diagnostics_state: pyright not installed — cannot re-validate")
+        logger.warning("[hooks] diagnostics_state: pyright not installed — cannot re-validate")
         return None
     except subprocess.TimeoutExpired:
-        logger.warning("[HOOKS] diagnostics_state: pyright timed out re-validating %s", file_path)
+        logger.warning("[hooks] diagnostics_state: pyright timed out re-validating %s", file_path)
         return None
     except (json.JSONDecodeError, ValueError) as exc:
-        logger.warning("[HOOKS] diagnostics_state: pyright output unparseable: %s", exc)
+        logger.warning("[hooks] diagnostics_state: pyright output unparseable: %s", exc)
         return None
     except Exception as exc:
-        logger.warning("[HOOKS] diagnostics_state: re-validation failed: %s", exc)
+        logger.warning("[hooks] diagnostics_state: re-validation failed: %s", exc)
         return None
 
     errors: list[dict] = []
@@ -315,18 +315,20 @@ def revalidate(file_path: str) -> list[dict] | None:
 def print_introspection() -> None:
     """Show what the gate remembers for every seat, and whether it is still true."""
     CONSOLE.print("[bold cyan]diagnostics_state[/bold cyan] Module")
+    CONSOLE.print("[dim]What the edit gate remembers of each seat's type errors, re-checked live.[/dim]")
     CONSOLE.print(f"  State directory: {STATE_DIR}")
 
     states = [_read_seat_file(path) for path in sorted(STATE_DIR.glob("*.json"))]
     recorded = [state for state in states if state and state.get("errors")]
     if not recorded:
         CONSOLE.print("  Recorded: [green]nothing — no edit is being gated[/green]")
+        CONSOLE.print("[dim]Run drone @hooks diagnostics_state --help for usage.[/dim]")
         return
 
     for state in recorded:
         errors = state["errors"]
         errored_file = state.get("file", "")
-        CONSOLE.print(f"  One seat recorded {len(errors)} error(s) in {Path(errored_file).name}")
+        CONSOLE.print(f"  One seat recorded {len(errors)} error(s) in {Path(errored_file).name}", highlight=False)
         CONSOLE.print(f"    Resolvable only elsewhere: {all_cross_file(errors)}")
 
         fresh = revalidate(errored_file)
@@ -336,14 +338,24 @@ def print_introspection() -> None:
             CONSOLE.print("    Live check: [green]file is clean now — this state is stale[/green]")
         else:
             CONSOLE.print(f"    Live check: [red]{len(fresh)} error(s) still present[/red]")
+    CONSOLE.print("[dim]Run drone @hooks diagnostics_state --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print the diagnostics_state verb's usage and examples."""
+    CONSOLE.print("[bold cyan]diagnostics_state[/bold cyan] — what the edit gate remembers")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks diagnostics_state[/cyan]    Show recorded errors and re-check them live")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks diagnostics_state[/cyan]")
 
 
 def handle_command(command: str, args: list) -> bool:
     """Route diagnostics_state commands from drone @hooks."""
     if command in ("--help", "-h", "help") or (command == "diagnostics_state" and wants_help(args)):
-        CONSOLE.print("[bold cyan]diagnostics_state[/bold cyan] — what the edit gate remembers")
-        CONSOLE.print()
-        CONSOLE.print("  drone @hooks diagnostics_state    Show recorded errors and re-check them live")
+        print_help()
         return True
 
     if command == "diagnostics_state":

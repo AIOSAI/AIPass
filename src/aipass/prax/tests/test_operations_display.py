@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations_display.py
 # Description: Unit tests for the dashboard display and command handlers
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-08
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for the display and command handlers of apps/modules/dashboard.py."""
@@ -327,14 +327,14 @@ class TestHandleRefresh:
         monkeypatch.setattr(
             mod,
             "refresh_single_dashboard",
-            lambda bp: {"status": "success", "branch": "FLOW"},
+            lambda bp: {"status": "success", "branch": "flow"},
         )
 
         mod.handle_command("dashboard", ["refresh", "@flow"])
 
         printed = self._screen.read().printed
-        assert "Refreshing FLOW dashboard..." in printed
-        assert "Refreshed FLOW" in printed
+        assert "Refreshing flow dashboard..." in printed
+        assert "Refreshed flow" in printed
         assert self._screen.read().errors == []
 
     def test_refresh_specific_branch_failure(self, tmp_path, monkeypatch):
@@ -349,7 +349,7 @@ class TestHandleRefresh:
 
         mod.handle_command("dashboard", ["refresh", "@flow"])
 
-        assert "Refreshing FLOW dashboard..." in self._screen.read().printed
+        assert "Refreshing flow dashboard..." in self._screen.read().printed
         self._screen.assert_one_error("Failed: disk full")
 
     def test_refresh_specific_branch_not_found(self, monkeypatch):
@@ -379,14 +379,14 @@ class TestHandleRefresh:
         monkeypatch.setattr(
             mod,
             "refresh_single_dashboard",
-            lambda bp: {"status": "success", "branch": "PRAX"},
+            lambda bp: {"status": "success", "branch": "prax"},
         )
         with _patch("pathlib.Path.cwd", return_value=tmp_path):
             mod.handle_command("dashboard", ["refresh"])
 
         printed = self._screen.read().printed
-        assert f"Refreshing {tmp_path.name.upper()} dashboard..." in printed
-        assert "Refreshed PRAX" in printed
+        assert f"Refreshing {tmp_path.name.lower()} dashboard..." in printed
+        assert "Refreshed prax" in printed
         assert self._screen.read().errors == []
 
     def test_refresh_cwd_failure(self, tmp_path, monkeypatch):
@@ -404,7 +404,7 @@ class TestHandleRefresh:
         with _patch("pathlib.Path.cwd", return_value=tmp_path):
             mod.handle_command("dashboard", ["refresh"])
 
-        assert f"Refreshing {tmp_path.name.upper()} dashboard..." in self._screen.read().printed
+        assert f"Refreshing {tmp_path.name.lower()} dashboard..." in self._screen.read().printed
         self._screen.assert_one_error("Failed: no dashboard")
 
     def test_bare_refresh_refreshes_the_callers_branch_not_prax(self, tmp_path, monkeypatch):
@@ -421,14 +421,14 @@ class TestHandleRefresh:
         monkeypatch.setattr(
             mod,
             "refresh_single_dashboard",
-            lambda bp: refreshed.append(bp) or {"status": "success", "branch": bp.name.upper()},
+            lambda bp: refreshed.append(bp) or {"status": "success", "branch": bp.name.lower()},
         )
 
         with _patch("pathlib.Path.cwd", return_value=prax):
             mod.handle_command("dashboard", ["refresh"])
 
         assert refreshed == [flow]
-        assert "Refreshed FLOW" in self._screen.read().printed
+        assert "Refreshed flow" in self._screen.read().printed
 
     def test_bare_refresh_outside_any_registered_branch_refuses(self, tmp_path, monkeypatch):
         """A stray DASHBOARD.local.json does not make ~, the repo root or /tmp a branch to write into."""

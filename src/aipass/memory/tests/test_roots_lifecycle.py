@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_roots_lifecycle.py
 # Description: Pins the template, verbs and healing for AIPASS_ROOTS.json
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-08-30
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/roots.py and apps/handlers/monitor/roots_file.py."""
@@ -336,11 +336,17 @@ class TestTheOperatorLane:
         assert roots.handle_command("rollover", []) is False
         assert roots.handle_command("search", ["x"]) is False
 
-    @pytest.mark.parametrize("args", [[], ["--help"], ["-h"], ["help"], ["add", "--help"]])
-    def test_help_is_reachable_from_any_position(self, capsys, args):
-        """`roots add --help` shows help, never treats `--help` as a path."""
-        assert roots.handle_command("roots", args) is True
+    def test_the_bare_command_prints_the_self_map(self, capsys):
+        assert roots.handle_command("roots", []) is True
         assert "roots Module" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("args", [["--help"], ["-h"], ["help"], ["add", "--help"]])
+    def test_help_is_reachable_from_any_position(self, capsys, args):
+        """`roots add --help` shows the help page, never treats `--help` as a path."""
+        assert roots.handle_command("roots", args) is True
+        out = capsys.readouterr().out
+        assert "roots - " in out and "USAGE:" in out and "EXAMPLES:" in out
+        assert "roots Module" not in out, "help routed to the self-map"
 
     def test_an_unknown_subcommand_is_named_not_swallowed(self, capsys):
         """An unknown subcommand is named AND exits non-zero."""

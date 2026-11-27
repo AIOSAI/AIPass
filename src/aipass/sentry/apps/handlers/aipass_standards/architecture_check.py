@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: architecture_check.py
 # Description: Architecture Standards Checker Handler
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-05
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Architecture Standards Checker Handler
@@ -506,8 +506,11 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
         if full.exists():
             checks.append({"name": f"File: {expected}", "passed": True, "message": "Template file exists"})
         else:
-            file_name = Path(expected).name
-            if is_bypassed(file_name, "architecture", bypass_rules=bypass_rules):
+            # Rows match as substrings: a full path, or a waived directory above the file, both reach it;
+            # the bare name is the older row form.
+            if is_bypassed(expected, "architecture", bypass_rules=bypass_rules) or is_bypassed(
+                Path(expected).name, "architecture", bypass_rules=bypass_rules
+            ):
                 checks.append(
                     {"name": f"File: {expected}", "passed": True, "message": "Template file missing (bypassed)"}
                 )
@@ -534,6 +537,14 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
     )
 
     return checks
+
+
+def absent_targets(branch_path: str) -> List[str]:
+    """The template paths this branch lacks: a bypass row naming one waives a real finding with no file on disk."""
+    branch = Path(branch_path)
+    rows = check_template_baseline(str(branch / "apps" / f"{branch.name}.py"))
+    named = [c["name"] for c in rows if not c["passed"] and c["name"].startswith(("Dir: ", "File: "))]
+    return [name.split(": ", 1)[1].rstrip("/") for name in named]
 
 
 def _open_sites(sites: List[int], source: str, module_path: str, bypass_rules: list | None) -> List[int]:

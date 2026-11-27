@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_api_entry.py
 # Description: Tests for api.py entry point CLI
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-05-12
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/api.py, the command door, and __init__.py, api's one import door."""
@@ -21,9 +21,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import aipass.api as door
+from aipass.api.apps import api as api_entry
 from aipass.api.apps.api import discover_modules, main, print_help, print_introspection, route_command
 from aipass.api.apps.handlers.auth.secrets import SecretsUnavailable
-from aipass.cli import display
+from aipass.cli import display, header_version
 
 PATCH_CONSOLE = "aipass.api.apps.api.console"
 PATCH_HEADER = "aipass.api.apps.api.header"
@@ -196,7 +197,7 @@ class TestPrintHelp:
         """Help output renders without raising."""
         print_help()
 
-        mock_header.assert_called_once_with("API Branch - API Operations")
+        mock_header.assert_called_once_with("api Branch - API Operations")
         assert mock_console.print.call_count >= 1
 
 
@@ -261,7 +262,7 @@ class TestMain:
             result = main()
 
         assert result == 0
-        mock_console.print.assert_called_once_with("API v1.0.0")
+        mock_console.print.assert_called_once_with(f"api v{header_version(api_entry.__file__)}", highlight=False)
 
     @patch(PATCH_JSON_HANDLER)
     @patch(PATCH_CONSOLE)
@@ -271,7 +272,7 @@ class TestMain:
             result = main()
 
         assert result == 0
-        mock_console.print.assert_called_once_with("API v1.0.0")
+        mock_console.print.assert_called_once_with(f"api v{header_version(api_entry.__file__)}", highlight=False)
 
     @patch(PATCH_JSON_HANDLER)
     @patch(PATCH_CONSOLE)

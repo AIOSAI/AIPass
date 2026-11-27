@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load.py
 # Description: Load Module Registry Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2025-11-07
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Load Module Registry Handler"""
@@ -19,6 +19,8 @@ logger = PraxTrail("registry_load")
 
 MODULE_NAME = "load"
 REGISTRY_FILE = PRAX_JSON_DIR / "prax_registry.json"
+# What both loaders answer for a registry they could not read; {} is a registry never written.
+UNREADABLE = None
 
 
 def load_module_registry() -> Optional[Dict[str, Dict[str, Any]]]:
@@ -36,7 +38,7 @@ def load_module_registry() -> Optional[Dict[str, Dict[str, Any]]]:
             return modules
     except Exception as e:
         logger.warning("load: failed to load the module registry", file=str(REGISTRY_FILE), error=str(e))
-        return None
+        return UNREADABLE
 
 
 def load_last_scan() -> Optional[Dict[str, Any]]:
@@ -51,6 +53,6 @@ def load_last_scan() -> Optional[Dict[str, Any]]:
             block = json.load(f).get("last_scan", {})
     except Exception as e:
         logger.warning("load: failed to read last_scan", file=str(REGISTRY_FILE), error=str(e))
-        return None
+        return UNREADABLE
 
     return block if isinstance(block, dict) else {}

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.4.0
+# Version: 1.6.0
 # Created: 2026-03-05
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/core.py (spawn_agent) and apps/handlers/registry.py."""
@@ -13,7 +13,10 @@
 # sentry: no-test-needed(stdlib) — uuid.uuid4()'s randomness, which apps/modules/core.py mints citizen_id from
 
 import json
+import os
 import shutil
+import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -21,7 +24,10 @@ import pytest
 
 from aipass.spawn import restore_citizen, spawn_agent
 from aipass.spawn.apps.handlers.seed_ops import export_seeds
-from aipass.spawn.apps.handlers import mint_ops
+from aipass.spawn.apps import spawn as spawn_entry
+from aipass.spawn.apps.handlers import mint_ops, sync_registry_ops, update_ops
+from aipass.spawn.apps.handlers.meta_ops import CorruptTemplateManifest
+from aipass.spawn.apps.handlers.mint_verify import expected_mint_paths
 from aipass.spawn.apps.handlers.class_registry import get_template_dir
 from aipass.spawn.apps.handlers.metadata import (
     BRANCH_NAME_RULE,
@@ -34,6 +40,7 @@ from aipass.spawn.apps.handlers.project_defaults import PROJECT_TEMPLATE_DIR, st
 from aipass.spawn.apps.handlers.update_ignore import is_ignored, read_ignore
 from aipass.spawn.apps.handlers.placeholders import (
     build_replacements_dict,
+    layout_package,
     replace_placeholders,
     validate_no_placeholders,
 )
@@ -43,6 +50,8 @@ from aipass.spawn.apps.handlers.registry import (
     save_registry,
     get_next_citizen_number,
 )
+from aipass.spawn.apps.handlers.repair_ops import rename_branch
+from aipass.spawn.apps.handlers.sync_registry_ops import sync_registry
 from aipass.spawn.apps.modules.core import handle_command
 from aipass.spawn.apps.spawn import handle_create
 
@@ -76,6 +85,59 @@ class TestCreateFlags:
         assert identity["traits"] == ["curious"]
         assert identity["purpose"] == "Flag Purpose"
 
+    def test_create_in_a_src_package_layout_imports_itself_from_that_package(self, tmp_path):
+        """<project>/src/shop/clerk: the newborn's door runs and names shop.clerk. Mutant: localize off -> red."""
+        target = tmp_path / "src" / "shop" / "clerk"
+
+        assert handle_create([str(target), "--registry", str(tmp_path / "SHOP_REGISTRY.json")]) == 0
+
+        assert (tmp_path / "src" / "shop" / "__init__.py").is_file()
+        entry = (target / "apps" / "clerk.py").read_text(encoding="utf-8")
+        assert "shop.clerk.apps.modules" in entry and "aipass.clerk" not in entry
+        done = subprocess.run(
+            [sys.executable, str(target / "apps" / "clerk.py"), "--help"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+        )
+        assert done.returncode == 0, done.stderr[-600:]
+
+    def test_a_src_package_newborn_passes_its_own_fence_and_routing_tests(self, tmp_path):
+        """Fence names built at runtime, and --version read from the header. Mutant: either unrewritten -> red."""
+        target = tmp_path / "src" / "shop" / "clerk"
+        assert handle_create([str(target), "--registry", str(tmp_path / "SHOP_REGISTRY.json")]) == 0
+
+        done = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+            + ["tests/test_handlers_fence.py", "tests/test_cli_routing.py"],
+            cwd=str(target),
+            env={**os.environ, "PYTHONPATH": str(tmp_path / "src")},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=300,
+        )
+
+        assert done.returncode == 0, done.stdout[-1500:]
+        assert 'f"shop.{BRANCH}' in (target / "tests" / "support_fence.py").read_text(encoding="utf-8")
+
+    def test_the_library_door_keeps_the_aipass_prefix_unless_asked(self, tmp_path):
+        """aipass new re-roots its own first citizen after spawn_agent; a second pass would duplicate its edits."""
+        target = tmp_path / "src" / "shop" / "clerk"
+
+        assert spawn_agent(str(target), registry_path=str(tmp_path / "SHOP_REGISTRY.json"))["success"] is True
+
+        assert "aipass.clerk.apps.modules" in (target / "apps" / "clerk.py").read_text(encoding="utf-8")
+        assert not (tmp_path / "src" / "shop" / "__init__.py").exists()
+
+    @pytest.mark.parametrize(
+        ("parts", "package"),
+        [(("src", "shop", "clerk"), "shop"), (("src", "aipass", "clerk"), None), (("clerk",), None)],
+    )
+    def test_layout_package_reads_the_package_from_src(self, tmp_path, parts, package):
+        assert layout_package(tmp_path.joinpath(*parts)) == package
+
 
 @pytest.fixture
 def tmp_agent(tmp_path):
@@ -96,11 +158,9 @@ class TestMetadata:
     def test_get_branch_name(self, tmp_path):
         assert get_branch_name(str(tmp_path / "my_agent")) == "my_agent"
 
-    def test_normalize_upper(self):
-        assert normalize_branch_name("my-agent", "upper") == "MY_AGENT"
-
-    def test_normalize_lower(self):
-        assert normalize_branch_name("My-Agent", "lower") == "my_agent"
+    def test_normalize_is_the_stored_lowercase_form(self):
+        """Mutant: the capital case comes back -> red."""
+        assert normalize_branch_name("My-Agent") == "my_agent"
 
     def test_detect_profile_default(self, tmp_path):
         assert detect_profile(tmp_path / "test") == "AIPass Workshop"
@@ -109,7 +169,7 @@ class TestMetadata:
 class TestPlaceholders:
     def test_build_replacements(self, tmp_path):
         r = build_replacements_dict(tmp_path / "x", "my_agent", role="Tester")
-        assert r["BRANCHNAME"] == "MY_AGENT"
+        assert r["BRANCHNAME"] == "my_agent"
         assert r["branchname"] == "my_agent"
         assert r["ROLE"] == "Tester"
 
@@ -164,8 +224,27 @@ class TestRegistry:
         result = add_to_registry(tmp_registry, "X", str(branch_path), "W", "@x")
         assert result is False
 
+    @pytest.mark.parametrize("shape", ["list", "dict"])
+    def test_a_name_differing_only_in_case_is_a_duplicate(self, tmp_path, tmp_registry, shape):
+        """A mixed registry holds FLOW and flow as one agent. Mutant: the guard compares exact case -> red."""
+        branch_path = tmp_path / "flow"
+        branch_path.mkdir()
+        row = {"name": "FLOW", "path": "flow"}
+        branches = [row] if shape == "list" else {"FLOW": row}
+        tmp_registry.write_text(json.dumps({"metadata": {}, "branches": branches}), encoding="utf-8")
+
+        assert add_to_registry(tmp_registry, "flow", str(branch_path), "W", "@flow") is False
+        assert len(json.loads(tmp_registry.read_text(encoding="utf-8"))["branches"]) == 1
+
 
 class TestSpawnAgent:
+    def test_a_newborn_certificate_names_its_owner_in_lowercase(self, tmp_agent, tmp_registry):
+        """Mutant: the certificate template's owner back on the capital token -> red."""
+        assert spawn_agent(str(tmp_agent), registry_path=str(tmp_registry))["success"] is True
+
+        certificate = json.loads((tmp_agent / "artifacts" / "birth_certificate.json").read_text(encoding="utf-8"))
+        assert certificate["owner"] == "test_agent"
+
     def test_full_spawn(self, tmp_agent, tmp_registry):
         result = spawn_agent(
             str(tmp_agent),
@@ -174,7 +253,7 @@ class TestSpawnAgent:
             registry_path=str(tmp_registry),
         )
         assert result["success"] is True
-        assert result["branch_name"] == "TEST_AGENT"
+        assert result["branch_name"] == "test_agent"
         assert result["files_copied"] > 0
         assert result["registry_updated"] is True
         assert result["validation_issues"] == []
@@ -375,11 +454,34 @@ class TestMintRefusals:
         assert not tmp_registry.exists()
 
     def test_a_name_already_registered_refuses_before_any_copy(self, tmp_path, tmp_agent, tmp_registry):
+        (tmp_path / "elsewhere").mkdir()
         add_to_registry(tmp_registry, "TEST_AGENT", str(tmp_path / "elsewhere"), "W", "@test_agent")
 
         result = spawn_agent(str(tmp_agent), registry_path=str(tmp_registry))
 
         assert result["success"] is False
+        assert "already registered" in result["error"]
+        assert not tmp_agent.exists()
+
+    def test_a_row_whose_directory_is_gone_is_replaced_by_the_fresh_birth(self, tmp_path, tmp_agent, tmp_registry):
+        """An archived-by-hand owner leaves a row that guards nothing. Mutant: refuse on the name alone -> red."""
+        add_to_registry(tmp_registry, "TEST_AGENT", str(tmp_path / "elsewhere"), "W", "@test_agent")
+
+        result = spawn_agent(str(tmp_agent), registry_path=str(tmp_registry))
+
+        assert result["success"] is True, result.get("error")
+        rows = [b for b in load_registry(tmp_registry)["branches"] if b["name"].lower() == "test_agent"]
+        assert len(rows) == 1
+        assert rows[0]["path"] != str(tmp_path / "elsewhere")
+
+    @pytest.mark.parametrize("stored", ["test_agent", "TEST_AGENT"])
+    def test_a_name_registered_in_either_case_refuses_before_any_copy(self, tmp_path, tmp_agent, tmp_registry, stored):
+        """The pre-copy guard ignores case. Mutant: it compares exact case -> red on the other spelling."""
+        (tmp_path / "elsewhere").mkdir()
+        add_to_registry(tmp_registry, stored, str(tmp_path / "elsewhere"), "W", "@test_agent")
+
+        result = spawn_agent(str(tmp_agent), registry_path=str(tmp_registry))
+
         assert "already registered" in result["error"]
         assert not tmp_agent.exists()
 
@@ -409,7 +511,7 @@ class TestMintRefusals:
         assert result["registry_path"] == str(registry)
         passport = json.loads((tmp_path / "newbie" / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["citizenship"]["registry_id"] == "project-credential"
-        assert [b["name"] for b in load_registry(registry)["branches"]] == ["NEWBIE"]
+        assert [b["name"] for b in load_registry(registry)["branches"]] == ["newbie"]
 
     def test_a_retry_after_an_incomplete_mint_refuses_instead_of_adopting(self, tmp_path, tmp_registry):
         template = tmp_path / "tmpl"
@@ -666,7 +768,7 @@ class TestCreateOverALiveAgent:
         result = spawn_agent(str(target), registry_path=str(reg))
 
         assert result["success"] is True and result["adopted"] is True
-        assert [b["name"] for b in load_registry(reg)["branches"]] == ["PROBE"]
+        assert [b["name"] for b in load_registry(reg)["branches"]] == ["probe"]
 
 
 BAD_NAMES = ["probe bad", "ProbeCap", "probé", "p" * 200, "-probe_dash"]
@@ -701,3 +803,122 @@ class TestBranchNameRule:
         assert BRANCH_NAME_RULE in result["error"]
         assert _tree(tmp_path) == before and reg.read_bytes() == reg_before
         assert target.exists() is (lane != "mint")
+
+
+class TestMixedRegistry:
+    """Until the conversion runs, a registry holds capital rows beside lowercase ones; every writer must hold."""
+
+    def test_mint_adopt_sync_and_rename_on_a_mixed_registry(self, tmp_path):
+        """Each writer adds lowercase, none doubles the capital row, and the capital row keeps its flags.
+
+        Mutant: a writer stores capitals again, or a duplicate guard compares exact case -> red."""
+        project = tmp_path / "mixed"
+        reg = project / "MIXED_REGISTRY.json"
+        capital = {"name": "KEEPER", "path": "keeper", "registry_id": "cid-cap", "owner": True, "admin": True}
+        (project / "keeper" / ".trinity").mkdir(parents=True)
+        (project / "keeper" / ".trinity" / "passport.json").write_text(
+            json.dumps({"citizenship": {"citizen_id": "cid-cap"}}), encoding="utf-8"
+        )
+        reg.write_text(json.dumps({"metadata": {"id": "cred"}, "branches": [capital]}), encoding="utf-8")
+        for seat in ("adoptee", "stray"):
+            (project / seat / ".trinity").mkdir(parents=True)
+            (project / seat / ".trinity" / "passport.json").write_text(
+                json.dumps({"identity": {"citizen_class": "specialist", "purpose": "Live agent"}}), encoding="utf-8"
+            )
+
+        def rows():
+            return {r["name"]: r for r in json.loads(reg.read_text(encoding="utf-8"))["branches"]}
+
+        assert spawn_agent(str(project / "fresh"), registry_path=str(reg))["success"] is True
+        assert "already registered" in spawn_agent(str(project / "other" / "keeper"), registry_path=str(reg))["error"]
+        assert spawn_agent(str(project / "adoptee"), registry_path=str(reg))["adopted"] is True
+        assert sync_registry(fix=True, registry_path=reg)["fixed"] is True
+        assert set(rows()) == {"KEEPER", "fresh", "adoptee", "stray"}
+
+        shutil.move(str(project / "keeper"), str(project / "kept"))
+        assert rename_branch("@keeper", "@kept", registry_path=reg, dry_run=False)["success"] is True
+
+        assert set(rows()) == {"kept", "fresh", "adoptee", "stray"}
+        kept = rows()["kept"]
+        assert (kept["path"], kept["registry_id"], kept["owner"], kept["admin"]) == ("kept", "cid-cap", True, True)
+
+
+def _corrupt_template(tmp_path, content=b'{"files": '):
+    """A copy of the shipped template whose manifest is there but cannot be read."""
+    template = tmp_path / "tmpl"
+    shutil.copytree(get_template_dir(), template)
+    manifest = template / ".spawn" / ".template_registry.json"
+    manifest.write_bytes(content)
+    return template, manifest
+
+
+def _snapshot(root):
+    """Every file under root with its bytes, so 'nothing was written' is measured."""
+    return {p: p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+class TestCorruptTemplateManifestStops:
+    """Missing is tolerated; corrupt raises with the path, before any write. Mutant: return None -> red."""
+
+    def test_a_mint_raises_naming_the_path_and_writes_nothing(self, tmp_path, tmp_agent, tmp_registry):
+        template, manifest = _corrupt_template(tmp_path)
+
+        with pytest.raises(CorruptTemplateManifest, match=str(manifest)):
+            spawn_agent(str(tmp_agent), template_dir=str(template), registry_path=str(tmp_registry))
+
+        assert not tmp_agent.exists()
+        assert not tmp_registry.exists()
+
+    def test_the_entry_point_prints_one_line_and_exits_1(self, tmp_path, tmp_agent, tmp_registry, monkeypatch, capsys):
+        template, manifest = _corrupt_template(tmp_path, b"[]")
+        argv = ["create", str(tmp_agent), "--template", str(template), "--registry", str(tmp_registry)]
+        monkeypatch.setattr(sys, "argv", ["spawn", *argv])
+
+        assert spawn_entry.main() == 1
+
+        err = " ".join(capsys.readouterr().err.split())
+        assert f"spawn {' '.join(argv)} stopped: template manifest {manifest} cannot be read" in err
+        assert "Nothing was written." in err
+        assert not tmp_agent.exists()
+
+    def test_verify_raises_rather_than_trusting_the_tree_alone(self, tmp_path):
+        template, manifest = _corrupt_template(tmp_path)
+
+        with pytest.raises(CorruptTemplateManifest, match=str(manifest)):
+            expected_mint_paths(template, {}, "probe")
+
+    def test_an_update_raises_before_it_writes(self, tmp_path, tmp_registry, monkeypatch):
+        seat = tmp_path / "seat"
+        assert spawn_agent(str(seat), registry_path=str(tmp_registry))["success"] is True
+        (seat / "README.md").unlink()  # the walk would re-add it, so a write would show
+        before = _snapshot(seat)
+        template, manifest = _corrupt_template(tmp_path)
+        monkeypatch.setattr(update_ops, "get_template_dir", lambda _cls=None: template)
+        monkeypatch.setattr(update_ops, "_read_identity", lambda _d: {"citizen_class": "specialist"})
+
+        with pytest.raises(CorruptTemplateManifest, match=str(manifest)):
+            update_ops.update_branch("seat", dry_run=False, registry_path=tmp_registry)
+
+        assert _snapshot(seat) == before
+
+    def test_a_sync_fix_raises_before_the_registry_save(self, tmp_path, tmp_registry, monkeypatch):
+        assert spawn_agent(str(tmp_path / "seat"), registry_path=str(tmp_registry))["success"] is True
+        registry = load_registry(tmp_registry)
+        registry["branches"] = []
+        tmp_registry.write_text(json.dumps(registry), encoding="utf-8")
+        before = tmp_registry.read_bytes()
+        template, manifest = _corrupt_template(tmp_path)
+        monkeypatch.setattr(sync_registry_ops, "get_template_dir", lambda _cls=None: template)
+
+        with pytest.raises(CorruptTemplateManifest, match=str(manifest)):
+            sync_registry(fix=True, registry_path=tmp_registry)
+
+        assert tmp_registry.read_bytes() == before
+
+    def test_a_missing_manifest_still_mints_against_the_tree(self, tmp_path, tmp_agent, tmp_registry):
+        template, manifest = _corrupt_template(tmp_path)
+        manifest.unlink()
+
+        result = spawn_agent(str(tmp_agent), template_dir=str(template), registry_path=str(tmp_registry))
+
+        assert result["success"] is True, result.get("error")

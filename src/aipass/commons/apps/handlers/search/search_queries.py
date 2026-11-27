@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: search_queries.py
 # Description: FTS5 Search Query Handlers
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-22
 # =============================================
 
 """FTS5 Search Query Handlers"""
@@ -46,7 +46,7 @@ def search_posts(
         sql += " AND p.room_name = ?"
         params.append(room)
     if author:
-        sql += " AND p.author = ?"
+        sql += " AND LOWER(p.author) = LOWER(?)"
         params.append(author)
 
     sql += " ORDER BY rank LIMIT ?"
@@ -75,7 +75,7 @@ def search_comments(
     params: List[Any] = [_quote_fts5_query(query)]
 
     if author:
-        sql += " AND c.author = ?"
+        sql += " AND LOWER(c.author) = LOWER(?)"
         params.append(author)
 
     sql += " ORDER BY rank LIMIT ?"

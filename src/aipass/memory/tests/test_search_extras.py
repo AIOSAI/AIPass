@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_search_extras.py
 # Description: Tests for search query_executor subprocess encoding and vector search
-# Version: 1.0.3
+# Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-11-15
+# Modified: 2026-11-23
 # Category: memory/tests
 # =============================================
 
@@ -19,6 +19,9 @@ import json
 import subprocess
 from unittest.mock import MagicMock, patch
 
+from aipass.memory.apps.handlers.cli import caller_gate
+from aipass.memory.apps.handlers.monitor import detector
+from aipass.memory.apps.handlers.rollover import todo_roll
 from aipass.memory.apps.handlers.search import query_executor
 
 
@@ -253,3 +256,118 @@ class TestAFailedPlanFetchIsSaidNotReadAsNoMatch:
 
         assert result["results"] == []
         assert said == []
+
+    def test_a_store_with_no_plans_yet_is_a_state_said_below_warning(self, monkeypatch, tmp_path):
+        answer = '{"success": true, "results": [], "count": 0, "exists": false}'
+        told = []
+        monkeypatch.setattr(query_executor.logger, "info", lambda msg, *a, **k: told.append(str(msg)))
+        result, said = self._search(monkeypatch, tmp_path, f"import sys\nsys.stdin.read()\nprint({answer!r})\n")
+
+        assert result["results"] == []
+        assert said == []
+        assert "[search] No flow_plans in the global store yet — no plan to pin for DPLAN-0012" in told
+
+
+class TestTheCallersOwnStore:
+    """caller_local_store: the verified caller, else the cwd's branch; the lookup never creates the store."""
+
+    def _fleet(self, monkeypatch, tmp_path, caller):
+        wren = tmp_path / "wren"
+        (wren / "sub").mkdir(parents=True)
+        rows = [{"name": "wren", "path": str(wren)}]
+        monkeypatch.setattr(detector, "write_scope", lambda: rows)
+        monkeypatch.setattr(todo_roll, "in_scope_branches", lambda root=None: rows)
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: (caller, False))
+        return wren
+
+    def test_the_verified_caller_names_its_store_and_nothing_is_created(self, monkeypatch, tmp_path):
+        wren = self._fleet(monkeypatch, tmp_path, "@wren")
+
+        assert query_executor.caller_local_store() == {"branch": "wren", "db_path": wren / ".chroma", "owner": None}
+        assert not (wren / ".chroma").exists()
+
+    def test_with_no_verified_caller_the_cwd_branch_answers(self, monkeypatch, tmp_path):
+        wren = self._fleet(monkeypatch, tmp_path, "")
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(wren / "sub"))
+
+        assert query_executor.caller_local_store() == {"branch": "wren", "db_path": wren / ".chroma", "owner": None}
+
+    def test_neither_is_refused_in_one_sentence(self, monkeypatch, tmp_path):
+        self._fleet(monkeypatch, tmp_path, "")
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+
+        refusal = query_executor.caller_local_store()["refusal"]
+        assert refusal.startswith("search reads your own branch's store and no branch resolves here")
+        assert "not inside a registered branch directory" in refusal
+
+    def test_a_caller_outside_the_scope_is_refused(self, monkeypatch, tmp_path):
+        self._fleet(monkeypatch, tmp_path, "@ghost")
+
+        assert "@ghost has none in the memory scope" in query_executor.caller_local_store()["refusal"]
+
+    def test_a_dark_rail_is_refused_not_read_as_no_caller(self, monkeypatch, tmp_path):
+        self._fleet(monkeypatch, tmp_path, "")
+
+        def dark():
+            raise ImportError("no ai_mail")
+
+        monkeypatch.setattr(caller_gate, "verified_caller", dark)
+
+        assert "rail is unavailable (ImportError('no ai_mail'))" in query_executor.caller_local_store()["refusal"]
+
+
+class TestMemorysLocalSearchIsItsOwnRowsOnly:
+    """@memory's local store is the global store, so its seat searches as owner: never another branch's row."""
+
+    def test_the_seat_whose_store_is_the_global_one_searches_as_its_owner(self, monkeypatch, tmp_path):
+        home = tmp_path / "memory"
+        home.mkdir()
+        monkeypatch.setattr(detector, "write_scope", lambda: [{"name": "memory", "path": str(home)}])
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: ("@memory", False))
+        monkeypatch.setattr(query_executor, "_GLOBAL_STORE", (home / ".chroma").resolve())
+
+        assert query_executor.caller_local_store()["owner"] == "memory"
+
+    def test_the_owner_reaches_the_store_and_the_pin_keeps_only_its_plans(self, monkeypatch, tmp_path):
+        sent = []
+        pins = [
+            {"id": "mine", "metadata": {"branch": "memory"}, "document": "a", "collection": "flow_plans"},
+            {"id": "wrens", "metadata": {"branch": "wren"}, "document": "b", "collection": "flow_plans"},
+        ]
+
+        def store(script, data, **kwargs):
+            sent.append((data["operation"], data.get("owner")))
+            if data["operation"] == "get_by_source":
+                return {"success": True, "results": [dict(p) for p in pins]}
+            return {"success": True, "results": [], "collections_searched": 2, "total_results": 0}
+
+        monkeypatch.setattr(query_executor, "run_json", store)
+        monkeypatch.setattr(
+            query_executor, "encode_query_subprocess", lambda query: {"success": True, "embedding": [0.0]}
+        )
+
+        found = query_executor.execute_search("FPLAN-1204 lane", db_path=tmp_path, owner="memory")
+
+        assert sent[0] == ("search_vectors", "memory")
+        assert [r["id"] for r in found["results"]] == ["mine"]
+
+
+class TestALocalSearchReadsOnlyItsStore:
+    """The vector search and the plan-ID pin both go to the store handed in, never the global one."""
+
+    def test_db_path_reaches_the_search_and_the_pin(self, monkeypatch, tmp_path):
+        local = tmp_path / "wren" / ".chroma"
+        sent = []
+
+        def store(script, data, **kwargs):
+            sent.append((data["operation"], data["db_path"]))
+            return {"success": True, "results": [], "collections_searched": 1, "total_results": 0}
+
+        monkeypatch.setattr(query_executor, "run_json", store)
+        monkeypatch.setattr(
+            query_executor, "encode_query_subprocess", lambda query: {"success": True, "embedding": [0.0]}
+        )
+
+        assert query_executor.execute_search("FPLAN-1202 lane", db_path=local)["success"] is True
+
+        assert sent == [("search_vectors", str(local)), ("get_by_source", str(local))]

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_artifacts.py
 # Description: Tests for what each dispatch attempt leaves behind - stdout, exit codes, result JSON, the lock
-# Version: 1.1.2
+# Version: 1.1.6
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's attempt artifacts: stdout, stderr, result JSON, lock."""
@@ -13,11 +13,14 @@
 
 import json
 import os
+import subprocess
 import time
 import pytest
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
+import aipass.ai_mail.apps.handlers.dispatch.cloud as cloud_mod
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
 from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import BG_TASKS_MARKER, main
 from aipass.ai_mail.tests.support_dispatch_monitor import _run_main
@@ -285,6 +288,8 @@ def test_a_dispatch_that_printed_nothing_bounces_with_no_result_json(monkeypatch
     reason = _bounce_reason(monkeypatch, main_argv[0], tmp_path, lambda stdout_log: 1)
 
     assert "Last attempt result JSON: (no result JSON captured)\n\nrun: claude" in reason
+    warnings = [c.args[0] % c.args[1:] for c in cast(MagicMock, mod.logger).warning.call_args_list]
+    assert any(w.startswith("[monitor] No stdout log to parse") for w in warnings)
 
 
 def test_a_lock_turned_unreadable_mid_run_is_left_in_place(monkeypatch, main_argv, tmp_path):
@@ -301,3 +306,108 @@ def test_a_lock_turned_unreadable_mid_run_is_left_in_place(monkeypatch, main_arg
     assert code == 0
     assert lock_file.read_text(encoding="utf-8") == "not json"
     bounce.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "spoil, error",
+    [
+        (lambda lock: lock.write_text("not json", encoding="utf-8"), "Expecting value"),
+        (lambda lock: lock.unlink(), "no lock file"),
+    ],
+    ids=["unreadable", "absent"],
+)
+def test_a_monitor_that_cannot_own_its_lock_refuses_the_wake(monkeypatch, main_argv, tmp_path, spoil, error):
+    argv, lock_file, _ = main_argv
+    spoil(lock_file)
+    ran = MagicMock(return_value=0)
+    bounce = MagicMock(return_value=True)
+    woke = MagicMock(return_value="success")
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
+    monkeypatch.setattr(mod, "wake_sender", woke)
+
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [ran])
+
+    assert code == 1
+    ran.assert_not_called()
+    reason = bounce.call_args.args[1]
+    assert reason.startswith(f"Refused: the monitor cannot own its lock {lock_file} (")
+    assert error in reason
+    assert woke.call_args.args[2] == mod.LOCK_REFUSED
+
+
+def test_a_lock_that_cannot_be_removed_is_warned_and_left(monkeypatch, main_argv, tmp_path):
+    argv, lock_file, _ = main_argv
+    bounce = MagicMock()
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
+
+    def seals_the_lock_dir(stdout_log):
+        lock_file.parent.chmod(0o500)
+        return 0
+
+    try:
+        code, _ = _run_main(monkeypatch, argv, tmp_path, [seals_the_lock_dir])
+    finally:
+        lock_file.parent.chmod(0o700)
+
+    assert code == 0
+    bounce.assert_not_called()
+    assert lock_file.exists()
+    warnings = [c.args[0] % c.args[1:] for c in cast(MagicMock, mod.logger).warning.call_args_list]
+    assert any(w.startswith(f"[monitor] Failed to clean up lock file {lock_file}") for w in warnings)
+
+
+def _cloud_main(monkeypatch, argv, tmp_path, lane):
+    """main() on the cloud lane with cloud.run played by lane(mail, started); the exit code."""
+    sep = argv.index("--")
+    cfg = json.dumps({"mail": "m1", "poll": 180, "ceiling": 900})
+    argv = [*argv[:sep], "--provider=cloud", f"--cloud={cfg}", "--", "script", "-qfec", "claude --cloud x", "log"]
+    monkeypatch.setattr(cloud_mod, "run", lambda cmd, cwd, env, cfg, target, inbox, mail, started: lane(mail, started))
+    code, _ = _run_main(monkeypatch, argv, tmp_path, [])
+    return code
+
+
+_CLOUD_DONE = {"exit_code": 0, "status": "completed (cloud PR #1)", "wake_result": "mailed", "run_line": "run: cloud"}
+
+
+def test_a_cloud_mail_that_times_out_reads_not_sent_and_the_monitor_still_releases_the_lock(
+    monkeypatch, main_argv, tmp_path
+):
+    argv, lock_file, _ = main_argv
+
+    def hung(sender, subject, body, target_home, kind=None):
+        raise subprocess.TimeoutExpired(["drone", "@ai_mail", "send"], 30)
+
+    monkeypatch.setattr(mod, "_send_from_ai_mail", hung)
+    sent: list = []
+
+    code = _cloud_main(monkeypatch, argv, tmp_path, lambda mail, _: sent.append(mail("S", "B")) or _CLOUD_DONE)
+
+    assert (code, sent) == (0, [False])
+    assert not lock_file.exists()
+
+
+def test_a_cloud_run_reads_no_result_json_and_no_max_turns_from_its_start_log(monkeypatch, main_argv, tmp_path):
+    """The stdout log of a cloud run is the start's pty output, never a print-mode result."""
+    argv, lock_file, stderr_log = main_argv
+    start_log = lock_file.parent.parent / "logs" / "dispatch_stdout.out"
+    start_log.write_text('Created cloud session\n{"stop_reason":"max_turns"\n', encoding="utf-8")
+
+    assert _cloud_main(monkeypatch, argv, tmp_path, lambda mail, _: _CLOUD_DONE) == 0
+
+    assert "[MAX TURNS HIT]" not in stderr_log.read_text(encoding="utf-8")
+    warnings = [c.args[0] % c.args[1:] for c in cast(MagicMock, mod.logger).warning.call_args_list]
+    assert not any("No result JSON" in w or "MAX TURNS" in w for w in warnings), warnings
+
+
+def test_a_started_cloud_session_frees_the_targets_lock_while_its_poll_runs(monkeypatch, main_argv, tmp_path):
+    """Nothing runs locally once the session exists: a local dispatch may take the branch during the poll."""
+    argv, lock_file, _ = main_argv
+    during_poll: list = []
+
+    def lane(mail, started):
+        started()
+        during_poll.append(lock_file.exists())
+        return _CLOUD_DONE
+
+    assert _cloud_main(monkeypatch, argv, tmp_path, lane) == 0
+    assert during_poll == [False]

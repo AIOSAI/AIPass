@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: templates.py
 # Description: Gold-source template lane — spawn scaffold propagation, receipt status, and the bump site
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-02-14
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Template Lane
@@ -98,6 +98,7 @@ def _announce_retired(verb: str) -> None:
     error(f"'{verb}' was retired on 2026-08-27 — {reason}.")
     console.print()
     console.print("[bold]Run instead:[/bold]")
+    console.print("[dim]The live lane that replaced this verb[/dim]")
     console.print(f"  {replacement}")
     console.print()
     console.print("[dim]Its handlers scanned a pre-.trinity layout: zero real memory files matched.[/dim]")
@@ -118,7 +119,7 @@ def _run_spawn_push(dry_run: bool) -> None:
     console.print()
     mode = "DRY RUN" if dry_run else "PUSH"
     console.print(
-        Panel.fit(f"[bold cyan]Memory - Spawn Templates · {mode}[/bold cyan]", border_style="cyan", box=box.ROUNDED)
+        Panel.fit(f"[bold cyan]memory - Spawn Templates · {mode}[/bold cyan]", border_style="cyan", box=box.ROUNDED)
     )
     console.print()
 
@@ -139,7 +140,7 @@ def _run_spawn_push(dry_run: bool) -> None:
     files_modified = result.get("files_modified", 0)
 
     if files_modified == 0 and not result.get("changes"):
-        console.print("[green]>[/green] Spawn templates already up to date")
+        console.print("[green]>[/green] spawn templates already up to date")
     else:
         verb = "would update" if dry_run else "updated"
         console.print(f"[green]>[/green] {sets_updated}/{len(sets_found)} sets {verb}, {files_modified} files")
@@ -165,7 +166,7 @@ def _show_status() -> None:
     """Report which branches carry the current template version."""
     console.print()
     console.print(
-        Panel.fit("[bold cyan]Memory - Template Version Status[/bold cyan]", border_style="cyan", box=box.ROUNDED)
+        Panel.fit("[bold cyan]memory - Template Version Status[/bold cyan]", border_style="cyan", box=box.ROUNDED)
     )
     console.print()
 
@@ -233,7 +234,7 @@ def _run_bump(confirm: bool) -> None:
     console.print()
     mode = "EXECUTE" if confirm else "DRY RUN"
     console.print(
-        Panel.fit(f"[bold cyan]Memory - Template Bump · {mode}[/bold cyan]", border_style="cyan", box=box.ROUNDED)
+        Panel.fit(f"[bold cyan]memory - Template Bump · {mode}[/bold cyan]", border_style="cyan", box=box.ROUNDED)
     )
     console.print()
 
@@ -279,6 +280,7 @@ def print_introspection() -> None:
     console.print(
         Panel.fit("[bold cyan]Templates Module - The Gold Source[/bold cyan]", border_style="cyan", box=box.ROUNDED)
     )
+    console.print("[dim]Gold-source memory templates: propagate, report, heal[/dim]")
     console.print()
     console.print("[bold]PURPOSE:[/bold]")
     console.print("  @memory owns the gold-source memory templates. Propagate them into")
@@ -298,6 +300,8 @@ def print_introspection() -> None:
     console.print("  pre-.trinity layout and could never match a real memory file. They still")
     console.print("  route, and name the live lane instead of failing silently.")
     console.print()
+    console.print("[dim]Run drone @memory templates --help for full usage[/dim]")
+    console.print()
 
 
 def print_help() -> None:
@@ -311,6 +315,10 @@ def print_help() -> None:
     console.print("  drone @memory templates template-status             Who carries which version")
     console.print("  drone @memory templates bump                        Bump dry run (the gate report)")
     console.print("  drone @memory templates bump --confirm              Heal the fleet for real")
+    console.print()
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  # Who carries which template version")
+    console.print("  [dim]drone @memory templates template-status[/dim]")
     console.print()
     console.print("[bold]THE BUMP LANE:[/bold]")
     console.print("  A bump is trigger-driven, never polled: nothing watches the templates.")

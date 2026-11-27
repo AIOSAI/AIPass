@@ -3,7 +3,7 @@
 # Description: aipass install's last print: the phone's bind, boot unit, server, guide, pause and pairing QR
 # Version: 1.1.0
 # Created: 2026-10-13
-# Modified: 2026-10-13
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -21,6 +21,7 @@ When the code waits for the person (DPLAN-0407), finish_phone prints the head
 
 from __future__ import annotations
 
+from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.handlers.baud.phone_ready import SERVER_ANSWERING, SERVER_SERVING, PhoneReady, is_tailnet
 from aipass.aipass.apps.handlers.baud.phone_setup import (
     BIND_KEPT,
@@ -50,7 +51,6 @@ from aipass.aipass.apps.handlers.baud.phone_setup import (
     Pairing,
     ServerStart,
 )
-from aipass.aipass.apps.handlers.json import json_handler
 from aipass.cli import console, warning
 from aipass.prax import logger
 
@@ -95,7 +95,7 @@ def _print_dry_run_phone(
 ) -> None:
     """The dry run's phone lines: what each door would do, nothing done."""
     now = f"now {ready.host}:{ready.port}" if ready.api else "@api's config unreadable here"
-    console.print(f"{_DRY} would read this host's tailnet address: tailscale ip -4")
+    console.print(f"{_DRY} would read this host's tailnet address: tailscale ip -4", highlight=False)
     if bind is not None and bind.state == BIND_KEPT:
         console.print(f"{_DRY} would keep @api's bind ({now}), already a tailnet address")
     else:
@@ -263,6 +263,7 @@ def print_phone_ready(
     hand. A minted pairing ends the print with its QR block, below the guide; any
     other ends on the guide, with the pair command above it.
     """
+    json_handler.log_operation("print_phone_ready", {"dry_run": dry_run, "api": bool(ready.api)})
     if dry_run:
         console.print()
         console.print("[bold cyan]Your phone[/bold cyan]")
@@ -278,12 +279,3 @@ def print_phone_ready(
     boot = boot if boot is not None else BootSetup(BOOT_NO_DOOR)
     print_phone_head(ready, bind, boot, start if start is not None else ServerStart(SERVE_SKIPPED))
     print_phone_tail(ready, pairing if pairing is not None else Pairing(PAIR_SKIPPED))
-
-
-def handle_command(command: str, args: list[str]) -> bool:
-    """A helper module: no command of its own. aipass install and aipass baud reach this print."""
-    if command != "phone_print":
-        return False
-    console.print("[dim]Helper module — the phone print ends: aipass install[/dim]")
-    json_handler.log_operation("phone_print_usage", {"command": command, "args": len(args)}, module_name="baud")
-    return True

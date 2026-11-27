@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_branch_loader.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Tests for branch_loader prompt handler (injection caps since 1.1.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/prompt/branch_loader.py."""
@@ -59,7 +59,7 @@ class TestBranchLoaderHandler:
             result = handle({"cwd": str(tmp_path)})
 
         assert result["exit_code"] == 0
-        assert "Branch Context:" in result["stdout"]
+        assert f"# Branch Context: {tmp_path.name}\n" in result["stdout"], "the name as written, never in capitals"
         assert "Some instructions" in result["stdout"]
         assert result["sound"] == "branch prompt"
 

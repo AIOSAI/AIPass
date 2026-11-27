@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rollover_pipeline_todo.py
 # Description: Rollover pipeline - the todo pad rolls to a backlog file, the backlog trim and restore
-# Version: 1.0.1
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-11-21
+# Modified: 2026-11-23
 # Category: memory/tests
 # =============================================
 
@@ -918,3 +918,38 @@ class TestTodoRestore:
         assert tr.floor_from_tab("⟦ no pad size configured — nothing rolls · task ≤100 chars · next #3 ⟧ x") == 2
         for garbage in (_tab("?"), _tab(0), _tab(-4), _tab("2x"), "next #20", "see ⟦ a · next #20 ⟧", None, 20):
             assert tr.floor_from_tab(garbage) is None, garbage
+
+
+class TestAnExternalPadRolls:
+    """`rollover run --branch @wren` resolves a declared external, and its pad rolls into its OWN project's .backup/todo/."""
+
+    @pytest.fixture
+    def tr(self, tmp_path, monkeypatch, declared_externals):
+        module = _todo_roll()
+        _point_todos_count(monkeypatch, tmp_path, module, 10)
+        monkeypatch.setattr(module, "_find_repo_root", lambda: declared_externals.home)
+        return module
+
+    def test_wren_resolves_by_name_and_grow_by_the_cwd_inside_it(self, tr, declared_externals):
+        wren = tr.resolve_target("@wren")
+        grow = tr.resolve_target(None, environ={"AIPASS_CALLER_CWD": str(declared_externals.grow / "apps")})
+
+        assert (wren["error"], wren["path"]) == (None, declared_externals.wren)
+        assert (grow["error"], grow["path"]) == (None, declared_externals.grow)
+        assert wren["backlog"] == declared_externals.wren.parent / ".backup" / "todo" / "wren" / "backlog.json"
+        assert grow["backlog"] == declared_externals.seed / ".backup" / "todo" / "grow" / "backlog.json"
+        assert (wren["backlog_display"], grow["backlog_display"]) == (
+            ".backup/todo/wren/backlog.json",
+            ".backup/todo/grow/backlog.json",
+        )
+
+    def test_the_external_pad_rolls_and_is_pruned(self, tr, declared_externals):
+        local = _mint_pad(declared_externals.wren.parent, [_todo(n) for n in range(1, 13)], name="wren")
+        target = tr.resolve_target("@wren")
+
+        result = tr.roll_todos("wren", local_path=target["local"], backlog_path=target["backlog"])
+
+        assert result["success"] is True, result["error"]
+        assert result["numbers"] == [1, 2]
+        assert [t["number"] for t in json.loads(local.read_text(encoding="utf-8"))["todos"]] == list(range(3, 13))
+        assert len(json.loads(target["backlog"].read_text(encoding="utf-8"))["entries"]) == 2

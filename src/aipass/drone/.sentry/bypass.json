@@ -19,7 +19,7 @@
       "file": "apps/drone.py",
       "standard": "cli",
       "lines": [
-        64
+        65
       ],
       "reason": "_reports_passport_fault writes the passport fault line with sys.stderr.write: it is one fact and must not wrap when piped, and Rich wraps at 80 columns. The line is a diagnostic about this seat's own passport and goes to stderr so a caller that parses the command's stdout (drone is run by every citizen and by scripts) never sees it in the answer; the cli console prints to stdout and is the wrong channel. cli's help offers no err console that prints plain to stderr without markup or wrapping. Fleet green leg 8, drone's decision.",
       "anchor": "sys.stderr.write(fault"
@@ -123,11 +123,11 @@
       "file": "apps/drone.py",
       "standard": "logged_fallback",
       "lines": [
-        622,
-        642,
-        646,
-        702,
-        712
+        658,
+        678,
+        682,
+        741,
+        751
       ],
       "reason": "main() is the process exit status: 1 is the failure answer to the OS on every path that returns it (routing refused, unknown command, the registry unreadable, an unhandled systems error, a module that failed to import or raised), and success is 0. Each handler prints the error to stderr before it. A passport fault (leg 7) is printed after routing by the _reports_passport_fault wrapper and never changes the code. The checker counts the other `return 1`s as a success path because they are not error() calls; they are failures too. Callers: the console script entry only (sys.exit(main())). Fleet green leg 6, drone's decision.",
       "anchor": "return 1"
@@ -146,7 +146,7 @@
       "file": "apps/handlers/module_registry_handler.py",
       "standard": "logged_fallback",
       "lines": [
-        129
+        130
       ],
       "reason": "get_module_info: None for a registered internal module whose adapter fails to import, and None for an unknown name. Every caller tells them apart by what it already knows: drone.py:237 and module_registry.py:106 iterate list_modules() (registered names only) and print '(not available)'; module_registry.py:116 asks is_module() and says 'registered but could not load'. A raise would take the whole services listing down for one broken adapter. Fleet green leg 6, drone's decision.",
       "anchor": "return None"
@@ -164,7 +164,7 @@
       "file": "apps/handlers/registry_handler.py",
       "standard": "logged_fallback",
       "lines": [
-        49
+        50
       ],
       "reason": "_validate_branch_path is a security check that fails closed: False = not proven inside the project root, whether it escapes or could not be resolved (logged WARNING with SECURITY). Both callers act on that and nothing else: resolver.py:176 refuses the branch, registry_handler.py:581 drops it from the loaded registry. True on an unresolvable path would open the gate; a raise would drop the whole registry for one bad entry. Known imprecision: resolver's refusal text says 'escapes project root' for both. Fleet green leg 6, drone's decision.",
       "anchor": "return False"
@@ -173,8 +173,8 @@
       "file": "apps/handlers/registry_handler.py",
       "standard": "logged_fallback",
       "lines": [
-        249,
-        277
+        250,
+        278
       ],
       "reason": "_registry_matches_credential, option C (accept loudly). True here means 'do not skip this registry', never 'the ids matched'. 338, the registry could not be read: load_registry() reads the same file and raises RegistryCorruptError or RegistryPermissionError naming it; skipping would resolve another registry further up in silence. 373, the passport could not be read: False would send find_registry() to another project's registry in silence, and a raise would stop every drone command under that passport, the mail to ask for help included. The fault is recorded for passport_fault() and drone.py main() prints it once on stderr after routing. Caller: find_registry() only. Fleet green leg 7, drone's decision.",
       "anchor": "return True"
@@ -186,6 +186,16 @@
         "move_into_archive"
       ],
       "reason": "Two FileExistsError handlers that are the design, not a default: an .archive already there is the common case (mkdir is tried first because a check-then-mkdir races), and a name already taken in the .archive moves on to the next free name, never over it. Neither hides a failure: any other OSError raises to _move_to_archive and the broker, which record outcome failed at ERROR; running out of names raises FileExistsError."
+    },
+    {
+      "file": "apps/handlers/docker_handler.py",
+      "standard": "help_text",
+      "lines": [
+        111,
+        117
+      ],
+      "reason": "The python3 lines are not drone help: both are Dockerfile text, the apt package list and the venv created in the image, run inside a container where drone does not exist, so 'drone @branch' cannot be the instruction.",
+      "anchor": "python3"
     }
   ],
   "notes": {

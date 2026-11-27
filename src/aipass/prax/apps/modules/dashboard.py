@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dashboard.py
 # Description: Dashboard Section Utilities
-# Version: 0.6.0
+# Version: 0.8.0
 # Created: 2026-02-25
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Dashboard Section Utilities
@@ -92,8 +92,12 @@ def print_help():
     console.print("  drone @prax dashboard push-template             # push to all branches")
     console.print("  drone @prax dashboard push-template --dry-run   # preview changes")
     console.print("  drone @prax dashboard diff-template             # diff all branches")
-    console.print("  drone @prax dashboard diff-template --branch FLOW  # diff single branch")
+    console.print("  drone @prax dashboard diff-template --branch flow  # diff single branch")
     console.print("  drone @prax dashboard template-status           # version info")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [green]drone @prax dashboard refresh @prax[/green]")
+    console.print("  [green]drone @prax dashboard diff-template --branch flow[/green]")
     console.print()
 
 
@@ -155,13 +159,20 @@ def _registered_branch_at(start: Path) -> "Path | None":
     for directory in (start, *start.parents):
         if not directory.name:
             continue
-        try:
-            if resolve_branch_path(directory.name).resolve() == directory.resolve():
-                return directory
-        except (FileNotFoundError, OSError, json.JSONDecodeError) as e:
-            logger.info("No registry row for %s, walking up: %s", directory, e)
-            continue
+        if _has_registry_row(directory):
+            return directory
     return None
+
+
+def _has_registry_row(directory: Path) -> bool:
+    """True when the registry declares ``directory`` as a branch; a missing row is the walk's normal answer."""
+    try:
+        return resolve_branch_path(directory.name).resolve() == directory.resolve()
+    except FileNotFoundError:
+        return False
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning("Registry unreadable while checking %s, treating it as not a branch: %s", directory, e)
+        return False
 
 
 def _handle_refresh(args: List[str]) -> None:
@@ -189,7 +200,7 @@ def _handle_refresh(args: List[str]) -> None:
             logger.warning("Branch path not found: %s", e)
             error(str(e))
             return
-        console.print(f"[dim]Refreshing {branch_path.name.upper()} dashboard...[/dim]")
+        console.print(f"[dim]Refreshing {branch_path.name.lower()} dashboard...[/dim]")
         result = refresh_single_dashboard(branch_path)
         if result["status"] == "success":
             console.print(f"[green]Refreshed {result['branch']}[/green]")
@@ -206,7 +217,7 @@ def _handle_refresh(args: List[str]) -> None:
         error(f"{cwd} is not inside a registered branch. Name it: drone @prax dashboard refresh @branch")
         return
 
-    console.print(f"[dim]Refreshing {branch_path.name.upper()} dashboard...[/dim]")
+    console.print(f"[dim]Refreshing {branch_path.name.lower()} dashboard...[/dim]")
     result = refresh_single_dashboard(branch_path)
     if result["status"] == "success":
         console.print(f"[green]Refreshed {result['branch']}[/green]")
@@ -233,6 +244,7 @@ def _handle_push_template(args: List[str]) -> None:
     if result["changes"]:
         console.print()
         console.print(f"[yellow]Changes ({len(result['changes'])} branches):[/yellow]")
+        console.print("[dim]  Sections added or removed per branch to match the template[/dim]")
         for entry in result["changes"]:
             console.print(f"\n  [bold]{entry['branch']}:[/bold]")
             for action in entry["actions"]:
@@ -316,12 +328,13 @@ def _handle_template_status() -> None:
     if pushed:
         preview = ", ".join(pushed[:5])
         suffix = "..." if len(pushed) > 5 else ""
-        console.print(f"  Branches pushed: {len(pushed)} ({preview}{suffix})")
+        console.print(f"  Branches pushed: {len(pushed)} ({preview}{suffix})", highlight=False)
 
     changes = status.get("changes", [])
     if changes:
         console.print()
         console.print("[yellow]Change history:[/yellow]")
+        console.print("[dim]  Template edits recorded in the template file, oldest first[/dim]")
         for change in changes:
             console.print(f"  - {change}")
 

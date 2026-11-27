@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_memory_pool_handler.py
 # Description: Tests for memory_pool_auto_processed event handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-06-06
-# Modified: 2026-11-16
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/events/memory_pool.py."""
@@ -137,7 +137,7 @@ class TestHandleMemoryPoolAutoProcessedFailure:
         mod.report_error.assert_called_once_with(  # type: ignore[attr-defined]
             error_type="MemoryPoolAutoProcessError",
             message="ChromaDB connection refused",
-            component="MEMORY",
+            component="memory",
             fire_event=True,
         )
 
@@ -168,7 +168,7 @@ class TestHandleMemoryPoolAutoProcessedFailure:
         reason, branch, module, _ = suppressed.call_args.args
         assert (reason, branch, module) == (
             "Medic OFF - suppressed dispatch for",
-            "MEMORY",
+            "memory",
             "MemoryPoolAutoProcessError",
         )
 
@@ -213,7 +213,7 @@ class TestHandleMemoryPoolAutoProcessedFailure:
             fire_event=fire_event,
         )
 
-        assert mod.report_error.call_args.kwargs["component"] == "MEMORY"  # type: ignore[attr-defined]
+        assert mod.report_error.call_args.kwargs["component"] == "memory"  # type: ignore[attr-defined]
 
     def test_a_failure_with_no_fire_event_still_records_the_failure(self) -> None:
         """No callback means no dispatch — it must not also mean no record.

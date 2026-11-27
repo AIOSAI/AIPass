@@ -20,6 +20,21 @@ documented rather than left to be discovered. Verified by reading the script, 20
 - An intercepted call runs `python -m aipass.hooks.apps.handlers.lifecycle.session_boot`, with the
   interpreter resolved from the repo's own `.venv` at install time (falling back to `python3`). No user path is hardcoded.
 
+With no live chat, the shim offers `[Enter] continue last chat` and `[n] new chat`. A seat with nothing to
+continue (no transcript for the cwd and no trustworthy session pointer) gets no menu, because Enter
+would fail there: it starts a new chat. If that seat holds `dropbox/install_report.json`, which the installer
+writes, the first chat opens with the prompt `Read dropbox/install_report.json: a fresh AIPass install. Greet me
+by name, then walk me through each attention item.` It does not when arguments were passed to `claude`. No transcript is
+planted instead, because the transcript format is bound to the CLI version. Once a transcript exists the menu is
+offered as before.
+
+**The CLI pin is a tested-with fact, not a requirement.** `cli.claude.pinned_version` in
+`.claude/provider_manifest.json` is the Claude Code version the shim was verified against; the release merge
+playbook moves it at each release. The shim compares it with `claude --version` at boot and logs a WARNING
+(`CLI version drift: running X, pinned Y`) when they differ. It prints nothing: one line cannot say whether
+anything is broken, and a stranger on a newer CLI would read it as an order to downgrade. `aipass doctor` reads the
+same key and reports it as information.
+
 A fresh start opens a new tmux session named `<branch>-<id8>`, the first eight characters of the new
 session id. It never kills a tmux session: a bare `<branch>` name could belong to a live session.
 

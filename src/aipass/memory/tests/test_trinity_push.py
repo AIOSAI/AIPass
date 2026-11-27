@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-08-27
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
@@ -19,6 +19,7 @@ import copy
 import json
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -487,7 +488,15 @@ class TestTheMachineFrame:
 
     def test_a_missing_created_does_not_invent_a_false_history(self):
         meta = tp.build_doc_metadata({}, "local", "guinea")
-        assert meta["created"] == meta["last_updated"]
+        assert meta["created"] == datetime.now().strftime("%Y-%m-%d")
+
+    def test_the_header_is_the_eight_standard_fields_without_last_updated(self):
+        """No reader but a Freshness row and every entry carries its own date: the field is dropped, not stamped."""
+        standard = ["document_type", "document_name", "version", "schema_version", "created", "managed_by", "tags"]
+        assert list(tp.build_doc_metadata({"last_updated": "2026-01-01"}, "local", "guinea")) == [*standard, "_usage"]
+        for name in ("LOCAL.template.json", "OBSERVATIONS.template.json"):
+            gold = json.loads((_MEMORY_ROOT / "templates" / name).read_text(encoding="utf-8"))
+            assert list(gold["document_metadata"]) == [*standard, "_usage"], name
 
     def test_managed_by_is_the_exact_branch_directory_name(self):
         """The owner's ruling, and what sentry's checker compares against."""
@@ -522,13 +531,13 @@ class TestTheMachineFrame:
         assert list(frame) == list(template)
 
     def test_the_frame_report_names_what_it_prunes(self, tmp_path):
-        before = {"document_metadata": {"status": {}, "weird": 1}, "active_tasks": {}, "sessions": []}
+        before = {"document_metadata": {"status": {}, "last_updated": "2026-11-26"}, "active_tasks": {}, "sessions": []}
         root = _branch(tmp_path, "guinea", before)
 
         plan = tp.plan_branch("guinea", root, _config(), backlog_path=tmp_path / "backlog.json")
         [changes] = [item["frame_changes"] for item in plan["files"] if item["file_key"] == "local"]
 
-        assert any("status" in change and "prune" in change for change in changes)
+        assert "document_metadata: prune non-standard key(s) last_updated, status" in changes
         assert any("active_tasks" in change for change in changes)
 
     def test_the_gold_templates_spell_the_branch_placeholder_as_spawn_does(self):
@@ -614,7 +623,7 @@ class TestScope:
         lane that has a registry at all.
         """
         names = {item["name"] for item in tp.resolve_scope()["branches"]}
-        assert {"memory", "canary", "hooks"} <= names
+        assert {"memory", "canary_test", "hooks"} <= names
 
     def test_the_fleet_scope_holds_the_named_residents(self, live_residents):
         """The other half — true only where the residents are actually installed."""
@@ -637,8 +646,8 @@ class TestScope:
         assert "registry_scope.fleet_branches(" in source
 
     def test_a_single_branch_resolves_with_or_without_the_at_sign(self, live_fleet):
-        assert tp.resolve_scope("@canary")["branches"][0]["name"] == "canary"
-        assert tp.resolve_scope("canary")["branches"][0]["name"] == "canary"
+        assert tp.resolve_scope("@canary_test")["branches"][0]["name"] == "canary_test"
+        assert tp.resolve_scope("canary_test")["branches"][0]["name"] == "canary_test"
 
     def test_an_unknown_branch_is_an_error_not_an_empty_run(self):
         """Silence would read as 'nothing to do' for a name that was mistyped."""
@@ -1539,7 +1548,8 @@ class TestEntryRulesReadTheConfig:
     def test_the_global_fallback_is_cached_not_re_read_per_entry(self, monkeypatch):
         """734 entries must not be 734 config reads; the push path never touches it.
 
-        Clears the private cache: a public reset for this test alone would be a test door.
+        Empties the cache at the module edge, restored after the test: a public reset for
+        this test alone would be a test door.
         """
         reads = []
         real_load = entry_limits.load_entry_limits
@@ -1549,7 +1559,7 @@ class TestEntryRulesReadTheConfig:
             return real_load(*args, **kwargs)
 
         monkeypatch.setattr(entry_limits, "load_entry_limits", counting_load)
-        tp._RULES_CACHE.clear()
+        monkeypatch.setattr(tp, "_RULES_CACHE", {})
         sections = ("sessions", "key_learnings", "todos", "observations")
         answers = [tp.entry_rules(section) for section in sections * 2]
 

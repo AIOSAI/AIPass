@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.0
 # Created: 2026-03-28
-# Modified: 2026-11-02
+# Modified: 2026-11-22
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -393,6 +393,14 @@ def test_get_new_branches(digest_db: sqlite3.Connection) -> None:
 
     new_branches = _digest()["new_branches"]
     assert "FRESH_BRANCH" in new_branches
+
+
+def test_digest_new_branches_leave_out_the_host_and_system_in_either_case(digest_db: sqlite3.Connection) -> None:
+    for name in ("THE_COMMONS", "the_commons", "system"):
+        _insert_agent(digest_db, name)
+
+    new_branches = _digest()["new_branches"]
+    assert not {"THE_COMMONS", "the_commons", "SYSTEM", "system"} & set(new_branches)
 
 
 def test_get_top_posts_by_engagement(digest_db: sqlite3.Connection) -> None:

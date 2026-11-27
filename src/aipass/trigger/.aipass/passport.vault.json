@@ -5,7 +5,6 @@
     "version": "2.0.0",
     "schema_version": "2.0.0",
     "created": "2026-03-07",
-    "last_updated": "2026-08-28",
     "managed_by": "trigger",
     "tags": [
       "identity",

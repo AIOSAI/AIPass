@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Escalation digest CLI — inspect repeat warning/error signatures
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-08
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -34,6 +34,7 @@ def print_introspection():
     console.print("  [cyan]handlers/json/[/cyan]")
     console.print("    [cyan]•[/cyan] config_loader.py [dim](section — operator thresholds and window)[/dim]")
     console.print()
+    console.print("[dim]Run drone @trigger escalation --help for usage.[/dim]")
 
 
 def print_help() -> None:
@@ -60,6 +61,14 @@ def print_help() -> None:
     console.print()
     console.print("[yellow]Settings[/yellow] [dim](edit the JSON, not the code):[/dim]")
     console.print(f"  [dim]{escalation.config_loader.CONFIG_PATH}[/dim]")
+    console.print()
+    console.print("[yellow]Usage:[/yellow]")
+    console.print("  [cyan]drone @trigger escalation[/cyan] <command> \\[args]")
+    console.print("  [cyan]drone @trigger escalation[/cyan] --help")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [cyan]drone @trigger escalation status[/cyan]")
+    console.print("  [cyan]drone @trigger escalation list error[/cyan]")
     console.print()
 
 

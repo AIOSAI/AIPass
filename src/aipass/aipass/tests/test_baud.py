@@ -3,7 +3,7 @@
 # Description: Tests for aipass baud's command line: each value flag reaches the function it feeds
 # Version: 1.6.1
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/baud.py: the install and status flags as a user types them, and the phone print."""
@@ -102,6 +102,27 @@ class TestInstallFlags:
         dest = str(tmp_path / "phone")
         assert _exit_code(["install", "--dest", dest]) == 0
         assert [call["dest"] for call in installs.calls] == [dest]
+
+
+class TestDestKeepsTheApiPoint:
+    """C43: --dest repointed @api's host server at a scratch folder."""
+
+    def test_an_install_to_dest_never_points_api(self, monkeypatch, capsys, tmp_path):
+        dest = tmp_path / "scratch"
+        outcome = baud.InstallOutcome(tag="v0.2.1", dest=dest, sha256="0" * 64, files=3, source="file")
+        monkeypatch.setattr(baud, "install_from_file", lambda *_args: outcome)
+        pointed: list = []
+        monkeypatch.setattr(baud, "point_api_at", lambda *args: pointed.append(args))
+
+        rc = baud.install_phone_face(from_path=str(tmp_path / "face.tar.gz"), dest=str(dest))
+
+        assert rc == 0 and pointed == []
+        assert "not repointed" in " ".join(capsys.readouterr().out.split())
+
+    def test_a_dry_run_to_dest_says_api_stays(self, capsys, tmp_path):
+        assert baud.install_phone_face(from_path=str(tmp_path / "f.tar.gz"), dest=str(tmp_path), dry_run=True) == 0
+        out = " ".join(capsys.readouterr().out.split())
+        assert "not repointed" in out and "would point @api" not in out
 
 
 class TestStatusDest:
@@ -817,8 +838,9 @@ class TestInstallPhoneThenReport:
         assert installs == [{"tag": "v0.2.1", "dry_run": True, "best_effort": True}]
         out = capsys.readouterr().out.rstrip()
         report = tmp_path / "AIPass" / "src" / "aipass" / "devpulse" / "dropbox" / "install_report.json"
-        phone, report_line = out.rsplit("\n", 1)
+        # The provider ending follows the report line; the phone lines still come right before it.
+        report_line = f"[dry-run] would write the install report: {report}"
+        phone, _ending = out.split(f"\n{report_line}\n", 1)
         assert phone.rstrip().endswith(_PAIR_PLAN_NONE)
-        assert report_line == f"[dry-run] would write the install report: {report}"
         assert not runs.exists()
         assert not (tmp_path / "AIPass").exists()

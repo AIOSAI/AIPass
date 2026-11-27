@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: logger.py
 # Description: PRAX Public API
-# Version: 1.8.0
+# Version: 1.10.0
 # Created: 2025-11-15
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -18,6 +18,7 @@ __all__ = [
     "SystemLogger",
     "get_system_status",
     "print_introspection",
+    "print_help",
     "handle_command",
     "MODULE_NAME",
     "DATA_FILE",
@@ -138,7 +139,7 @@ def print_introspection():
 
     console.print()
     console.print("[bold cyan]logger Module[/bold cyan]")
-    console.print("Public API for PRAX system-wide logging with auto-routing")
+    console.print("Public API for prax system-wide logging with auto-routing")
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print()
@@ -161,6 +162,31 @@ def print_introspection():
     console.print("    [dim]→ load.py (load_log_config — the tiers' backup_count, published as log_backup_count)[/dim]")
     console.print("    [dim]→ load.py (PRAX_JSON_DIR — base path for prax JSON data files)[/dim]")
     console.print()
+    console.print("[dim]For usage: handle_command('logger', ['--help']) prints the full help[/dim]")
+    console.print()
+
+
+def print_help():
+    """Display how a module logs through prax: logger is a Python API, not a drone command."""
+    from aipass.cli import console
+
+    console.print()
+    console.print("[bold cyan]prax logger - Public Logging API[/bold cyan]")
+    console.print("[dim]One import gives any module a logger that routes to system_logs/ and its own module log[/dim]")
+    console.print()
+    console.print("[bold cyan]Usage:[/bold cyan]")
+    console.print("  [green]from aipass.prax.apps.modules.logger import system_logger as logger[/green]")
+    console.print("  [green]logger.info(message, *args)[/green]       [dim]also warning, error, debug[/dim]")
+    console.print(
+        "  [green]get_system_status()[/green]               [dim]module count, log dirs, registry, last scan[/dim]"
+    )
+    console.print()
+    console.print("[bold cyan]Examples:[/bold cyan]")
+    console.print('  [green]logger.warning("Config unreadable, using defaults: %s", exc)[/green]')
+    console.print(
+        "  [green]drone @prax status[/green]                [dim]the status get_system_status() reports[/dim]"
+    )
+    console.print()
 
 
 def handle_command(_command: str, args: list) -> bool:
@@ -170,6 +196,6 @@ def handle_command(_command: str, args: list) -> bool:
         print_introspection()
         return True
     if args[0] in ("--help", "-h", "help"):
-        print_introspection()  # Logger has no user commands — introspection IS the help
+        print_help()
         return True
     return False

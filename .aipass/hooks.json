@@ -260,6 +260,12 @@
       "handler": "aipass.hooks.apps.handlers.lifecycle.session_start.handle_session_pointer",
       "matcher": "",
       "timeout": 30
+    },
+    "compact_resume": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.lifecycle.compact.handle_resume",
+      "matcher": "",
+      "timeout": 30
     }
   }
 }

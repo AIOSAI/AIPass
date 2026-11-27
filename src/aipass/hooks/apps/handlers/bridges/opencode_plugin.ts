@@ -45,7 +45,11 @@ export default Plugin.define({
     // Async: a synchronous spawn holds the server's one JavaScript thread for the whole row. Stop is the
     // exception: a standalone run exits on idle, before an awaited spawn finishes, and the turn is over anyway.
     const call = async (row: Row, payload: object, sync: boolean): Promise<Answer & { broken?: string }> => {
-      const argv = row.command.split(/\s+/).filter(Boolean).map((w) => w.replaceAll("$AIPASS_HOME", home))
+      // A row quotes each $AIPASS_HOME word for sh; this runs no shell, so split on the spelled words, then unquote.
+      const argv = row.command
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((w) => w.replace(/^"(.*)"$/, "$1").replaceAll("$AIPASS_HOME", home))
       const stdin = Buffer.from(JSON.stringify(payload))
       const timeout = (row.timeout ?? 60) * 1000
       try {

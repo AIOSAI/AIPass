@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_close_ops.py
 # Description: Tests for close_ops handler — plan closure business logic
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-03-29
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/plan/close_ops.py and its close_helpers, append_closed_plan and registry_routing modules."""
@@ -18,7 +18,7 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
-from aipass.flow.apps.handlers.plan import authority
+from aipass.flow.apps.handlers.plan import authority, registry_routing
 from aipass.flow.apps.handlers.plan.close_ops import (
     close_all_plans_impl,
     close_plan_impl,
@@ -68,6 +68,28 @@ class TestABareNumberNeverClosesTheNamesakeOfAnUnreadableRegistry:
         deps["archive_plan_fn"].assert_not_called()
         assert pbplan.read_text(encoding="utf-8") == before
         assert theirs.exists()
+
+
+class TestABareNumberIsNotCalledMissingWhenTheTemplateRegistryIsUnreadable:
+    def test_the_close_names_the_unreadable_template_registry(self, tmp_path, monkeypatch):
+        flow_json = tmp_path / "flow_json"
+        flow_json.mkdir()
+        monkeypatch.setattr(plan_load, "FLOW_JSON_DIR", flow_json)
+        monkeypatch.setattr(plan_load, "REGISTRY_FILE", flow_json / "fplan_registry.json")
+        monkeypatch.setattr(registry_routing, "FLOW_ROOT", tmp_path)
+        (flow_json / "fplan_registry.json").write_text(json.dumps({"plans": {}, "next_number": 1}), encoding="utf-8")
+        (flow_json / "template_registry.json").write_text('{"types": ', encoding="utf-8")
+        deps = _make_deps(load_registry=plan_load.load_registry, validate_plan_exists=validate_plan_exists)
+
+        with patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True):
+            result = close_plan_impl(plan_num="12", **deps)
+
+        assert result["success"] is False
+        [message] = result["messages"]
+        assert message["details"].startswith(
+            f"Template registry {flow_json / 'template_registry.json'} cannot be read: "
+        )
+        deps["save_registry"].assert_not_called()
 
 
 _APPEND = "aipass.flow.apps.handlers.plan.append_closed_plan"

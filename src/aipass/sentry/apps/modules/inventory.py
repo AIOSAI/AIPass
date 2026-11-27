@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inventory.py
 # Description: the test-inventory verb - a ranked static report over every test
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-01
-# Modified: 2026-11-02
+# Modified: 2026-11-25
 # =============================================
 
 """
@@ -50,7 +50,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     if wants_help(None, args):
-        _print_help()
+        print_help()
         return True
 
     try:
@@ -208,7 +208,7 @@ def _report(root: roots.Root, inventory: report.Inventory, paths: dict, elapsed:
     console.print()
     console.print("[bold cyan]Authorship[/bold cyan]")
     for bucket, count in sorted(summary["authorship"]["buckets"].items()):
-        console.print(f"  {bucket:<14} {count}")
+        console.print(f"  {bucket:<14} [cyan]{count}[/cyan]")
     console.print()
     _print_queue(summary["top_review_priority"][:top])
     console.print()
@@ -281,7 +281,7 @@ def _print_queue(queue: List[dict]) -> None:
         )
 
 
-def _print_help() -> None:
+def print_help() -> None:
     """What the verb does, what it refuses to do, and how to call it."""
     console.print()
     console.print("[bold cyan]sentry test-inventory[/bold cyan] - every test function, ranked for READING")
@@ -290,7 +290,7 @@ def _print_help() -> None:
     console.print("  drone @sentry test-inventory aipass            every citizen, one tree")
     console.print("  drone @sentry test-inventory @backup           one branch")
     console.print("  drone @sentry test-inventory .                 any directory")
-    console.print("  drone @sentry test-inventory aipass --top 40   a longer reading queue")
+    console.print("  drone @sentry test-inventory aipass --top 40   a longer reading queue", highlight=False)
     console.print("  drone @sentry test-inventory aipass --twins    cross-branch twins instead")
     console.print()
     console.print("[yellow]Measures[/yellow]")
@@ -302,6 +302,10 @@ def _print_help() -> None:
     console.print("[yellow]Refuses[/yellow]")
     console.print("  it runs no tests, measures no coverage, and issues no verdict.")
     console.print("  the score orders a reading queue and authorises nothing.")
+    console.print()
+    console.print("[yellow]Examples:[/yellow]")
+    console.print("  [green]drone @sentry test-inventory @backup[/green]")
+    console.print("  [green]drone @sentry test-inventory aipass --twins[/green]")
     console.print()
 
 

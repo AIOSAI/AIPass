@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.11.0
+# Version: 2.12.1
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-16
+# Modified: 2026-11-26
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -31,7 +31,7 @@ import pytest
 
 from aipass.ai_mail import GRANT_KEY
 from aipass.cli import display
-from aipass.hooks.apps import sound
+from aipass.hooks.apps.handlers.notification import sound
 from aipass.hooks.apps.handlers.config import diagnostics, loader, trust_registry
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.handlers.lifecycle import session_boot
@@ -273,18 +273,27 @@ _TMUX_OWN_TESTS = {
     "TestFindTmuxSessionForPid",
     "TestTmuxLookupsSurviveAMachineWithoutTmux",
 }
+# These pin _execvp's own path to os.execvp, so they keep the real seam and patch os.execvp themselves.
+_EXEC_OWN_TESTS = {"TestExecInTmux", "TestTmuxLookupsSurviveAMachineWithoutTmux"}
+
+
+def _real_exec(file, args):
+    raise AssertionError(f"a boot test reached the real exec ({file} {args[:3]}...): patch session_boot._execvp")
 
 
 @pytest.fixture
 def _no_real_tmux_lookup(request):
-    """Keep the MENU tests off a real subprocess.
+    """Keep the boot tests off a real subprocess and a real exec.
 
-    The menu asks tmux where each process lives, which is slow.
+    The menu asks tmux where each process lives, which is slow. An exec the test did not patch would replace
+    the pytest process with tmux, and the run would end with no summary: it raises instead.
     """
-    if request.cls is not None and request.cls.__name__ in _TMUX_OWN_TESTS:
-        yield
-        return
-    with patch.object(session_boot, "_find_tmux_session_for_pid", return_value=None):
+    name = request.cls.__name__ if request.cls is not None else ""
+    with contextlib.ExitStack() as stack:
+        if name not in _EXEC_OWN_TESTS:
+            stack.enter_context(patch.object(session_boot, "_execvp", side_effect=_real_exec))
+        if name not in _TMUX_OWN_TESTS:
+            stack.enter_context(patch.object(session_boot, "_find_tmux_session_for_pid", return_value=None))
         yield
 
 

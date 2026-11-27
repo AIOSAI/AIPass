@@ -31,7 +31,9 @@ Real-time unified console showing:
 - File changes, log events, drone commands, agent activity
 - **Branch scoping** — `monitor run sentry,cli` shows only those branches (see below)
 - **Caller attribution** — `CALLER → TARGET` for drone commands
-- **Model tags** — `[BRANCH/model]` (e.g., `[DEVPULSE/opus]`, `[DEVPULSE/gpt-5.4]`)
+- **Model tags** — `[branch/model]` (e.g., `[devpulse/opus]`, `[devpulse/gpt-5.4]`)
+- **Lowercase labels, one colour per branch** — every fleet branch has its own colour in `BRANCH_COLORS`; a name not in the table prints white
+- **Tags read in either case** — the log watcher matches agent tags case-insensitively: `[hooks]` and `[HOOKS]`, `[flow]` and `[FLOW]`, `[caller:x]` and `[CALLER:x]` give the same event
 - **Multi-CLI** — Claude Code (JSONL), Codex (JSONL) session monitoring
 - **Rate tracking** — 4th background thread scans `system_logs/` for runaway log growth every 10s
 - **Polling fallback** — automatic fallback when inotify watches are exhausted
@@ -54,14 +56,14 @@ no label.
 The project sweep resolves whoever the registries *declare*, not whoever has a
 directory. Path
 shape is never used: matching path segments against known names labels every
-file under the `AIPass` directory as AIPASS, and misattribution is worse than
+file under the `AIPass` directory as aipass, and misattribution is worse than
 UNKNOWN — events land on the wrong screen and are filtered off the right one.
 
 **Branch scoping.** A comma-separated list (`monitor run sentry,cli`) restricts the
 display to those branches; bare `run` and `run all` show everything. A
 scope covers each named branch's log lines, file changes and CLI sessions —
 including session labels that carry a project prefix or model tag
-(`AIPASS/SENTRY/opus`) — plus commands the branch issued or was targeted by
+(`aipass/sentry/opus`) — plus commands the branch issued or was targeted by
 (`devpulse → prax` appears in both scopes). Filtering happens at the queue, so
 out-of-scope traffic never occupies a display slot and cannot push wanted events
 out under load. The banner and `status` name the active scope, `status` also
@@ -94,5 +96,5 @@ that dies leaves the queue permanently full with nobody to empty it.
 filter — it renders live social activity in The Commons (posts, comments, votes,
 reactions) read-only, instead of file/log events. `--logs` opts back out to tailing
 the commons branch's technical logs. Feed mode adds two interactive commands of its
-own: `filter <room>` (comma-separated) and `filter clear`.
+own: `filter <room>` (comma-separated, any case) and `filter clear`.
 

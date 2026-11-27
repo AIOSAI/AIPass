@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ai_mail.py
 # Description: Entry point CLI for drone @ai_mail — inter-branch email system
-# Version: 1.3.1
+# Version: 1.3.3
 # Created: 2026-03-08
-# Modified: 2026-11-02
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -20,7 +20,7 @@ from typing import Any, List
 
 from aipass.prax import logger
 
-from aipass.cli import console, error, reset_command_state, resolve_exit
+from aipass.cli import console, error, header_version, reset_command_state, resolve_exit
 
 _UPDATE_SECTION = None  # type: ignore
 
@@ -33,7 +33,7 @@ MODULES_DIR = MODULE_ROOT / "modules"
 def print_help():
     """Print drone-compliant help output with Rich markup"""
     console.print()
-    console.print("[bold cyan]AI_MAIL — Email system for branch communication[/bold cyan]")
+    console.print("[bold cyan]ai_mail — Email system for branch communication[/bold cyan]")
     console.print()
 
     console.print("[yellow]COMMANDS:[/yellow]")
@@ -77,7 +77,7 @@ def print_help():
 def print_introspection():
     """Display discovered modules only (sentry pattern)"""
     console.print()
-    console.print("[bold cyan]AI_Mail - Branch Communication System[/bold cyan]")
+    console.print("[bold cyan]ai_mail - Branch Communication System[/bold cyan]")
     console.print()
     console.print("[dim]Email system for branch-to-branch communication[/dim]")
     console.print()
@@ -139,7 +139,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
             if module.handle_command(command, args):
                 return True
         except BrokenPipeError:
-            logger.info(f"[ai_mail] Broken pipe in {module.__name__} (stdout closed early)")
+            logger.warning(f"[ai_mail] Broken pipe in {module.__name__} (stdout closed early)")
             return True
 
     return False
@@ -166,7 +166,7 @@ def main():
             return 0
 
         if args[0] in ["--version", "-V"]:
-            console.print("AI_MAIL v2.0.0")
+            console.print(f"ai_mail v{header_version(__file__)}", highlight=False)
             return 0
 
         if args[0] in ["--help", "-h", "help"]:

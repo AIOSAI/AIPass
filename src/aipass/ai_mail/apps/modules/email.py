@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email.py
 # Description: Email Orchestration Module
-# Version: 3.6.1
+# Version: 3.6.2
 # Created: 2025-12-02
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -37,6 +37,7 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.email.close_ops import batch_close, batch_close_post_ops
 from aipass.ai_mail.apps.handlers.email.inbox_resolve import resolve_inbox_target
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
+from aipass.ai_mail.apps.handlers.central_writer import update_central
 
 
 _AI_MAIL_DIR = Path(__file__).resolve().parents[2]
@@ -44,12 +45,6 @@ _REPO_ROOT = find_repo_root()
 
 # Max rows any bulk listing prints. Applied to the NEWEST end of the store.
 LIST_LIMIT = 20
-
-try:
-    from aipass.ai_mail.apps.handlers.central_writer import update_central
-except ImportError as e:
-    logger.warning("[email] central_writer import unavailable: %s", e)
-    update_central = None
 
 
 def _print_row(row: str) -> None:
@@ -87,9 +82,12 @@ def caller_refusal() -> str:
         return str(e)
 
 
-HELP_TEXT = """
-Email Module - Send and manage branch-to-branch email (Lifecycle v2)
-
+def print_help():
+    """Display help text for the email module."""
+    console.print()
+    console.print("[bold cyan]Email Module[/bold cyan] - Send and manage branch-to-branch email (Lifecycle v2)")
+    console.print(
+        """
 COMMANDS:
   email     - Send email to a branch (preferred)
   send      - Send email to a branch (alias for email)
@@ -99,9 +97,11 @@ COMMANDS:
   close     - Close email without reply (archives to deleted)
   sent      - View sent messages
   contacts  - Manage contacts
-
-USAGE:
-  ai_mail email @recipient "subject" "message" [--dispatch] [--reply-to @branch]
+"""
+    )
+    console.print("[yellow]Usage:[/yellow]")
+    console.print(
+        """  ai_mail email @recipient "subject" "message" [--dispatch] [--reply-to @branch]
   ai_mail send @recipient "subject" "message"   (same as email)
   ai_mail inbox | view <id> | view latest | reply <id> "msg" | close <id> | sent | contacts
 
@@ -118,14 +118,15 @@ FLAGS:
   --kind KIND       Declare the mail's kind: medic, rounds, job_failed, notice
                     or mail. Undeclared, delivery guesses it from sender and
                     subject. An unknown kind is refused.
-
-NOTE: To send + wake in one step, use: drone @ai_mail dispatch @target "Subject" "Body"
 """
-
-
-def print_help():
-    """Display help text for the email module."""
-    console.print(HELP_TEXT)
+    )
+    console.print("[yellow]Examples:[/yellow]")
+    console.print('  [cyan]drone @ai_mail email @sentry "Subject" "Message"[/cyan]')
+    console.print("  [cyan]drone @ai_mail inbox[/cyan]")
+    console.print('  [cyan]drone @ai_mail reply abc123 "Thanks!"[/cyan]')
+    console.print()
+    console.print('NOTE: To send + wake in one step, use: drone @ai_mail dispatch @target "Subject" "Body"')
+    console.print()
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -189,9 +190,9 @@ def handle_inbox(args: List[str]) -> bool:
             _print_row(format_email_list_item(i, msg, show_unread=True))
         console.print("\n" + "=" * 70)
         if len(messages) > len(display):
-            console.print(f"Showing {len(display)} most recent of {len(messages)} messages")
+            console.print(f"Showing {len(display)} most recent of {len(messages)} messages", highlight=False)
         else:
-            console.print(f"Showing {len(display)} of {len(messages)} messages")
+            console.print(f"Showing {len(display)} of {len(messages)} messages", highlight=False)
         return True
     except BrokenPipeError as e:
         logger.warning("[email] inbox view broken pipe: %s", e)
@@ -282,11 +283,8 @@ def handle_close(args: List[str]) -> bool:
                 json_handler.log_operation("email_closed", {"message_id": msg_id})
 
         if len(args) > 1 and closed > 0:
-            try:
-                from aipass.ai_mail.apps.handlers.email.purge import run_purge
-            except ImportError as e:
-                logger.warning("[email] purge import unavailable: %s", e)
-                run_purge = None
+            from aipass.ai_mail.apps.handlers.email.purge import run_purge
+
             batch_close_post_ops(branch_path, update_central, run_purge)
             console.print(f"\nClosed {closed}, failed {failed}")
         return True
@@ -371,7 +369,7 @@ def handle_contacts(args: List[str]) -> bool:
         if not branches:
             error("No contacts found")
             return True
-        console.print(f"\nTotal: {len(branches)} branches\n")
+        console.print(f"\nTotal: {len(branches)} branches\n", highlight=False)
         console.print(f"{'EMAIL':<20} {'BRANCH NAME':<25} {'PATH':<35}")
         console.print("-" * 80)
         for b in sorted(branches, key=lambda x: x["email"]):
@@ -408,10 +406,10 @@ def handle_register(args: List[str]) -> bool:
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("email Module")
-    console.print("Orchestrates email workflows: send, inbox, view, close, reply, sent, and contacts.")
+    console.print("[bold cyan]email Module[/bold cyan]")
+    console.print("[dim]Orchestrates email workflows: send, inbox, view, close, reply, sent, and contacts.[/dim]")
     console.print()
-    console.print("Connected Handlers:")
+    console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  handlers/email/")
     console.print("    - send.py (resolve_sender_info — resolve sender identity for outgoing email)")
     console.print("    - send.py (send_to_single — deliver email to a single branch)")
@@ -446,6 +444,7 @@ def print_introspection():
     console.print("  handlers/")
     console.print("    - central_writer.py (update_central — update central dashboard data)")
     console.print()
+    console.print("[dim]Run 'drone @ai_mail email --help' for usage[/dim]")
 
 
 if __name__ == "__main__":

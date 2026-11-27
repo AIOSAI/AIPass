@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitoring_handlers_external_project.py
 # Description: Unit tests for the branch detector's external project and path strategies
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-08
+# Modified: 2026-11-22
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py, its external project detection and path strategies."""
@@ -45,23 +45,23 @@ class TestDetectFromClaudeProject:
 
         path = str(_FAKE_HOME) + "/.claude/projects/" + "-fakehome-user-Projects-AIPass-src-aipass-prax/session.jsonl"
         result = detector._detect_from_claude_project(path)
-        assert result == "AIPASS/PRAX"
+        assert result == "aipass/prax"
 
     def test_internal_aipass_fallback_to_segment_scan(self):
         """Should fall back to known branch name scanning for internal AIPass."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        detector.known_branches.add("PRAX")
+        detector.known_branches.add("prax")
 
         path = str(_FAKE_HOME) + "/.claude/projects/" + "-fakehome-user-Projects-AIPass-src-aipass-prax/something.jsonl"
         result = detector._detect_from_claude_project(path)
-        assert result == "AIPASS/PRAX"
+        assert result == "aipass/prax"
 
     def test_internal_aipass_subagent_suffix(self):
         """Should append SUB for subagent paths."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        detector.known_branches.add("PRAX")
+        detector.known_branches.add("prax")
 
         path = (
             str(_FAKE_HOME)
@@ -70,7 +70,7 @@ class TestDetectFromClaudeProject:
             + "/subagents/abc123/session.jsonl"
         )
         result = detector._detect_from_claude_project(path)
-        assert result == "AIPASS/PRAX SUB"
+        assert result == "aipass/prax SUB"
 
     def test_a_folder_encoding_a_cwd_inside_a_declared_row_names_that_row(self):
         mod = _import_branch_detector()
@@ -99,12 +99,12 @@ class TestDetectFromClaudeProject:
         """Should fall back to segment scanning for unknown external paths."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        detector.known_branches.add("SENTRY")
+        detector.known_branches.add("sentry")
 
         path = str(_FAKE_HOME) + "/.claude/projects/some-random-sentry/file.jsonl"
         result = detector._detect_from_claude_project(path)
 
-        assert result == "SENTRY"
+        assert result == "sentry"
 
     def test_old_fallback_returns_none_for_empty_segments(self):
         """Should return None when folder parses to no segments."""
@@ -120,12 +120,12 @@ class TestDetectFromClaudeProject:
         """Should return last segment if it matches a known branch."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        detector.known_branches.add("CLI")
+        detector.known_branches.add("cli")
 
         path = str(_FAKE_HOME) + "/.claude/projects/unknown-cli/file.jsonl"
         result = detector._detect_from_claude_project(path)
 
-        assert result == "CLI"
+        assert result == "cli"
 
     def test_old_fallback_returns_none_when_no_branch_match(self):
         """Should return None when no segments match known branches."""
@@ -138,13 +138,13 @@ class TestDetectFromClaudeProject:
         assert result is None
 
     def test_internal_aipass_fallback_last_segment(self):
-        """When no known branch found, should use last segment uppercased."""
+        """When no known branch found, should use last segment lowercased."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod, branches={})
 
         path = str(_FAKE_HOME) + "/.claude/projects/" + "-fakehome-user-Projects-AIPass-src-aipass-newmod/file.jsonl"
         result = detector._detect_from_claude_project(path)
-        assert result == "AIPASS/NEWMOD"
+        assert result == "aipass/newmod"
 
 
 class TestDetectFromCompoundParts:
@@ -154,10 +154,10 @@ class TestDetectFromCompoundParts:
         """Should detect branch from underscore-delimited path part."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        detector.known_branches.add("MAIL")
+        detector.known_branches.add("mail")
 
         result = detector._detect_from_compound_parts(["src", "ai_mail", "handler"])
-        assert result == "MAIL"
+        assert result == "mail"
 
     def test_returns_none_when_no_match(self):
         """Should return None when no underscore subparts match."""
@@ -181,9 +181,9 @@ class TestExtractBranchFromCentral:
         """Should extract branch name from .central.json filename."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        path = tmp_path / "some" / "ai_mail" / "DRONE.central.json"
+        path = tmp_path / "some" / "ai_mail" / "drone.central.json"
         result = detector._extract_branch_from_central(str(path), path)
-        assert result == "DRONE"
+        assert result == "drone"
 
     def test_underscore_central_json(self, tmp_path):
         """Should extract branch name from _central.json filename."""
@@ -191,7 +191,7 @@ class TestExtractBranchFromCentral:
         detector = _make_detector_with_branches(mod)
         path = tmp_path / "some" / "dir" / "ai_mail" / "PRAX_central.json"
         result = detector._extract_branch_from_central("ai_mail/PRAX_central.json", path)
-        assert result == "PRAX"
+        assert result == "prax"
 
     def test_returns_none_for_non_mail_path(self, tmp_path):
         """Should return None if path doesn't contain ai_mail or AI_MAIL."""
@@ -234,7 +234,7 @@ class TestDetectFromPathStrategies:
         """Strategy 3: Should detect from .claude/projects/ path."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        detector.known_branches.add("PRAX")
+        detector.known_branches.add("prax")
 
         resolved = (
             str(_FAKE_HOME) + "/.claude/projects/" + "-fakehome-user-Projects-AIPass-src-aipass-prax/session.jsonl"
@@ -256,14 +256,14 @@ class TestDetectFromPathStrategies:
 
             result = detector.detect_from_path(resolved)
 
-        assert "PRAX" in result
+        assert "prax" in result
 
     def test_ai_mail_central_strategy(self):
         """Strategy 4: Should detect from ai_mail central filename."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
 
-        resolved = str(_FAKE_PROJECTS / "AIPass" / "src" / "aipass" / "ai_mail" / "central" / "DRONE.central.json")
+        resolved = str(_FAKE_PROJECTS / "AIPass" / "src" / "aipass" / "ai_mail" / "central" / "drone.central.json")
 
         with patch(f"{mod.__name__}.Path") as mock_path_cls:
             mock_path = MagicMock(spec=Path)
@@ -272,7 +272,7 @@ class TestDetectFromPathStrategies:
             mock_path.parents = []
             mock_path.parent = MagicMock()
             mock_path.parent.__eq__ = MagicMock(return_value=False)
-            mock_path.name = "DRONE.central.json"
+            mock_path.name = "drone.central.json"
             mock_path_cls.return_value = mock_path
             mock_path_cls.home.return_value = _FAKE_HOME
 
@@ -281,7 +281,7 @@ class TestDetectFromPathStrategies:
 
             result = detector.detect_from_path(resolved)
 
-        assert result == "DRONE"
+        assert result == "drone"
 
     def test_root_level_system_files_strategy(self):
         """Strategy 5: Should return SYSTEM for repo root files."""
@@ -335,7 +335,7 @@ class TestDetectFromPathStrategies:
         """Strategy 6: Should detect branch from path parts."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        detector.known_branches.add("DRONE")
+        detector.known_branches.add("drone")
 
         resolved = "/some/random/drone/handler.py"
 
@@ -356,15 +356,15 @@ class TestDetectFromPathStrategies:
 
             result = detector.detect_from_path(resolved)
 
-        assert result == "DRONE"
+        assert result == "drone"
 
     def test_compound_parts_detection_strategy(self):
         """Strategy 6 (compound): Should detect from compound underscore parts."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        # Add WIDGET as known branch but NOT "SOME_WIDGET" — so only
+        # Add widget as known branch but NOT "some_widget" — so only
         # compound splitting of "some_widget" -> ["some", "widget"] can match.
-        detector.known_branches.add("WIDGET")
+        detector.known_branches.add("widget")
 
         resolved = "/unrelated/some_widget/handler.py"
 
@@ -385,7 +385,7 @@ class TestDetectFromPathStrategies:
 
             result = detector.detect_from_path(resolved)
 
-        assert result == "WIDGET"
+        assert result == "widget"
 
 
 class TestDetectFromLogAdditional:

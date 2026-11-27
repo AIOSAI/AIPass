@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: admin_grant.py
 # Description: Admin grant module — birth-cert privilege ceremony CLI (FPLAN-0401)
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-08-12
-# Modified: 2026-10-18
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -22,10 +22,7 @@ from aipass.devpulse.apps.handlers.owner.admin_grant import (
 )
 
 HELP_TEXT = """\
-[bold cyan]admin_grant[/bold cyan] — birth-cert admin privilege ceremony (DPLAN-0288)
-
-[bold]Usage:[/bold]
-  admin_grant status              Ceremony/lane state (key, cert, signature, verify)
+  admin_grant status             Ceremony/lane state (key, cert, signature, verify)
   admin_grant verify              Run the full 5-leg contract check
   admin_grant keygen              Generate signing key at ~/.aipass/admin_grant.key (owner)
   admin_grant keygen --force      Regenerate key (invalidates existing signature) (owner)
@@ -66,6 +63,19 @@ def print_introspection() -> None:
     console.print()
     console.print("[yellow]Subcommands:[/yellow] [cyan]status, verify, keygen, mint[/cyan]")
     console.print()
+    console.print("[dim]Run 'drone @devpulse admin_grant --help' for usage information[/dim]")
+
+
+def print_help() -> None:
+    """Print CLI help — usage and examples."""
+    console.print("[bold cyan]admin_grant[/bold cyan] — birth-cert admin privilege ceremony (DPLAN-0288)")
+    console.print()
+    console.print("[bold]USAGE:[/bold]")
+    console.print(HELP_TEXT)
+    console.print("[bold]EXAMPLES:[/bold]")
+    console.print("  drone @devpulse admin_grant status")
+    console.print("  drone @devpulse admin_grant verify")
+    console.print("  drone @devpulse admin_grant keygen --force")
 
 
 def _cmd_status() -> None:
@@ -125,7 +135,7 @@ def handle_command(command: str, args: list[str]) -> bool:
         return True
 
     if _wants_help(args):
-        console.print(HELP_TEXT)
+        print_help()
         return True
 
     verb, rest = args[0], args[1:]
@@ -143,5 +153,5 @@ def handle_command(command: str, args: list[str]) -> bool:
     else:
         # error, not warning: an unrecognised verb ran nothing, and a chained caller needs the exit code to say so.
         error(f"unknown admin_grant verb: {verb}", suggestion="Use 'admin_grant --help' for usage")
-        console.print(HELP_TEXT)
+        print_help()
     return True

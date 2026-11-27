@@ -68,67 +68,80 @@
     {
       "file": "apps/aipass.py",
       "standard": "logged_fallback",
-      "lines": [266],
+      "lines": [
+        178
+      ],
       "reason": "main() returns a process exit code. 1 is the failure code at every return that carries it (crash, unknown command, @target, import failure); success is 0 through resolve_exit, and a refusal is 2. The caller is the shell, and it tells failure from success. The crash also goes to stderr through error() and its traceback to the log (_log_crash, which never raises from the log). Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13."
     },
     {
       "file": "apps/modules/new_project.py",
       "standard": "logged_fallback",
-      "lines": [148],
+      "lines": [
+        155
+      ],
       "reason": "_prompt_agent answers the no_agent flag. EOFError is end of input, which is no answer, so it takes the prompt's printed default Y (False = create the agent), the same as an empty Enter on the line below. That is the answer, not a failure. Ctrl-C raises to handle_command. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-17 (+14: the module door for the host API, FPLAN-0649)."
     },
     {
       "file": "apps/modules/install.py",
       "standard": "logged_fallback",
-      "lines": [168, 221, 675],
-      "reason": "168: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:193). 221: _pid_alive, a PermissionError from signal 0 means the process exists under another user, so True is the answer. 676: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them; again 2026-10-24 (FPLAN-0665 moved them 4 down)."
+      "lines": [
+        186,
+        239,
+        715
+      ],
+      "reason": "186: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:211). 239: _pid_alive, a PermissionError from signal 0 means the process exists under another user, so True is the answer. 714: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them; again 2026-10-24 (FPLAN-0665 moved them 4 down). Again 2026-11-24 (home validation moved them 17-20 down). 714 -> 715 2026-11-26 (a dim line added above)."
     },
     {
       "file": "apps/modules/doctor.py",
       "standard": "logged_fallback",
-      "lines": [188, 637],
-      "reason": "187: _configured_aipass_home's two callers read \"\" as no setting: _check_home_agreement (doctor.py:360) skips the comparison, and the pytest collect row (_check_pytest_collect) falls back to the env AIPASS_HOME, then says not set; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 612: _registry_citizen_names's one caller (drone row, doctor.py:667) compares only when names exist; an unreadable registry is the registry row's FAIL naming 'aipass doctor --fix' (check_identity), and the drone row names the same registry. Re-read in fleet green leg 7 (aipass's decision); re-pinned 2026-10-15 (FPLAN-0645: one import and the door keyword moved both lines); again 2026-10-15 (FPLAN-0646: the --yes import and the fix orchestration moved them). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: the claude code row and its constant moved both lines); 608 again 2026-10-24 (FPLAN-0665); both 2026-10-25 (FPLAN-0670: the codex hooks import and row); both 2026-10-26 (FPLAN-0704: the shadow import); both 2026-10-27 (FPLAN-0705: the gitignore coverage import); both 2026-10-28 (FPLAN-0732: the smoke import); FPLAN-0734 moved them."
+      "lines": [
+        211,
+        664
+      ],
+      "reason": "175: _configured_aipass_home's callers read \"\" as no setting: _check_home_agreement (doctor.py:385) skips the comparison and _owner_project_root (doctor.py:263) falls back to cwd; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home. 627: _registry_citizen_names's one caller, the drone row (doctor.py:676), compares only when names exist; an unreadable registry is the registry row's FAIL naming 'aipass doctor --fix', and the warning is logged. Re-pinned 2026-11-24 after the doctor cuts moved both lines. Re-pinned 2026-11-24 (claude pin row moved them 34 down)."
     },
     {
       "file": "apps/handlers/baud/fetch.py",
       "standard": "logged_fallback",
-      "lines": [97],
+      "lines": [
+        97
+      ],
       "reason": "resolve_token answers None for 'no token found', and every path without a token answers the same: no GITHUB_TOKEN, no gh, gh that gives none. Its one caller (fetch.py:208, the token_provider default) then fetches unauthenticated, and a refused fetch raises FetchError there. A gh that will not run is one more way of having no token. Re-read in fleet green leg 7 (aipass's decision)."
     },
     {
       "file": "apps/handlers/init/scaffold_manifest.py",
       "standard": "logged_fallback",
-      "lines": [156],
+      "lines": [
+        156
+      ],
       "reason": "read_ignore: a .updateignore that does not exist means no ignore patterns, which is the answer []. A file that is there but unreadable raises UpdateIgnoreUnreadable on the next line (fleet green leg 5), so its callers (bootstrap.update_project:418, doctor scaffold group:1098) never read an unreadable file as an empty one. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: docstring closings joined, the line moved up); 2026-10-27 (FPLAN-0705: trusted_hashes and the managed key moved it down)."
     },
     {
       "file": "apps/handlers/system_detect/system_detector.py",
       "standard": "logged_fallback",
-      "lines": [109],
+      "lines": [
+        109
+      ],
       "reason": "_shell_from_parent_proc is a probe: None is 'not detected', the same answer as no /proc entry, and its one caller (detect_shell, system_detector.py:123) keeps its 'unknown' value on None as documented. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: detect_claude_code above it)."
-    },
-    {
-      "file": "apps/handlers/sandbox_check/sandbox_checker.py",
-      "standard": "logged_fallback",
-      "lines": [113],
-      "reason": "_find_srt_resolver is a probe: None is 'resolver not found', the same answer as a missing spec or file, and its one caller (check_srt_resolvable, sandbox_checker.py:166) reports the resolver as not found on None. Re-read in fleet green leg 7 (aipass's decision)."
-    },
-    {
-      "file": "tests/test_aipass_main.py",
-      "standard": "through_the_command",
-      "lines": [29],
-      "reason": "Ruling (b), fleet green leg 7: the public door, aipass --version, starts the walk at Path(__file__), the live repo, so the walk's contract cannot be handed a tmp tree through it: nearest pyproject named aipass wins, a foreign name or malformed TOML is walked past, a version-less one answers None. The command path itself is pinned through main() in the same class. A start parameter on _resolve_version would exist for the test alone."
     },
     {
       "file": "tests/test_install.py",
       "standard": "through_the_command",
-      "lines": [31, 1477, 1509],
-      "reason": "Ruling (c), fleet green leg 7: run_install, the one public door, clones the repo (_clone_repo), runs setup.sh (_run_setup), fixes ownership (_check_and_fix_owner), fetches baud (_install_phone_face), then runs the health check and the final screen (_finish, which writes the install report and reads _registry_user_name and _setup_attention); _resolve_home and _looks_like_aipass_tree prompt and probe before the clone. Every helper is pinned with the far side stubbed (lines re-pinned 2026-10-15, DPLAN-0409 C3). _resolve_source (--source) is a pure check before the clone, also pinned through run_install. Re-pinned 2026-11-14 (FPLAN-0924; 1269 is a second _clone_repo pin)."
+      "lines": [
+        32,
+        1525,
+        1557,
+        1584,
+        1594
+      ],
+      "reason": "Ruling (c), fleet green leg 7: run_install, the one public door, clones the repo (_clone_repo), runs setup.sh (_run_setup), fixes ownership (_check_and_fix_owner), fetches baud (_install_phone_face), then runs the health check and the final screen (_finish, which writes the install report and reads _registry_user_name and _setup_attention); _resolve_home and _looks_like_aipass_tree prompt and probe before the clone. Every helper is pinned with the far side stubbed (lines re-pinned 2026-10-15, DPLAN-0409 C3). _resolve_source (--source) is a pure check before the clone, also pinned through run_install. Re-pinned 2026-11-14 (FPLAN-0924; 1269 is a second _clone_repo pin). Re-pinned 2026-11-24 (home-validation pins moved them down). _clone_repo is also pinned against a real local checkout (origin repoint): run_install would run setup.sh."
     },
     {
       "file": "tests/test_doctor.py",
       "standard": "through_the_command",
-      "lines": [32],
+      "lines": [
+        32
+      ],
       "reason": "Ruling (c), fleet green leg 7: _doctor_wire's public callers, run_doctor --fix (fix_provider_settings) and check_provider_manifest with a yes at the prompt, write the provider settings (~/.claude/settings.json); its verify, merge and reconcile rows are pinned on a tmp settings file with the wire stubbed, and the FPLAN-0646 ask tests run through run_doctor and handle_command, reading the module only for its message constants. The module is private because the CLI never routes to it (discover_modules skips it). Re-pinned 2026-10-15 (FPLAN-0646: import re moved it 30 -> 31)."
     },
     {
@@ -149,214 +162,233 @@
     {
       "file": "apps/modules/doctor.py",
       "standard": "fallback",
-      "lines": [186],
-      "reason": "_configured_aipass_home: an unreadable ~/.claude/settings.json reads as no setting so the home-agreement and owner-root lookups go on with the env AIPASS_HOME; the same doctor run's Identity group shows the FAIL row 'global settings ~/.claude/settings.json unreadable - Repair its JSON' (_check_global_aipass_home), plus the [doctor] info line in the aipass log"
+      "lines": [
+        209
+      ],
+      "reason": "_configured_aipass_home: an unreadable ~/.claude/settings.json reads as no setting so the home-agreement and owner-root lookups go on with the env AIPASS_HOME; the same doctor run's Identity group shows the FAIL row 'global settings ~/.claude/settings.json unreadable - Repair its JSON' (_check_global_aipass_home), plus the [doctor] info line in the aipass log Re-pinned 2026-11-24 (claude pin row moved them 34 down)."
     },
     {
       "file": "apps/modules/doctor.py",
       "standard": "fallback",
-      "lines": [460],
-      "reason": "_find_manifest: an unreadable ~/.claude/settings.json only drops the settings route to AIPASS_HOME; the walk from cwd still runs. Who finds out: the Identity group's FAIL row 'global settings ... unreadable - Repair its JSON' in the same doctor run, and the hooks WARN row 'manifest not found' when no route finds it"
+      "lines": [
+        487
+      ],
+      "reason": "_find_manifest: an unreadable ~/.claude/settings.json only drops the settings route to AIPASS_HOME; the walk from cwd still runs. Who finds out: the Identity group's FAIL row 'global settings ... unreadable - Repair its JSON' in the same doctor run, and the hooks WARN row 'manifest not found' when no route finds it Re-pinned 2026-11-24 (claude pin row moved them 34 down)."
     },
     {
       "file": "apps/modules/doctor.py",
       "standard": "fallback",
-      "lines": [635],
-      "reason": "_registry_citizen_names: an unreadable registry yields no names, so the drone row names no extras (it never claims more than its routed count). The same run's Identity group reads the same _find_registry file and shows the registry FAIL row naming 'aipass doctor --fix'; warning line '[doctor] could not read registry for citizen names' in the log"
+      "lines": [
+        662
+      ],
+      "reason": "_registry_citizen_names: an unreadable registry yields no names, so the drone row names no extras (it never claims more than its routed count). The same run's Identity group reads the same _find_registry file and shows the registry FAIL row naming 'aipass doctor --fix'; warning line '[doctor] could not read registry for citizen names' in the log Re-pinned 2026-11-24 (claude pin row moved them 34 down)."
     },
     {
       "file": "apps/modules/install.py",
       "standard": "fallback",
-      "lines": [132],
+      "lines": [
+        150
+      ],
       "reason": "_fire_lock_removed: import guard for the @trigger event bus; the lock is already removed, only the file_deleted event is lost. Warning line '[install] trigger unavailable for file_deleted event' in the aipass log; nothing a person acts on rides on the event"
     },
     {
       "file": "apps/modules/install.py",
       "standard": "fallback",
-      "lines": [153],
+      "lines": [
+        171
+      ],
       "reason": "_lock_holder_pid: an unreadable lock gives no pid, and acquire_install_lock treats an unknown holder as alive and never steals it: the install stops with the error line 'REFUSED: another install of <home> is already running (lock: <path>). Wait for it to finish, or delete the lock if you know it is dead.' The safe direction, shown on stderr"
     },
     {
       "file": "apps/modules/install.py",
       "standard": "fallback",
-      "lines": [166],
+      "lines": [
+        184
+      ],
       "reason": "_clear_stale_lock: FileNotFoundError at unlink means another process removed the stale lock first, so the lock IS free (True is the fact, not a stand-in); the retry claims it with O_EXCL, which refuses loudly if someone else got there. The 'Clearing a stale install lock' warning line has already printed"
     },
     {
       "file": "apps/modules/install.py",
       "standard": "fallback",
-      "lines": [220],
+      "lines": [
+        238
+      ],
       "reason": "_pid_alive: PermissionError from kill(pid, 0) (EPERM) proves the process exists under another user, so True is the answer, not a default; the lock is then left alone and the REFUSED error line names it"
     },
     {
       "file": "apps/modules/install.py",
       "standard": "fallback",
-      "lines": [231],
+      "lines": [
+        249
+      ],
       "reason": "release_install_lock: FileNotFoundError means the lock is already gone, which is what release wants; the install's result is unaffected (the docstring: a failed release must not mask the install). Info line '[install] lock already gone at release'"
     },
     {
       "file": "apps/modules/install.py",
       "standard": "fallback",
-      "lines": [254],
+      "lines": [
+        272
+      ],
       "reason": "_announce_cloned_branch: a best-effort courtesy line naming the branch the clone landed on; it must never fail an install. When git cannot be read the line is simply absent, and the doctor/finish screen that follows reports the tree's health"
-    },
-    {
-      "file": "apps/aipass.py",
-      "standard": "fallback",
-      "lines": [24],
-      "reason": "Version-conditional import: tomllib is stdlib on 3.11+, and on 3.10 the same parser is the tomli package, a declared dependency (pyproject: tomli>=2; python_version < '3.11'). Not a stand-in, the same library under its 3.10 name"
-    },
-    {
-      "file": "apps/aipass.py",
-      "standard": "fallback",
-      "lines": [29],
-      "reason": "Fires only on a Python 3.10 install missing its declared tomli dependency (a broken install); the one effect is that aipass --version prints the installed package metadata version instead of the live tree's pyproject version, a real version either way. Info line '[AIPASS] tomllib/tomli unavailable, pyproject version read disabled' in the aipass log"
     },
     {
       "file": "apps/modules/baud.py",
       "standard": "fallback",
-      "lines": [104],
+      "lines": [
+        104
+      ],
       "reason": "_api_host_config: optional cross-branch @api module. None is handed to point_api_at/point_api_at_binary/readiness, which print \"@api's face-dir setting is not available on this install. Run: drone @api host-api set-config --face-dir <dest>\" (and the baud-bin twin), and baud status prints 'unknown (@api's face_dir is not available on this install)'; warning line '[baud] @api host_api module not importable'"
     },
     {
       "file": "apps/modules/_doctor_wire.py",
       "standard": "fallback",
-      "lines": [237],
+      "lines": [
+        236
+      ],
       "reason": "_codex_model_row: an unreadable `codex debug models` catalog is not read as a pass: slugs=None turns into the WARN row 'codex model  <model>: model catalog unreadable' on the doctor screen, plus a warning log line with the parse error"
     },
     {
       "file": "apps/modules/_doctor_fix.py",
       "standard": "fallback",
-      "lines": [83],
+      "lines": [
+        82
+      ],
       "reason": "_build_placement_items: an agent path outside project_root cannot be made relative, so the remediation shows its absolute path, which is the accurate path, not a stand-in; the 'Misplaced agent' item and its fix command still print with it"
     },
     {
       "file": "apps/handlers/opencode_cli.py",
       "standard": "fallback",
-      "lines": [88],
+      "lines": [
+        88
+      ],
       "reason": "_auth_names: unparseable `opencode auth list` output returns None, and the only caller turns None into the WARN row 'opencode login <first line of output> - Run: opencode auth list' on the doctor screen; warning line '[opencode_cli] opencode auth list unreadable'"
     },
     {
       "file": "apps/handlers/admin_lane.py",
       "standard": "fallback",
-      "lines": [118],
+      "lines": [
+        118
+      ],
       "reason": "admin_lane_state: _holder_cert reads the same registry through _holder_entry first, so an unreadable registry has already raised there and been added to 'unreadable', which the lane screen prints; this second catch only stops the same failure crashing a repeat read"
     },
     {
       "file": "apps/handlers/settings_backup.py",
       "standard": "fallback",
-      "lines": [110],
+      "lines": [
+        110
+      ],
       "reason": "_reserve_backup_name: FileExistsError on an O_EXCL create means that suffix is taken, so the loop tries the next one; nothing stands in and no backup is overwritten (the docstring: two doors in the same second never overwrite each other). Not a failure, so there is nothing to report"
     },
     {
       "file": "apps/handlers/provider_wire.py",
       "standard": "fallback",
-      "lines": [404],
+      "lines": [
+        404
+      ],
       "reason": "read_codex_config: version-conditional import, tomllib (3.11+) or the same parser as tomli on 3.10 (declared dependency); when neither imports, the inner handler hands on the reason 'reading config.toml needs Python 3.11+ or the tomli package', shown as the codex rows' WARN detail"
     },
     {
       "file": "apps/handlers/provider_wire.py",
       "standard": "fallback",
-      "lines": [454],
+      "lines": [
+        454
+      ],
       "reason": "set_codex_pins: version-conditional import, tomllib or tomli (same parser); when neither imports nothing is written and the returned line 'Skipped the Codex config pins: setting them needs Python 3.11+ or the tomli package' is printed by the caller"
     },
     {
       "file": "apps/handlers/baud/phone_setup.py",
       "standard": "fallback",
-      "lines": [199],
+      "lines": [
+        199
+      ],
       "reason": "_local_hhmm: an expiry that is not ISO 8601 is shown raw ('at <value>') instead of as local HH:MM; the person sees the door's own value, nothing is hidden"
     },
     {
       "file": "apps/handlers/baud/fetch.py",
       "standard": "fallback",
-      "lines": [91],
+      "lines": [
+        91
+      ],
       "reason": "resolve_token: gh is an optional token source; with no gh the token is None and the public download is tried first. If that fails, fetch_release raises FetchError 'No public baud release asset found (HTTP n) and no GitHub token to try the API: Set GITHUB_TOKEN or log in with the gh CLI.' on stderr"
     },
     {
       "file": "apps/handlers/baud/fetch.py",
       "standard": "fallback",
-      "lines": [95],
+      "lines": [
+        95
+      ],
       "reason": "resolve_token: gh that cannot run is the same as no gh (an optional token source); None leads to the FetchError naming 'Set GITHUB_TOKEN or log in with the gh CLI' when the public route fails. The exception type is logged, never the token"
     },
     {
       "file": "apps/handlers/baud/point.py",
       "standard": "fallback",
-      "lines": [120],
+      "lines": [
+        120
+      ],
       "reason": "phone_url: a courtesy 'Then open:' line after baud install; an unusable @api config prints the visible placeholder 'http://<host>:<port>/phone.html (see: drone @api host-api config)', which names where to read the real URL"
     },
     {
       "file": "apps/handlers/system_detect/system_detector.py",
       "standard": "fallback",
-      "lines": [53],
+      "lines": [
+        53
+      ],
       "reason": "detect_git is a probe, not a check: {'found': False} is the answer 'git is not on PATH', never a pass. Its one caller, doctor's System group (doctor.py _check_system), turns it into a FAIL row 'git  not found' with the cure 'Install git: https://git-scm.com/downloads'."
     },
     {
       "file": "apps/handlers/system_detect/system_detector.py",
       "standard": "fallback",
-      "lines": [82],
+      "lines": [
+        82
+      ],
       "reason": "detect_claude_code is a probe: {'found': False} is the answer 'claude is not on PATH'. Its one caller, doctor's _claude_code_row, prints the row 'claude code  not on PATH'; it is a plain row by design because AIPass runs under Codex and OpenCode too, so a missing claude is not a failure."
     },
     {
       "file": "apps/handlers/system_detect/system_detector.py",
       "standard": "fallback",
-      "lines": [107],
+      "lines": [
+        107
+      ],
       "reason": "_shell_from_parent_proc is the second probe for the shell name, run only when $SHELL is unset: None means 'not detected', the same answer as no /proc entry. The doctor System row prints the shell as 'unknown', so the person sees that the shell was not detected; nothing is judged on the shell name."
-    },
-    {
-      "file": "apps/handlers/sandbox_check/sandbox_checker.py",
-      "standard": "fallback",
-      "lines": [91],
-      "reason": "_read_userns_sysctl is read only after the bwrap trivial sandbox already failed, to add the AppArmor sysctl as a hint. sysctl missing (non-Ubuntu) or timing out drops only the '(apparmor_restrict_unprivileged_userns=N)' suffix; doctor's 'bwrap functional' row is FAIL either way, carrying bwrap's own exit code and stderr."
-    },
-    {
-      "file": "apps/handlers/sandbox_check/sandbox_checker.py",
-      "standard": "fallback",
-      "lines": [131],
-      "reason": "_srt_install_hint builds remediation text, not a verdict: with no npm on PATH the plain 'npm install -g @anthropic-ai/sandbox-runtime' is the right hint. The srt row it decorates is already FAIL in doctor's Sandbox group; the node row above it is FAIL when node (and so npm) is missing."
-    },
-    {
-      "file": "apps/handlers/sandbox_check/sandbox_checker.py",
-      "standard": "fallback",
-      "lines": [145],
-      "reason": "_srt_install_hint: 'npm root -g' failing only drops the '(installs to <prefix>)' courtesy suffix from the hint; the hint still names the install command, and the srt row it sits on is FAIL in doctor's Sandbox group."
     },
     {
       "file": "shared/project_home.py",
       "standard": "fallback",
-      "lines": [196],
+      "lines": [
+        196
+      ],
       "reason": "find_fenceless_projects: a corrupt settings.local.json is listed as fenceless, not skipped, so doctor shows a WARN row 'instruction fence: <project>' with the cure 'Run aipass init update <project>'. That command now refuses and names the corrupt file ('<path> is unusable (...): fix or move it aside', bootstrap._load_json). Doctor only reads; the file is left untouched."
     },
     {
       "file": "apps/handlers/init/scaffold_manifest.py",
       "standard": "fallback",
-      "lines": [91],
+      "lines": [
+        91
+      ],
       "reason": "read_manifest: a corrupt manifest reads as no recorded hashes, the safe direction. decide() then keeps every file that differs from the template ('unknown provenance'), so an update never overwrites one. Doctor's Scaffold group shows the WARN row 'scaffold manifest  not stamped'. Raising here would crash doctor, which catches only UpdateIgnoreUnreadable (doctor.py is agent A's lane); the better cure, a ManifestUnreadable doctor shows as a row, is HELD."
     },
     {
       "file": "apps/handlers/structure_scan/structure_scanner.py",
       "standard": "fallback",
-      "lines": [154],
+      "lines": [
+        154
+      ],
       "reason": "Python 3.10 compatibility: requires-python is >=3.10 and pyproject declares tomli for python_version < '3.11', so importing tomli where stdlib tomllib is absent is the supported path, not a stand-in for a failure."
     },
     {
       "file": "apps/handlers/structure_scan/structure_scanner.py",
       "standard": "fallback",
-      "lines": [157],
-      "reason": "No tomllib and no tomli: the reason ('no TOML parser: Python X.Y has no tomllib and tomli is not installed') goes into *why* and the function returns None for 'unknown', never 'no packages'. Doctor's Structure group prints it as a WARN row with 'install tomli or fix pyproject.toml' (doctor.py), and placement is not measured against unknown packages."
-    },
-    {
-      "file": "apps/handlers/provider_wire.py",
-      "standard": "unused_function",
-      "functions": [
-        "refresh_provider_hooks",
-        "refresh_codex"
+      "lines": [
+        157
       ],
-      "reason": "Called from setup.sh's venv-python heredoc via dynamic import (setup.sh:704-707, DPLAN-0279) — a cross-language caller the AST/corpus scanner can't see. That heredoc is its ONLY caller; no in-process Python caller makes this reachable. Covered directly by tests/test_provider_wire.py. Verified live 2026-08-09. refresh_codex (2026-10-26): the same pattern from setup.sh's Codex block (codex on PATH), its only caller; covered by TestCodexHooks and TestCodexPins."
+      "reason": "No tomllib and no tomli: the reason ('no TOML parser: Python X.Y has no tomllib and tomli is not installed') goes into *why* and the function returns None for 'unknown', never 'no packages'. Doctor's Structure group prints it as a WARN row with 'install tomli or fix pyproject.toml' (doctor.py), and placement is not measured against unknown packages."
     },
     {
       "file": "apps/handlers/readme_map/__init__.py",
       "standard": "fallback",
-      "lines": [86],
+      "lines": [
+        86
+      ],
       "reason": "Not on the audit list but flagged in this file. read_readme_at returns None after an ERROR log naming the path. Its one caller, apps/modules/read.py _render_readme, prints the error 'Could not read <path>.' to the person and logs ERROR, so a None never renders as an empty README."
     },
     {
@@ -370,9 +402,118 @@
       "reason": "scaffold_manifest.py is a step of bootstrap's init/update: its operation is recorded once by its module: init_flow.py logs aipass_init and aipass_init_update through json_handler with the handler's whole result; a handler log_operation would record the same run twice."
     },
     {
-      "file": "shared/json_ops.py",
-      "standard": "trigger",
-      "reason": "backup_json is one step of @spawn's update (spawn/apps/handlers/update_ops.py), which records the run itself (update_executed); the event belongs to the caller that knows what was backed up and why, not to the shared helper."
+      "file": "apps/modules/init_flow.py",
+      "standard": "logged_fallback",
+      "lines": [
+        279,
+        320
+      ],
+      "reason": "279 and 320: handle_command's init forms return process exit code 1 after cli_error prints the failure and the warning is logged; success returns 0, and the caller is sys.exit, so the shell tells failure from success."
+    },
+    {
+      "file": "tests/test_bootstrap.py",
+      "standard": "stdlib_patch",
+      "lines": [
+        727
+      ],
+      "reason": "727: the repoint question is builtins.input in the product, its only seam; the test answers it 'y' to pin the terminal's yes. monkeypatch restores it after the test."
+    },
+    {
+      "file": "tests/test_bootstrap_update.py",
+      "standard": "stdlib_patch",
+      "lines": [
+        796
+      ],
+      "reason": "796: the repoint question is builtins.input in the product, its only seam; the test answers it to pin the terminal branch. monkeypatch restores it."
+    },
+    {
+      "file": "tests/test_doctor.py",
+      "standard": "silent_catch",
+      "lines": [
+        189
+      ],
+      "reason": "189: the helper runs doctor to read its rows; a FAIL row exits 1, which the except asserts (exc.code == 1) rather than swallowing; any other exit fails the assert."
+    },
+    {
+      "file": "apps/handlers/provider_choice.py",
+      "standard": "logged_fallback",
+      "lines": [
+        93,
+        205
+      ],
+      "reason": "ask_provider: Ctrl-C or Ctrl-D at the install's last question means skip, the same answer as 'q', so None is the answer, not a failure (docstring names all three); run_ending then prints the 'aipass provider' line. Logged at info. Audit finding 7, 2026-11-25. 205: run_ending's wiring failure returns 1, the documented failure code (installer or wiring failed, AIPass installed), logged at error with the retry line printed; 0 is only success."
+    },
+    {
+      "file": "apps/integrations",
+      "standard": "architecture",
+      "reason": "Missing on purpose: the branch has no integrations; the owner archived the empty citizen-template placeholders (archive beside it), so the directory is absent by decision, not by drift. 2026-11-26."
+    },
+    {
+      "file": "apps/plugins",
+      "standard": "architecture",
+      "reason": "Missing on purpose: the branch has no plugins; the owner archived the empty citizen-template placeholders (archive beside it), so the directory is absent by decision, not by drift. 2026-11-26."
+    },
+    {
+      "file": "templates",
+      "standard": "architecture",
+      "reason": "Missing on purpose: the branch has no templates of its own (scaffold templates live in shared/ and spawn); the owner archived the empty citizen-template placeholders (archive beside it), so the directory is absent by decision, not by drift. 2026-11-26."
+    },
+    {
+      "file": "tools",
+      "standard": "architecture",
+      "reason": "Missing on purpose: the branch has no tools directory; the owner archived the empty citizen-template placeholders (archive beside it), so the directory is absent by decision, not by drift. 2026-11-26."
+    },
+    {
+      "file": "apps/modules/doctor.py",
+      "standard": "fallback",
+      "lines": [
+        161
+      ],
+      "reason": "_claude_pin_row: an unreadable manifest gives no pin row; the services group's hooks row reports the manifest itself, so a second error here would double-count one fault. Logged at info. 2026-11-26."
+    },
+    {
+      "file": "apps/modules/doctor.py",
+      "standard": "fallback",
+      "lines": [
+        1249
+      ],
+      "reason": "_set_aside_unchosen: an unreadable manifest yields no Claude settings scalars to set aside; the hooks row reports the manifest. Logged at info. Audit finding 2, 2026-11-25."
+    },
+    {
+      "file": "apps/handlers/provider_choice.py",
+      "standard": "fallback",
+      "lines": [
+        90
+      ],
+      "reason": "ask_provider: Ctrl-C or Ctrl-D at the install's last question means skip, the same answer as q (docstring names all three); not a failure. Logged at info. Audit finding 7, 2026-11-25."
+    },
+    {
+      "file": "apps/handlers/provider_choice.py",
+      "standard": "fallback",
+      "lines": [
+        234
+      ],
+      "reason": "chosen_provider: no install report, or one without a provider, is the answer 'nothing chosen yet' (docstring); doctor then checks every provider row as before. Logged at info. 2026-11-26."
+    },
+    {
+      "file": "apps/modules/_phone_print.py",
+      "standard": "modules",
+      "reason": "Private helper module (leading underscore) holding baud.py's phone print and pairing QR; discover_modules skips underscore names, so it is never a routed command and has no handle_command to give. Its caller's handle_command is the door. 2026-11-26."
+    },
+    {
+      "file": "apps/modules/_doctor_smoke.py",
+      "standard": "modules",
+      "reason": "Private helper module (leading underscore) holding doctor's opt-in --smoke turn; discover_modules skips underscore names, so it is never a routed command and has no handle_command to give. Its caller's handle_command is the door. 2026-11-26."
+    },
+    {
+      "file": "apps/modules/_doctor_fix.py",
+      "standard": "modules",
+      "reason": "Private helper module (leading underscore) holding doctor's --fix remediation report; discover_modules skips underscore names, so it is never a routed command and has no handle_command to give. Its caller's handle_command is the door. 2026-11-26."
+    },
+    {
+      "file": "apps/modules/_doctor_wire.py",
+      "standard": "modules",
+      "reason": "Private helper module (leading underscore) holding doctor's provider wiring rows and wire prompt; discover_modules skips underscore names, so it is never a routed command and has no handle_command to give. doctor.py's handle_command is the door. 2026-11-26."
     }
   ]
 }

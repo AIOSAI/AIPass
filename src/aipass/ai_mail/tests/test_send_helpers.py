@@ -1,24 +1,26 @@
 # =================== AIPass ====================
 # Name: test_send_helpers.py
 # Description: Tests for email send handler and send_args dispatch resolution
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/email/send.py and apps/handlers/email/send_args.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(logging) — send_to_single()'s exact console/log wording, only its return value
-# sentry: no-test-needed(logging) — send_to_single()'s trigger-import warning; its central-update warning is pinned
 # sentry: no-test-needed(shared) — send_to_single()'s refused path: tests/test_refused_sends.py
 # sentry: no-test-needed(shared) — send_to_single()'s upsert key: tests/test_upsert.py
 
+import importlib.util
 import io
 
 import pytest
 from unittest.mock import patch, MagicMock
 
+import aipass.trigger as trigger_door
+from aipass.ai_mail.apps.handlers.email import send as send_mod
 from aipass.ai_mail.apps.handlers.email.send import (
     send_to_single,
     send_to_broadcast,
@@ -528,3 +530,18 @@ def test_send_to_single_and_broadcast_hand_the_declared_kind_to_delivery(tmp_pat
     send_to_single(to_branch="@flow", subject="S", on_delivered_callback=None, **common)
 
     assert kinds == ["job_failed", "notice", None]
+
+
+def test_send_handler_has_no_stand_in_for_a_missing_trigger_bus(monkeypatch):
+    """A broken trigger install fails the handler's import, before any send, not each event in silence."""
+
+    def door_without_names(name: str):
+        """The trigger package with nothing behind its door, as a broken install has."""
+        raise AttributeError(name)
+
+    monkeypatch.setattr(trigger_door, "__getattr__", door_without_names)
+    spec = importlib.util.spec_from_file_location("_probe_send", send_mod.__file__)
+    probe = importlib.util.module_from_spec(spec)
+
+    with pytest.raises(ImportError, match="trigger"):
+        spec.loader.exec_module(probe)

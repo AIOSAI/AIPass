@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.15.0
+# Version: 2.15.2
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-11-20
+# Modified: 2026-11-26
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -123,7 +123,7 @@ def _load_config() -> dict:
                 else f"its top level is a {type(overrides).__name__}, not a JSON object"
             )
             _config_failure = CONFIG_FAILURE.format(path=_CONFIG_PATH, reason=reason)
-            logger.error("[HOOKS] %s", _config_failure)
+            logger.error("[hooks] %s", _config_failure)
 
     _config = result
     return result
@@ -152,10 +152,10 @@ def _get_turn_token(hook_data: dict) -> int:
     try:
         return os.path.getsize(tp)
     except FileNotFoundError:
-        logger.debug("[HOOKS] cadence: no transcript yet (turn 0): %s", tp)
+        logger.debug("[hooks] cadence: no transcript yet (turn 0): %s", tp)
         return -1
     except OSError as exc:
-        logger.warning("[HOOKS] cadence: transcript stat failed: %s", exc)
+        logger.warning("[hooks] cadence: transcript stat failed: %s", exc)
         return -1
 
 
@@ -191,7 +191,7 @@ def _close_fd(fd) -> None:
         _unlock(fd)
         fd.close()
     except OSError as exc:
-        logger.warning("[HOOKS] cadence: fd cleanup failed: %s", exc)
+        logger.warning("[hooks] cadence: fd cleanup failed: %s", exc)
 
 
 def _still_names(fd, path: Path) -> bool:
@@ -212,10 +212,10 @@ def _parse(content: str) -> tuple[Any, str]:
 
 def _set_aside(path: Path, why: str) -> None:
     """Quarantine under the lock: renamed beside, never unlinked; the temp dir's own cleaning takes it, as the state."""
-    logger.error("[HOOKS] cadence: a damaged state file is set aside, it reads empty: %s", why)
+    logger.error("[hooks] cadence: a damaged state file is set aside, it reads empty: %s", why)
     aside = path.with_name(f"{path.name}.corrupt-{time.time_ns()}")
     os.replace(path, aside)
-    logger.info("[HOOKS] cadence: set aside as %s", aside)
+    logger.info("[hooks] cadence: set aside as %s", aside)
 
 
 def _open_state(path: Path):
@@ -239,7 +239,7 @@ def _mtime_age(fd) -> float:
     try:
         return time.time() - os.fstat(fd.fileno()).st_mtime
     except OSError as exc:
-        logger.warning("[HOOKS] cadence: fstat failed, assuming stale: %s", exc)
+        logger.warning("[hooks] cadence: fstat failed, assuming stale: %s", exc)
         return _DEBOUNCE_S + 1
 
 
@@ -290,7 +290,7 @@ def _read_turn_uncounted(path: Path) -> int:
         return stored if isinstance(stored, int) else -1
     except (OSError, json.JSONDecodeError, AttributeError) as exc:
         _turn_degraded = f"cadence state file {path} could not be read: {exc}"
-        logger.warning("[HOOKS] cadence: state read failed on an automated turn, turn falls back to 0: %s", exc)
+        logger.warning("[hooks] cadence: state read failed on an automated turn, turn falls back to 0: %s", exc)
         if fd is not None:
             _close_fd(fd)
         return 0
@@ -337,7 +337,7 @@ def _load_and_increment(hook_data: dict) -> int | None:
 
     except (OSError, json.JSONDecodeError) as exc:
         _turn_degraded = f"cadence state file {path} could not be read or written: {exc}"
-        logger.warning("[HOOKS] cadence: state access failed, the turn is unknown: %s", exc)
+        logger.warning("[hooks] cadence: state access failed, the turn is unknown: %s", exc)
         if fd is not None:
             _close_fd(fd)
         _turn = None
@@ -357,7 +357,7 @@ def _degraded_fire(loader_name: str) -> bool:
     fires = loader_name in DEGRADED_LOADERS
     log = logger.warning if loader_name == DEGRADED_REPORTER else logger.info
     log(
-        "[HOOKS] cadence DEGRADED loader=%s %s: turns cannot be counted, so only %s fire and every other "
+        "[hooks] cadence DEGRADED loader=%s %s: turns cannot be counted, so only %s fire and every other "
         "loader is withheld until this is cured — %s",
         loader_name,
         "fires" if fires else "WITHHELD",
@@ -375,7 +375,7 @@ def _prompt_branch(hook_data: dict) -> str:
     cwd = hook_data.get("cwd")
     root = find_branch_root(cwd) if isinstance(cwd, str) and cwd else None
     if root is None:
-        logger.info("[HOOKS] cadence: cwd %r is under no branch, the global loader config applies", cwd)
+        logger.info("[hooks] cadence: cwd %r is under no branch, the global loader config applies", cwd)
         return "none"
     return root.name
 
@@ -399,7 +399,7 @@ def _branch_loader_override(config: dict, branch: str, loader_name: str) -> dict
     else:
         return override
     logger.error(
-        "[HOOKS] cadence: malformed override for branch=%s loader=%s in %s (%s); the global entry serves",
+        "[hooks] cadence: malformed override for branch=%s loader=%s in %s (%s); the global entry serves",
         branch,
         loader_name,
         _CONFIG_PATH,
@@ -436,7 +436,7 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
     # via should_fire_mail, and an alert's arrival never asks cadence.
     if is_automated(hook_data):
         logger.info(
-            "[HOOKS] cadence skipped loader=%s automated turn session=%s branch=%s", loader_name, session_short, branch
+            "[hooks] cadence skipped loader=%s automated turn session=%s branch=%s", loader_name, session_short, branch
         )
         return False
 
@@ -446,7 +446,7 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
 
     if turn == 0 and loader_name in GROUNDING_LOADERS and _grounded_by_regroup(hook_data or {}, config):
         logger.info(
-            "[HOOKS] cadence suppressed loader=%s turn=0: the post-compact re-ground already delivered it "
+            "[hooks] cadence suppressed loader=%s turn=0: the post-compact re-ground already delivered it "
             "session=%s branch=%s",
             loader_name,
             session_short,
@@ -458,7 +458,7 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
 
     action = "fired" if fired else "skipped"
     logger.info(
-        "[HOOKS] cadence %s loader=%s turn=%d period=%d offset=%d beat=%s session=%s branch=%s",
+        "[hooks] cadence %s loader=%s turn=%d period=%d offset=%d beat=%s session=%s branch=%s",
         action,
         loader_name,
         turn,
@@ -492,12 +492,12 @@ def _read_last_mail_turn(path: Path) -> int | None:
     try:
         content = path.read_text(encoding="utf-8")
     except OSError as exc:
-        logger.warning("[HOOKS] cadence: mail state read failed, treating as never fired: %s", exc)
+        logger.warning("[hooks] cadence: mail state read failed, treating as never fired: %s", exc)
         return None
     try:
         value = json.loads(content).get("last_fired_turn") if content.strip() else None
     except json.JSONDecodeError as exc:
-        logger.warning("[HOOKS] cadence: mail state unreadable, treating as never fired: %s", exc)
+        logger.warning("[hooks] cadence: mail state unreadable, treating as never fired: %s", exc)
         return None
     return value if isinstance(value, int) else None
 
@@ -510,7 +510,7 @@ def _write_last_mail_turn(path: Path, turn: int | None) -> None:
         else:
             path.write_text(json.dumps({"last_fired_turn": turn}), encoding="utf-8")
     except OSError as exc:
-        logger.warning("[HOOKS] cadence: mail state write failed: %s", exc)
+        logger.warning("[hooks] cadence: mail state write failed: %s", exc)
 
 
 def should_fire_mail(new_count: int, hook_data: dict | None = None) -> bool:
@@ -546,7 +546,7 @@ def should_fire_mail(new_count: int, hook_data: dict | None = None) -> bool:
         _write_last_mail_turn(path, turn)
 
     logger.info(
-        "[HOOKS] cadence mail %s count=%d turn=%d last_fired=%s period=%d",
+        "[hooks] cadence mail %s count=%d turn=%d last_fired=%s period=%d",
         "fired" if fired else "skipped",
         new_count,
         turn,
@@ -585,7 +585,7 @@ def current_turn() -> int | None:
         fd, data = _open_state(path)
         _close_fd(fd)
     except (OSError, json.JSONDecodeError) as exc:
-        logger.info("[HOOKS] cadence: turn unreadable: %s", exc)
+        logger.info("[hooks] cadence: turn unreadable: %s", exc)
         return None
     turn = data.get("turn")
     return turn if isinstance(turn, int) else None
@@ -611,7 +611,7 @@ def should_fire_advisory(name: str, period: int = ADVISORY_PERIOD) -> bool:
     path = _advisory_state_path(name)
     if path is None:
         logger.warning(
-            "[HOOKS] cadence FAIL-OPEN advisory=%s: it fires EVERY time — "
+            "[hooks] cadence FAIL-OPEN advisory=%s: it fires EVERY time — "
             "no CLAUDE_CODE_SESSION_ID in the environment, so there is no state file to throttle in",
             name,
         )
@@ -626,7 +626,7 @@ def should_fire_advisory(name: str, period: int = ADVISORY_PERIOD) -> bool:
             last_turn = data.get("turn") if isinstance(data.get("turn"), int) else None
             last_at = data.get("at") if isinstance(data.get("at"), (int, float)) else None
         except (OSError, json.JSONDecodeError) as exc:
-            logger.info("[HOOKS] cadence: advisory state unreadable, treating as never fired: %s", exc)
+            logger.info("[hooks] cadence: advisory state unreadable, treating as never fired: %s", exc)
 
     if last_at is None and last_turn is None:
         fire = True
@@ -640,7 +640,7 @@ def should_fire_advisory(name: str, period: int = ADVISORY_PERIOD) -> bool:
             path.write_text(json.dumps({"turn": turn, "at": now}), encoding="utf-8")
         except OSError as exc:
             # Fire anyway — losing the advisory is worse than repeating it.
-            logger.warning("[HOOKS] cadence: advisory state write failed: %s", exc)
+            logger.warning("[hooks] cadence: advisory state write failed: %s", exc)
     return fire
 
 
@@ -664,7 +664,7 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
 
     if path is None:
         logger.info(
-            "[HOOKS] cadence: reset_counter SKIPPED caller=%s pid=%d — no session ID (env var not set)",
+            "[hooks] cadence: reset_counter SKIPPED caller=%s pid=%d — no session ID (env var not set)",
             caller,
             pid,
         )
@@ -681,7 +681,7 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
             try:
                 data = json.loads(content)
             except json.JSONDecodeError as exc:
-                logger.info("[HOOKS] cadence: reset read old state failed: %s", exc)
+                logger.info("[hooks] cadence: reset read old state failed: %s", exc)
         old_turn = data.get("turn", -1)
         prior_armed_at = data.get("regroup_armed_at")
         now = time.time()
@@ -712,7 +712,7 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
 
         if debounced:
             logger.info(
-                "[HOOKS] cadence: regroup rearm debounced caller=%s pid=%d session=%s (%.1fs since last arm)",
+                "[hooks] cadence: regroup rearm debounced caller=%s pid=%d session=%s (%.1fs since last arm)",
                 caller,
                 pid,
                 session_short,
@@ -720,7 +720,7 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
             )
         else:
             logger.info(
-                "[HOOKS] cadence: counter reset for post-compact re-injection caller=%s pid=%d token=%s "
+                "[hooks] cadence: counter reset for post-compact re-injection caller=%s pid=%d token=%s "
                 "session=%s prev_turn=%d",
                 caller,
                 pid,
@@ -730,7 +730,7 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
             )
     except OSError as exc:
         logger.warning(
-            "[HOOKS] cadence: reset write FAILED caller=%s pid=%d session=%s: %s", caller, pid, session_short, exc
+            "[hooks] cadence: reset write FAILED caller=%s pid=%d session=%s: %s", caller, pid, session_short, exc
         )
         if fd is not None:
             _close_fd(fd)
@@ -750,7 +750,7 @@ def _stamp_window(session_id: str, opened_at: float, caller: str) -> None:
         _window_path(session_id).write_text(json.dumps({"opened_at": opened_at, "caller": caller}), encoding="utf-8")
     except OSError as exc:
         logger.warning(
-            "[HOOKS] cadence: window stamp write FAILED caller=%s session=%s: %s", caller, session_id[:8], exc
+            "[hooks] cadence: window stamp write FAILED caller=%s session=%s: %s", caller, session_id[:8], exc
         )
 
 
@@ -769,7 +769,7 @@ def window_opened_at(hook_data: dict | None = None) -> float | None:
     try:
         opened_at = json.loads(path.read_text(encoding="utf-8") or "{}").get("opened_at")
     except (OSError, json.JSONDecodeError, AttributeError) as exc:
-        logger.warning("[HOOKS] cadence: window stamp unreadable: %s", exc)
+        logger.warning("[hooks] cadence: window stamp unreadable: %s", exc)
         return None
     if isinstance(opened_at, bool) or not isinstance(opened_at, (int, float)):
         return None
@@ -791,7 +791,7 @@ def stamp_regroup_complete(hook_data: dict | None = None) -> None:
     transcript_mark = _get_turn_token(hook_data or {})
     if not session_id or window is None or transcript_mark <= 0:
         logger.info(
-            "[HOOKS] cadence: regroup completion NOT stamped (session=%s window=%s token=%d), fire-all stays",
+            "[hooks] cadence: regroup completion NOT stamped (session=%s window=%s token=%d), fire-all stays",
             session_id[:8] or "none",
             window,
             transcript_mark,
@@ -801,9 +801,9 @@ def stamp_regroup_complete(hook_data: dict | None = None) -> None:
         stamp = {"window": window, "token": transcript_mark, "used_token": None}
         _regroup_done_path(session_id).write_text(json.dumps(stamp), encoding="utf-8")
     except OSError as exc:
-        logger.warning("[HOOKS] cadence: regroup completion stamp write FAILED session=%s: %s", session_id[:8], exc)
+        logger.warning("[hooks] cadence: regroup completion stamp write FAILED session=%s: %s", session_id[:8], exc)
         return
-    logger.info("[HOOKS] cadence: regroup complete, stamped token=%d session=%s", transcript_mark, session_id[:8])
+    logger.info("[hooks] cadence: regroup complete, stamped token=%d session=%s", transcript_mark, session_id[:8])
 
 
 def _stands_in(stamp: dict, window: float | None, token: int, distance: int) -> bool:
@@ -849,7 +849,7 @@ def _grounded_by_regroup(hook_data: dict, config: dict) -> bool:
         fd = None
         return grounded
     except (OSError, json.JSONDecodeError) as exc:
-        logger.info("[HOOKS] cadence: regroup completion stamp unreadable, the fire-all stands: %s", exc)
+        logger.info("[hooks] cadence: regroup completion stamp unreadable, the fire-all stands: %s", exc)
         if fd is not None:
             _close_fd(fd)
         return False
@@ -894,7 +894,7 @@ def consume_regroup_pending(hook_data: dict | None = None) -> bool:
 
         if pending:
             logger.info(
-                "[HOOKS] cadence: regroup_pending consumed (mid-turn backstop) pid=%d token=%s session=%s",
+                "[hooks] cadence: regroup_pending consumed (mid-turn backstop) pid=%d token=%s session=%s",
                 pid,
                 regroup_stamp,
                 session_short,
@@ -902,7 +902,7 @@ def consume_regroup_pending(hook_data: dict | None = None) -> bool:
         return pending
 
     except (OSError, json.JSONDecodeError) as exc:
-        logger.info("[HOOKS] cadence: consume_regroup_pending failed session=%s: %s", session_short, exc)
+        logger.info("[hooks] cadence: consume_regroup_pending failed session=%s: %s", session_short, exc)
         if fd is not None:
             _close_fd(fd)
         return False
@@ -947,9 +947,9 @@ def queue_regroup_parts(total: int, hook_data: dict | None = None) -> None:
         fd.flush()
         _close_fd(fd)
         fd = None
-        logger.info("[HOOKS] cadence: regroup queued %d more part(s) session=%s", total - 1, session_short)
+        logger.info("[hooks] cadence: regroup queued %d more part(s) session=%s", total - 1, session_short)
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("[HOOKS] cadence: queue_regroup_parts failed session=%s: %s", session_short, exc)
+        logger.warning("[hooks] cadence: queue_regroup_parts failed session=%s: %s", session_short, exc)
         if fd is not None:
             _close_fd(fd)
 
@@ -986,7 +986,7 @@ def pop_regroup_part(hook_data: dict | None = None) -> tuple[int, int] | None:
         fd = None
         return part
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("[HOOKS] cadence: pop_regroup_part failed session=%s: %s", session_short, exc)
+        logger.warning("[hooks] cadence: pop_regroup_part failed session=%s: %s", session_short, exc)
         if fd is not None:
             _close_fd(fd)
         return None
@@ -1002,7 +1002,7 @@ def log_regroup_fire(loaders: str, part: int, total: int, text: str, budget: int
     chars = len(text.encode("utf-16-le")) // 2
     over = chars > budget
     (logger.warning if over else logger.info)(
-        "[HOOKS] regroup fired loader=%s part=%d/%d bytes=%d chars=%d budget=%d%s session=%s",
+        "[hooks] regroup fired loader=%s part=%d/%d bytes=%d chars=%d budget=%d%s session=%s",
         loaders,
         part,
         total,
@@ -1018,6 +1018,7 @@ def print_introspection() -> None:
     """Print cadence config and current state."""
     config = _load_config()
     CONSOLE.print("[bold cyan]cadence[/bold cyan] Module")
+    CONSOLE.print("[dim]Decides on which prompt turns each context loader fires.[/dim]")
     CONSOLE.print(f"  Enabled: {config.get('enabled', True)}")
     global_period = config.get("period", 5)
     CONSOLE.print(f"  Period: {global_period} turns (global default)")
@@ -1038,19 +1039,29 @@ def print_introspection() -> None:
             data = json.loads(path.read_text(encoding="utf-8"))
             CONSOLE.print(f"  Current turn: {data.get('turn', '?')}")
         except (json.JSONDecodeError, OSError) as exc:
-            logger.info("[HOOKS] cadence: state read for introspection failed: %s", exc)
+            logger.info("[hooks] cadence: state read for introspection failed: %s", exc)
             CONSOLE.print("  Current turn: (unreadable)")
     else:
         CONSOLE.print("  Current turn: (no state file)")
     CONSOLE.print(f"  Config file: {_CONFIG_PATH}")
+    CONSOLE.print("[dim]Run drone @hooks cadence --help for usage.[/dim]")
+
+
+def print_help() -> None:
+    """Print the cadence verb's usage and examples."""
+    CONSOLE.print("[bold cyan]cadence[/bold cyan] — Prompt injection cadence control")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Usage:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks cadence[/cyan]    Show cadence config and current turn state")
+    CONSOLE.print()
+    CONSOLE.print("[bold]Examples:[/bold]")
+    CONSOLE.print("  [cyan]drone @hooks cadence[/cyan]")
 
 
 def handle_command(command: str, args: list) -> bool:
     """Route cadence commands from drone @hooks."""
     if command in ("--help", "-h", "help") or (command == "cadence" and wants_help(args)):
-        CONSOLE.print("[bold cyan]cadence[/bold cyan] — Prompt injection cadence control")
-        CONSOLE.print()
-        CONSOLE.print("  drone @hooks cadence    Show cadence config and current turn state")
+        print_help()
         return True
 
     if command == "cadence":

@@ -106,7 +106,7 @@ aipass = "aipass.aipass.apps.aipass:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/aipass"]
 # hatch reads only the root .gitignore; a branch's own ignore rules do not reach a local build.
-exclude = ["**/memory_pool_archive"]
+exclude = ["**/memory_pool_archive", "**/.sentry/last_audit*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "src"]

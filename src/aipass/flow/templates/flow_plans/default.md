@@ -122,7 +122,7 @@ drone @sentry checklist <file>           # 10-point check on file
 drone @sentry audit aipass @branch       # Full branch audit
 drone @sentry --help                     # Full help
 
-# AI_Mail - Status updates
+# ai_mail - Status updates
 drone @ai_mail email @devpulse "Subject" "Message"
 drone @ai_mail --help                  # Full help
 
@@ -235,15 +235,16 @@ drone @ai_mail email @devpulse "Production stopped: {plan_number}" "Issue: [desc
 - [ ] Agent output reviewed + verified
 - [ ] Sentry checklist on ! code: `drone @sentry checklist <file>`
 - [ ] Branch memories updated:
-  - [ ] `BRANCH.local.json` - session/work log
-  - [ ] `BRANCH.observations.json` - patterns learned (if any)
+  - [ ] `.trinity/local.json` - session/work log
+  - [ ] `.trinity/observations.json` - patterns learned (if any)
 - [ ] README.md updated (if build changed status/capabilities)
+- [ ] `docs/` pages updated (every page that describes what this build changed, in present tense)
 - [ ] Status email > @devpulse:
   ```bash
   drone @ai_mail email @devpulse "{plan_number} Complete" "Summary of what was done, any issues, outcomes"
   ```
 
-**Completion Order:** Memories -> README -> Email (README before email - don't report complete with stale docs)
+**Completion Order:** Memories -> README and docs -> Email (both before the email - don't report complete with stale docs)
 
 ### Definition of Done
 [What specifically defines complete for this plan?]

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_list_plans.py
 # Description: Unit tests for apps/modules/list_plans.py
-# Version: 1.2.0
+# Version: 1.3.2
 # Created: 2026-03-24
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/list_plans.py."""
@@ -145,6 +145,26 @@ class TestListPlansOrchestrator:
         out, _err = capsys.readouterr()
         assert out == "Plan list output\n3 plans total\n"
 
+    def test_a_row_wider_than_the_console_stays_on_its_own_line(self, capsys: pytest.CaptureFixture[str]):
+        """A location wider than the console (pinned 200 by conftest) stays on its plan's line, not below it.
+
+        Mutant: drop soft_wrap=True from the formatted_list print reddens this.
+        """
+        row = "  FPLAN-1197  \\[closed]  " + "/projects/finch/src" * 12 + "  A subject  2026-11-23 04:19"
+        mock_result = {
+            "success": True,
+            "empty": False,
+            "formatted_list": row,
+            "formatted_stats": "",
+            "filter_type": "all",
+        }
+
+        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result):
+            list_plans("all")
+
+        out, _err = capsys.readouterr()
+        assert out.splitlines()[0] == row.replace("\\[", "[")
+
     def test_empty_result_shows_warning(self):
         """Empty + success result should display a warning."""
         mock_result = {
@@ -258,11 +278,17 @@ class TestListPlansOrchestrator:
             "filter_type": "open",
         }
 
-        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), patch(f"{_MOD}.error") as mock_error:
+        with (
+            patch(f"{_MOD}.list_plans_impl", return_value=mock_result),
+            patch(f"{_MOD}.error") as mock_error,
+            patch(f"{_MOD}.logger") as mock_logger,
+        ):
             mock_error.side_effect = BrokenPipeError("pipe closed")
 
             result = list_plans("open")
             assert result is False
+            # The unshown error must reach a level a person reads, not info.
+            assert "something broke" in mock_logger.warning.call_args[0][0]
 
 
 class TestListIsScopedToTheCallersProject:
@@ -343,3 +369,19 @@ class TestListIsScopedToTheCallersProject:
         assert "fplan_registry.json cannot be read" in err
         assert "No plans found" not in out + err
         assert command_failed()
+
+    def test_a_broken_pipe_inside_the_listing_is_a_failure_not_an_empty_list(self, seats, monkeypatch, capsys):
+        """The display's closed stdout is caught by the module; one raised while reading is a real failure."""
+        host, _ext, _tmp, sit = seats
+
+        def load_registry(registry_file=None):
+            raise BrokenPipeError("pipe to the registry broke")
+
+        monkeypatch.setattr(f"{_MOD}.load_registry", load_registry)
+        sit(host / "src" / "a")
+
+        assert list_plans("all") is False
+
+        out, err = capsys.readouterr()
+        assert "pipe to the registry broke" in err
+        assert "No plans found" not in out + err

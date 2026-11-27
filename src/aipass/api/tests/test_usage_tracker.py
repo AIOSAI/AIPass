@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_usage_tracker.py
 # Description: Tests for usage tracker module
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-03-24
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/modules/usage_tracker.py, API usage monitoring orchestration."""
@@ -309,6 +309,18 @@ def test_cleanup_success(mock_trigger, mock_header, mock_success, mock_error, tm
     mock_success.assert_called_once_with("Cleaned up 1 entries older than 45 days")
     mock_error.assert_not_called()
     mock_trigger.fire.assert_called_once_with("usage_data_cleaned", days=45, data_path=str(store))
+
+
+@patch(f"{PATCH_ROOT}.success")
+@patch(f"{PATCH_ROOT}.header")
+def test_cleanup_with_trigger_missing_raises_rather_than_skipping_the_event(mock_header, mock_success, tmp_path):
+    """aipass.trigger ships in the same package: an import that fails is a broken install, said out loud."""
+    store = _usage_store(tmp_path, {"gen-old": {"timestamp": _LONG_AGO}})
+
+    with patch.dict("sys.modules", {"aipass.trigger": None}), pytest.raises(ImportError):
+        usage_tracker.cleanup_data(["45"], data_path=store)
+
+    mock_success.assert_called_once_with("Cleaned up 1 entries older than 45 days")
 
 
 @patch(f"{PATCH_ROOT}.warning")

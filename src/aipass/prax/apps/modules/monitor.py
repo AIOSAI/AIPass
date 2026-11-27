@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitor.py
 # Description: Unified Monitoring Module
-# Version: 0.5.3
+# Version: 0.7.0
 # Created: 2025-11-23
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
 """PRAX Monitor Module - Mission Control for Autonomous Branches."""
@@ -57,7 +57,7 @@ def print_introspection():
         ("6. branch_scope.py", "BranchScope, parse_scope() - Launch-time branch scoping"),
     ]
     console.print()
-    console.print("[bold cyan]PRAX Monitor Module[/bold cyan]")
+    console.print("[bold cyan]prax Monitor Module[/bold cyan]")
     console.print()
     console.print("[yellow]Purpose:[/yellow]")
     console.print("  Mission Control for autonomous branch monitoring")
@@ -78,7 +78,7 @@ def print_introspection():
 def print_help():
     """Drone-compliant help output - command syntax and examples."""
     console.print()
-    console.print("[bold cyan]PRAX Monitor - Unified Branch Monitoring[/bold cyan]")
+    console.print("[bold cyan]prax Monitor - Unified Branch Monitoring[/bold cyan]")
     _cmds = [
         ("drone @prax monitor", "Show module introspection"),
         ("drone @prax monitor run", "Start monitoring all branches"),
@@ -97,7 +97,7 @@ def print_help():
         ),
         ("drone @prax monitor --help", "Show this help"),
     ]
-    console.print("\n[yellow]Commands:[/yellow]")
+    console.print("\n[yellow]Usage:[/yellow]")
     for cmd, desc in _cmds:
         console.print(f"\n  [cyan]{cmd}[/cyan]\n    {desc}")
     console.print("\n[yellow]Interactive Mode Commands:[/yellow]")
@@ -170,7 +170,7 @@ def _known_branch_names() -> set:
 
         return set(get_detector().known_branches)
     except Exception as e:
-        logger.info("[monitor] Could not read known branches for scope check: %s", e)
+        logger.warning("[monitor] Could not read known branches, scope typo check skipped: %s", e)
         return set()
 
 
@@ -227,7 +227,7 @@ def _run_monitor(args: List[str]) -> bool:
     _is_tty = sys.stdin.isatty()
 
     console.print()
-    header("PRAX Mission Control - Unified Monitoring")
+    header("prax Mission Control - Unified Monitoring")
     console.print()
     console.print(f"[green]{_mode_line(scope)}[/green]")
     if scope.is_scoped:
@@ -404,7 +404,7 @@ def _emit_watcher_event(level: str, message: str) -> None:
         MonitoringEvent(
             priority=priority,
             event_type="log",
-            branch="PRAX",
+            branch="prax",
             action=level,
             level=level,
             timestamp=datetime.now(),
@@ -584,7 +584,7 @@ def _rate_tracker_worker():
         try:
             scan_rates()
         except Exception as exc:
-            logger.info("[monitor] Rate tracker scan error: %s", exc)
+            logger.warning("[monitor] Rate tracker scan failed, retrying next interval: %s", exc)
         _stop_event.wait(SCAN_INTERVAL)
 
 
@@ -637,7 +637,7 @@ def _interactive_loop():
             console.print("\n[yellow]Stopping monitoring...[/yellow]")
             break
         except EOFError:
-            logger.info("[monitor] EOF received, stopping interactive loop")
+            logger.warning("[monitor] stdin closed (EOF), stopping the interactive loop")
             break
 
 
@@ -647,6 +647,7 @@ def _print_status():
 
     console.print()
     console.print("[bold cyan]Monitoring Status:[/bold cyan]")
+    console.print("[dim]  What this monitor is watching right now[/dim]")
     console.print(f"  [green]Mode:[/green] {_mode_line(_active_scope)}")
     if _event_queue:
         console.print(f"  [yellow]Queue size:[/yellow] {_event_queue.size()}")
@@ -680,7 +681,7 @@ if __name__ == "__main__":
         print_help()
         sys.exit(0)
 
-    parser = argparse.ArgumentParser(description="PRAX Unified Monitoring - Mission Control", add_help=False)
+    parser = argparse.ArgumentParser(description="prax Unified Monitoring - Mission Control", add_help=False)
     parser.add_argument("--help", action="store_true", help="Show help message")
     parser.add_argument("--introspect", action="store_true", help="Show module introspection")
     parser.add_argument("tokens", nargs="*", help="Optional 'run' subcommand and/or branches (comma-separated)")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_create_plan.py
 # Description: Tests for apps/modules/create_plan.py -- handle_command routing
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-11-21
+# Modified: 2026-11-23
 # =============================================
 
 """Tests for apps/modules/create_plan.py."""
@@ -12,6 +12,7 @@
 # sentry: no-test-needed(ruff) — that create_plan.py parses and imports
 # sentry: no-test-needed(constant) — print_introspection's and print_help's literal banner text
 
+from contextlib import nullcontext
 from unittest.mock import patch
 
 import pytest
@@ -182,6 +183,25 @@ class TestAFailedCreateIsAnError:
         out, err = capsys.readouterr()
         assert "Refused: inside .git/" in err and "Refused" not in out
         assert command_failed()
+
+
+class TestALongLocationPrintsOnItsLine:
+    def test_both_created_lines_keep_a_location_wider_than_the_console(self, capsys):
+        """A location wider than the console (pinned 200 by conftest) prints after 'in', not on the next line.
+
+        Mutant: drop soft_wrap=True from either created-line print reddens this.
+        """
+        loc = "/projects/finch/src" * 12
+        shown = {"type": "display", "text": f"\\[flow] Created FPLAN-0001 in {loc}"}
+        with (
+            patch(f"{_MOD}.registry_lock", return_value=nullcontext()),
+            patch(f"{_MOD}.create_plan_impl", return_value=(True, 1, loc, "default", "", [shown])),
+        ):
+            assert handle_command("create", [loc, "A subject"]) is True
+
+        lines = capsys.readouterr().out.splitlines()
+        assert f"[flow] Created FPLAN-0001 in {loc}" in lines
+        assert f"Created FPLAN-0001 in {loc}/ using default template" in lines
 
 
 class TestABlankSubjectIsRefused:

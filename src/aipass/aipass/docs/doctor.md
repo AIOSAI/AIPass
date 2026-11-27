@@ -12,16 +12,24 @@ prints is something another owner could be asked directly.
 ## The groups
 
 The report opens with its scope: `scope: project <root>`, or
-`scope: no project at <cwd>: Structure is not checked`. The Structure checks
-follow the working directory, so a run from outside a project counts fewer
-rows and cannot see a project's damaged citizens. A clean count from there is
-no verdict on a project.
+`scope: no project at <cwd>: the project's registry, mailbox, hooks, Structure
+and Scaffold are not checked`. Those rows follow the working directory: from
+outside a project the Structure and Scaffold groups and the `registry`,
+`passport`, `hooks.json` and `ai_mail` rows are left out, so the exit code
+reflects the machine and the home only, and a fresh install's first run from
+`$HOME` is not an error. A clean count from there is no verdict on a project.
+An unset `AIPASS_HOME` warns that the install wrote it to `~/.bashrc`: open a
+new terminal or `source ~/.bashrc`.
 
 One pass produces seven groups, in this order:
 
 - **System** — OS, shell, Python, RAM, CPU, install method, and the Claude Code
   version (AGENTS.md is read from v2.1.277; below it the row warns)
-  ([`apps/handlers/system_detect/`](../apps/handlers/system_detect)).
+  ([`apps/handlers/system_detect/`](../apps/handlers/system_detect)). When the
+  provider manifest's `cli.claude.pinned_version` differs from the running
+  `claude --version`, an info row (the ok glyph) reads `claude pin  tested with
+  Claude Code <pinned>; you run <running>`, naming the AIPass version verified
+  with the pin; a match, no pin or no claude adds no row.
 - **Identity** — `AIPASS_HOME`, the trust list (one WARN row, `trust`, per
   enrolled project whose folder is gone, naming `aipass trust prune`), the
   registry and its shape, `hooks.json`, the passport's role, and the
@@ -39,8 +47,15 @@ One pass produces seven groups, in this order:
 - **Services** — what a session depends on: `drone systems` reachability
   (when drone fails because the registry is unreadable, the row names the
   registry and `aipass doctor --fix`, not the install),
-  pytest collection, the provider manifest rows (hooks, env vars, permission
+  the provider manifest rows (hooks, env vars, permission
   rules, the settings scalars), the wire verification and stale deny rules.
+  `wire verify` executes before it inspects: it runs the first wired hook
+  command (UserPromptSubmit first) exactly as the provider settings hold it,
+  through `sh -c` with the settings' `env` and `{}` on stdin. Exit 126 or 127
+  is a FAIL quoting the shell's last error line, `a wired hook cannot run:
+  ...`; wiring that inspects clean but cannot execute (an `AIPASS_HOME` that
+  splits in the shell) never passes. Otherwise the row is `drone @hooks
+  verify`'s verdict. The install's Health check runs the same row.
 - **Community** — the mailbox is readable and `dropbox/` is writable.
 - **Structure** — agent placement, stray-file detection, the registry's paths
   (a registered citizen whose folder exists but whose `.trinity/passport.json`
@@ -76,18 +91,13 @@ One pass produces seven groups, in this order:
   `.chroma`, `docs.local`, `dropbox`, `.spawn` or a `*_json` folder, or a
   `*_REGISTRY.json`, is one FAIL per folder or file with its count and
   `drone @git untrack [--recursive] <path>` as the fix; `--fix` never touches
-  the index. The AIPass source tree is not measured: its `.gitignore` ships
+  the index. The AIPass source tree gets no row: its `.gitignore` ships
   spawn's templates tracked on purpose
   ([`apps/handlers/structure_scan/`](../apps/handlers/structure_scan)).
 - **Scaffold** — the stamped scaffold version, tier0 drift, missing and retired
   hook handlers for the project you are standing in. This is the group that
   tells you a scaffold update is owed; see
   [`scaffold_update.md`](scaffold_update.md).
-- **Sandbox** — with `AIPASS_SANDBOX_ENABLED` off (the default; the hook gates
-  do the containing), one PASS row and no prerequisite is checked. On, the
-  kernel sandbox prerequisites — bwrap and whether it runs, node, srt, rg, the
-  broker daemon — each a row, a missing one a FAIL; Linux only
-  ([`apps/handlers/sandbox_check/`](../apps/handlers/sandbox_check)).
 
 An `admin lane` row (`lit` / `dark` / `partial`) rides in the report as well.
 It observes presence only and never errors —
@@ -171,14 +181,24 @@ safety gates on git, edits and rm, no standards checks on edits; it names
 `aipass doctor --fix` to wire them later, and the row says
 `not applied: declined`. With no terminal to ask on, `doctor --fix` writes
 nothing and its row says `not applied: no tty — aipass doctor --fix --yes`;
-`--yes` writes without the question. The install's Health check runs the same
-step, its wire receipt naming the door `install`: it asks on a terminal, `aipass install --yes`
-writes without the question, and with no terminal or under `--non-interactive` without `--yes` it writes nothing and its row says
-`not applied: no tty` or `not applied: --non-interactive`, each naming
-`aipass doctor --fix --yes`. Each receipt records the door and the consent,
-`y (tty)` or `--yes`. The install runs it as `aipass doctor --fix --rows-json PATH`
-in the home: the same run, then every non-pass row and the counts written to PATH
-as JSON for the install report; `--non-interactive` there writes no settings. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
+`--yes` writes without the question. The install's Health check, `aipass doctor
+--fix --rows-json PATH` in the home, is install mode: it writes no provider
+settings, even with `--yes`, has no `claude code` row in System, and shows each
+installed CLI as one information row (the ok glyph), `not chosen: aipass
+provider <name>`, because the pick at the install's end wires the chosen one. Under the
+summary, one dim line counts the rows set aside, `N provider row(s) wait for
+your pick at the end of the install`: a later plain `aipass doctor` counts them.
+Every non-pass row and the counts go to PATH as JSON for the install report.
+
+Once the install report (`src/aipass/devpulse/dropbox/install_report.json`
+in the home, the folder holding the provider manifest doctor found, never the
+shell's `$AIPASS_HOME`) records `provider`, every run
+checks only that CLI's rows (Claude: hooks, env vars, permissions, global
+settings, wire verify; the `codex ...` and `opencode ...` rows by name); each
+other installed CLI is one `not chosen` information row and never red. With no
+provider recorded, `doctor` and `doctor --fix` check and wire every installed
+CLI. A manifest that does not parse is the `hooks` row's to report; the
+set-aside reads it as empty rather than stopping the run. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
 [`apps/handlers/provider_reconcile.py`](../apps/handlers/provider_reconcile.py)
 and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 
@@ -192,9 +212,11 @@ the OpenCode plugin, backs up to `.backup/settings/` beside that file the same w
 `receipts.jsonl` in the same folder: when, which door, who, the backup's name,
 and the file's sha256 before and after. `doctor --fix` prints both paths. The
 backups are never pruned or rotated. If the backup or the receipt cannot be
-written, the command fails and the settings file is left as it was. If the
-write itself fails, the command fails too and no receipt is written; the
-backup taken just before it stays. Code:
+written before the write, the command fails and the settings file is left as
+it was. If the write itself fails, the command fails too and no receipt is
+written; the backup taken just before it stays. If the receipt append fails
+after a successful write, the command fails with the receipt path while the
+settings file keeps the new content and the backup holds the old. Code:
 [`apps/handlers/settings_backup.py`](../apps/handlers/settings_backup.py).
 
 ## Both CLIs see every shared skill
@@ -204,17 +226,15 @@ the provider switch.
 `shared skills` passes when each `SKILL.md` has a `name` and a `description` in
 its frontmatter. `skills link` passes when `.claude/skills` is a symlink
 resolving to `.agents/skills`, and warns when it is missing, a copy, or points
-elsewhere. `legacy prep` warns when an old `.claude/commands/prep.md` sits
-beside the skill, so `/prep` is offered twice. `provider switch` passes when
+elsewhere. `provider switch` passes when
 the project holds every switch file: `.claude/commands/codex.md` (`/codex`) and
 `.claude/commands/opencode.md` (`/opencode`) for Claude Code,
 `.codex/skills/claude/SKILL.md` (`$claude`) and `.codex/skills/opencode/SKILL.md`
 (`$opencode`) for Codex, and `.opencode/commands/` `claude.md`, `codex.md`,
 `memo.md`, `prep.md` and `compass.md` for OpenCode. It names each missing one,
 and the cure is `aipass init update`, which writes them and records their hash.
-`doctor --fix` makes a missing link and renames an unedited legacy `prep.md` to
-`prep(disabled).md`, one `skills fix` row per change; it writes no switch file,
-and a copy, a foreign link and an edited `prep.md` are left for you. Where the
+`doctor --fix` makes a missing link, one `skills fix` row; it writes no switch file,
+and a copy or a foreign link is left for you. Where the
 filesystem refuses links, `--fix` writes a copy that will not follow
 `.agents/skills`, and the row says so.
 
@@ -223,8 +243,8 @@ filesystem refuses links, `--fix` writes a copy that will not follow
 `doctor --fix` will not apply a scaffold update. An update can replace files, so
 it is a decision and not a repair — the plan goes to a human first. The one
 exception is a stamp-only plan; [`scaffold_update.md`](scaffold_update.md) has
-the rule. The skills link and the legacy `prep.md` above are repairs, not an
-update: neither overwrites a file.
+the rule. The skills link above is a repair, not an
+update: it overwrites no file.
 
 Code: [`apps/modules/doctor.py`](../apps/modules/doctor.py), with the
 remediation report in [`apps/modules/_doctor_fix.py`](../apps/modules/_doctor_fix.py),

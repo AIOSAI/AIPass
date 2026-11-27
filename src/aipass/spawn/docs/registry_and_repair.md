@@ -40,7 +40,7 @@ but will not parse is refused by the sync, `--fix` and `--check` alike (`--check
 `drone @spawn sync-registry --rebuild`. Under `--fix`, a stale entry
 whose branch is found elsewhere in the project has its `path` rewritten, so `owner`, `admin`
 and `registry_id` stay; directory names are keyed through `normalize_branch_name`, so
-`my-agent` on disk matches `MY_AGENT`. Every registry writer holds `registry_lock` (`flock`
+`my-agent` on disk matches `my_agent`. Every registry writer holds `registry_lock` (`flock`
 on `.<stem>.lock`) and loads inside it.
 
 `--rebuild` is for a registry that will not parse (empty, `[]`, truncated, or JSON with garbage
@@ -57,21 +57,44 @@ exposes `rebuild_registry`, so `aipass doctor` can call it while drone cannot ro
 
 ---
 
-## Registry entry shape — mixed casing is not a rule
+## Registry entry shape — the name is lowercase, the path relative
 
-`AIPASS_REGISTRY.json` carries entries in two shapes: UPPERCASE names with
-registry-relative paths, and lowercase names with absolute paths.
+The system stores an agent's name in lowercase. Every row spawn writes carries the name
+in lowercase, hyphens as underscores, and a path relative to the registry's own folder. That
+covers `create` (mint and adopt), `add_to_registry`, `sync-registry --fix`, `--rebuild` and
+`repair --rename`. `normalize_branch_name` defaults to lowercase. A target outside the
+registry's project is refused, never written with an absolute path. The project's own name (the
+registry file's stem and `metadata.name`) is not an agent name and stays as it is.
 
-**The uppercase-plus-relative shape is what `create` writes.** `handlers/mint_ops.py` hands
-`add_to_registry` the uppercased name and a path relativized to the registry's own
-directory, falling back to absolute only when relativization raises. The lowercase absolute
-entries are not written by this lane.
+A registry written before this rule can still hold capital rows beside lowercase ones. Spawn
+reads such a registry by folding case on both sides. The duplicate guards in `create` and
+`add_to_registry` treat `FLOW` and `flow` as one agent, so no writer adds a second row
+for a name already present in the other case. Spawn's writers leave an existing capital row's
+name as they find it; only `repair --rename` rewrites a name, and it writes lowercase.
 
-Nothing reads the difference: registry lookups lowercase both sides before comparing
-(`is_protected`, `ensure_admin`), and a path is resolved as `registry_dir / entry_path`,
-which pathlib returns unchanged when the entry is already absolute. It is cosmetic — two
-shapes a reader sees and no code does. **Normalising is not done here**, and
-`sync-registry` does not touch casing.
+Such a registry is converted with `drone @spawn sync-registry <registry-or-project> --lowercase`.
+The argument names the registry file itself or a folder to walk up from, so the fleet registry and
+each exterior project's are converted one at a time. Without `--confirm` it prints each row that
+would change (old name -> new name, old path -> new path) and writes nothing, exiting 1 when there
+is something to convert and 0 when there is not. With `--confirm` it copies the registry byte for
+byte to `<name>.pre-convert-<YYYYmmdd-HHMMSS>` beside it, prints that path, then writes the
+converted registry under `registry_lock` with an atomic replace. Each name becomes
+`normalize_branch_name(name)`, the dict-form key moving with it. Each absolute path becomes
+relative to the registry's folder. Every other key (`owner`, `admin`, `ci_cure`, `registry_id`,
+`email`, dates, keys spawn does not know) and the row order are kept, and `metadata` changes only
+in `last_updated`, the stamp every registry writer sets. It refuses, writing nothing and exiting 2,
+when two rows fold to one name (it names both; choosing which row lives is the operator's call),
+when a row's path is outside the registry's folder (it names the row), or when the file does not
+parse (that is `--rebuild`'s case). A second run finds nothing to convert and says so.
+
+The same lane reaches each registered citizen's own copies of its name: the certificate's `owner`
+in `artifacts/birth_certificate.json` and the passport's `branch_info.branch_name` in
+`.trinity/passport.json`, found under the row's path. The preview lists each file and the one value
+that would change. Only that value's bytes are rewritten, in place and atomically: key order,
+indent, the certificate's `name` and `description` prose and the trailing newline stay as written.
+A missing or unreadable file is skipped and named, not an error. A certificate that carries a
+`signature` is signed over its content, so if its `owner` would change the whole run is refused,
+naming the file, and exits 2. New citizens are born with both values in lowercase.
 
 ---
 
@@ -81,6 +104,10 @@ shapes a reader sees and no code does. **Normalising is not done here**, and
 dry-run by default, can be restricted to a single branch, can be pointed at another repo
 root, and backs each passport up before writing. It either completes a passport or raises;
 there is no partial write.
+
+It drops four keys and nothing else: `citizenship.owner`, `document_metadata.note`,
+`document_metadata.last_updated` and the top-level `family`. Unknown keys are kept and
+reported. It writes no date stamp, so a re-run over a migrated passport changes nothing.
 
 The citizens it walks are the ones @memory's door (`fleet_branches`) answers for the root:
 core, resident and external, each with the residency the door gives it. Spawn keeps no census
@@ -113,14 +140,28 @@ of every file and directory the template ships, each with a content hash. It is 
 `create` verifies a mint against and the file `update` walks, so **any change to a template
 file must be followed by a regeneration** or the manifest and the tree disagree.
 
+A missing manifest is tolerated: a bare template is a real state, and the mint verifies
+against the on-disk contents alone. A manifest that exists but cannot be read (bad JSON, not
+an object, an OS error) raises `CorruptTemplateManifest` in `meta_ops.py`. `create`, `update`,
+`sync-registry --fix` and `regenerate-registry` read the manifest before their first write,
+so the command stops with nothing written. The entry point prints one line and exits 1:
+
+```
+spawn <command and args> stopped: template manifest <path> cannot be read (<ErrorType>: <error>). Nothing was written.
+```
+
 ---
 
 ## Repair
 
 Repair acts on ONE registry: the one it is given, else the nearest `*_REGISTRY.json` walking up
 from the cwd. `--rename` finds its registry by walking up from the cwd too, then each
-`projects/*/*_REGISTRY.json`; it looks a name up rather than enumerating citizens, and the door
-cannot answer it, because a renamed directory no longer holds the passport the door checks.
+`projects/*/*_REGISTRY.json`, then the `*_REGISTRY.json` at each active root `AIPASS_ROOTS.json`
+declares (memory's `declared_roots`, in declaration order). It looks a name up rather than
+enumerating citizens, and the door cannot answer it, because a renamed directory no longer holds
+the passport the door checks. The passport is matched by `citizenship.citizen_id` against the
+row's `registry_id`; a passport that already carries the new names is rewritten to the same
+values, and a passport with no `citizen_id` refuses.
 
 The bare scan is read-only ALWAYS: it reports pollution (duplicate branch directories) and
 registry path mismatches and writes nothing. Two submodes act, and each refuses to act
@@ -138,8 +179,9 @@ guards the relocation lane.
 `--relocate` resolves the new path before checking it sits inside the project, so
 `<root>/../outside` refuses. If the registry write fails after the move, the tree is moved
 back and the command exits 1. `--clean-pollution` never flags a nested directory holding
-`__init__.py`: that is a flat-layout package, not a duplicate. A grant ceremony whose
-registry write fails exits 1 and grants nothing.
+`__init__.py`: that is a flat-layout package, not a duplicate. A grant ceremony that is
+refused, a failed registry write included, exits 1; one whose writer raises an unexpected error
+exits 2. Neither grants anything.
 
 ---
 

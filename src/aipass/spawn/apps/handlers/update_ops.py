@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.7.1
+# Version: 2.10.0
 # Created: 2026-03-07
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -16,20 +16,27 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from aipass.memory import find_repo_root
+from aipass.memory import declared_roots, find_repo_root
 from aipass.prax import logger
 
 from aipass.spawn.apps.handlers.json_merge import backup_json, deep_merge
 from aipass.spawn.apps.handlers.class_registry import get_template_dir, resolve_template_class
 from aipass.spawn.apps.handlers.meta_ops import (
     generate_branch_meta,
+    CorruptTemplateManifest,
     load_template_registry,
     save_branch_meta,
 )
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES, copy_undecodable
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
-from aipass.spawn.apps.handlers.registry import find_registry, fleet_rows, load_registry, branches_as_list
+from aipass.spawn.apps.handlers.registry import (
+    aipass_home,
+    branches_as_list,
+    find_registry,
+    fleet_rows,
+    load_registry,
+)
 from aipass.spawn.apps.handlers.update_ignore import IGNORE_NAME, is_ignored, read_ignore
 from aipass.spawn.apps.handlers.json import json_handler
 
@@ -64,6 +71,8 @@ _PASSPORT_HEAL_ALLOWLIST = (
     ("branch_info", "email"),
     ("branch_info", "git_branch"),
     ("identity", "traits"),
+    # Ships empty (the cloud lane reads "" as absent); deep_merge keeps an id the owner wrote.
+    ("citizenship", "cloud_environment_id"),
 )
 
 
@@ -106,10 +115,19 @@ def update_branch(
     md_detail: list[dict] = []
     gitignore_state: str | None = None
 
-    registry_path = Path(registry_path) if registry_path else find_registry()
-    branch_dir = _resolve_branch_path(branch_name, registry_path) if registry_path else None
-    if branch_dir is None or registry_path is None:
-        return _result(branch_name, False, counts, [f"Branch '{branch_name}' not found in registry"], dry_run)
+    if registry_path:
+        registry_path = Path(registry_path)
+    else:
+        registry_path, refusal = resolve_citizen_registry(branch_name)
+        if registry_path is None:
+            return _result(branch_name, False, counts, [refusal], dry_run)
+    branch_dir = _resolve_branch_path(branch_name, registry_path)
+    if branch_dir is None:
+        return _result(branch_name, False, counts, [f"Branch '{branch_name}' not found in {registry_path}"], dry_run)
+    # A row path climbing out of its project would aim the writes at a directory no registry seals.
+    if not branch_dir.is_relative_to(registry_path.parent.resolve()):
+        refusal = f"Branch '{branch_name}' resolves to {branch_dir}, outside its project {registry_path.parent}"
+        return _result(branch_name, False, counts, [refusal], dry_run)
     if not branch_dir.is_dir():
         return _result(branch_name, False, counts, [f"Branch directory does not exist: {branch_dir}"], dry_run)
 
@@ -122,6 +140,8 @@ def update_branch(
 
     if not template_dir.is_dir():
         return _result(branch_name, False, counts, [f"Template directory not found: {template_dir}"], dry_run)
+    # Read before the walk writes anything: a corrupt manifest raises here, with nothing changed.
+    template_registry = load_template_registry(template_dir)
 
     if trace:
         logger.info("[update] Citizen class: %s, template: %s", citizen_class, template_dir)
@@ -276,7 +296,6 @@ def update_branch(
                 errors.append(f"JSON merge failed for {resolved_path}")
 
     if not dry_run:
-        template_registry = load_template_registry(template_dir)
         if template_registry:
             updated_meta = generate_branch_meta(branch_dir, template_registry)
             updated_meta["metadata"]["last_updated"] = datetime.now().strftime("%Y-%m-%d")
@@ -357,6 +376,9 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
         try:
             result = update_branch(lower_name, dry_run=dry_run, trace=trace, registry_path=citizen["registry_path"])
             results.append(result)
+        except CorruptTemplateManifest:
+            # One template serves the fleet: a corrupt manifest stops the run, not one row.
+            raise
         except Exception as exc:
             logger.error("[update] Error updating %s: %s", name, exc)
             results.append(_failed_row(lower_name, exc, dry_run))
@@ -388,6 +410,36 @@ def _read_identity(branch_dir: Path) -> dict:
         return {**identity, "citizen_class": resolve_template_class(identity)}
     except ValueError as e:
         raise ValueError(f"{e} (passport: {passport_path})") from e
+
+
+def resolve_citizen_registry(branch_name: str) -> tuple[Path | None, str]:
+    """(registry, "") for the one registry naming branch_name; (None, refusal) when none or several do.
+
+    Looked in: the registry above the cwd, then every citizen memory's door answers (core, residents,
+    declared roots), the door adopt-citizen walks."""
+    name = branch_name.lower()
+    home = aipass_home()
+    hits: dict[Path, Path] = {}
+    local = find_registry()
+    local_dir = _resolve_branch_path(name, local) if local is not None else None
+    if local is not None and local_dir is not None:
+        hits[local.resolve()] = local_dir
+    for citizen in fleet_rows(home):
+        registry = citizen["registry_path"]
+        if citizen["name"].lower() == name and registry is not None:
+            hits.setdefault(Path(registry).resolve(), Path(citizen["path"]))
+    if len(hits) == 1:
+        return next(iter(hits)), ""
+    if hits:
+        found = "; ".join(f"{path} ({registry.name})" for registry, path in sorted(hits.items()))
+        return None, f"Branch '{name}' is in {len(hits)} registries, refused by name; nothing written: {found}"
+    residents = len(list((home / "projects").glob("*/*_REGISTRY.json")))
+    roots = len(declared_roots(home))
+    return None, (
+        f"Branch '{name}' not found in AIPASS_REGISTRY.json, "
+        f"{residents} project {'registry' if residents == 1 else 'registries'}, "
+        f"{roots} declared root{'' if roots == 1 else 's'}"
+    )
 
 
 def _resolve_branch_path(branch_name: str, registry_path: Path | str | None = None) -> Path | None:
@@ -436,6 +488,8 @@ def _heal_passport(
         legacy_traits = existing_data.pop("traits", None)
 
         for section, key in _PASSPORT_HEAL_ALLOWLIST:
+            if section == "citizenship" and not isinstance(existing_data.get(section), dict):
+                continue  # a 1.0 passport has no citizenship block; growing one is migration's job
             section_data = existing_data.setdefault(section, {})
             if (section, key) == ("identity", "traits"):
                 if legacy_traits is not None and not section_data.get(key):
@@ -445,6 +499,8 @@ def _heal_passport(
                 continue
             template_value = template_data.get(section, {}).get(key)
             section_data[key] = deep_merge(template_value, section_data.get(key))
+            if section == "citizenship" and "seed" in section_data:
+                section_data["seed"] = section_data.pop("seed")  # the vault stamp stays last (seed_ops order)
 
         merged_text = json.dumps(existing_data, indent=2, ensure_ascii=False) + "\n"
 
