@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: settings_gate.py
-# Version: 1.4.1
+# Version: 1.4.2
 # Description: No AI changes a provider's settings alone: Claude asks the owner; Codex, OpenCode, headless deny
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-10-25
-# Modified: 2026-11-22
+# Modified: 2026-11-27
 # =============================================
 
 """The provider-settings gate (DPLAN-0424): the owner accepts every change to a CLI's own settings.
@@ -138,6 +138,9 @@ def _installer(command: str, cwd: str) -> str | None:
         if inv.program in _INSTALLER_SCRIPTS:
             return inv.program
         script = next((word for word in inv.argv[1:] if not word.startswith("-")), "") if inv.language else ""
+        # `bash -n setup.sh` parses and runs nothing. Only that exact spelling: `-n -i` runs the script.
+        if inv.language == "shell" and inv.argv[1:3] == ("-n", script):
+            continue
         if Path(script).name in _INSTALLER_SCRIPTS:
             return Path(script).name
     return None
