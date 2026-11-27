@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_wake_managers.py
-# Description: Tests for the wake's manager lanes, the wake-back opt-out, the Fable grant read and the dashboard refresh
-# Version: 1.0.3
+# Description: Tests for the wake's manager lanes, the cloud lane, the wake-back opt-out, the Fable grant and dashboard
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
-"""Tests for apps/handlers/dispatch/wake.py's manager lanes, wake-back and wake_dashboard.py's refresh."""
+"""Tests for apps/handlers/dispatch/wake.py's manager and cloud lanes, wake-back and wake_dashboard.py's refresh."""
 
 # Who may be woken and how, and what the wake promises other branches.
 
@@ -14,6 +14,8 @@
 # sentry: no-test-needed(shared) — wake_branch()'s spawn, session pointer and model: tests/test_wake.py
 
 import json
+import shlex
+import subprocess
 import sys
 import threading
 import pytest
@@ -32,10 +34,12 @@ from aipass.ai_mail.apps.handlers.dispatch.wake import (
 )
 from aipass.ai_mail.tests.support_wake import (
     _FakeProc,
+    _claude_args,
     _make_scheduled_fixtures,
     _make_wake_fixtures,
     _patch_wake_deps,
     _record_spawn_routes,
+    _step,
 )
 
 pytestmark = pytest.mark.usefixtures("wake_log_operation_suppressed")
@@ -748,3 +752,62 @@ class TestRecipientDashboardRefresh:
         dashboard_step = status.find_step("dashboard")
         assert dashboard_step is not None, "the dashboard gate must record its own verdict"
         assert dashboard_step[0] == "ok"
+
+
+# A stand-in claude: prints its second argument, the brief, exactly as the shell handed it over.
+SHOW_SECOND_ARG = "#!/bin/sh\nprintf '%s' \"$2\"\n"
+
+
+class TestCloudWake:
+    """cloud={"body"} spawns the monitor on `script -qfec <one command> <log>`, the mail tagged and named."""
+
+    def _wake(self, tmp_path, monkeypatch, passport):
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        (branch_path / ".trinity").mkdir()
+        (branch_path / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+        mail = {"id": "m1", "subject": "Fix it", "status": "new", "auto_execute": True}
+        inbox = branch_path / ".ai_mail.local" / "inbox.json"
+        inbox.write_text(json.dumps({"messages": [mail]}), encoding="utf-8")
+        config = {"cloud_poll_seconds": 60, "cloud_ceiling_seconds": 600}
+        wake_mod.CONFIG_FILE.write_text(json.dumps(config), encoding="utf-8")
+        claude = tmp_path / "claude"
+        claude.write_text(SHOW_SECOND_ARG, encoding="utf-8")
+        claude.chmod(0o755)
+        _patch_wake_deps(monkeypatch, _find_claude_bin=lambda: str(claude))
+        calls = _record_spawn_routes(monkeypatch)
+        body = "Print $HOME and `whoami` verbatim; it's 'quoted'"
+        status, ok = wake_branch("@testbranch", subject="Fix it", cloud={"body": body}, fresh=True)
+        return status, ok, calls, inbox, body
+
+    def test_the_brief_reaches_claude_verbatim_through_one_script_command(self, tmp_path, monkeypatch):
+        status, ok, calls, inbox, body = self._wake(
+            tmp_path, monkeypatch, {"citizenship": {"cloud_environment_id": "env_01X"}}
+        )
+
+        assert ok is True
+        assert _step(status, "fresh") == ("info", "fresh", "cloud sessions are always fresh — --fresh / -c ignored")
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert args[:2] == ["/usr/bin/script", "-qfec"] and args[3].endswith("dispatch_stdout.out")
+        argv = shlex.split(args[2])
+        assert argv[1] == "--cloud" and argv[3:] == ["--settings", '{"remote": {"defaultEnvironmentId": "env_01X"}}']
+        assert argv[2].startswith(body + "\n\n---\nYou are @testbranch in a Claude Code cloud VM")
+        assert "`dispatch: m1`" in argv[2]
+        assert json.loads(inbox.read_text(encoding="utf-8"))["messages"][0]["cloud"] == {"requested": True}
+        cmd = calls["popen"][0]["cmd"]
+        flags = cmd[: cmd.index("--")]
+        assert "--provider=cloud" in flags
+        assert '--cloud={"mail": "m1", "poll": 60, "ceiling": 600}' in flags
+        assert [row["provider"] for row in register_mod.outstanding()] == ["cloud"]
+        # A real shell runs script's one string: $HOME and the backticks must arrive unexpanded.
+        monkeypatch.undo()
+        shell = subprocess.run(["sh", "-c", args[2]], capture_output=True, text=True, encoding="utf-8", check=True)
+        assert shell.stdout == argv[2]
+
+    def test_a_citizen_without_a_cloud_environment_id_is_refused_and_nothing_spawns(self, tmp_path, monkeypatch):
+        status, ok, calls, inbox, _ = self._wake(tmp_path, monkeypatch, {"citizenship": {}})
+
+        assert ok is False and calls["popen"] == []
+        assert _step(status, "cloud")[0] == "fail"
+        assert "has no citizenship.cloud_environment_id" in _step(status, "cloud")[2]
+        assert "never falls back to a local wake" in _step(status, "cloud")[2]
+        assert "cloud" not in json.loads(inbox.read_text(encoding="utf-8"))["messages"][0]

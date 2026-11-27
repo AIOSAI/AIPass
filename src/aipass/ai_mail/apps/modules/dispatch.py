@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.10.2
+# Version: 3.11.0
 # Created: 2026-02-02
 # Modified: 2026-11-26
 # =============================================
@@ -47,6 +47,7 @@ def print_help() -> None:
   drone @ai_mail dispatch @branch "Subject" "Body" --provider opencode --model opencode/glm-5.3-flash-free  # Wake on OpenCode
   drone @ai_mail dispatch @branch "Subject" "Body" --no-memory-save
   drone @ai_mail dispatch @branch "S" "B" --grant-root <dir> --grant a.ts,src  # Admin: write grant (grants --help)
+  drone @ai_mail dispatch @branch "Subject" "Body" --cloud            # In its Claude Code cloud VM; PR mailed back
 
 WAKE ONLY:
   drone @ai_mail dispatch wake @branch                       # Wake with default inbox check
@@ -410,9 +411,12 @@ def _orchestrate_close(args: List[str]) -> bool:
 def _orchestrate_dispatch_send(args: List[str]) -> bool:
     """Orchestrate combined dispatch: send email with --dispatch flag + wake branch."""
     flags, filtered = _parse_flags(
-        args, ("--from",) + _RUN_FLAGS + _GRANT_FLAGS, ("--fresh", "--no-memory-save", "--no-watchdog")
+        args,
+        ("--from",) + _RUN_FLAGS + _GRANT_FLAGS,
+        ("--fresh", "--no-memory-save", "--no-watchdog", "--cloud") + (("-c",) if "--cloud" in args else ()),
     )
-    use_fresh = flags.get("--fresh", False)
+    cloud = flags.get("--cloud", False)
+    use_fresh = flags.get("--fresh", False) or flags.get("-c", False)
     no_memory_save = flags.get("--no-memory-save", False)
     from_branch = flags.get("--from")
     use_model = flags.get("--model")
@@ -437,6 +441,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     body = filtered[2]
 
     # --from may author the mail but not buy a wake lane; refused BEFORE the send so a spoof delivers nothing.
+    from aipass.ai_mail.apps.handlers.dispatch.cloud import dispatch_refusal as cloud_ok
     from aipass.ai_mail.apps.handlers.users import verified_caller
 
     refusal = verified_caller.sender_claim_refusal(from_branch)
@@ -445,6 +450,11 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         return True
 
     is_admin = _admin_lane()
+
+    ok, why = cloud_ok(target, is_admin, [f for f in flags if f in _RUN_FLAGS + _GRANT_FLAGS]) if cloud else (True, "")
+    if not ok:
+        error(f"Dispatch to {target} not sent: {why}")
+        return True
 
     try:
         grant = grant_handler.from_send_args(flags, filtered, _GRANT_FLAGS, target, is_admin)
@@ -509,6 +519,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         provider=use_provider,
         opencode_config=opencode_config,
         grant=grant,
+        cloud={"body": body} if cloud else None,
     )
     console.print(dispatch_status.format())
 
@@ -580,18 +591,7 @@ def print_introspection():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1:
+    if len(sys.argv) == 1 or sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
-
-    if sys.argv[1] in ["--help", "-h", "help"]:
-        print_help()
-        sys.exit(0)
-
-    command = sys.argv[1]
-    remaining_args = sys.argv[2:] if len(sys.argv) > 2 else []
-
-    if handle_command(command, remaining_args):
-        sys.exit(0)
-    else:
-        sys.exit(1)
+    sys.exit(0 if handle_command(sys.argv[1], sys.argv[2:]) else 1)

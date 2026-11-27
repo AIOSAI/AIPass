@@ -118,3 +118,4 @@ opencode run --standalone --format json --auto [-m <provider/model>] --session <
 ## Related
 
 - [wake_pipeline.md](wake_pipeline.md) — the wake path every provider shares
+- [cloud_lane.md](cloud_lane.md) — `--cloud`: the session in the target's cloud VM and its PR

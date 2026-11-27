@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_wake.py
 # Description: Tests for the dispatch monitor's wake-back - the sender wake, its log, the manager mail and the decline
-# Version: 1.2.1
+# Version: 1.3.1
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-26
 # =============================================
 
-"""Tests for apps/handlers/dispatch/dispatch_monitor.py's wake-back: wake_sender, main()'s wake and its report."""
+"""Tests for apps/handlers/dispatch/dispatch_monitor.py's wake-back: wake_sender, main()'s wake, its report, the cloud lane."""
 
 # Split out of test_dispatch_monitor.py on 2026-10-08 to keep that file under the
 # 1,200-line target: who is woken or mailed when a dispatch completes.
@@ -19,8 +19,10 @@ import os
 import time
 import pytest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import aipass.ai_mail.apps.handlers.dispatch.cloud as cloud_mod
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
 from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
     MAX_WAKE_DEPTH,
@@ -782,3 +784,178 @@ class TestWakeBackDeclinedByCaller:
         got["wake"].assert_called_once()
         assert got["wake"].call_args.args == ("@sender",)
         assert _report()["wake_result"] == "success"
+
+
+# === The cloud lane (FPLAN-1249) =============================================
+#
+# No local agent: the monitor starts a cloud session, records it on the dispatch mail, polls
+# `drone @git pr list` for the PR whose body carries the mail id, and writes the wake-back
+# itself. pr list (FPLAN-1248) is mocked here, as are script and claude.
+
+MAIL = "abc12345"
+URL = "https://claude.ai/code/session_01ABC"
+
+
+class _Clock:
+    """time for the poll: sleep advances it, so a ceiling passes without waiting."""
+
+    def __init__(self):
+        self.now = 1000.0
+        self.slept = 0
+
+    def time(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+        self.slept += 1
+
+
+def _pr(number, head="claude/fix-abc"):
+    return {"number": number, "head": head, "base": "dev", "state": "OPEN", "ci": "success", "title": f"T{number}"}
+
+
+def _cloud_run(tmp_path, monkeypatch, polls=(), view=True, delivered=True):
+    """Run the cloud lane with script, pr list and pr view faked; (result, argvs, mails sent, the mail after)."""
+    inbox = tmp_path / "inbox.json"
+    mail = {"id": MAIL, "subject": "S", "status": "new", "auto_execute": True, "cloud": {"requested": True}}
+    inbox.write_text(json.dumps({"messages": [mail]}), encoding="utf-8")
+    answers, argvs = list(polls), []
+
+    def fake_cli(cmd, cwd=None, env=None, timeout=60):
+        argvs.append(list(cmd))
+        if cmd[0] == "script":
+            said = f"Created cloud session: fix\nView: {URL}?from=cli&m=0\n" if view else "Error: no environment\n"
+            Path(cmd[-1]).write_text(said, encoding="utf-8")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[2:4] == ["pr", "list"]:
+            return SimpleNamespace(returncode=0, stdout=json.dumps(answers.pop(0) if answers else []), stderr="")
+        return SimpleNamespace(returncode=0, stdout=f"#{cmd[4]} T\n\ndispatch: {MAIL}\nDid the thing.", stderr="")
+
+    monkeypatch.setattr(cloud_mod, "run_cli", fake_cli)
+    monkeypatch.setattr(cloud_mod, "time", _Clock())
+    mails: list = []
+    cmd = cloud_mod.start_cmd("script", "claude", "env_1", "brief", str(tmp_path / "start.out"))
+    cfg = {"mail": MAIL, "poll": 180, "ceiling": 900}
+    result = cloud_mod.run(cmd, tmp_path, {}, cfg, "@hooks", inbox, lambda s, b: mails.append((s, b)) or delivered)
+    return result, argvs, mails, json.loads(inbox.read_text(encoding="utf-8"))["messages"][0]
+
+
+def _pr_lists(argvs):
+    return [a for a in argvs if a[2:4] == ["pr", "list"]]
+
+
+class TestCloudLane:
+    """cloud.run: the start, the session on the mail, the poll, the wake-back and the ceiling."""
+
+    def test_the_session_id_parses_from_the_view_line_and_is_recorded_on_the_mail(self, monkeypatch, tmp_path):
+        assert cloud_mod.parse_view(f"Created cloud session: x\nView: {URL}?from=cli&m=0\n") == (
+            "session_01ABC",
+            f"{URL}?from=cli&m=0",
+        )
+
+        _, _, _, mail = _cloud_run(tmp_path, monkeypatch)
+
+        assert mail["cloud"]["session_id"] == "session_01ABC"
+        assert mail["cloud"]["url"] == f"{URL}?from=cli&m=0"
+        assert mail["cloud"]["requested"] is True
+
+    def test_the_poll_reads_pr_list_by_the_mail_id_and_mails_one_wake_back_per_pr(self, monkeypatch, tmp_path):
+        """A head outside claude/ is not the session's; the PR leaving the list ends the poll."""
+        polls = [[], [_pr(12), _pr(99, head="feature/other")], [_pr(12)], []]
+
+        result, argvs, mails, mail = _cloud_run(tmp_path, monkeypatch, polls)
+
+        lists = _pr_lists(argvs)
+        assert lists[0] == [
+            "drone",
+            "@git",
+            "pr",
+            "list",
+            "--base",
+            "dev",
+            "--head",
+            "claude/",
+            "--marker",
+            MAIL,
+            "--json",
+        ]
+        assert len(lists) == 4
+        assert [s for s, _ in mails] == ["Cloud dispatch result: @hooks PR #12 (ci success)"]
+        body = mails[0][1]
+        for part in ("PR #12: T12", "Head: claude/fix-abc -> dev", "CI success", f"Session: {URL}", "Did the thing."):
+            assert part in body
+        assert mail["cloud"]["done"] is True
+        assert mail["cloud"]["results"] == [{"number": 12, "head": "claude/fix-abc", "state": "OPEN", "ci": "success"}]
+        assert mail["cloud"]["ended"] == "closed"
+        assert (result["exit_code"], result["status"], result["wake_result"]) == (
+            0,
+            "completed (cloud PR #12)",
+            "mailed",
+        )
+
+    def test_a_second_pr_after_a_steer_is_a_new_result(self, monkeypatch, tmp_path):
+        _, _, mails, mail = _cloud_run(tmp_path, monkeypatch, [[_pr(12)], [_pr(12), _pr(13)]])
+
+        assert [s.split(" PR ")[1] for s, _ in mails] == ["#12 (ci success)", "#13 (ci success)"]
+        assert [r["number"] for r in mail["cloud"]["results"]] == [12, 13]
+
+    def test_a_result_mail_that_did_not_go_is_not_reported_as_mailed(self, monkeypatch, tmp_path):
+        result, _, mails, _ = _cloud_run(tmp_path, monkeypatch, [[_pr(12)], []], delivered=False)
+
+        assert len(mails) == 1
+        assert (result["status"], result["wake_result"]) == ("completed (cloud PR #12)", "failed_result_mail")
+
+    def test_the_ceiling_writes_the_timeout_mail_and_the_mail_stays_open(self, monkeypatch, tmp_path):
+        result, argvs, mails, mail = _cloud_run(tmp_path, monkeypatch)
+
+        assert len(_pr_lists(argvs)) == 900 // 180
+        assert [s for s, _ in mails] == ["Cloud dispatch timeout: @hooks, no PR after 15 min"]
+        assert f"Session: {URL}" in mails[0][1] and "the mail stays open" in mails[0][1]
+        assert (mail["status"], mail["cloud"]["ended"]) == ("new", "ceiling")
+        assert "done" not in mail["cloud"]
+        assert (result["status"], result["wake_result"]) == ("TIMEOUT (cloud, no PR in 900s)", "mailed_timeout")
+
+    def test_a_start_with_no_view_line_is_refused_with_its_reason_and_never_polls(self, monkeypatch, tmp_path):
+        result, argvs, mails, mail = _cloud_run(tmp_path, monkeypatch, view=False)
+
+        assert result["exit_code"] == cloud_mod.START_FAILED
+        assert result["status"] == "REFUSED (cloud start printed no View line)"
+        assert [s for s, _ in mails] == ["Cloud dispatch refused: @hooks"]
+        assert "printed no View line" in mails[0][1] and "Error: no environment" in mails[0][1]
+        assert _pr_lists(argvs) == [] and "session_id" not in mail["cloud"]
+
+    def test_the_monitor_runs_the_cloud_lane_in_place_of_an_agent_and_reports_its_wake_back(
+        self, monkeypatch, main_argv, tmp_path
+    ):
+        """No local attempt, no bounce, no wake_sender: the lane's own mail is the wake-back."""
+        argv, _, _ = main_argv
+        sep = argv.index("--")
+        cfg = json.dumps({"mail": MAIL, "poll": 180, "ceiling": 900})
+        argv = [*argv[:sep], "--provider=cloud", f"--cloud={cfg}", "--", "script", "-qfec", "claude --cloud x", "log"]
+        lane = MagicMock(
+            return_value={
+                "exit_code": 0,
+                "status": "completed (cloud PR #12)",
+                "wake_result": "mailed",
+                "run_line": f"run: cloud · session {URL}",
+            }
+        )
+        monkeypatch.setattr(cloud_mod, "run", lane)
+        agent, bounce = MagicMock(), MagicMock()
+        monkeypatch.setattr(mod, "run_with_startup_check", agent)
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
+        monkeypatch.setattr("sys.argv", argv)
+        monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.paths.find_repo_root", MagicMock(return_value=tmp_path))
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 0
+        assert lane.call_args.args[0] == ["script", "-qfec", "claude --cloud x", "log"]
+        assert lane.call_args.args[3] == {"mail": MAIL, "poll": 180, "ceiling": 900}
+        agent.assert_not_called()
+        bounce.assert_not_called()
+        mod.wake_sender.assert_not_called()
+        assert (_report()["wake_result"], _report()["status"]) == ("mailed", "completed (cloud PR #12)")

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.12.6
+# Version: 3.13.0
 # Created: 2026-03-02
 # Modified: 2026-11-26
 # =============================================
@@ -25,6 +25,7 @@ from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
+from aipass.ai_mail.apps.handlers.dispatch import cloud as cloud_lane
 from aipass.ai_mail.apps.handlers.dispatch import session_pointer
 from aipass.ai_mail.apps.handlers.dispatch.pid_lock import (
     acquire_lock,
@@ -98,6 +99,8 @@ PROVIDER_CLAUDE = session_pointer.CLAUDE
 PROVIDER_CODEX = session_pointer.CODEX
 PROVIDER_OPENCODE = session_pointer.OPENCODE
 KNOWN_PROVIDERS: Tuple[str, ...] = (PROVIDER_CLAUDE, PROVIDER_CODEX, PROVIDER_OPENCODE)
+# Not in KNOWN_PROVIDERS: only dispatch --cloud reaches it, with the mail the session answers.
+PROVIDER_CLOUD = cloud_lane.CLOUD
 CODEX_LAST_MESSAGE_FILE = "dispatch_last_message.txt"
 
 # Fable is granted by name, not class. Only the fallback: the live grant is read from CONFIG_FILE.
@@ -277,7 +280,7 @@ def _read_json(filepath: Path) -> Optional[dict]:
 
 def _load_config() -> dict:
     """Load safety config for max_turns."""
-    defaults = {"max_turns_per_wake": 100}
+    defaults = {"max_turns_per_wake": 100, **cloud_lane.CONFIG_DEFAULTS}
     config = _read_json(CONFIG_FILE)
     if config is None:
         return defaults
@@ -665,6 +668,41 @@ def _opencode_cmd(
     return [*head, prompt]
 
 
+def _cloud_cmd(
+    claude_bin: str,
+    branch_path: Path,
+    email: str,
+    cloud: Dict[str, str],
+    subject: str,
+    config: dict,
+    fresh: bool,
+    status: DispatchStatus,
+) -> Tuple[List[str], Dict[str, Any]]:
+    """The cloud start argv and the monitor's {"mail", "poll", "ceiling"}; ([], {}) once a refusal is recorded."""
+    if fresh:
+        status.info("fresh", "cloud sessions are always fresh — --fresh / -c ignored")
+    env_id, refusal = cloud_lane.environment_id(branch_path)
+    if refusal:
+        status.fail("cloud", f"{email} not started in the cloud: {refusal}")
+        return [], {}
+    try:
+        script_bin = _find_bin("script")
+        mail_id = cloud_lane.mark_requested(branch_path / ".ai_mail.local" / "inbox.json", subject)
+    except (FileNotFoundError, OSError, ValueError) as e:
+        status.fail("cloud", f"{email} not started in the cloud: {e}")
+        return [], {}
+    if not mail_id:
+        status.fail("cloud", f"{email} not started in the cloud: no dispatch mail {subject!r} in its inbox to answer")
+        return [], {}
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import TRANSCRIPT_NAMES
+
+    log = str(branch_path / "logs" / TRANSCRIPT_NAMES["stdout"])
+    prompt = cloud_lane.brief(cloud.get("body", ""), email, mail_id)
+    cfg = {"mail": mail_id, "poll": config[cloud_lane.POLL_KEY], "ceiling": config[cloud_lane.CEILING_KEY]}
+    status.ok("cloud", f"mail {mail_id} · environment {env_id} · poll {cfg['poll']}s, ceiling {cfg['ceiling']}s")
+    return cloud_lane.start_cmd(script_bin, claude_bin, env_id, prompt, log), cfg
+
+
 def wake_branch(
     branch_email: str,
     custom_message: Optional[str] = None,
@@ -680,6 +718,7 @@ def wake_branch(
     provider: str = PROVIDER_CLAUDE,
     opencode_config: Optional[Dict[str, Any]] = None,
     grant: Optional[Dict[str, Any]] = None,
+    cloud: Optional[Dict[str, str]] = None,
 ) -> Tuple[DispatchStatus, bool]:
     """
     Spawn an agent (Claude, or Codex / OpenCode by provider) at the target branch with step-by-step status.
@@ -687,7 +726,10 @@ def wake_branch(
     admin is an ALREADY-DECIDED verdict (dispatch.py ran the grant check), never a request.
     True means "did what it should", not "woke an agent": check status.find_step("manager").
     A *grant* rides the register row; when the row cannot carry it, nothing is spawned.
+    *cloud* ({"body"}) makes it the cloud lane: the monitor starts a cloud session for the dispatch mail.
     """
+    if cloud is not None:
+        provider = PROVIDER_CLOUD
     json_handler.log_operation(
         "wake_branch",
         {"branch": branch_email, "fresh": fresh, "auto": auto, "model": model or DEFAULT_MODEL, "provider": provider},
@@ -763,7 +805,7 @@ def wake_branch(
         logger.warning("[wake] %s passport unreadable, waking in a lane that wakes managers too: %s", email, exc)
 
     # After the manager gate: a skipped wake must not first print a provider it never uses.
-    if provider not in KNOWN_PROVIDERS:
+    if provider not in KNOWN_PROVIDERS and cloud is None:
         status.fail("provider", f"unknown provider {provider!r} — known: {', '.join(KNOWN_PROVIDERS)}")
         return status, False
     status.ok("provider", provider)
@@ -772,10 +814,11 @@ def wake_branch(
         return status, False
 
     # Decided ONCE for both spawn lanes; a second site would let the rule drift.
-    if provider in (PROVIDER_CODEX, PROVIDER_OPENCODE):
+    if provider in (PROVIDER_CODEX, PROVIDER_OPENCODE, PROVIDER_CLOUD):
         # The Claude default and the Fable grant are Claude's; these take the slug verbatim or their own default.
         resolved_model = model or ""
-        status.ok("model", model or ("codex config default" if provider == PROVIDER_CODEX else "opencode default"))
+        default = {PROVIDER_CODEX: "codex config default", PROVIDER_OPENCODE: "opencode default"}
+        status.ok("model", model or default.get(provider, "cloud session default"))
     else:
         decision = resolve_wake_model(email, model)
         resolved_model = decision.model
@@ -898,10 +941,14 @@ def wake_branch(
         "json",
     ]
 
-    if provider == PROVIDER_CODEX:
-        claude_cmd = _codex_cmd(claude_bin, branch_path, email, prompt, resolved_model, fresh, status)
-    elif provider == PROVIDER_OPENCODE:
-        claude_cmd = _opencode_cmd(claude_bin, branch_path, email, prompt, resolved_model, fresh, status)
+    cloud_cfg: Dict[str, Any] = {}
+    if provider == PROVIDER_CLOUD:
+        claude_cmd, cloud_cfg = _cloud_cmd(
+            claude_bin, branch_path, email, cloud or {}, subject or "", config, fresh, status
+        )
+    elif provider in (PROVIDER_CODEX, PROVIDER_OPENCODE):
+        build = _codex_cmd if provider == PROVIDER_CODEX else _opencode_cmd
+        claude_cmd = build(claude_bin, branch_path, email, prompt, resolved_model, fresh, status)
     # The session comes from session_pointer, not -c's file mtime; -c is the no-pointer fallback.
     # Another host's pointer names a session Claude cannot resume, and -c would leave it in place.
     elif fresh or (session_pointer.read_pointer(branch_path) or {}).get("provider", PROVIDER_CLAUDE) != PROVIDER_CLAUDE:
@@ -922,6 +969,8 @@ def wake_branch(
         else:
             status.info("session", "no pointer — continuing newest transcript (-c)")
             claude_cmd = [claude_bin, "-c", *base_args]
+    if not claude_cmd:
+        return status, False
 
     log_dir = branch_path / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -933,7 +982,11 @@ def wake_branch(
     # wake_back rides argv, never spawn_env, which becomes the agent's own environment.
     from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import NO_WAKE_BACK_FLAG
 
-    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import OPENCODE_CONFIG_FLAG_PREFIX, PROVIDER_FLAG_PREFIX
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
+        CLOUD_FLAG_PREFIX,
+        OPENCODE_CONFIG_FLAG_PREFIX,
+        PROVIDER_FLAG_PREFIX,
+    )
 
     from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import requested_run
 
@@ -949,6 +1002,8 @@ def wake_branch(
         monitor_flags.append(f"{PROVIDER_FLAG_PREFIX}{provider}")
     if headless_config:
         monitor_flags.append(f"{OPENCODE_CONFIG_FLAG_PREFIX}{headless_config}")
+    if provider == PROVIDER_CLOUD:
+        monitor_flags.append(f"{CLOUD_FLAG_PREFIX}{json.dumps(cloud_cfg)}")
     monitor_cmd = [
         sys.executable,
         str(MONITOR_SCRIPT),
@@ -990,7 +1045,7 @@ def wake_branch(
             sender=sender,
             target=email,
             subject=subject or "",
-            expected_seconds=HARD_TIMEOUT,
+            expected_seconds=cloud_cfg["ceiling"] + cloud_lane.START_TIMEOUT if cloud_cfg else HARD_TIMEOUT,
             wake_back=wake_back,
             provider=provider,
             grant=grant,

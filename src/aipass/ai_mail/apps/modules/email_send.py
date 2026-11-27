@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: email_send.py
 # Description: Email Send Orchestration (extracted from email.py)
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-04-22
 # Modified: 2026-11-26
 # =============================================
@@ -17,10 +17,11 @@ from pathlib import Path
 from typing import List
 
 from aipass.prax import logger
-from aipass.cli import console, error, escape
+from aipass.cli import console, error, escape, warning
 from aipass.trigger import trigger
 
 from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
+from aipass.ai_mail.apps.handlers.dispatch import cloud as cloud_lane
 from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
 from aipass.ai_mail.apps.handlers.email.create import create_email_file, load_email_file
 from aipass.ai_mail.apps.handlers.email.header import prepend_dispatch_header
@@ -98,6 +99,10 @@ def handle_send(args: List[str]) -> bool:
         _send_interactive()
         return True
 
+    # Steered first: a refused steer sends no mail, so the record never claims a steer that did not happen.
+    if parsed.get("cloud") and not _steer_cloud(parsed["recipients"], parsed["message"]):
+        return True
+
     recipients = parsed["recipients"]
     from_branch = parsed.get("from_branch")
     if len(recipients) == 1:
@@ -134,6 +139,42 @@ def handle_send(args: List[str]) -> bool:
         ):
             ok += 1
     console.print(f"\nGroup send complete: {ok}/{len(recipients)} delivered", highlight=False)
+    return True
+
+
+def _steer_cloud(recipients: List[str], text: str) -> bool:
+    """Queue text into the recipient's open cloud dispatch session; False (after error()) when refused."""
+    from aipass.ai_mail.apps.handlers.dispatch.wake import resolve_branch
+    from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+
+    if len(recipients) != 1:
+        error("Not steered: --cloud steers one recipient's cloud session")
+        return False
+    target = recipients[0]
+    try:
+        resolved = resolve_branch(target)
+    except RegistryUnreadable as e:
+        error(f"Not steered: the registry is unreadable ({e})")
+        return False
+    if resolved is None:
+        error(f"Not steered: unknown agent {target}")
+        return False
+    try:
+        mail = cloud_lane.find_open(resolved[0] / ".ai_mail.local" / "inbox.json")
+    except (OSError, ValueError) as e:
+        error(f"Not steered: {target}'s inbox is unreadable ({e})")
+        return False
+    if mail is None:
+        error(f'Not steered: {target} has no open cloud dispatch; start one with dispatch {target} "S" "B" --cloud')
+        return False
+    session = mail["cloud"]
+    steered, why = cloud_lane.steer(text, session["session_id"])
+    if not steered:
+        error(f"Not steered: {why}")
+        return False
+    console.print(f"Steered {target}'s cloud session {session['session_id']} (dispatch mail {mail.get('id')})")
+    if session.get("ended"):
+        warning(f"Its poll has ended ({session['ended']}): a new PR will not be mailed back")
     return True
 
 
@@ -338,6 +379,9 @@ def print_help():
     )
     console.print(
         "  [cyan]--upsert-key KEY[/cyan] [cyan]--kind KIND[/cyan]  [dim]explained in: drone @ai_mail inbox --help[/dim]"
+    )
+    console.print(
+        '  [cyan]--cloud[/cyan]  [dim]email @x "text" --cloud steers @x\'s open cloud dispatch, then mails[/dim]'
     )
     console.print()
     console.print("[yellow]Examples:[/yellow]")

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_email_module_send.py
 # Description: Tests for email_send.py's send lane and email.py's command routing
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-10-08
 # Modified: 2026-11-26
 # =============================================
@@ -15,11 +15,15 @@
 # sentry: no-test-needed(shared) — handle_inbox() and the other reading handlers: tests/test_email_module.py
 
 import importlib.util
+import json
+import subprocess
 
 import pytest
 from unittest.mock import MagicMock
 
 from aipass.ai_mail.apps.handlers import central_writer
+import aipass.ai_mail.apps.handlers.dispatch.cloud as cloud_mod
+import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 from aipass.ai_mail.apps.modules import email_send as email_send_mod
 from aipass.ai_mail.apps.modules.email import (
     handle_command,
@@ -691,3 +695,59 @@ class TestSendRefusesAMissingSubject:
         assert handle_send(args) is True
 
         assert len(errors) == 1 and named in errors[0], errors
+
+
+class TestCloudSteer:
+    """`email @x "text" --cloud` queues the text into @x's open cloud session, then records the mail as today."""
+
+    def _steer(self, monkeypatch, tmp_path, messages, answer='{"ok": true}'):
+        branch = tmp_path / "hooks"
+        (branch / ".ai_mail.local").mkdir(parents=True)
+        (branch / ".ai_mail.local" / "inbox.json").write_text(json.dumps({"messages": messages}), encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "resolve_branch", lambda target, admin=False: (branch, "@hooks"))
+        monkeypatch.setattr(wake_mod, "_find_bin", lambda name, extra_dirs=(): name)
+        steers: list = []
+        monkeypatch.setattr(
+            cloud_mod,
+            "run_cli",
+            lambda cmd, cwd=None, env=None, timeout=60: (
+                steers.append(list(cmd)) or subprocess.CompletedProcess(cmd, 0, answer, "")
+            ),
+        )
+        sent: list = []
+        _stub_single_send(monkeypatch, tmp_path, on_send=sent.append)
+        errors: list[str] = []
+        monkeypatch.setattr(email_send_mod, "error", lambda msg: errors.append(msg))
+        assert handle_send(["@hooks", "the test still fails, fix it", "--cloud"]) is True
+        return steers, sent, errors
+
+    def test_the_text_goes_to_the_open_sessions_id_and_the_mail_is_recorded(self, monkeypatch, tmp_path):
+        open_mail = {"id": "m2", "status": "opened", "cloud": {"session_id": "session_02", "url": "u"}}
+        closed = {"id": "m1", "status": "closed", "cloud": {"session_id": "session_01"}}
+        steers, sent, errors = self._steer(monkeypatch, tmp_path, [open_mail, closed])
+
+        text = "the test still fails, fix it"
+        assert steers == [["claude", "-p", text, "--cloud", "session_02", "--output-format", "json"]]
+        assert [a[:3] for a in sent] == [("@hooks", "Cloud steer", text)]
+        assert errors == []
+
+    def test_no_open_cloud_dispatch_is_refused_and_nothing_is_steered_or_sent(self, monkeypatch, tmp_path):
+        closed = {"id": "m1", "status": "closed", "cloud": {"session_id": "session_01"}}
+        steers, sent, errors = self._steer(monkeypatch, tmp_path, [closed, {"id": "m0", "status": "new"}])
+
+        assert steers == [] and sent == []
+        assert len(errors) == 1 and errors[0].startswith("Not steered: @hooks has no open cloud dispatch")
+
+    def test_a_steer_claude_refuses_sends_no_mail(self, monkeypatch, tmp_path):
+        open_mail = {"id": "m2", "status": "new", "cloud": {"session_id": "session_02"}}
+        steers, sent, errors = self._steer(monkeypatch, tmp_path, [open_mail], answer='{"ok": false}')
+
+        assert len(steers) == 1 and sent == []
+        assert errors == ['Not steered: claude -p --cloud session_02 exited 0 without ok: {"ok": false}']
+
+    def test_email_help_names_the_cloud_flag(self, capsys: pytest.CaptureFixture[str]):
+        printed = _StdoutLines(capsys)
+
+        assert email_send_mod.handle_command("email", ["--help"]) is True
+
+        assert any("--cloud" in p and "steers" in p for p in printed)

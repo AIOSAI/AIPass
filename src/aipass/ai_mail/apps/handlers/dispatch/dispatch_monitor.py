@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.17.2
+# Version: 2.18.0
 # Created: 2026-03-02
 # Modified: 2026-11-26
 # =============================================
@@ -26,6 +26,7 @@ from typing import Optional, Tuple
 
 from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.handlers.dispatch import cloud as cloud_lane
 from aipass.ai_mail.apps.handlers.dispatch import register, session_pointer
 from aipass.ai_mail.apps.handlers.dispatch import report as report_mod
 from aipass.ai_mail.apps.handlers.paths import find_project_root
@@ -81,6 +82,8 @@ PROVIDER_FLAG_PREFIX = "--provider="
 # `--opencode-config=<json>` before "--": the caller's OpenCode config, set in the child env after the strip.
 OPENCODE_CONFIG_FLAG_PREFIX = "--opencode-config="
 OPENCODE_CONFIG_ENV = "OPENCODE_CONFIG_CONTENT"
+# `--cloud=<json>` before "--": {"mail", "poll", "ceiling"} for --provider=cloud, whose argv starts the session.
+CLOUD_FLAG_PREFIX = "--cloud="
 CODEX = session_pointer.CODEX
 # run_with_startup_check's own failures: the agent never spawned, or outran HARD_TIMEOUT and was killed.
 SPAWN_FAILED = -2
@@ -937,7 +940,7 @@ def prepend_to_path(path_value: str, entry: str) -> str:
 def main():
     """
     Usage: dispatch_monitor.py <branch_email> <lock_file> <sender> <stderr_log> [--no-wake-back]
-           [--provider=codex|opencode] [--opencode-config=<json>] -- <agent_argv...>
+           [--provider=codex|opencode|cloud] [--opencode-config=<json>] [--cloud=<json>] -- <agent_argv...>
 
     --no-wake-back declines the completion wake-back; sender is still used for bounce mail.
     """
@@ -964,6 +967,9 @@ def main():
             if flag.startswith(OPENCODE_CONFIG_FLAG_PREFIX)
         ),
         "",
+    )
+    cloud_cfg = next(
+        (flag[len(CLOUD_FLAG_PREFIX) :] for flag in monitor_flags if flag.startswith(CLOUD_FLAG_PREFIX)), ""
     )
     claude_cmd = sys.argv[sep_idx + 1 :]
 
@@ -1066,7 +1072,22 @@ def main():
     bg_orphaned = False
     cmd = list(claude_cmd)
 
-    for attempt in range(1, 1 if lock_refusal else 4):
+    # The cloud lane runs no local agent: one start, then the poll; its own mails replace bounce and wake-back.
+    cloud_result = None
+    if provider == cloud_lane.CLOUD and not lock_refusal:
+        cloud_result = cloud_lane.run(
+            claude_cmd,
+            branch_path,
+            spawn_env,
+            json.loads(cloud_cfg),
+            branch_email,
+            lock_path.parent / "inbox.json",
+            lambda subject, body: _send_from_ai_mail(sender, subject, body, branch_path, kind="notice").returncode == 0,
+        )
+        exit_code = cloud_result["exit_code"]
+        attempts.append({"attempt": 1, "exit_code": exit_code, "startup_failed": False, "mode": "cloud"})
+
+    for attempt in range(1, 1 if lock_refusal or cloud_result else 4):
         cmd, mode = cmd_for_attempt(claude_cmd, attempt, branch_path, provider)
         if attempt == 3 and mode == "fresh" and cmd != claude_cmd:
             logger.info("[monitor] %s attempt %d/3: switching to --fresh", branch_email, attempt)
@@ -1189,10 +1210,15 @@ def main():
     # Success only. `cmd` is the LAST attempt's: strike 3 remints, so the original would misreport.
     if exit_code == 0 and provider == CODEX:
         reconcile_codex_pointer(branch_path, stdout_log)
-    elif exit_code == 0 and provider != OPENCODE:
+    elif exit_code == 0 and provider not in (OPENCODE, cloud_lane.CLOUD):
         reconcile_pointer(branch_path, stdout_log, cmd)
     try:
-        run_line = stamp_run(branch_path, cmd, provider, opencode_config, exit_code)
+        # A cloud run never touches the branch's local session pointer.
+        run_line = (
+            cloud_result["run_line"]
+            if cloud_result
+            else stamp_run(branch_path, cmd, provider, opencode_config, exit_code)
+        )
     except Exception as e:
         # The run line is an extra; the bounce, wake-back, report and register close below are not.
         logger.warning("[monitor] %s run record failed, reporting without it: %s", branch_email, e)
@@ -1223,7 +1249,7 @@ def main():
             stderr_fh.close()
 
     bounce_delivered = True
-    if exit_code != 0:
+    if exit_code != 0 and cloud_result is None:
         attempt_details = []
         for a in attempts:
             if a["startup_failed"]:
@@ -1276,13 +1302,17 @@ def main():
         status = f"INCOMPLETE (bg tasks terminated, {duration}s)"
     if max_turns_hit:
         status = f"MAX TURNS HIT ({duration}s)"
+    if cloud_result:
+        status = cloud_result["status"]
     # The outcome field the report, the register's close and the feed title share.
     if not bounce_delivered:
         status = f"{status}, bounce NOT delivered to {sender}"
     logger.info("[monitor] @%s %s — %ds", branch_name, status, duration)
 
     # Before the report, so wake_result is known when it is assembled.
-    if wake_back:
+    if cloud_result:
+        wake_result = cloud_result["wake_result"]
+    elif wake_back:
         wake_result = wake_sender(sender, branch_email, exit_code, target_home=branch_path, run_line=run_line)
     else:
         logger.info(

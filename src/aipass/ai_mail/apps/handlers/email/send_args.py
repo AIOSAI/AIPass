@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: send_args.py
 # Description: Email Send Argument Parsing Handler
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-03-08
-# Modified: 2026-11-21
+# Modified: 2026-11-26
 # =============================================
 
 """
@@ -15,6 +15,9 @@ from typing import List, Dict, Optional, Any
 
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.email.mail_kind import MAIL_KINDS
+
+# `email @x "text" --cloud` names no subject: the steer text is the message.
+CLOUD_STEER_SUBJECT = "Cloud steer"
 
 
 def _flag_error(error: str, **parsed: Any) -> Dict[str, Any]:
@@ -29,6 +32,7 @@ def _flag_error(error: str, **parsed: Any) -> Dict[str, Any]:
         "message": None,
         "upsert_key": None,
         "kind": None,
+        "cloud": False,
         "mode": "error",
         "error": error,
     }
@@ -46,6 +50,9 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
 
     no_memory_save = "--no-memory-save" in working_args
     working_args = [a for a in working_args if a != "--no-memory-save"]
+
+    cloud = "--cloud" in working_args
+    working_args = [a for a in working_args if a != "--cloud"]
 
     from_branch = None
     if "--from" in working_args:
@@ -115,6 +122,9 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
         else:
             rest.append(a)
 
+    if cloud and recipients and len(rest) == 1:
+        rest = [CLOUD_STEER_SUBJECT, *rest]
+
     refusal = None
     if recipients and len(rest) >= 2:
         usage = 'Usage: send @recipient "subject" "message"'
@@ -157,6 +167,7 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
         "message": message,
         "upsert_key": upsert_key,
         "kind": kind,
+        "cloud": cloud,
         "mode": mode,
         "error": None if mode != "error" else "Usage: send @recipient [subject] [message]",
     }

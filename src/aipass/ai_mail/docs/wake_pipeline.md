@@ -178,7 +178,7 @@ returns a `ModelDecision(model, refusal)`:
 
 ## Other providers
 
-`--provider codex` and `--provider opencode` ride the same path; what differs (argv, streams, models, process scans) is in [wake_providers.md](wake_providers.md).
+`dispatch --cloud` is a fourth shape on the same path, in [cloud_lane.md](cloud_lane.md). `--provider codex` and `--provider opencode` ride the same path; what differs (argv, streams, models, process scans) is in [wake_providers.md](wake_providers.md).
 
 ## The recipient's dashboard is refreshed before the spawn
 
@@ -207,6 +207,7 @@ in the inbox.
 ## Related
 
 - [wake_providers.md](wake_providers.md) — the Codex and OpenCode providers
+- [cloud_lane.md](cloud_lane.md) — `--cloud`: the session in the target's cloud VM and its PR
 - [wake_lanes.md](wake_lanes.md) — the admin, cross-project and `@all` lanes, and the reply return path
 - [dispatch_register_and_feed.md](dispatch_register_and_feed.md) — the register row a wake opens and the feed it writes
 - [identity_and_boundaries.md](identity_and_boundaries.md) — who may claim to be the sender a wake trusts
