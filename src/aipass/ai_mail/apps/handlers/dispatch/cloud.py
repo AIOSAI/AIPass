@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: cloud.py
 # Description: The cloud dispatch lane: start a Claude Code cloud session, record it on the mail, poll for its PR
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-11-26
 # Modified: 2026-11-26
 # =============================================
@@ -39,6 +39,7 @@ START_TIMEOUT = 300
 START_FAILED = -8
 VIEW_LINE = re.compile(r"View: (https://claude\.ai/code/([A-Za-z0-9_-]+)\S*)")
 BODY_LINES = 12
+RESULT_KEYS = ("number", "head", "head_sha", "url", "state", "ci")
 
 FOOTER = (
     "\n\n---\nYou are {target} in a Claude Code cloud VM, at the clone root. AIPass is installed and your hooks "
@@ -266,7 +267,7 @@ def wake_back_mail(target: str, mail_id: str, row: dict, url: str, body_head: st
     subject = f"Cloud dispatch result: {target} PR #{number} (ci {row.get('ci')})"
     body = (
         f"{target}'s cloud session answered mail {mail_id} with PR #{number}: {row.get('title')}\n"
-        f"PR: #{number} (read it: drone @git pr view {number})\n"
+        f"PR: #{number} {row.get('url') or ''} (read it: drone @git pr view {number})\n"
         f"Head: {row.get('head')} -> {row.get('base')} · state {row.get('state')} · CI {row.get('ci')}\n"
         f"Session: {url}\n"
         f'Steer it: drone @ai_mail email {target} "text" --cloud\n\n'
@@ -287,6 +288,12 @@ def timeout_mail(target: str, mail_id: str, url: str, ceiling: int) -> Tuple[str
     return subject, body
 
 
+def _is_new(row: dict, reported: Dict[object, dict]) -> bool:
+    """A PR number not yet reported, or a new head sha on one that was (a push after a steer)."""
+    old = reported.get(row.get("number"))
+    return old is None or old.get("head_sha") != row.get("head_sha")
+
+
 def _poll(
     cfg: dict, cwd: Path, target: str, url: str, inbox_file: Path, mail: Callable[[str, str], bool]
 ) -> Tuple[List[dict], str]:
@@ -300,12 +307,12 @@ def _poll(
             continue
         if reported and not rows:
             return list(reported.values()), "closed"
-        for row in (r for r in rows if r.get("number") not in reported):
+        for row in (r for r in rows if _is_new(r, reported)):
             reported[row.get("number")] = row
             row["mailed"] = mail(*wake_back_mail(target, mail_id, row, url, pr_body_head(row.get("number"), cwd)))
             if not row["mailed"]:
                 logger.warning("[cloud] result mail for %s PR #%s NOT delivered", mail_id, row.get("number"))
-            results = [{k: r.get(k) for k in ("number", "head", "state", "ci")} for r in reported.values()]
+            results = [{k: r.get(k) for k in RESULT_KEYS} for r in reported.values()]
             update_mail(inbox_file, mail_id, done=True, results=results)
     return list(reported.values()), "ceiling"
 

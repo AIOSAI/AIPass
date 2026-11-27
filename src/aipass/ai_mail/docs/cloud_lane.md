@@ -72,7 +72,7 @@ The dispatch mail in the target's inbox carries a `cloud` block, written under t
 |---|---|---|
 | `requested` | at send | `true`: this dispatch asked for the cloud |
 | `session_id`, `url`, `started` | at start | the session and its View URL |
-| `done`, `results` | per PR | `results` is `[{number, head, state, ci}]` for every PR reported |
+| `done`, `results` | per PR | `results` is `[{number, head, head_sha, url, state, ci}]`, the latest row of every PR reported |
 | `ended` | when the poll stops | `closed` (a reported PR left the list) or `ceiling` |
 
 The lane never closes the mail.
@@ -84,7 +84,8 @@ config (`wake.CONFIG_FILE`), the monitor reads
 `drone @git pr list --base dev --head claude/ --marker <mail id> --json` and keeps rows with
 base `dev` and a `claude/` head. A read that fails is logged and retried at the next poll.
 
-Each new PR number mails the sender `Cloud dispatch result: @x PR #N (ci <state>)`: the title,
+Each new PR number, and each new `head_sha` on a PR already reported (a push after a steer),
+mails the sender `Cloud dispatch result: @x PR #N (ci <state>)`: the title, the PR url and
 `drone @git pr view N`, head and base with state and CI, the session URL, the steer command and
 the first 12 lines of the PR body. A result mail that does not go is logged and the report's
 `wake_result` reads `failed_result_mail`. The status is `completed (cloud PR #N...)`.
@@ -109,10 +110,6 @@ a PR. With one text argument the subject is `Cloud steer`.
 
 ## Limits
 
-- A push to an existing PR is not a new result: the pr list rows carry the head branch name,
-  no commit sha, so only a new PR number is reported.
-- The result mail names the PR number and `drone @git pr view N`, not a URL: the rows carry no
-  URL.
 - Mail does not cross machines; the VM's mailbox dies with it, so every mail of this lane is
   written by the local monitor.
 - An idle VM pauses and the next message restores it; after a long stop the conversation

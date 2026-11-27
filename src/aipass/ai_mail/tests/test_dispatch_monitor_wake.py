@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_wake.py
 # Description: Tests for the dispatch monitor's wake-back - the sender wake, its log, the manager mail and the decline
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-10-08
 # Modified: 2026-11-26
 # =============================================
@@ -811,8 +811,12 @@ class _Clock:
         self.slept += 1
 
 
-def _pr(number, head="claude/fix-abc"):
-    return {"number": number, "head": head, "base": "dev", "state": "OPEN", "ci": "success", "title": f"T{number}"}
+URL12 = "https://github.com/o/r/pull/12"
+
+
+def _pr(number, head="claude/fix-abc", sha="a1"):
+    row = {"number": number, "head": head, "base": "dev", "state": "OPEN", "ci": "success", "title": f"T{number}"}
+    return {**row, "head_sha": sha, "url": f"https://github.com/o/r/pull/{number}"}
 
 
 def _cloud_run(tmp_path, monkeypatch, polls=(), view=True, delivered=True):
@@ -886,7 +890,9 @@ class TestCloudLane:
         for part in ("PR #12: T12", "Head: claude/fix-abc -> dev", "CI success", f"Session: {URL}", "Did the thing."):
             assert part in body
         assert mail["cloud"]["done"] is True
-        assert mail["cloud"]["results"] == [{"number": 12, "head": "claude/fix-abc", "state": "OPEN", "ci": "success"}]
+        assert mail["cloud"]["results"] == [
+            {"number": 12, "head": "claude/fix-abc", "head_sha": "a1", "url": URL12, "state": "OPEN", "ci": "success"}
+        ]
         assert mail["cloud"]["ended"] == "closed"
         assert (result["exit_code"], result["status"], result["wake_result"]) == (
             0,
@@ -899,6 +905,13 @@ class TestCloudLane:
 
         assert [s.split(" PR ")[1] for s, _ in mails] == ["#12 (ci success)", "#13 (ci success)"]
         assert [r["number"] for r in mail["cloud"]["results"]] == [12, 13]
+
+    def test_a_push_to_the_same_pr_is_a_new_result_and_the_mail_links_the_pr(self, monkeypatch, tmp_path):
+        _, _, mails, mail = _cloud_run(tmp_path, monkeypatch, [[_pr(12)], [_pr(12)], [_pr(12, sha="b2")]])
+
+        assert [s for s, _ in mails] == ["Cloud dispatch result: @hooks PR #12 (ci success)"] * 2
+        assert "PR: #12 https://github.com/o/r/pull/12" in mails[0][1]
+        assert [r["head_sha"] for r in mail["cloud"]["results"]] == ["b2"]
 
     def test_a_result_mail_that_did_not_go_is_not_reported_as_mailed(self, monkeypatch, tmp_path):
         result, _, mails, _ = _cloud_run(tmp_path, monkeypatch, [[_pr(12)], []], delivered=False)
