@@ -35,6 +35,7 @@ from pathlib import Path
 
 from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
+from aipass.hooks.apps.handlers.config.loader import seat_at_root
 from aipass.hooks.apps.handlers.config.opencode_paths import opencode_db_path, opencode_store
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.hooks.apps.handlers.json import json_handler
@@ -65,7 +66,7 @@ def user_settings_path() -> Path:
 
 
 def find_branch_dir(cwd: str) -> Path | None:
-    """Resolve the branch root (src/aipass/<name>) from a cwd: the one walk the lifecycle handlers share."""
+    """Resolve the branch root (src/aipass/<name>) from a cwd, else $AIPASS_SEAT at a repo root."""
     parts = Path(cwd).parts
     for i, part in enumerate(parts):
         if part == "aipass" and i > 0 and parts[i - 1] == "src":
@@ -74,7 +75,7 @@ def find_branch_dir(cwd: str) -> Path | None:
                 return branch_dir
     if (Path(cwd) / ".trinity").is_dir():
         return Path(cwd)
-    return None
+    return seat_at_root(cwd)
 
 
 def transcript_provider(transcript_path: str) -> str:

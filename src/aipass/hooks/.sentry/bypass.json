@@ -261,12 +261,12 @@
       "file": "apps/modules/context_window.py",
       "standard": "logged_fallback",
       "lines": [
-        157,
-        160,
-        197,
-        295,
-        358,
-        380
+        158,
+        161,
+        198,
+        296,
+        359,
+        381
       ],
       "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 157-160: an unreadable transcript (Claude's or a Codex rollout) reads as no usage. 197: an unreadable status-line window file reads as window unknown, logged at INFO. 295: an unreadable OpenCode store reads as no usage, logged at INFO. 358: an unreadable OpenCode catalog reads as no limit, so the window is unknown, logged at INFO. 380: an unreadable limit cache reads as empty, so the catalog is read, logged at INFO."
     },
@@ -583,7 +583,7 @@
       "file": "apps/handlers/config/loader.py",
       "standard": "fallback",
       "lines": [
-        171
+        185
       ],
       "reason": "Fails toward MORE enforcement: an unreadable AIPass config runs the built-in gate set from gates.builtin_config(), never no gates. It logs at ERROR, which @trigger's log watcher escalates."
     },
@@ -591,7 +591,7 @@
       "file": "apps/handlers/config/loader.py",
       "standard": "fallback",
       "lines": [
-        319
+        333
       ],
       "reason": "The guard file only stops a repeat of the one-per-session never-enrolled nudge; if it cannot be written the user sees the nudge again, which is itself the visible signal. No decision rests on it."
     },
@@ -1150,7 +1150,7 @@
       "file": "apps/modules/context_window.py",
       "standard": "fallback",
       "lines": [
-        115
+        116
       ],
       "reason": "A provider transcript still being written ends mid-line as a matter of course: the torn line is skipped and the scan reads the next newest. The transcript is the provider's, only read here."
     },
@@ -1158,7 +1158,7 @@
       "file": "apps/modules/context_window.py",
       "standard": "fallback",
       "lines": [
-        155
+        156
       ],
       "reason": "Absence, not failure: on turn 0 the provider has not written the transcript yet, so there is no usage to read and the gauge stays quiet. Any other read error is logged at WARNING by the handler below it."
     },
@@ -1166,14 +1166,14 @@
       "file": "apps/modules/context_window.py",
       "standard": "fallback",
       "lines": [
-        195,
-        235,
-        293,
-        356,
-        396,
-        407,
-        419,
-        436
+        196,
+        236,
+        294,
+        357,
+        397,
+        408,
+        420,
+        437
       ],
       "reason": "Read-only inputs of the advisory context gauge (status-line window file, provider settings, OpenCode store and config, Codex config and rollout), each owned by its provider and never written here: an unreadable one costs a reading, and the window falls to the next source or the gauge stays quiet."
     },
@@ -1181,7 +1181,7 @@
       "file": "apps/modules/context_window.py",
       "standard": "fallback",
       "lines": [
-        378
+        379
       ],
       "reason": "A rebuildable cache of catalog limits: an unreadable one is left as found (None stops the write-back) and the limit is read from the OpenCode catalog itself, so the answer is still right. WARNING, escalated by @trigger, names it."
     },
@@ -1256,7 +1256,7 @@
       "file": "apps/handlers/config/loader.py",
       "standard": "logged_fallback",
       "lines": [
-        198
+        212
       ],
       "reason": "None here is the documented answer to find_project_config: serve the AIPass gate set, never no hooks. An unreadable trust registry fails toward MORE enforcement. It logs at ERROR naming the project and the cure, which @trigger escalates."
     },

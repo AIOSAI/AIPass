@@ -115,6 +115,16 @@ a `period`/`offset` that is not a whole number) logs ERROR and serves the global
 rewritten. Every decision line ends `beat=on|off session=… branch=<name>`. The post-compact backstop,
 the mail loop and the degraded mode never read the override. The shipped config names no branch.
 
+**A repo root can name its seat.** A Claude Code cloud session opens at the clone's root and cannot
+leave it, and a root is under no branch. There, and only there, `AIPASS_SEAT=<branch>` stands in for
+the cwd. `loader.seat_at_root` answers `src/aipass/<branch>` when the cwd holds `src/aipass` and that
+branch holds `.trinity/`; any other name (a path, a dot name, no such branch) answers nothing. The three
+walks use it at their no-branch exit: `grounding_content.find_branch_root` (branch prompt, cadence
+key, mail banner), `grounding_content._find_passport` (identity) and `context_window.find_branch_dir`.
+A cwd inside a branch always wins over the variable. The context gauge reads only the transcript, so
+it is silent on any first prompt until an assistant reply carries usage. The presence gate,
+`compass_recall` and `feedback_pulse` walk from the cwd on their own and do not read the variable.
+
 ## Persistent Alerts
 
 The `persistent_alert` handler (`prompt/persistent_alert.py`) injects advisory banners into every prompt when active alerts exist. General-purpose — any agent can raise alerts (prax for runaway logs, trigger for medic, backup for sync failures).

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_context_window.py
-# Version: 1.8.1
+# Version: 1.9.0
 # Description: Tests for shared context_window module (live status-line window since 1.8.0)
 # Branch: hooks
 # Created: 2026-07-20
@@ -20,6 +20,7 @@ import json
 import pytest
 
 from aipass.hooks.apps.modules import context_window
+from aipass.hooks.apps.modules.grounding_content import find_branch_root
 from aipass.hooks.apps.modules.context_window import (
     AUTOCOMPACT_BUFFER,
     compact_threshold,
@@ -102,6 +103,38 @@ class TestFindBranchDir:
     def test_returns_none_when_unresolvable(self, tmp_path):
         result = find_branch_dir(str(tmp_path))
         assert result is None
+
+
+def _clone(tmp_path):
+    """A repo root holding src/aipass/devpulse and src/aipass/sentry, each a branch with .trinity/."""
+    (tmp_path / "pyproject.toml").write_text("", encoding="utf-8")
+    for name in ("devpulse", "sentry"):
+        (tmp_path / "src" / "aipass" / name / ".trinity").mkdir(parents=True)
+    return tmp_path
+
+
+@pytest.mark.parametrize("resolve", [find_branch_dir, find_branch_root])
+class TestAipassSeatAtTheRoot:
+    """A cloud session stands at the clone's root: $AIPASS_SEAT names the branch there, and only there."""
+
+    def test_the_root_resolves_to_the_named_seat(self, tmp_path, monkeypatch, resolve):
+        root = _clone(tmp_path)
+        monkeypatch.setenv("AIPASS_SEAT", "devpulse")
+        assert resolve(str(root)) == root / "src" / "aipass" / "devpulse"
+
+    def test_the_root_without_the_variable_resolves_to_nothing(self, tmp_path, monkeypatch, resolve):
+        monkeypatch.delenv("AIPASS_SEAT", raising=False)
+        assert resolve(str(_clone(tmp_path))) is None
+
+    def test_a_branch_cwd_wins_over_the_variable(self, tmp_path, monkeypatch, resolve):
+        sentry = _clone(tmp_path) / "src" / "aipass" / "sentry"
+        monkeypatch.setenv("AIPASS_SEAT", "devpulse")
+        assert resolve(str(sentry)) == sentry
+
+    @pytest.mark.parametrize("seat", ["../devpulse", "nope", ".trinity"])
+    def test_a_name_that_is_not_a_seat_resolves_to_nothing(self, tmp_path, monkeypatch, resolve, seat):
+        monkeypatch.setenv("AIPASS_SEAT", seat)
+        assert resolve(str(_clone(tmp_path))) is None
 
 
 class TestReadLatestUsage:

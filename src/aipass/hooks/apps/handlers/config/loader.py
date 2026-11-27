@@ -75,6 +75,20 @@ def aipass_home() -> Path | None:
     return None
 
 
+def seat_at_root(cwd: str) -> Path | None:
+    """The branch $AIPASS_SEAT names, only when *cwd* is a repo root (it holds src/aipass); else None.
+
+    A cloud session cannot leave the clone's root, so the variable stands in for the cwd there and
+    nowhere else. The name must be one plain directory under src/aipass that holds .trinity/.
+    """
+    name = os.environ.get("AIPASS_SEAT", "")
+    fleet = Path(cwd).resolve() / "src" / AIPASS
+    if not name or name != Path(name).name or name.startswith(".") or not fleet.is_dir():
+        return None
+    seat = fleet / name
+    return seat if (seat / ".trinity").is_dir() else None
+
+
 def fleet_rows(repo_root: Path) -> list[dict]:
     """Every citizen under *repo_root* (core, resident, declared-root), each with an absolute path.
 
