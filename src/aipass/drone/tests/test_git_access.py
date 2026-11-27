@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access — the tiers, the owner gate and its log severity
-# Version: 1.8.0
+# Version: 1.8.1
 # Created: 2026-05-12
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py: the git tiers and how owner tier is earned per repo."""
@@ -16,6 +16,7 @@ from __future__ import annotations
 import ast
 import inspect
 import json
+import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -524,6 +525,32 @@ class TestNoSeatLiftsItsOwnGate:
         monkeypatch.setenv("AIPASS_GIT_AUTH_MODE", value)
         with pytest.raises(PermissionError, match="is not authorized for 'commit'"):
             verify_git_access("commit")
+
+
+class TestTheSeatVariableIsNotAnOwnerCredential:
+    """AIPASS_SEAT names who is sitting at a passportless root; only the cwd inside the seat earns owner tier."""
+
+    @pytest.fixture()
+    def root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        make_owner_project(tmp_path, branch_dir=tmp_path / "src" / "aipass" / "devpulse")
+        monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
+        monkeypatch.setenv("AIPASS_SEAT", "devpulse")
+        return tmp_path
+
+    def test_a_seat_at_the_root_is_refused_commit_and_still_reads_pr_list(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: drop the cwd check, and one variable at the clone root holds the only write tier."""
+        monkeypatch.chdir(root)
+
+        with pytest.raises(PermissionError, match=re.escape(auth.REFUSE_SEAT.format(tier="owner-tier"))):
+            verify_git_access("commit")
+        assert verify_git_access("pr-read") == "devpulse"
+
+    def test_the_same_seat_with_the_cwd_inside_it_commits(self, root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(root / "src" / "aipass" / "devpulse")
+
+        assert verify_git_access("commit") == "devpulse"
 
 
 class TestRegistryIdIsNotASecret:

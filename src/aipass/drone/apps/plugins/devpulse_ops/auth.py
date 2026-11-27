@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.16.2
+# Version: 1.17.1
 # Created: 2026-03-30
 # Modified: 2026-11-26
 # =============================================
@@ -21,7 +21,7 @@ from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.repo_context import AIPASS_REGISTRY_NAME
 from aipass.drone.apps.handlers.git import release_handler, repo_door, session_home
-from aipass.drone.apps.modules.router import caller_seat
+from aipass.drone.apps.modules.router import caller_cwd, caller_seat
 from aipass.drone.apps.modules import RegistryMismatchError
 from aipass.drone.apps.modules.config import get_registry_path
 from aipass.drone.apps.modules.registry import load_registry
@@ -187,6 +187,8 @@ _EXTERNAL_ONLY_VERBS = frozenset({"push"})
 # authority: not shown to be the owner, ERROR, "not authorized".
 # capability: proven owner, untranslated verb, WARNING, "cannot run here".
 _AUTHORITY = "authority"
+# AIPASS_SEAT is one environment variable, weaker than the cwd it stands in for: it names a seat, it earns no write.
+REFUSE_SEAT = "{tier} verbs need the cwd inside the seat; AIPASS_SEAT is not enough"
 _CAPABILITY = "capability"
 
 
@@ -510,10 +512,16 @@ def _raise_refusal(command: str, caller_info: Caller, refusal: Refusal | None) -
         raise PermissionError(msg)
 
 
+def _seat_only(tier: str) -> Refusal | None:
+    """A write tier's refusal when the caller was named by AIPASS_SEAT rather than found at the cwd."""
+    return Refusal(REFUSE_SEAT.format(tier=tier), _AUTHORITY) if caller_seat() != caller_cwd() else None
+
+
 def _ci_cure_access(command: str) -> str:
-    """The ci-cure tier: the registry fact alone grants it."""
+    """The ci-cure tier: the registry fact grants it, from the cwd inside the seat only."""
     caller_info = _resolve_caller()
-    _raise_refusal(command, caller_info, _registry_fact_refusal(command, caller_info, _CI_CURE_FACT))
+    fact_refusal = _seat_only("ci-cure") or _registry_fact_refusal(command, caller_info, _CI_CURE_FACT)
+    _raise_refusal(command, caller_info, fact_refusal)
     json_handler.log_operation(
         "git_access_verify",
         {"caller": caller_info.name, "command": command, "tier": "ci-cure", "session": session_home.stamp()},
@@ -539,7 +547,7 @@ def verify_git_access(command: str) -> str:
 
     if command in owner_tier["commands"]:
         caller_info = _resolve_caller()
-        _raise_refusal(command, caller_info, _owner_tier_refusal(command, caller_info))
+        _raise_refusal(command, caller_info, _seat_only("owner-tier") or _owner_tier_refusal(command, caller_info))
         json_handler.log_operation(
             "git_access_verify",
             {

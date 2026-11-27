@@ -91,11 +91,17 @@ hooks' `loader.seat_at_root`, so the hooks and drone agree on who is sitting.
 
 Two readers, two questions. Identity readers take `caller_seat()`: the `[CALLER:X]` tag, the
 `AIPASS_CALLER_*` stamp (so `AIPASS_CALLER_CWD` carries the seat), `@git`'s own branch detection,
-the `inbox` passport walk, owner-tier auth, the repo-root lock, the registry credential checks, and
-the cwd written to the deletion and door records. Path readers keep `caller_cwd()`, the raw
+the `inbox` passport walk, the global tier of `@git` auth, the repo-root lock, the registry
+credential checks, and the cwd written to the deletion and door records. Path readers keep `caller_cwd()`, the raw
 directory: `drone rm` targets and its sibling fence, the stale sweep, `@git export`'s destination
 and the path arguments of `diff`, `log`, `blame`, `tracked`, `untrack` and `restore`. A relative
 path typed at the root means the root, whoever is sitting.
+
+**Writes need the cwd.** The owner and ci-cure tiers of `@git` resolve the caller from the seat too,
+then refuse when the seat is not the cwd: `owner-tier verbs need the cwd inside the seat; AIPASS_SEAT
+is not enough`, with `ci-cure` in place of `owner-tier` for that tier. The seat is one environment
+variable, a weaker credential than standing in the branch, so from a repo root it names who is
+reading (`pr list`, `status`) and earns no commit, push, merge or ci-cure.
 
 ---
 

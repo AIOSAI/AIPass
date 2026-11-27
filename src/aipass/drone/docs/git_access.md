@@ -24,6 +24,11 @@ Owner tier is **earned per repo** from four facts in the caller's own project re
 `citizen_class: manager`, registry tenancy, an entry carrying `owner: true`, and path-binding of
 the passport to the recorded home. There is no caller allowlist anywhere in the branch.
 
+The caller is found from the cwd. At a passportless repo root, `AIPASS_SEAT=<branch>` names the
+seat for the global tier, but both write tiers refuse it: `owner-tier verbs need the cwd inside the
+seat; AIPASS_SEAT is not enough`, and the same line naming `ci-cure` for that tier. See
+[caller_identity.md](caller_identity.md).
+
 The ci-cure tier is earned the same way, minus the manager class: registry tenancy, an entry
 carrying `ci_cure: true` (the JSON boolean), and path-binding. The fact must sit on exactly one
 entry of the registry; two holders refuse both. Outside AIPass's own registry the verb is a
