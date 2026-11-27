@@ -1,18 +1,12 @@
 #!/usr/bin/env bash
-#
-# AIPass setup script
-# Creates a venv, installs the package in editable mode, and verifies CLI entry points.
-# It ends in `aipass install --finish`: the doctor, the install report and the final screen.
-#
+# AIPass setup: venv, editable install, CLI entry-point check, then `aipass install --finish`.
 # Usage: ./setup.sh [--no-finish] [--no-symlink] [--force-symlink]
 #   --no-finish      skip the doctor/report tail (`aipass install` passes it and runs the tail itself)
 #   --no-symlink     do not create/modify global drone/aipass CLI symlinks
-#   --force-symlink  repoint a global symlink even if it points at a different install (#660)
-#
+#   --force-symlink  repoint a global symlink even if it points at a different install
 
 set -euo pipefail
 
-# cd to repo root (where this script lives) so it works from anywhere
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -30,10 +24,8 @@ for arg in "$@"; do
     esac
 done
 
-# --- Collected action-needed items (round-2 install UX: a0f2351e Catch 2) ---
-# Anything printed mid-run that needs a follow-up command gets appended here,
-# then printed as ONE block at the end and written to .aipass/setup_attention.txt
-# for the install report — scrolling output buries sudo hints otherwise.
+# Follow-up commands collect here, print as one block at the end and go to
+# .aipass/setup_attention.txt for the install report: scrolling output buries sudo hints.
 ACTION_NEEDED=()
 
 print_action_needed() {
@@ -50,11 +42,9 @@ print_action_needed() {
     echo ""
 }
 
-# Own function (not an inline `[ -t 0 ]`) so tests can override it after
-# sourcing and drive the interactive prompts below without a real tty.
+# Own function so tests can override it after sourcing and drive the prompts without a tty.
 # AIPASS_NON_INTERACTIVE=1 wins over the tty test: `aipass install --non-interactive`
-# exports it, because install.sh hands that process the user's tty and a run told
-# it was non-interactive still asked for a git identity (container proof, 2026-10-13).
+# exports it, because install.sh hands that process the user's tty.
 is_interactive() {
     [ -n "${AIPASS_NON_INTERACTIVE:-}" ] && return 1
     [ -t 0 ]
@@ -64,7 +54,6 @@ echo "=== AIPass Setup ==="
 echo "Repo root: $SCRIPT_DIR"
 echo ""
 
-# --- Find working Python ---
 # This checkout's venv is deleted below: one active in the calling shell must not be the python picked here.
 PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$SCRIPT_DIR/.venv/bin" | paste -sd:)
 PYTHON=""
@@ -91,7 +80,6 @@ fi
 PY_VERSION=$($PYTHON -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 echo "Found $PYTHON $PY_VERSION"
 
-# --- Check minimum version ---
 PY_OK=$($PYTHON -c 'import sys; print(int(sys.version_info >= (3, 10)))')
 if [ "$PY_OK" != "1" ]; then
     echo "FAIL: Python 3.10+ required, found $PY_VERSION"
@@ -99,7 +87,6 @@ if [ "$PY_OK" != "1" ]; then
     exit 1
 fi
 
-# --- Check ensurepip (Debian/Ubuntu split it into python3-venv apt package) ---
 if ! $PYTHON -c 'import ensurepip' &>/dev/null 2>&1; then
     echo ""
     echo "FAIL: ensurepip is unavailable for $PYTHON."
@@ -113,7 +100,6 @@ if ! $PYTHON -c 'import ensurepip' &>/dev/null 2>&1; then
     exit 1
 fi
 
-# --- Create venv ---
 if [ -d ".venv" ]; then
     echo "Existing .venv found — removing $SCRIPT_DIR/.venv for a clean install."
     rm -rf .venv
@@ -122,7 +108,6 @@ fi
 echo "Creating virtual environment at .venv ..."
 $PYTHON -m venv .venv
 
-# --- Activate and install ---
 source .venv/bin/activate
 VENV_PYTHON="python3"
 
@@ -132,7 +117,6 @@ echo "Upgrading pip ..."
 echo "Installing aipass in editable mode (with dev, memory, llm, drive, bluesky extras) — this can take a few minutes while the memory wheels build ..."
 "$VENV_PYTHON" -m pip install -e ".[dev,memory,llm,drive,bluesky,host]"
 
-# --- Verify CLI entry points ---
 FAIL=0
 
 echo ""
@@ -145,7 +129,6 @@ else
     FAIL=1
 fi
 
-# sentry is accessed via drone @sentry, not as a standalone CLI
 if drone @sentry --help &>/dev/null; then
     echo "  sentry ... ok (via drone @sentry)"
 else
@@ -153,7 +136,6 @@ else
     FAIL=1
 fi
 
-# --- Create secrets directory ---
 SECRETS_DIR="$HOME/.secrets/aipass"
 if [ ! -d "$SECRETS_DIR" ]; then
     echo "Creating secrets directory at $SECRETS_DIR ..."
@@ -165,16 +147,13 @@ else
     echo "Secrets directory already exists — skipping"
 fi
 
-# --- Seed .env template into secrets ---
 if [ ! -f "$SECRETS_DIR/.env" ] && [ -f ".env.example" ]; then
     cp .env.example "$SECRETS_DIR/.env"
     echo "  Copied .env.example → ~/.secrets/aipass/.env (add your API keys there)"
 fi
 
-# --- User's display name: git user.name, else $USER, never asked (the owner: no
-# questions about the user). Stored as registry metadata.user; the install report
-# carries it as user_name and devpulse greets by it. Git identity itself is never
-# asked here: git names the gap the first time a commit needs one. ---
+# Display name: git user.name, else $USER, never asked. Stored as registry metadata.user; the install
+# report carries it as user_name. Git identity is not asked either: git names the gap at the first commit.
 resolve_user_name() {
     USER_NAME="$(git config --global user.name 2>/dev/null || true)"
     # $USER is unset under a bare su or a container entrypoint; the login name is always there.
@@ -182,7 +161,6 @@ resolve_user_name() {
 }
 resolve_user_name
 
-# --- Generate branch registry ---
 if [ ! -f "AIPASS_REGISTRY.json" ]; then
     echo "Generating AIPASS_REGISTRY.json ..."
     python3 - "$SCRIPT_DIR" "$USER_NAME" << 'PYEOF'
@@ -196,7 +174,6 @@ src_dir = Path(repo_root) / "src" / "aipass"
 today = date.today().isoformat()
 
 branches = []
-# Discover modules under src/aipass/
 for d in sorted(src_dir.iterdir()):
     if d.is_dir() and not d.name.startswith(("_", ".")):
         branches.append({
@@ -210,7 +187,6 @@ for d in sorted(src_dir.iterdir()):
             "last_active": today,
         })
 
-# Registry includes every branch discovered under src/aipass/ — no hardcoded list.
 
 registry = {
     "metadata": {
@@ -231,7 +207,6 @@ else
     echo "AIPASS_REGISTRY.json already exists — skipping"
 fi
 
-# --- Bootstrap branch identity and memory files ---
 echo ""
 echo "Bootstrapping branch identity files ..."
 
@@ -246,16 +221,9 @@ bootstrap_branch() {
 
     BRANCH_COUNT=$((BRANCH_COUNT + 1))
 
-    # .trinity/passport.json + local.json + observations.json
-    # DPLAN-0263 P2: rendered from spawn's own specialist/manager templates
-    # (single source of truth) instead of hand-rolled heredocs — the heredocs had
-    # drifted to a pre-numbered-entry schema (key_learnings as dict, observations
-    # nested session/entries) that the cap/rollover system doesn't expect. By this
-    # point in the script the venv exists and aipass is pip-installed editable
-    # (with the memory extra), so VENV_PYTHON can import aipass.spawn's renderer
-    # directly. rel_path keeps branch_info.path relative ("src/aipass/<name>",
-    # matching every real passport) instead of the absolute path build_replacements_dict
-    # would otherwise render for an absolute target_dir.
+    # Rendered from spawn's own templates: the one source of the schema the cap/rollover system expects.
+    # rel_path keeps branch_info.path relative ("src/aipass/<name>", as every real passport);
+    # an absolute target_dir would render an absolute path.
     mkdir -p "$path/.trinity"
     local rel_path="${path#"$SCRIPT_DIR"/}"
     local rendered
@@ -280,14 +248,12 @@ PYEOF
         fi
     fi
 
-    # .sentry/bypass.json
     mkdir -p "$path/.sentry"
     if [ ! -f "$path/.sentry/bypass.json" ]; then
         echo '{}' > "$path/.sentry/bypass.json"
         created=1
     fi
 
-    # .ai_mail.local/inbox.json
     mkdir -p "$path/.ai_mail.local"
     if [ ! -f "$path/.ai_mail.local/inbox.json" ]; then
         echo '{"inbox": []}' > "$path/.ai_mail.local/inbox.json"
@@ -316,12 +282,8 @@ done
 
 echo "  $BRANCH_COUNT branches bootstrapped"
 
-# --- Reconcile registry owner + per-citizen identity ---
-# setup.sh's registry generation above lists branches with no owner seat and no
-# per-branch registry_id (only metadata.id + passports get one, all sharing the
-# same value by design). Without this step, a newcomer's FIRST doctor run reads
-# 19 stale-bookkeeping errors (entry_rid_stale x17, no_owner) on a healthy install
-# — sync-registry --fix carries this exact machinery, it just never ran here.
+# The registry generated above has no owner seat and no per-branch registry_id: without this
+# step a first doctor run reports stale-bookkeeping errors on a healthy install.
 echo ""
 echo "Reconciling registry owner + identity ..."
 "$VENV_PYTHON" - << 'PYEOF'
@@ -335,9 +297,7 @@ else:
     print("  already clean")
 PYEOF
 
-# --- Seed branch config files from .example defaults ---
-# Some branches need a config file that's gitignored (contains local state).
-# Ship `*.example.json` in git; seed the real file from it on fresh install.
+# The real config is gitignored (local state): a fresh install seeds it from the tracked *.example.json.
 MEMORY_CONFIG_DIR="$SCRIPT_DIR/src/aipass/memory/config"
 MEMORY_CONFIG_FILE="$MEMORY_CONFIG_DIR/memory_bank.config.json"
 MEMORY_CONFIG_EXAMPLE="$MEMORY_CONFIG_DIR/memory_bank.config.example.json"
@@ -346,14 +306,10 @@ if [ -f "$MEMORY_CONFIG_EXAMPLE" ] && [ ! -f "$MEMORY_CONFIG_FILE" ]; then
     echo "  memory_bank.config.json seeded from example"
 fi
 
-# --- Enroll this install in the hook trust registry (the owner's ruling, compass #221) ---
-# The hook engine only loads .aipass/hooks.json for projects listed in
-# ~/.aipass/trusted_projects.json. That gate exists to stop a FOREIGN project's
-# hostile hooks.json from running — it was never meant to distrust the config
-# this installer just wired up. Without this step a non-interactive install
+# The hook engine loads .aipass/hooks.json only for projects in ~/.aipass/trusted_projects.json,
+# the gate against a foreign project's hooks.json. Without this step a non-interactive install
 # finishes "clean" with every hook silently dead ("No .aipass/hooks.json found").
-# enroll() is idempotent (dict-key assignment + stale prune), so re-running
-# setup.sh refreshes the hash instead of duplicating the entry.
+# enroll() is idempotent: a re-run refreshes the hash, never duplicates the entry.
 echo ""
 echo "Enrolling this install in the hook trust registry ..."
 if "$VENV_PYTHON" - "$SCRIPT_DIR" << 'PYEOF'
@@ -370,8 +326,7 @@ else
     ACTION_NEEDED+=("Hook trust enrollment failed — run: aipass trust $SCRIPT_DIR")
 fi
 
-# --- Machine changes outside this checkout (owner rule: one explanation, one yes/no) ---
-# On a tty one question covers the block below; on no it is skipped whole. AIPASS_YES=1
+# On a tty one question covers every change outside this checkout; on no all are skipped. AIPASS_YES=1
 # (aipass install --yes) is the yes given up front. With no tty, AIPASS_NON_INTERACTIVE
 # or CI and no AIPASS_YES, nobody was asked, so it is a no: never a silent yes.
 confirm_machine_changes() {
@@ -414,17 +369,14 @@ LINUX_SYMLINK_DIR=""
 # === Gated block start: runs only when MACHINE_CHANGES=yes (not re-indented: heredocs) ===
 if [ "$MACHINE_CHANGES" = "yes" ]; then
 
-# --- Provider wiring is not setup's ---
-# Claude Code, Codex and OpenCode are wired at the end of `aipass install`, only the one
-# the user picks (`aipass provider <name>` later); `aipass doctor --fix` still wires any installed.
+# No provider is wired here: `aipass install` wires the one the user picks at its end
+# (`aipass provider <name>` later); `aipass doctor --fix` still wires any installed.
 
-# --- Set AIPASS_HOME + PATH so all services work from any project ---
 echo ""
 echo "Configuring cross-project access ..."
 
 PROFILE="$HOME/.bashrc"
 
-# AIPASS_HOME
 if ! grep -qxF "export AIPASS_HOME=\"$SCRIPT_DIR\"" "$PROFILE" 2>/dev/null; then  # this home exactly: a second install moves it
     echo "" >> "$PROFILE"
     echo "# AIPass — cross-project access" >> "$PROFILE"
@@ -446,10 +398,8 @@ if [ -f "$HOME/.profile" ]; then
     fi
 fi
 
-# --- Create global symlinks for CLI tools ---
-# #660: never SILENTLY hijack a global 'drone'/'aipass' that points at a
-# DIFFERENT install. safe_symlink skips a different-target link (loud warning)
-# unless --force-symlink; --no-symlink opts out of symlinking entirely.
+# Never silently hijack a global 'drone'/'aipass' that points at a different install:
+# safe_symlink skips such a link with a loud warning unless --force-symlink.
 safe_symlink() {
     # safe_symlink <src> <dest> [sudo]  ->  0 linked · 1 skipped(diff target) · 2 ln failed
     local src="$1" dest="$2" use_sudo="${3:-}" existing=""
@@ -494,7 +444,6 @@ else
             elif [ "$rc" -eq 1 ]; then
                 :  # skipped a different install — safe_symlink explained; do NOT fall back
             else
-                # sudo/ln failed (e.g. no sudo) — fall back to user-local bin
                 LOCAL_BIN="$HOME/.local/bin"
                 mkdir -p "$LOCAL_BIN"
                 rc=0
@@ -502,7 +451,6 @@ else
                 if [ "$rc" -eq 0 ]; then
                     echo "  /usr/local/bin failed (no sudo) — using $LOCAL_BIN/$cmd instead"
                     LINUX_SYMLINK_DIR="$LOCAL_BIN"
-                    # Ensure ~/.local/bin is on PATH
                     PROFILE="${HOME}/.bashrc"
                     if ! grep -q '\.local/bin' "$PROFILE" 2>/dev/null; then
                         echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$PROFILE"
@@ -531,13 +479,12 @@ if [ "$SYMLINK_SKIPPED" -gt 0 ]; then
     ACTION_NEEDED+=("$SYMLINK_SKIPPED global symlink(s) left untouched — rerun with --force-symlink to repoint them here")
 fi
 
-# --- Action items for the install report (read by `aipass install --finish`) ---
+# Read by `aipass install --finish` for the install report.
 mkdir -p "$SCRIPT_DIR/.aipass"
 {
     if [ ${#ACTION_NEEDED[@]} -gt 0 ]; then printf '%s\n' "${ACTION_NEEDED[@]}"; fi
 } > "$SCRIPT_DIR/.aipass/setup_attention.txt"
 
-# --- Result ---
 echo ""
 if [ "$FAIL" -eq 0 ]; then
     echo "=== Setup complete ==="
