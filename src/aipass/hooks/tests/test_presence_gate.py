@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_presence_gate.py
-# Version: 1.2.0
+# Version: 1.4.0
 # Description: Tests for the presence gate handler
 # Branch: hooks
 # Layer: tests
 # Created: 2026-06-29
-# Modified: 2026-11-17
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/security/presence_gate.py."""
@@ -83,12 +83,12 @@ def _blocking():
     return patch.object(presence_gate, "_OBSERVE_ONLY", False)
 
 
-def _refused_branch(hook_data: dict, occupant: dict) -> str:
+def _refused_branch(hook_data: dict, occupant: dict, **env: str) -> str:
     """The branch a refusal names: the words before ' is already live' in handle()'s reason."""
     _, serve = _make_mocks(our_pid=1000, occupant=occupant)
     with (
         _blocking(),
-        patch.dict(os.environ, {**_kept_redirect(), "AIPASS_SESSION_TYPE": "interactive"}, clear=True),
+        patch.dict(os.environ, {**_kept_redirect(), "AIPASS_SESSION_TYPE": "interactive", **env}, clear=True),
         serve(),
     ):
         result = presence_gate.handle(hook_data)
@@ -113,6 +113,30 @@ class TestResolveBranch:
     def test_stops_at_repo_root(self, tmp_path, live_occupant):
         (tmp_path / ".git").mkdir()
         assert _refused_branch({"cwd": str(tmp_path)}, live_occupant) == tmp_path.name
+
+    def test_a_repo_root_reads_the_seat_aipass_seat_names(self, tmp_path, live_occupant):
+        (tmp_path / ".git").mkdir()
+        for name in ("devpulse", "sentry"):
+            (tmp_path / "src" / "aipass" / name / ".trinity").mkdir(parents=True)
+        root, sentry = {"cwd": str(tmp_path)}, {"cwd": str(tmp_path / "src" / "aipass" / "sentry")}
+        assert _refused_branch(root, live_occupant) == tmp_path.name
+        assert _refused_branch(root, live_occupant, AIPASS_SEAT="devpulse") == "devpulse"
+        assert _refused_branch(sentry, live_occupant, AIPASS_SEAT="devpulse") == "sentry"
+
+    def test_a_seated_root_collides_with_the_live_session_in_its_branch(self, tmp_path, live_occupant):
+        (tmp_path / ".git").mkdir()
+        seat = tmp_path / "src" / "aipass" / "devpulse"
+        (seat / ".trinity").mkdir(parents=True)
+        cc_mock, serve = _make_mocks(our_pid=1000)
+        cc_mock.find_occupant.side_effect = lambda cwd, exclude_pid=None: live_occupant if cwd == str(seat) else None
+
+        def decide(**env):
+            environ = {**_kept_redirect(), "AIPASS_SESSION_TYPE": "interactive", **env}
+            with _blocking(), patch.dict(os.environ, environ, clear=True), serve():
+                return presence_gate.handle({"cwd": str(tmp_path)})
+
+        assert decide()["stdout"] == ""
+        assert json.loads(decide(AIPASS_SEAT="devpulse")["stdout"])["reason"].startswith("devpulse is already live")
 
     def test_fallback_to_path_cwd_when_no_cwd_in_hook_data(self, tmp_path, monkeypatch, live_occupant):
         (tmp_path / ".git").mkdir()

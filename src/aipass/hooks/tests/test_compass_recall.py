@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_compass_recall.py
-# Version: 1.6.1
+# Version: 1.7.0
 # Description: Tests for compass recall prompt handler
 # Branch: hooks
 # Created: 2026-07-16
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/prompt/compass_recall.py."""
@@ -535,6 +535,16 @@ class TestSeatGate:
     def test_devpulse_still_hears_its_decisions(self, tmp_path):
         result, _ = self._recall_at(tmp_path, _seat_dir(tmp_path, "devpulse", "manager"))
         assert "[GOOD] #56:" in result["stdout"]
+
+    def test_a_repo_root_is_judged_by_the_seat_aipass_seat_names(self, tmp_path, monkeypatch):
+        fleet = tmp_path / "src" / "aipass"
+        _seat_dir(fleet, "devpulse", "manager")
+        sentry = _seat_dir(fleet, "sentry", "specialist")
+        monkeypatch.delenv("AIPASS_SEAT", raising=False)
+        assert self._recall_at(tmp_path, tmp_path)[0] == {"stdout": "", "exit_code": 0}
+        monkeypatch.setenv("AIPASS_SEAT", "devpulse")
+        assert "[GOOD] #56:" in self._recall_at(tmp_path, tmp_path)[0]["stdout"]
+        assert self._recall_at(tmp_path, sentry)[0] == {"stdout": "", "exit_code": 0}
 
     def test_a_future_manager_hears_recall_with_no_code_change(self, tmp_path):
         result, _ = self._recall_at(tmp_path, _seat_dir(tmp_path, "canary", "manager"))

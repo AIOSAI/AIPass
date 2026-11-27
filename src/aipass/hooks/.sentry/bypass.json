@@ -639,7 +639,7 @@
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "fallback",
       "lines": [
-        77
+        79
       ],
       "reason": "Display only: an unreadable start leaves the age out of the refusal text (\"\" or None both drop the \"old\" part). No decision rests on the age; ranking uses _session_start."
     },
@@ -647,7 +647,7 @@
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "fallback",
       "lines": [
-        96
+        98
       ],
       "reason": "None is handed on as \"cannot rank\", never as \"younger\": _we_are_the_incumbent then answers False, so an unreadable start keeps the refusal of the newer seat. The refusal is the answer."
     },
@@ -835,7 +835,7 @@
       "file": "apps/handlers/prompt/feedback_pulse.py",
       "standard": "fallback",
       "lines": [
-        50
+        51
       ],
       "reason": "A corrupt counter is never overwritten here (the parse fails before the write); it reads as turn 0, so the feedback line stays quiet for the session. Only a nag line is lost. WARNING, which @trigger escalates, names the failure."
     },

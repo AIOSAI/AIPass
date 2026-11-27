@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: compass_recall.py
-# Version: 1.2.3
+# Version: 1.3.0
 # Description: Ambient compass recall — surfaces rated decisions on relevant prompts
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-16
-# Modified: 2026-11-22
+# Modified: 2026-11-26
 # =============================================
 
 """Queries compass FTS against the user's prompt and injects matching decisions
@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 
 from aipass.prax import logger
-from aipass.hooks.apps.handlers.config.loader import find_project_config
+from aipass.hooks.apps.handlers.config.loader import find_project_config, seat_at_root
 from aipass.hooks.apps.handlers.json import json_handler
 
 _STATE_DIR = Path(tempfile.gettempdir())
@@ -106,7 +106,8 @@ def _open_window(state: dict, hook_data: dict) -> dict:
 def _manager_seat(hook_data: dict) -> bool:
     """True when the prompting seat's passport is a manager's: compass is for managers, never builders."""
     release_notice = importlib.import_module("aipass.hooks.apps.modules.release_notice")
-    return release_notice.is_manager_seat(Path(hook_data.get("cwd", "") or Path.cwd()))
+    cwd = hook_data.get("cwd", "") or str(Path.cwd())
+    return release_notice.is_manager_seat(seat_at_root(cwd) or Path(cwd))
 
 
 def handle(hook_data: dict) -> dict:

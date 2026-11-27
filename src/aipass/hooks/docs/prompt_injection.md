@@ -121,9 +121,14 @@ the cwd. `loader.seat_at_root` answers `src/aipass/<branch>` when the cwd holds 
 branch holds `.trinity/`; any other name (a path, a dot name, no such branch) answers nothing. The three
 walks use it at their no-branch exit: `grounding_content.find_branch_root` (branch prompt, cadence
 key, mail banner), `grounding_content._find_passport` (identity) and `context_window.find_branch_dir`.
-A cwd inside a branch always wins over the variable. The context gauge reads only the transcript, so
-it is silent on any first prompt until an assistant reply carries usage. The presence gate,
-`compass_recall` and `feedback_pulse` walk from the cwd on their own and do not read the variable.
+The same helper serves three more readers at the same edge: the presence gate names the seat and
+searches for its occupant in the seat's directory, so a seated root session collides with a live one
+in that branch, `compass_recall` judges the seat's passport for the
+manager check, and `feedback_pulse` reads the seat's own `.aipass/` toggle. A cwd inside a branch
+always wins over the variable. The context gauge reads only the transcript, so it is silent on any
+first prompt until an assistant reply carries usage. Its window is the one the status line writes per
+session; a session whose status line writes none prints `window unknown` whatever the seat, and a
+settings window only caps a known one.
 
 ## Persistent Alerts
 

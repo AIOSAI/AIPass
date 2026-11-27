@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_feedback_pulse.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for feedback pulse handler and toggle module
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-18
-# Modified: 2026-11-14
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/prompt/feedback_pulse.py and apps/modules/feedback.py."""
@@ -256,6 +256,23 @@ class TestFeedbackPulseToggle:
         aipass_dir.mkdir()
         (aipass_dir / "feedback_off").touch()
         assert self._fired_turn(tmp_path, tmp_path) == ""
+
+    def test_a_repo_root_reads_the_toggle_of_the_seat_aipass_seat_names(self, tmp_path, monkeypatch):
+        root = tmp_path / "clone"
+        (root / ".aipass").mkdir(parents=True)
+        seat = root / "src" / "aipass" / "devpulse"
+        (seat / ".trinity").mkdir(parents=True)
+        (seat / ".aipass").mkdir()
+        (seat / ".aipass" / "feedback_off").touch()
+        sentry = root / "src" / "aipass" / "sentry"
+        (sentry / ".aipass").mkdir(parents=True)
+        for turn in "abc":
+            (tmp_path / turn).mkdir()
+        monkeypatch.delenv("AIPASS_SEAT", raising=False)
+        assert "issues" in self._fired_turn(tmp_path / "a", root)
+        monkeypatch.setenv("AIPASS_SEAT", "devpulse")
+        assert self._fired_turn(tmp_path / "b", root) == ""
+        assert "issues" in self._fired_turn(tmp_path / "c", sentry)
 
 
 class TestFeedbackToggleModule:
