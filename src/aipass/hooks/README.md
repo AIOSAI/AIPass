@@ -5,7 +5,7 @@
 **Purpose:** Hook infrastructure for AIPass. One dispatch engine routes every hook event across
 platforms (Claude Code, Codex, OpenCode) with per-project configuration, full logging and gates that fail closed. On
 one side it injects the grounding an agent wakes up with; on the other it fences the writes an agent
-makes.
+makes. A Claude Code cloud session opens at the clone's root and boots as the seat `AIPASS_SEAT` names.
 **Module:** `aipass.hooks`
 **Version:** 1.3.1
 
