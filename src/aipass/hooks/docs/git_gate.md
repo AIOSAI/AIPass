@@ -18,6 +18,10 @@ included; git or gh launched from inside a program, the gh credential, and GitHu
 seat too; reading or writing the secrets store (R7), for every seat; and writes to the protected files
 off the admin seat (below).
 
+**In a Claude Code cloud session** the gate is wired and judges as on any machine: no seat, cwd or
+`CLAUDE_CODE_REMOTE` exempts raw `git`. The harness commits and opens the pull request through its own
+GitHub tools, which no PreToolUse matcher names ([prompt_injection.md](prompt_injection.md)).
+
 **If drone cannot do it, it cannot be done.** No seat runs git
 or gh raw: `modules/admin_seat`'s grant opens none of these lanes. A git refusal (`RAW_GIT_REFUSED`)
 names the caller from its passport (or says it could not be named) and the drone twin of the verb

@@ -130,6 +130,13 @@ first prompt until an assistant reply carries usage. Its window is the one the s
 session; a session whose status line writes none prints `window unknown` whatever the seat, and a
 settings window only caps a known one.
 
+**A cloud session runs every hook.** The cloud environment's `aipass doctor --fix --yes` writes the
+manifest's `cli.claude` rows into the VM's `~/.claude/settings.json`, every event included; the
+clone's `.claude/settings.json` carries none. So the seat's grounding arrives as on any machine, and
+the gates are live: the git gate refuses the agent's raw `git` in the VM as everywhere (seat, cwd and
+`CLAUDE_CODE_REMOTE` change nothing), and `drone @git` reads pass. The harness commits and opens the
+pull request through its own GitHub tools, which no PreToolUse matcher names, so no gate sees them.
+
 ## Persistent Alerts
 
 The `persistent_alert` handler (`prompt/persistent_alert.py`) injects advisory banners into every prompt when active alerts exist. General-purpose — any agent can raise alerts (prax for runaway logs, trigger for medic, backup for sync failures).
