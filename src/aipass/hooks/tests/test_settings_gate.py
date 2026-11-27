@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_settings_gate.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Tests for the provider-settings gate: the decision table, the paths, the Bash shapes, the installers
 # Branch: hooks
 # Layer: tests
 # Created: 2026-10-25
-# Modified: 2026-11-14
+# Modified: 2026-11-27
 # =============================================
 
 """Tests for apps/handlers/security/settings_gate.py."""
@@ -26,6 +26,8 @@ from aipass.hooks.apps.handlers.security.settings_gate import handle
 
 INTERACTIVE = ["/home/u/.local/bin/claude", "--resume", "s1"]
 HEADLESS = ["/home/u/.local/bin/claude", "--resume", "s1", "-p", "Hi."]
+# Claude Code's session scratchpad as a cloud seat spells it: the clone's path with dashes, under /tmp/claude-0.
+SCRATCH = "/tmp/claude-0/" + "-".join(("", "home", "user", "AIPass")) + "/SESSION/scratchpad"
 
 
 @pytest.fixture
@@ -221,11 +223,38 @@ class TestInstallers:
             "./setup.sh",
             "python3 src/aipass/aipass/apps/provider_wire.py",
             "timeout 60 ./setup.sh",
+            "bash setup.sh -n",
+            "bash -n -i setup.sh",
+            "bash -nx setup.sh",
         ],
     )
     def test_an_installer_asks_on_claude_and_is_denied_on_codex(self, seat, command):
         assert _decision(_bash(seat, command)) == "ask"
         assert _decision(_bash(seat, command, provider="codex")) == "deny"
+
+    def test_a_syntax_check_beside_a_scratchpad_under_tmp_claude_is_allowed(self, seat):
+        # 2026-11-27: a cloud seat parked on this ask until its lane ceiling; nobody answers an ask there.
+        command = f"cd {seat['repo']}; S={SCRATCH}; bash -n setup.sh && echo ok"
+        for cwd in (str(seat["repo"]), seat["cwd"]):
+            seat["cwd"] = cwd
+            assert _bash(seat, command) == {"stdout": "", "exit_code": 0}
+            assert _bash(seat, command, provider="codex") == {"stdout": "", "exit_code": 0}
+            assert _bash(seat, f"echo x > {SCRATCH}/out.txt") == {"stdout": "", "exit_code": 0}
+        seat["argv"]["claude"] = HEADLESS
+        assert _bash(seat, command) == {"stdout": "", "exit_code": 0}
+
+    def test_the_same_command_with_a_provider_file_as_a_token_is_still_judged(self, seat):
+        lead = f"cd {seat['repo']}; S={SCRATCH}; bash -n setup.sh"
+        seat["cwd"] = str(seat["repo"])
+        wiring = _bash(seat, f"{lead} && echo x >> .claude/provider_manifest.json")
+        assert _decision(wiring) == "ask"
+        assert str(seat["repo"] / ".claude" / "provider_manifest.json") in _reason(wiring)
+        own = f"{lead} && echo x >> {seat['home']}/.claude/settings.json"
+        assert _decision(_bash(seat, own, provider="codex")) == "deny"
+        seat["argv"]["claude"] = HEADLESS
+        denied = _bash(seat, own)
+        assert _decision(denied) == "deny"
+        assert str(seat["home"] / ".claude" / "settings.json") in _reason(denied)
 
     def test_doctor_without_fix_only_reads(self, seat):
         assert _decision(_bash(seat, "aipass doctor", provider="codex")) == "allow"
