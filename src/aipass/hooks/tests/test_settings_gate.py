@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_settings_gate.py
-# Version: 1.4.1
+# Version: 1.4.2
 # Description: Tests for the provider-settings gate: the decision table, the paths, the Bash shapes, the installers
 # Branch: hooks
 # Layer: tests
@@ -226,6 +226,9 @@ class TestInstallers:
             "bash setup.sh -n",
             "bash -n -i setup.sh",
             "bash -nx setup.sh",
+            "bash -o pipefail setup.sh",
+            "bash +o posix setup.sh",
+            "bash -O extglob setup.sh",
         ],
     )
     def test_an_installer_asks_on_claude_and_is_denied_on_codex(self, seat, command):

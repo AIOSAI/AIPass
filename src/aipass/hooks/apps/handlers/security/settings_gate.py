@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: settings_gate.py
-# Version: 1.4.2
+# Version: 1.4.3
 # Description: No AI changes a provider's settings alone: Claude asks the owner; Codex, OpenCode, headless deny
 # Branch: hooks
 # Layer: apps/handlers/security
@@ -40,6 +40,7 @@ _OPENCODE_DIRS = ("plugins", "commands")
 _NO_ASK = {"codex": "Codex", "opencode": "OpenCode"}
 _CLAUDE_FILES = frozenset({"settings.json", "settings.local.json"})
 _INSTALLER_SCRIPTS = frozenset({"setup.sh", "provider_wire.py"})
+_SHELL_OPTION_FLAGS = frozenset({"-o", "+o", "-O", "+O"})
 _HEADLESS_TYPES = frozenset({"dispatched", "headless"})
 _ALLOW = {"stdout": "", "exit_code": 0}
 
@@ -127,6 +128,17 @@ def _protected(raw: str, cwd: str, whole: bool = False) -> tuple[Path, str] | No
     return None
 
 
+def _first_operand(argv: tuple[str, ...], shell: bool) -> str:
+    """An interpreter's first operand: past its flags; for a shell, past `-o`/`+o`/`-O`/`+O` and their name."""
+    words = iter(argv[1:])
+    for word in words:
+        if shell and word in _SHELL_OPTION_FLAGS:
+            next(words, None)
+        elif not word.startswith("-") and not (shell and word.startswith("+")):
+            return word
+    return ""
+
+
 def _installer(command: str, cwd: str) -> str | None:
     """The installer a Bash command executes (aipass doctor --fix, setup.sh, provider_wire.py), or None.
 
@@ -137,7 +149,7 @@ def _installer(command: str, cwd: str) -> str | None:
             return "aipass doctor --fix"
         if inv.program in _INSTALLER_SCRIPTS:
             return inv.program
-        script = next((word for word in inv.argv[1:] if not word.startswith("-")), "") if inv.language else ""
+        script = _first_operand(inv.argv, inv.language == "shell") if inv.language else ""
         # `bash -n setup.sh` parses and runs nothing. Only that exact spelling: `-n -i` runs the script.
         if inv.language == "shell" and inv.argv[1:3] == ("-n", script):
             continue
