@@ -18,6 +18,12 @@ the install's own process), verify the `drone` and `aipass` binaries and the
 registry owner, phone face + baud-cli, and the Health check: the full doctor
 with its fix step.
 
+`setup.sh` seats every citizen whose `src/aipass/<name>/.aipass/passport.vault.json`
+is in the tree, reading `citizen_class` and `role` from that seed, so a citizen
+born after the script was last edited still gets its `.trinity/` in a fresh
+clone. Each of its failure exits also writes its one-line reason to
+`<home>/.aipass/setup_attention.txt`, where the final screen picks it up.
+
 | Form | What it does |
 |---|---|
 | `install` | The whole bootstrap into the default home, ending at the report |

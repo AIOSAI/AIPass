@@ -84,6 +84,7 @@ fi
 
 if [ -z "$PYTHON" ]; then
     echo "FAIL: No working Python found. Install Python 3.10+ and try again."
+    printf '%s\n' "setup.sh stopped: no working Python 3.10+" > "$SCRIPT_DIR/.aipass/setup_attention.txt"
     exit 1
 fi
 
@@ -94,6 +95,7 @@ echo "Found $PYTHON $PY_VERSION"
 PY_OK=$($PYTHON -c 'import sys; print(int(sys.version_info >= (3, 10)))')
 if [ "$PY_OK" != "1" ]; then
     echo "FAIL: Python 3.10+ required, found $PY_VERSION"
+    printf '%s\n' "setup.sh stopped: Python 3.10+ required, found $PY_VERSION" > "$SCRIPT_DIR/.aipass/setup_attention.txt"
     exit 1
 fi
 
@@ -107,6 +109,7 @@ if ! $PYTHON -c 'import ensurepip' &>/dev/null 2>&1; then
     echo "  Fedora/RHEL:    sudo dnf install python3-pip"
     echo "  Arch:           (included in base python — file a bug if you hit this)"
     echo ""
+    printf '%s\n' "setup.sh stopped: ensurepip unavailable for $PYTHON (Debian/Ubuntu: apt install python3-venv)" > "$SCRIPT_DIR/.aipass/setup_attention.txt"
     exit 1
 fi
 
@@ -298,33 +301,18 @@ PYEOF
     fi
 }
 
-# Branches inside src/aipass/
-bootstrap_branch "drone"    "$SCRIPT_DIR/src/aipass/drone" "specialist" "Command routing and module discovery"
-bootstrap_branch "sentry"   "$SCRIPT_DIR/src/aipass/sentry" "specialist" "Standards enforcement and code auditing"
-bootstrap_branch "prax"     "$SCRIPT_DIR/src/aipass/prax" "specialist" "Logging and monitoring system"
-bootstrap_branch "cli"      "$SCRIPT_DIR/src/aipass/cli" "specialist" "Display formatting service"
-bootstrap_branch "flow"     "$SCRIPT_DIR/src/aipass/flow" "specialist" "Workflow and plan management"
-bootstrap_branch "ai_mail"  "$SCRIPT_DIR/src/aipass/ai_mail" "specialist" "Inter-agent messaging and dispatch"
-bootstrap_branch "api"      "$SCRIPT_DIR/src/aipass/api" "specialist" "LLM access and model routing"
-bootstrap_branch "trigger"  "$SCRIPT_DIR/src/aipass/trigger" "specialist" "Event-driven automation"
-bootstrap_branch "spawn"    "$SCRIPT_DIR/src/aipass/spawn" "specialist" "Branch lifecycle management"
-bootstrap_branch "devpulse" "$SCRIPT_DIR/src/aipass/devpulse" "manager" "Orchestration hub and coordination"
-bootstrap_branch "memory"   "$SCRIPT_DIR/src/aipass/memory" "specialist" "Vector memory bank"
-bootstrap_branch "aipass"   "$SCRIPT_DIR/src/aipass/aipass" "specialist" "Machine concierge — host and OS diagnosis, doctor, installer, fleet health"
-bootstrap_branch "hooks"    "$SCRIPT_DIR/src/aipass/hooks" "specialist" "Hook engine — hook dispatch and per-project config"
-bootstrap_branch "backup"   "$SCRIPT_DIR/src/aipass/backup" "specialist" "Local-first backups, snapshots and restore"
-bootstrap_branch "commons"  "$SCRIPT_DIR/src/aipass/commons" "specialist" "Community social space — posts, comments, votes"
-bootstrap_branch "daemon"   "$SCRIPT_DIR/src/aipass/daemon" "specialist" "Task scheduler — per-branch schedule discovery"
-bootstrap_branch "skills"   "$SCRIPT_DIR/src/aipass/skills" "specialist" "Capability framework — discoverable skill units"
-bootstrap_branch "canary_test" "$SCRIPT_DIR/src/aipass/canary_test" "specialist" "Permanent test citizen — dispatch and gate verification"
-
-# All 18 core branches in src/aipass/ are bootstrapped above. (A stale note here
-# once claimed backup/commons/daemon/skills were external — they returned to core
-# long ago; the drift canary caught the gap, DPLAN-0262.)
-# THIS LIST IS A BIRTH-DAY HAZARD: every citizen @spawn creates must be added by
-# hand or fresh installs mint every passport except theirs — which is exactly how
-# @canary (born 2026-08-22) failed spawn's drift test the next morning. @spawn is told; the durable fix is deriving this list from the
-# tree the way the registry build already does.
+# Every citizen with a tracked passport seed, derived from the tree as the registry build is.
+for vault in "$SCRIPT_DIR"/src/aipass/*/.aipass/passport.vault.json; do
+    [ -f "$vault" ] || continue
+    seat_dir="${vault%/.aipass/passport.vault.json}"
+    seat_meta=$("$VENV_PYTHON" -c 'import json, sys; i = json.load(open(sys.argv[1], encoding="utf-8"))["identity"]; print(i["citizen_class"], i["role"])' "$vault") || {
+        echo "FAIL: cannot read citizen_class and role from $vault"
+        printf '%s\n' "setup.sh stopped: unreadable passport seed $vault" > "$SCRIPT_DIR/.aipass/setup_attention.txt"
+        exit 1
+    }
+    read -r seat_class seat_role <<< "$seat_meta"
+    bootstrap_branch "$(basename "$seat_dir")" "$seat_dir" "$seat_class" "$seat_role"
+done
 
 echo "  $BRANCH_COUNT branches bootstrapped"
 
@@ -576,6 +564,7 @@ if [ "$FAIL" -eq 0 ]; then
         :   # aipass install runs the tail itself
     elif [ -z "$AIPASS_BIN" ]; then
         echo "ERROR: aipass binary not found: no health check, no install report. Open a new terminal and run: aipass install --finish --path $SCRIPT_DIR"
+        printf '%s\n' "setup.sh stopped: aipass binary not found; run: aipass install --finish --path $SCRIPT_DIR" > "$SCRIPT_DIR/.aipass/setup_attention.txt"
         exit 1
     elif [ ! -t 0 ] || [ -n "${CI:-}" ]; then
         "$AIPASS_BIN" install --finish --non-interactive --path "$SCRIPT_DIR"
@@ -586,5 +575,6 @@ else
     echo "=== Setup finished with errors ==="
     echo "The venv was created and the package was installed, but one or more"
     echo "CLI entry points failed verification. Check the output above."
+    printf '%s\n' "setup.sh stopped: CLI entry points failed verification" > "$SCRIPT_DIR/.aipass/setup_attention.txt"
     exit 1
 fi
