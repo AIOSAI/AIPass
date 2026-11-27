@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.15.0
+# Version: 1.15.1
 # Created: 2026-10-04
-# Modified: 2026-11-25
+# Modified: 2026-11-26
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git import (
+    pr_read_handler,
     alerts_handler,
     ci_cure_handler,
     commit_handler,
@@ -60,6 +61,14 @@ def page(command: str | None = None) -> str:
         return (
             "git pr <description> — Push current branch and create PR to main [owner]\n"
             "  On main: creates temp branch from slug. Otherwise: pushes branch directly. No -u flag.\n"
+            "git pr list [--base B] [--head PREFIX] [--marker TEXT] [--state open|all] [--json] [all seats]\n"
+            "  The repo's PRs: number, head -> base, state, the CI conclusion of the head commit\n"
+            "  (success, failure, pending or none), title, created. --base is exact, --head a\n"
+            "  prefix, --marker a text the body must hold; state defaults to open. --json prints\n"
+            f"  the same rows as a JSON list. Filters read the newest {pr_read_handler.LIST_LIMIT} PRs gh returns.\n"
+            "git pr view <#> [--json] — One PR: head -> base, state, mergeable, CI, then its body [all seats]\n"
+            "  issue view <#> shows a PR's body too, but not its head, base, mergeable or CI.\n"
+            "  A description whose first word is list or view reads; it never becomes a PR title.\n"
             "git pr <title> --repo <path> — Open an external repo's PR to its default branch [admin door]\n"
             "  Pushes the checked-out branch to origin under its own name, never forced, then opens\n"
             "  <branch> -> <default> on origin's GitHub repo, the default branch as GitHub reports\n"
@@ -358,9 +367,16 @@ def page(command: str | None = None) -> str:
     if command == "unlock":
         return "git unlock --force — Force-release the PR lock [owner]\n"
     if command == "merge":
+        from aipass.drone.apps.plugins.devpulse_ops import merge_plugin
+
         return (
-            "git merge <PR#> [--confirm] — Merge a PR and sync local main [owner]\n"
-            "  Runs gh pr merge --merge --delete-branch, then git pull --rebase.\n"
+            "git merge <PR#> [--confirm] — Merge a PR into dev or main and sync [owner]\n"
+            "  Reads the PR's base from gh first. Base main: gh pr merge --merge --delete-branch,\n"
+            "  then git pull --rebase and back to dev. Base dev (a cloud session's PR): the same\n"
+            "  merge, then checks out dev, git pull --rebase origin dev, and stays on dev; main is\n"
+            "  untouched. Local changes are stashed around the pull either way. Any other base,\n"
+            "  or one gh cannot read, is refused before the merge, exactly as printed:\n"
+            "  " + merge_plugin.REFUSE_BASE.format(pr="<n>", base="<base>") + "\n"
             "  Joint-decision gate: terminal sessions get a y/N prompt; headless\n"
             "  callers must pass --confirm or the merge is refused.\n"
             "  External project, its manager's seat: merges on origin's GitHub repo, then\n"
@@ -435,6 +451,7 @@ def page(command: str | None = None) -> str:
         "  branches               List remote branches\n"
         "  tag --list             List all tags (newest first)\n"
         "  issue list|view|status gh issue reads (view <#> [--comments])\n"
+        "  pr list|view           PRs with base, head, CI (--base --head --marker --state --json)\n"
         "  run list|view|watch    gh run reads (view <id> --log | --log-failed)\n"
         "  workflow list|view     gh workflow reads\n"
         "  release list           Published releases and their notes (release --help)\n"
@@ -454,7 +471,7 @@ def page(command: str | None = None) -> str:
         "  delete-branch <name>   Delete a remote branch\n"
         "  prune-temp             Delete merged citizen/* temp branches\n"
         "  close-pr <number>      Close a PR\n"
-        "  merge <PR#> [--confirm]  Merge a PR (gated: y/N prompt or --confirm; --repo: the door)\n"
+        "  merge <PR#> [--confirm]  Merge a PR into dev or main (gated: y/N or --confirm; --repo: the door)\n"
         "  sync [--autostash]     Sync with origin/main (FF on dev)\n"
         "  merge-main             Merge origin/main into dev, no rewrite, no push\n"
         "  smart-sync             Fetch + rebase if behind\n"
@@ -504,6 +521,8 @@ def page(command: str | None = None) -> str:
         "  gh release list|view       drone @git release list [--repo O/N] [--since TAG]\n"
         "  gh release edit <tag>      drone @git release edit <tag>  (notes from CHANGELOG.md)\n"
         "  gh label list|create       drone @git label list | label create <name>\n"
+        "  gh pr list --base B --json ...  drone @git pr list [--base B] [--head P] [--marker T] [--json]\n"
+        "  gh pr view <n>               drone @git pr view <n>\n"
         "  gh pr create (another repo)  drone @git pr <title> --repo <path>\n"
         "  gh pr merge <n> --merge      drone @git merge <n> --repo <path> --confirm\n"
         "  gh api .../code-scanning/alerts  drone @git alerts list | dismiss <n> | reopen <n>\n"

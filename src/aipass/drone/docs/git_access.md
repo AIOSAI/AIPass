@@ -16,7 +16,7 @@ Auth is centralised in `verify_git_access()` and checked **once**, at the top of
 
 | Tier | Who | What it covers |
 |------|-----|----------------|
-| **Global** | All branches | the read doors and the passthroughs — status, diff, log, show, blame, tracked, export, remote, lock, branches, tag listing, release list, label list, alerts list, the `gh` reads, and `issue create` / `issue comment` aimed at AIOSAI/AIPass |
+| **Global** | All branches | the read doors and the passthroughs — status, diff, log, show, blame, tracked, export, remote, lock, branches, tag listing, release list, label list, alerts list, `pr list` and `pr view` (the key `pr-read`), the `gh` reads, and `issue create` / `issue comment` aimed at AIOSAI/AIPass |
 | **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | everything that writes: commit, uncommit, untrack, restore, checkout, push (outside AIPass), the PR verbs, branch deletion, prune-temp, sync, merge-main, merge, smart-sync, unlock, tag, fix, release edit, label create, alerts dismiss, remote set, and the `gh` writes |
 | **CI cure** | The one citizen whose registry entry carries `ci_cure: true` (@trigger in AIPass) | `ci-cure` alone: commit a CI cure on dev and push dev |
 
@@ -139,6 +139,11 @@ commits.
 
 **Flow:** work on dev → stack changes → `dev-pr` → merge the PR → `sync` realigns dev from main.
 
+**A PR into dev.** A cloud session opens its PR against dev from a `claude/<slug>-<id>` branch.
+`merge` reads the PR's base before acting: base dev is merged, then dev is pulled onto dev and main
+is left alone; base main is the train above; any other base is refused before the merge. The y/N or
+`--confirm` gate is the same for both. See [pull_requests.md](pull_requests.md).
+
 **`pr` vs `dev-pr`:** `pr` works from any branch — on main it auto-creates a temp branch from the
 description slug (`main:<slug>`), on other branches it pushes directly. It does not use `-u`, so
 main's upstream tracking stays on `origin/main`. `dev-pr` is specific to the dev→main workflow.
@@ -156,7 +161,7 @@ administration, not routing logic.
 
 | Plugin | Verb | Purpose |
 |--------|------|---------|
-| `merge_plugin` | `merge` | Straight-merge a PR and sync local main; an external repo takes `external_pr_handler` |
+| `merge_plugin` | `merge` | Straight-merge a PR into dev or main and sync the branch it lands on; an external repo takes `external_pr_handler` |
 | `sync_plugin` | `smart-sync` | Fetch, detect divergence, rebase; acts on `main` only and refuses any other HEAD |
 | `fix_plugin` | `fix` | Repair a stuck rebase or a detached HEAD; the divergence repair runs on `main` only and is skipped on any other branch |
 
@@ -168,5 +173,6 @@ its files carry a `.disabled` suffix, and hook sounds live in the hooks branch.
 ## Related
 
 - [git_interface.md](git_interface.md) — what the verbs themselves do
+- [pull_requests.md](pull_requests.md) — `pr list`, `pr view` and how `merge` reads a PR's base
 - [external_repo_door.md](external_repo_door.md) — git in a repo that is not AIPass
 - [caller_identity.md](caller_identity.md) — attribution, which is not authority

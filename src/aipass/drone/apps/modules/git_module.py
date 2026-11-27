@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.21.1
+# Version: 1.21.2
 # Created: 2026-03-17
 # Modified: 2026-11-26
 # =============================================
@@ -34,6 +34,7 @@ from aipass.drone.apps.handlers.git import (
     uncommit_handler,
     label_handler,
     alerts_handler,
+    pr_read_handler,
     ci_cure_handler,
     export_handler,
     show_handler,
@@ -100,6 +101,7 @@ _COMMANDS = (
     "prune-temp",
     "tag",
     "tag-list",
+    "pr-read",
     "issue-contribute",
     "issue-write",
     "run-write",
@@ -205,6 +207,8 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         cmd = gh_key
     elif command == "remote" and args[:1] == ["set"]:
         cmd = "remote-write"
+    elif command == "pr" and args[:1] in (["list"], ["view"]):
+        cmd = "pr-read"
     try:
         caller = verify_git_access(cmd)
     except PermissionError as exc:
@@ -590,13 +594,11 @@ def _handle_prune_temp() -> dict:
 
 
 def _handle_pr(args: list[str], repo_root: Path | None = None) -> dict:
-    """Push the current branch and open its PR: to main at home, to the default branch through the door."""
+    """Push the branch and open its PR (main at home, the default via the door); ``pr list|view`` read instead."""
+    if args[:1] in (["list"], ["view"]):
+        return pr_read_handler.pr_read(args, repo_root or lock_handler.find_repo_root())
     if not args:
-        return {
-            "stdout": "",
-            "stderr": "Usage: drone @git pr <description>",
-            "exit_code": 1,
-        }
+        return {"stdout": "", "stderr": "Usage: drone @git pr <description>", "exit_code": 1}
     description = " ".join(args)
     if repo_root is not None:
         result = external_pr_handler.open_branch_pr(repo_root, description)
@@ -610,11 +612,7 @@ def _handle_pr(args: list[str], repo_root: Path | None = None) -> dict:
 def _handle_dev_pr(args: list[str]) -> dict:
     """Handle the dev-pr subcommand (owner tier)."""
     if not args:
-        return {
-            "stdout": "",
-            "stderr": "Usage: drone @git dev-pr <description>",
-            "exit_code": 1,
-        }
+        return {"stdout": "", "stderr": "Usage: drone @git dev-pr <description>", "exit_code": 1}
     description = " ".join(args)
     result = dev_pr_handler.create_dev_pr(description)
     if result["success"]:

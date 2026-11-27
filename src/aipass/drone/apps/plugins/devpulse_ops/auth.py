@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.16.1
+# Version: 1.16.2
 # Created: 2026-03-30
 # Modified: 2026-11-26
 # =============================================
@@ -47,6 +47,7 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "branches",
             "tag-list",
             "issue-contribute",
+            "pr-read",
         ],
         # export reads the repo and writes only the empty directory it is handed
         "description": "Read-only — available to all branches",
