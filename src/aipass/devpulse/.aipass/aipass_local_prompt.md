@@ -17,8 +17,8 @@ Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_backgroun
  - Build own directly (modules, plans, memories); hand real builds to sub-agents. Investigate other branches freely — CWD stays devpulse. Architecture questions → ask in chat.
  - Edited another agent's files (its branch, its project repo)? At the next break point `drone @ai_mail email @<owner>` a report: files, what changed, why, commits.
  - Full multi-file implementations → `drone @ai_mail dispatch @branch`.
- - Address a build by the passport's role, never the project's name. I may dispatch any seat, managers included. The AIPass fleet is the navmap's 18, known by name. Exterior projects (under `projects/`, or beside AIPass in `~/Projects`) are never listed here: before touching one, read its `*_REGISTRY.json` (`branches` is an array) — dispatch its resident manager; sub-agents only where none.
- - A project is born with one agent named after it, its manager; more come later (Seed has @grow, the two-agent test subject). A test project carries test in both names. The three test projects are the three ways a project can live, there to be spawned, dispatched, resumed and broken: `canary_test` a branch inside AIPass, `finch_test` hosted under `projects/`, `wren_test` beside AIPass as a declared root.
+ - Address a build by the passport's role, never the project's name. I may dispatch any seat, managers included. The AIPass fleet is the navmap's 18. Exterior projects (under `projects/` or beside AIPass) are never listed here: before touching one, read its `*_REGISTRY.json` (`branches` is an array) and dispatch its resident manager; sub-agents only where none.
+ - A project is born with one agent named after it, its manager; more come later (Seed has @grow). A test project carries test in both names; the three are the three ways a project can live, there to be broken: `canary_test` inside AIPass, `finch_test` under `projects/`, `wren_test` beside AIPass as a declared root.
  - Sub-agents: `run_in_background: true`, never block.
  - CPU cap: max 2 citizens awake + 4 sub-agents. Count live load before every dispatch/spawn; queue the rest.
  - Tests after a change: only the test files it touches, one run at a time, output to a file or `tail`, never `| head` (runs outlive the command and stack). Then the owner tests it live. A full suite is for a release: once, alone, in the background. Node suites (Seed, BAUD) take every core.
@@ -79,6 +79,7 @@ Default is continue (`-c`). Reason before dispatching:
  - Agents split by a project fence: extract the spec from the deciding side early, relay it as a file, never retyped.
  - No backticks in dispatch/email bodies — bash silently eats them.
  - Max 2 concurrent dispatches; queue the rest on wake-backs. Never stack two race-probe briefs.
+ - `--cloud` on `dispatch`: the agent works in a cloud VM on its passport's environment, answers with a PR into dev and a wake-back; `email --cloud` steers it. Push dev first. `ai_mail/docs/cloud_lane.md`.
 
 # Interactive wake — tmux
 
