@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: passport_migration.py
 # Description: Passport 2.0 fleet migration — structure transform, backup, measured receipt
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-28
 # Modified: 2026-11-26
 # =============================================
@@ -83,6 +83,7 @@ KEY_ORDER = {
         "registry_path",
         "communications",
         "memory",
+        "cloud_environment_id",
     ),
     "identity": (
         "citizen_class",

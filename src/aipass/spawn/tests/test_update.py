@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_update.py
 # Description: Tests for spawn update orchestrator
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-07
-# Modified: 2026-11-23
+# Modified: 2026-11-26
 # =============================================
 
 """Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
@@ -1349,6 +1349,21 @@ class TestPassportHealIsNotAMigration:
         assert result == "updated"
         assert self._paths(healed) - self._paths(existing) == three
         assert healed["document_metadata"]["schema_version"] == "1.0.0"
+
+    @pytest.mark.parametrize(("existing", "expected"), [(None, ""), ("env_set_by_owner", "env_set_by_owner")])
+    def test_a_2_0_passport_gains_cloud_environment_id_empty_and_keeps_a_set_one(self, tmp_path, existing, expected):
+        """The cloud lane reads "" as absent; update adds the key, never overwrites an owner's id."""
+        template = {"citizenship": {"memory": True, "cloud_environment_id": ""}}
+        citizenship = {"memory": True} | ({} if existing is None else {"cloud_environment_id": existing})
+        passport = {
+            "document_metadata": {"schema_version": "2.0.0"},
+            "citizenship": citizenship,
+            "identity": {"citizen_class": "specialist"},
+        }
+
+        _result, healed = self._heal(tmp_path, template, passport)
+
+        assert healed["citizenship"]["cloud_environment_id"] == expected
 
     def test_a_passport_written_with_escapes_is_left_alone(self, tmp_path):
         """An untouched document must not be rewritten because it is SPELLED differently.

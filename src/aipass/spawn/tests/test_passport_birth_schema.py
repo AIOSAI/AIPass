@@ -54,6 +54,7 @@ EXPECTED_KEY_ORDER = {
         "registry_path",
         "communications",
         "memory",
+        "cloud_environment_id",
     ],
     "identity": [
         "citizen_class",
@@ -187,6 +188,10 @@ class TestNewbornPassportFields:
     def test_git_branch_is_the_literal_dev(self, tmp_path):
         """No more work/{{branchname}} fossils — one rule, one branch name."""
         assert _mint(tmp_path)["branch_info"]["git_branch"] == "dev"
+
+    def test_cloud_environment_id_ships_empty(self, tmp_path):
+        """The cloud lane reads "" as absent; the owner writes the id once the environment exists."""
+        assert _mint(tmp_path)["citizenship"]["cloud_environment_id"] == ""
 
     def test_names_render_lowercase(self, tmp_path):
         """Casing: branch_name / managed_by / document_name are lowercase now.

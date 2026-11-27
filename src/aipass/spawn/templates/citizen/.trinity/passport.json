@@ -28,7 +28,8 @@
     "citizen_id": "{{CITIZEN_ID}}",
     "registry_path": "AIPASS_REGISTRY.json",
     "communications": true,
-    "memory": true
+    "memory": true,
+    "cloud_environment_id": ""
   },
   "identity": {
     "citizen_class": "{{CITIZEN_CLASS}}",

@@ -68,6 +68,7 @@ CONTRACT_KEY_ORDER = {
         "registry_path",
         "communications",
         "memory",
+        "cloud_environment_id",
     ),
     "identity": (
         "citizen_class",
@@ -436,10 +437,12 @@ class TestBlockAndKeyOrder:
         gold = json.loads(gold_path.read_text(encoding="utf-8"))
         migrated = _migrated(live_fleet_copy, "src/aipass/devpulse")
         assert list(migrated) == list(gold)
-        # The draft predates the last_updated drop; a key the migration drops is no part of the shape.
+        # The draft predates later contract changes: a dropped key is no part of the shape, and a key
+        # the contract gained since (citizenship.cloud_environment_id) may follow, never an unknown one.
         for section in gold:
             expected = [k for k in gold[section] if k not in DROPPED_KEYS.get(section, ())]
-            assert list(migrated[section]) == expected, section
+            assert [k for k in migrated[section] if k in gold[section]] == expected, section
+            assert set(migrated[section]) - set(gold[section]) <= set(KEY_ORDER.get(section, ())), section
 
 
 class TestDrops:

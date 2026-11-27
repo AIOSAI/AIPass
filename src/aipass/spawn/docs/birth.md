@@ -88,7 +88,10 @@ name instead of silently making a branch called WIZARD in `./wizard`.
    Minting it at registration time instead would be too late — the passport is written
    before the registry, so the two copies would be different UUIDs for one citizen. Distinct
    from `citizenship.registry_id`, which is the id of the REGISTRY holding the citizen and is
-   shared by every citizen in a project.
+   shared by every citizen in a project. `citizenship.cloud_environment_id` is the Claude Code
+   cloud environment the citizen's cloud dispatches run on; it ships empty, which the cloud
+   lane reads as absent, until the owner creates the environment and writes its id. It is
+   optional: a passport or passport vault without the key is valid.
 7. **Meta** — Generate `.spawn/.branch_meta.json`: the per-branch tracking file that maps
    each delivered file back to its **template file id** with a current SHA-256, matched by
    path first and content hash second. This is what lets `update` reason about a renamed or

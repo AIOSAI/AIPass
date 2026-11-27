@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: seed_ops.py
 # Description: Passport vaults — tracked identity, untracked live file (TDPLAN-0017)
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-08-28
-# Modified: 2026-11-20
+# Modified: 2026-11-26
 # =============================================
 
 """Passport vaults: the identity that ships with the repo (TDPLAN-0017). Code names keep the older word seed.
@@ -86,7 +86,8 @@ STAMP_FIELDS = ("version", "sha256")
 MACHINE_LOCAL_CITIZENSHIP = ("registered", "registry_id", "citizen_id", STAMP_KEY)
 
 OPTIONAL_KEYS = {
-    "citizenship": (STAMP_KEY,),
+    # cloud_environment_id: absent or "" both mean no cloud lane; most passports gain it on update.
+    "citizenship": (STAMP_KEY, "cloud_environment_id"),
     "identity": ("class_extension",),
 }
 

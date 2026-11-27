@@ -96,7 +96,7 @@
     {
       "file": "apps/handlers/update_ops.py",
       "standard": "fallback",
-      "lines": [243],
+      "lines": [245],
       "reason": "Not a stand-in: a template file that is not UTF-8 text is the binary lane. copy_undecodable copies it byte for byte and raises if it carries a {{ placeholder, so nothing ships unrendered; the warning names the file."
     },
     {

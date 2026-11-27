@@ -138,6 +138,10 @@ same write) or raises `PassportMigrationError`; there is no partial write.
 `tests/test_update.py` pins both halves, including the rule that any field added to the heal
 allowlist must exist in every schema version it can meet.
 
+One field reaches only a passport that already has a `citizenship` block (2.0):
+`citizenship.cloud_environment_id`. A passport without the key gains it empty, and an id the
+owner wrote is kept. A 1.0 passport gets no citizenship block from the heal.
+
 The heal also answers "did anything change?" about the DOCUMENT, not about how it was
 spelled. Passports written with `ensure_ascii=True` carry an escape where the heal's
 serialiser writes the character itself, so the heal compares parsed documents: a passport

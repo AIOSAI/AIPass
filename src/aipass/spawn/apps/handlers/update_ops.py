@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.9.0
+# Version: 2.10.0
 # Created: 2026-03-07
 # Modified: 2026-11-26
 # =============================================
@@ -71,6 +71,8 @@ _PASSPORT_HEAL_ALLOWLIST = (
     ("branch_info", "email"),
     ("branch_info", "git_branch"),
     ("identity", "traits"),
+    # Ships empty (the cloud lane reads "" as absent); deep_merge keeps an id the owner wrote.
+    ("citizenship", "cloud_environment_id"),
 )
 
 
@@ -486,6 +488,8 @@ def _heal_passport(
         legacy_traits = existing_data.pop("traits", None)
 
         for section, key in _PASSPORT_HEAL_ALLOWLIST:
+            if section == "citizenship" and not isinstance(existing_data.get(section), dict):
+                continue  # a 1.0 passport has no citizenship block; growing one is migration's job
             section_data = existing_data.setdefault(section, {})
             if (section, key) == ("identity", "traits"):
                 if legacy_traits is not None and not section_data.get(key):
@@ -495,6 +499,8 @@ def _heal_passport(
                 continue
             template_value = template_data.get(section, {}).get(key)
             section_data[key] = deep_merge(template_value, section_data.get(key))
+            if section == "citizenship" and "seed" in section_data:
+                section_data["seed"] = section_data.pop("seed")  # the vault stamp stays last (seed_ops order)
 
         merged_text = json.dumps(existing_data, indent=2, ensure_ascii=False) + "\n"
 
