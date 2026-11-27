@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_git_module_merge.py
 # Description: Tests for the merge, dev-pr and branches lanes — protected-branch merge, return to dev, external repos
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-10-08
 # Modified: 2026-11-26
 # =============================================
@@ -254,6 +254,8 @@ _CLOUD = {
     "state": "OPEN",
     "title": "docs: cloud probe",
     "createdAt": "2026-11-26T23:38:19Z",
+    "headRefOid": "9f1c2ab0",
+    "url": "https://github.com/AIOSAI/AIPass/pull/830",
     "body": "02cfce6b: one-word docstring change",
     "statusCheckRollup": [{"conclusion": "SUCCESS"}, {"state": "SUCCESS"}],
 }
@@ -315,6 +317,14 @@ class TestPrListAndView:
         assert refused["stderr"] == pr_read_handler.REFUSE_STATE.format(state="closed")
         assert calls == []
 
+    def test_a_json_row_carries_the_head_commit_and_the_pr_url(self, builder_seat: Path) -> None:
+        """A push to an open PR moves head_sha while head stays: the poll needs the sha to see it."""
+        pushed = {**_CLOUD, "headRefOid": "77aa01de"}
+
+        [row] = json.loads(_pr(["list", "--json"], {_PR_LIST.format(state="open"): [pushed]})["stdout"])
+
+        assert (row["head_sha"], row["url"]) == ("77aa01de", "https://github.com/AIOSAI/AIPass/pull/830")
+
     def test_each_row_carries_the_ci_conclusion_of_its_head_commit(self, builder_seat: Path) -> None:
         result = _pr(["list"], {_PR_LIST.format(state="open"): _ALL})
 
@@ -334,7 +344,8 @@ class TestPrListAndView:
 
         assert result["stdout"] == (
             "#830 docs: cloud probe\n"
-            "claude/cloud-probe-x -> dev · OPEN · mergeable MERGEABLE · ci success\n\n"
+            "claude/cloud-probe-x -> dev · OPEN · mergeable MERGEABLE · ci success\n"
+            "head 9f1c2ab0 · https://github.com/AIOSAI/AIPass/pull/830\n\n"
             "02cfce6b: one-word docstring change"
         )
         assert _pr(["view"], answers)["stderr"] == pr_read_handler.REFUSE_VIEW

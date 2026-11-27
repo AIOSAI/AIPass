@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: pr_read_handler.py
 # Description: pr list | pr view: a repo's pull requests with their base, head and CI, through gh
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-26
 # Modified: 2026-11-26
 # =============================================
@@ -9,7 +9,7 @@
 """``drone @git pr list | pr view <#>``: the pull requests of the repo the command stands in.
 
 list filters by base, head-branch prefix, a text the body must contain, and state; the CI column
-is the conclusion of the checks on each PR's head commit. ``--json`` prints the same rows as a list.
+is the conclusion of the checks on each PR's head commit. ``--json`` adds head_sha and url to each row.
 """
 
 from __future__ import annotations
@@ -27,8 +27,8 @@ LIST_FLAGS = ("--base", "--head", "--marker", "--state")
 # gh pr list has no head-prefix or body filter, so both are applied to the newest this-many PRs.
 # Bodies and checks for 200 or more make GitHub's GraphQL answer 502, measured on AIOSAI/AIPass.
 LIST_LIMIT = 100
-LIST_FIELDS = "number,headRefName,baseRefName,state,title,createdAt,body,statusCheckRollup"
-VIEW_FIELDS = "number,headRefName,baseRefName,state,mergeable,title,body,statusCheckRollup"
+LIST_FIELDS = "number,headRefName,headRefOid,baseRefName,state,title,createdAt,url,body,statusCheckRollup"
+VIEW_FIELDS = "number,headRefName,headRefOid,baseRefName,state,mergeable,title,createdAt,url,body,statusCheckRollup"
 _FAILED = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
 _PASSED = {"SUCCESS", "NEUTRAL", "SKIPPED"}
 
@@ -63,6 +63,8 @@ def _row(pr: dict) -> dict:
         "ci": ci_conclusion(pr.get("statusCheckRollup")),
         "title": pr.get("title") or "",
         "created": pr.get("createdAt") or "",
+        "head_sha": pr.get("headRefOid") or "",
+        "url": pr.get("url") or "",
     }
 
 
@@ -116,7 +118,8 @@ def _view(args: list[str], slug: str, as_json: bool) -> dict:
         return gh_chores.answer(json.dumps(row, indent=2))
     head = (
         f"#{row['number']} {row['title']}\n"
-        f"{row['head']} -> {row['base']} · {row['state']} · mergeable {row['mergeable']} · ci {row['ci']}\n\n"
+        f"{row['head']} -> {row['base']} · {row['state']} · mergeable {row['mergeable']} · ci {row['ci']}\n"
+        f"head {row['head_sha']} · {row['url']}\n\n"
     )
     return gh_chores.answer(head + row["body"])
 

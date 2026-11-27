@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.15.1
+# Version: 1.15.2
 # Created: 2026-10-04
 # Modified: 2026-11-26
 # =============================================
@@ -65,8 +65,9 @@ def page(command: str | None = None) -> str:
             "  The repo's PRs: number, head -> base, state, the CI conclusion of the head commit\n"
             "  (success, failure, pending or none), title, created. --base is exact, --head a\n"
             "  prefix, --marker a text the body must hold; state defaults to open. --json prints\n"
-            f"  the same rows as a JSON list. Filters read the newest {pr_read_handler.LIST_LIMIT} PRs gh returns.\n"
-            "git pr view <#> [--json] — One PR: head -> base, state, mergeable, CI, then its body [all seats]\n"
+            "  the same rows as a JSON list, plus head_sha (the head commit) and url.\n"
+            f"  Filters read the newest {pr_read_handler.LIST_LIMIT} PRs gh returns.\n"
+            "git pr view <#> [--json] — One PR: head -> base, state, mergeable, CI, head sha, url, body [all seats]\n"
             "  issue view <#> shows a PR's body too, but not its head, base, mergeable or CI.\n"
             "  A description whose first word is list or view reads; it never becomes a PR title.\n"
             "git pr <title> --repo <path> — Open an external repo's PR to its default branch [admin door]\n"

@@ -27,7 +27,8 @@ One row per PR: number, `head -> base`, state, `ci <conclusion>`, title, created
 is read from the checks on the PR's head commit: `failure` when any check failed, errored, was
 cancelled or timed out; `success` when every check passed, was neutral or skipped; `pending` while
 any is still running; `none` when the commit has no checks. `--json` prints the same rows as a JSON
-list with the keys `number`, `head`, `base`, `state`, `ci`, `title`, `created`.
+list with the keys `number`, `head`, `base`, `state`, `ci`, `title`, `created`, plus `head_sha` (the
+head commit, so a push to an open PR shows as a new sha under the same head) and `url` (the PR's page).
 
 gh has no head-prefix or body filter, so both are applied to the newest 100 PRs gh returns
 (`LIST_LIMIT`). Asking for 200 or more with bodies and checks makes GitHub's GraphQL answer 502 on
@@ -38,11 +39,12 @@ AIOSAI/AIPass. No match prints `No open pull requests match on github.com/<owner
 ```
 #830 docs(devpulse): cloud probe, DPLAN-0492
 claude/cloud-probe-dplan-0492-5vbbkw -> dev · OPEN · mergeable MERGEABLE · ci success
+head 985950d5b9558266ea99964b5543a80aaeba16da · https://github.com/AIOSAI/AIPass/pull/830
 
 <the body: the agent's report>
 ```
 
-`--json` prints the same fields plus `mergeable` and `body`. `issue view <#>` also prints a PR's
+`--json` prints the same keys as a list row plus `mergeable` and `body`. `issue view <#>` also prints a PR's
 body, but not its head, base, mergeable state or CI, which is why `pr view` is its own read.
 
 ## Who may read
